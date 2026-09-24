@@ -64,7 +64,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-repo",
+ "bincode",
  "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -72,6 +75,8 @@ name = "ariadne-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
+ "ariadne-graph",
  "ariadne-repo",
  "ariadne-report",
  "clap",
@@ -93,8 +98,12 @@ name = "ariadne-graph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
  "ariadne-index",
+ "ariadne-repo",
+ "bincode",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -110,6 +119,9 @@ name = "ariadne-integration-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
+ "ariadne-cli",
+ "ariadne-graph",
  "ariadne-repo",
  "ariadne-report",
  "serde_json",
@@ -132,6 +144,8 @@ name = "ariadne-report"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
+ "ariadne-graph",
  "ariadne-repo",
  "bincode",
  "serde",

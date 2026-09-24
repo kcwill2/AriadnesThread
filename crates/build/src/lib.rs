@@ -1,25 +1,9 @@
 //! Build and compilation context discovery.
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CompilationContext {
-    pub name: String,
-    pub compiler: String,
-    pub defines: Vec<String>,
-    pub include_dirs: Vec<String>,
-}
+pub mod discovery;
+pub mod types;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_compilation_context_creation() {
-        let ctx = CompilationContext {
-            name: "Debug|x64".into(),
-            compiler: "cl.exe".into(),
-            defines: vec!["DEBUG".into()],
-            include_dirs: vec!["include".into()],
-        };
-        assert_eq!(ctx.name, "Debug|x64");
-    }
-}
+pub use discovery::{discover_build_contexts, BuildDiscoverer, ClangCompileCommandEntry};
+pub use types::{
+    BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit,
+};
