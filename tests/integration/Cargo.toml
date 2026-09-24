@@ -1,0 +1,12 @@
+[package]
+name = "ariadne-integration-tests"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+ariadne-repo = { path = "../../crates/repo" }
+ariadne-report = { path = "../../crates/report" }

@@ -1,0 +1,21 @@
+[package]
+name = "ariadne-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ariadne"
+path = "src/main.rs"
+
+[[bin]]
+name = "tool"
+path = "src/bin/tool.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-report = { path = "../report" }

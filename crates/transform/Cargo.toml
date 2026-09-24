@@ -1,0 +1,9 @@
+[package]
+name = "ariadne-transform"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true

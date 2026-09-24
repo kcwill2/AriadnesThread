@@ -1,0 +1,10 @@
+[package]
+name = "ariadne-build"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+ariadne-repo = { path = "../repo" }

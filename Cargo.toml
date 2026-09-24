@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "crates/cli",
+    "crates/repo",
+    "crates/build",
+    "crates/scheduler",
+    "crates/index",
+    "crates/graph",
+    "crates/cluster",
+    "crates/transform",
+    "crates/validate",
+    "crates/report",
+    "tools/clang-worker",
+    "tests/integration",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["AriadnesThread Authors"]
+
+[workspace.dependencies]
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tempfile = "3.9"
+sha2 = "0.10"
+bincode = "1.3"
