@@ -23,4 +23,5 @@ ariadne-graph = { path = "../graph" }
 ariadne-report = { path = "../report" }
 ariadne-index = { path = "../index" }
 ariadne-cluster = { path = "../cluster" }
+ariadne-transform = { path = "../transform" }
 bincode.workspace = true

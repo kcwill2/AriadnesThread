@@ -81,6 +81,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "ariadne-transform",
  "bincode",
  "clap",
  "tracing",
@@ -162,6 +163,7 @@ dependencies = [
  "ariadne-graph",
  "ariadne-index",
  "ariadne-repo",
+ "ariadne-transform",
  "bincode",
  "serde",
  "serde_json",
@@ -181,7 +183,14 @@ name = "ariadne-transform"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-cluster",
+ "ariadne-graph",
+ "ariadne-index",
+ "ariadne-repo",
+ "bincode",
  "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

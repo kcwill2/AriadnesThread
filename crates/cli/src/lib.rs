@@ -107,6 +107,19 @@ pub enum PlanSubcommands {
     },
 }
 
+
+#[derive(Subcommand)]
+pub enum TransformSubcommands {
+    /// Extract headers based on optimization plan
+    Extract {
+        /// Path to repository root
+        repo: PathBuf,
+        /// Plan ID to extract
+        #[arg(long)]
+        plan: String,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// Show version information
@@ -156,6 +169,11 @@ pub enum Commands {
         repo: Option<PathBuf>,
         #[command(subcommand)]
         command: Option<PlanSubcommands>,
+    },
+    /// Transformation commands
+    Transform {
+        #[command(subcommand)]
+        command: TransformSubcommands,
     },
 }
 
@@ -702,6 +720,40 @@ pub fn handle_plan_show(repo_path: &PathBuf, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_transform_extract(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
+    let repository = Repository::locate(repo_path)?;
+    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+
+    let plans = artifacts.load_plan_artifacts()?;
+    let plan = match plans.iter().find(|p| p.id.0 == plan_id) {
+        Some(p) => p,
+        None => bail!("Plan {} not found", plan_id),
+    };
+
+    let model = artifacts.load_reduced_artifacts()?;
+    let extractor = ariadne_transform::HeaderExtractor::new(&model);
+    let result = extractor.extract(plan);
+
+    let output_dir = artifacts.artifact_root.join("generated");
+    artifacts.save_extraction_artifacts(&result, &output_dir)?;
+
+    println!("Extracted {} headers from plan {}", result.headers.len(), plan_id);
+    println!("generated/");
+    
+    let mut files = result.headers.iter().map(|h| h.filename.to_string_lossy().to_string()).collect::<Vec<_>>();
+    files.sort();
+    
+    for (i, f) in files.iter().enumerate() {
+        if i == files.len() - 1 {
+            println!("└── {}", f);
+        } else {
+            println!("├── {}", f);
+        }
+    }
+
+    Ok(())
+}
+
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -773,6 +825,11 @@ pub fn run() -> Result<()> {
                 bail!("Repository path required for tool plan command");
             }
         },
+        Some(Commands::Transform { command }) => match command {
+            TransformSubcommands::Extract { repo, plan } => {
+                handle_transform_extract(&repo, &plan)?;
+            }
+        },
     }
 
     Ok(())
@@ -836,6 +893,19 @@ mod tests {
                 assert_eq!(id, "PLAN-001");
             }
             _ => panic!("Expected Plan Show command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_transform_extract() {
+        let args = vec!["tool", "transform", "extract", "my_repo", "--plan", "PLAN-001"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Transform { command: TransformSubcommands::Extract { repo, plan } } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+                assert_eq!(plan, "PLAN-001");
+            }
+            _ => panic!("Expected Transform Extract command"),
         }
     }
 }

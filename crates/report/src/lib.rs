@@ -71,9 +71,17 @@ pub struct PlanManifest {
     pub total_collateral_reduced: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractionManifest {
+    pub plan_id: String,
+    pub header_count: usize,
+    pub error_count: usize,
+}
+
 pub struct ArtifactManager {
     pub artifact_root: PathBuf,
 }
+
 
 impl ArtifactManager {
     pub fn init<P: AsRef<Path>>(root: P) -> Result<Self> {
@@ -430,7 +438,35 @@ impl ArtifactManager {
             .context("Failed to deserialize plans")?;
         Ok(plans)
     }
+
+    pub fn save_extraction_artifacts(
+        &self,
+        result: &ariadne_transform::ExtractionResult,
+        output_dir: &Path,
+    ) -> Result<PathBuf> {
+        fs::create_dir_all(output_dir)
+            .with_context(|| format!("Failed to create extraction artifact directory at {:?}", output_dir))?;
+
+        let manifest = ExtractionManifest {
+            plan_id: result.plan_id.clone(),
+            header_count: result.headers.len(),
+            error_count: result.errors.len(),
+        };
+
+        let manifest_path = output_dir.join("manifest.json");
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize extraction manifest")?;
+        fs::write(&manifest_path, manifest_json)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        let headers_dir = output_dir.join("headers");
+        result.write_to_disk(&headers_dir)
+            .context("Failed to write extracted headers to disk")?;
+
+        Ok(output_dir.to_path_buf())
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -641,5 +677,38 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].collateral_load_before, 100);
         assert_eq!(loaded[0].collateral_load_after, 58);
+    }
+
+    #[test]
+    fn test_save_extraction_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let sym1 = ariadne_transform::ExtractedSymbol {
+            name: "MyClass".to_string(),
+            kind: ariadne_index::types::SymbolKind::Class,
+            forward_declarable: true,
+            body: "// body1".to_string(),
+        };
+        let header1 = ariadne_transform::GeneratedHeader {
+            filename: std::path::PathBuf::from("h1.h"),
+            pragma_once: true,
+            symbols: vec![sym1],
+            required_includes: vec![],
+        };
+
+        let result = ariadne_transform::ExtractionResult {
+            plan_id: "PLAN-1".to_string(),
+            headers: vec![header1],
+            errors: vec![],
+        };
+
+        let output_dir = mgr.artifact_root.join("generated");
+        mgr.save_extraction_artifacts(&result, &output_dir).unwrap();
+
+        assert!(output_dir.join("manifest.json").exists());
+        assert!(output_dir.join("headers").join("h1.h").exists());
     }
 }

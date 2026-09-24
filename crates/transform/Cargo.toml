@@ -7,3 +7,10 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+ariadne-index = { path = "../index" }
+ariadne-graph = { path = "../graph" }
+ariadne-cluster = { path = "../cluster" }
+ariadne-repo = { path = "../repo" }
+tempfile.workspace = true
