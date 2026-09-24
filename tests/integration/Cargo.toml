@@ -13,3 +13,7 @@ ariadne-build = { path = "../../crates/build" }
 ariadne-graph = { path = "../../crates/graph" }
 ariadne-cli = { path = "../../crates/cli" }
 ariadne-report = { path = "../../crates/report" }
+ariadne-index = { path = "../../crates/index" }
+ariadne-cluster = { path = "../../crates/cluster" }
+sha2.workspace = true
+serde.workspace = true

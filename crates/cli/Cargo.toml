@@ -21,3 +21,6 @@ ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-graph = { path = "../graph" }
 ariadne-report = { path = "../report" }
+ariadne-index = { path = "../index" }
+ariadne-cluster = { path = "../cluster" }
+bincode.workspace = true

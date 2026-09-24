@@ -26,6 +26,51 @@ pub struct BuildContextManifest {
     pub context_names: Vec<String>,
 }
 
+/// Metadata manifest for semantic index artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexManifest {
+    pub repository_root: PathBuf,
+    pub total_translation_units: usize,
+    pub total_symbols: usize,
+    pub total_edges: usize,
+    pub complete_edges: usize,
+    pub incomplete_edges: usize,
+}
+
+/// Metadata manifest for reduced semantic model artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReducedManifest {
+    pub repository_root: PathBuf,
+    pub total_symbols: usize,
+    pub total_edges: usize,
+    pub total_tu_usages: usize,
+    pub total_indexed_files: usize,
+}
+
+/// Metadata manifest for load report artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadManifest {
+    pub repository_root: PathBuf,
+    pub total_analyzed_symbols: usize,
+    pub total_analyzed_files: usize,
+    pub total_collateral_load: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadReport {
+    pub repository_root: PathBuf,
+    pub symbol_metrics: Vec<ariadne_graph::LoadMetric>,
+    pub file_metrics: Vec<ariadne_graph::LoadMetric>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanManifest {
+    pub repository_root: PathBuf,
+    pub total_plans: usize,
+    pub total_targets: usize,
+    pub total_collateral_reduced: usize,
+}
+
 pub struct ArtifactManager {
     pub artifact_root: PathBuf,
 }
@@ -159,6 +204,232 @@ impl ArtifactManager {
 
         Ok(includes_artifact_dir)
     }
+
+    /// Saves tu_analyses.bin, index.json, and manifest.json into artifacts/index/
+    pub fn save_index_artifacts(&self, index_result: &ariadne_index::IndexResult) -> Result<PathBuf> {
+        let index_artifact_dir = self.artifact_root.join("index");
+        fs::create_dir_all(&index_artifact_dir)
+            .with_context(|| format!("Failed to create index artifact directory at {:?}", index_artifact_dir))?;
+
+        // 1. tu_analyses.bin
+        let tu_analyses_path = index_artifact_dir.join("tu_analyses.bin");
+        let tu_analyses_bin = bincode::serialize(&index_result.tu_analyses)
+            .context("Failed to serialize tu analyses to binary")?;
+        fs::write(&tu_analyses_path, tu_analyses_bin)
+            .with_context(|| format!("Failed to write tu_analyses.bin at {:?}", tu_analyses_path))?;
+
+        // 2. index.json
+        let index_path = index_artifact_dir.join("index.json");
+        let index_json = serde_json::to_string_pretty(index_result)
+            .context("Failed to serialize index result to JSON")?;
+        fs::write(&index_path, index_json)
+            .with_context(|| format!("Failed to write index.json at {:?}", index_path))?;
+
+        // 3. manifest.json
+        let manifest_path = index_artifact_dir.join("manifest.json");
+        let manifest = IndexManifest {
+            repository_root: index_result.repo_root.clone(),
+            total_translation_units: index_result.tu_analyses.len(),
+            total_symbols: index_result.total_symbols,
+            total_edges: index_result.total_edges,
+            complete_edges: index_result.complete_edges,
+            incomplete_edges: index_result.incomplete_edges,
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize index manifest to JSON")?;
+        fs::write(&manifest_path, manifest_json)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        Ok(index_artifact_dir)
+    }
+
+    /// Saves symbols.bin, edges.bin, tu-usage.bin, file-symbols.bin, and manifest.json into artifacts/reduced/
+    pub fn save_reduced_artifacts(&self, model: &ariadne_graph::ReducedSemanticModel) -> Result<PathBuf> {
+        let reduced_artifact_dir = self.artifact_root.join("reduced");
+        fs::create_dir_all(&reduced_artifact_dir)
+            .with_context(|| format!("Failed to create reduced artifact directory at {:?}", reduced_artifact_dir))?;
+
+        // 1. symbols.bin
+        let symbols_path = reduced_artifact_dir.join("symbols.bin");
+        let symbols_bin = bincode::serialize(&model.symbols)
+            .context("Failed to serialize symbols to binary")?;
+        fs::write(&symbols_path, symbols_bin)
+            .with_context(|| format!("Failed to write symbols.bin at {:?}", symbols_path))?;
+
+        // 2. edges.bin
+        let edges_path = reduced_artifact_dir.join("edges.bin");
+        let edges_bin = bincode::serialize(&model.edges)
+            .context("Failed to serialize edges to binary")?;
+        fs::write(&edges_path, edges_bin)
+            .with_context(|| format!("Failed to write edges.bin at {:?}", edges_path))?;
+
+        // 3. tu-usage.bin
+        let tu_usage_path = reduced_artifact_dir.join("tu-usage.bin");
+        let tu_usage_bin = bincode::serialize(&model.tu_usage)
+            .context("Failed to serialize tu usage to binary")?;
+        fs::write(&tu_usage_path, tu_usage_bin)
+            .with_context(|| format!("Failed to write tu-usage.bin at {:?}", tu_usage_path))?;
+
+        // 4. file-symbols.bin
+        let file_symbols_path = reduced_artifact_dir.join("file-symbols.bin");
+        let file_symbols_bin = bincode::serialize(&model.file_symbols)
+            .context("Failed to serialize file symbols to binary")?;
+        fs::write(&file_symbols_path, file_symbols_bin)
+            .with_context(|| format!("Failed to write file-symbols.bin at {:?}", file_symbols_path))?;
+
+        // 5. manifest.json
+        let manifest_path = reduced_artifact_dir.join("manifest.json");
+        let manifest = ReducedManifest {
+            repository_root: model.repo_root.clone(),
+            total_symbols: model.symbols.len(),
+            total_edges: model.edges.len(),
+            total_tu_usages: model.tu_usage.len(),
+            total_indexed_files: model.file_symbols.len(),
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize reduced manifest to JSON")?;
+        fs::write(&manifest_path, manifest_json)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        Ok(reduced_artifact_dir)
+    }
+
+    pub fn load_reduced_artifacts(&self) -> Result<ariadne_graph::ReducedSemanticModel> {
+        let reduced_artifact_dir = self.artifact_root.join("reduced");
+
+        let manifest_path = reduced_artifact_dir.join("manifest.json");
+        let manifest_json = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("Failed to read manifest.json at {:?}", manifest_path))?;
+        let manifest: ReducedManifest = serde_json::from_str(&manifest_json)
+            .context("Failed to deserialize reduced manifest")?;
+
+        let symbols_path = reduced_artifact_dir.join("symbols.bin");
+        let symbols_bin = fs::read(&symbols_path)
+            .with_context(|| format!("Failed to read symbols.bin at {:?}", symbols_path))?;
+        let symbols = bincode::deserialize(&symbols_bin)
+            .context("Failed to deserialize symbols")?;
+
+        let edges_path = reduced_artifact_dir.join("edges.bin");
+        let edges_bin = fs::read(&edges_path)
+            .with_context(|| format!("Failed to read edges.bin at {:?}", edges_path))?;
+        let edges = bincode::deserialize(&edges_bin)
+            .context("Failed to deserialize edges")?;
+
+        let tu_usage_path = reduced_artifact_dir.join("tu-usage.bin");
+        let tu_usage_bin = fs::read(&tu_usage_path)
+            .with_context(|| format!("Failed to read tu-usage.bin at {:?}", tu_usage_path))?;
+        let tu_usage = bincode::deserialize(&tu_usage_bin)
+            .context("Failed to deserialize tu usage")?;
+
+        let file_symbols_path = reduced_artifact_dir.join("file-symbols.bin");
+        let file_symbols_bin = fs::read(&file_symbols_path)
+            .with_context(|| format!("Failed to read file-symbols.bin at {:?}", file_symbols_path))?;
+        let file_symbols = bincode::deserialize(&file_symbols_bin)
+            .context("Failed to deserialize file symbols")?;
+
+        Ok(ariadne_graph::ReducedSemanticModel {
+            repo_root: manifest.repository_root,
+            symbols,
+            edges,
+            tu_usage,
+            file_symbols,
+        })
+    }
+
+    pub fn save_load_artifacts(&self, report: &LoadReport) -> Result<PathBuf> {
+        let load_artifact_dir = self.artifact_root.join("load");
+        fs::create_dir_all(&load_artifact_dir)
+            .with_context(|| format!("Failed to create load artifact directory at {:?}", load_artifact_dir))?;
+
+        // 1. report.json
+        let report_json_path = load_artifact_dir.join("report.json");
+        let report_json = serde_json::to_string_pretty(report)
+            .context("Failed to serialize load report to JSON")?;
+        fs::write(&report_json_path, report_json)
+            .with_context(|| format!("Failed to write report.json at {:?}", report_json_path))?;
+
+        // 2. report.bin
+        let report_bin_path = load_artifact_dir.join("report.bin");
+        let report_bin = bincode::serialize(report)
+            .context("Failed to serialize load report to binary")?;
+        fs::write(&report_bin_path, report_bin)
+            .with_context(|| format!("Failed to write report.bin at {:?}", report_bin_path))?;
+
+        // 3. manifest.json
+        let manifest_path = load_artifact_dir.join("manifest.json");
+        let total_collateral_load: usize = report.symbol_metrics.iter().map(|m| m.collateral_load).sum::<usize>() 
+            + report.file_metrics.iter().map(|m| m.collateral_load).sum::<usize>();
+
+        let manifest = LoadManifest {
+            repository_root: report.repository_root.clone(),
+            total_analyzed_symbols: report.symbol_metrics.len(),
+            total_analyzed_files: report.file_metrics.len(),
+            total_collateral_load,
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize load manifest to JSON")?;
+        fs::write(&manifest_path, manifest_json)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        Ok(load_artifact_dir)
+    }
+
+    pub fn load_load_artifacts(&self) -> Result<LoadReport> {
+        let load_artifact_dir = self.artifact_root.join("load");
+        let report_bin_path = load_artifact_dir.join("report.bin");
+        let report_bin = fs::read(&report_bin_path)
+            .with_context(|| format!("Failed to read report.bin at {:?}", report_bin_path))?;
+        let report: LoadReport = bincode::deserialize(&report_bin)
+            .context("Failed to deserialize load report")?;
+        Ok(report)
+    }
+
+    pub fn save_plan_artifacts(&self, repository_root: &Path, plans: &[ariadne_cluster::plan::OptimizationPlan]) -> Result<PathBuf> {
+        let plan_artifact_dir = self.artifact_root.join("plans");
+        fs::create_dir_all(&plan_artifact_dir)
+            .with_context(|| format!("Failed to create plans artifact directory at {:?}", plan_artifact_dir))?;
+
+        let json_path = plan_artifact_dir.join("plans.json");
+        let json_content = serde_json::to_string_pretty(&plans)
+            .context("Failed to serialize plans to JSON")?;
+        fs::write(&json_path, json_content)
+            .with_context(|| format!("Failed to write plans.json at {:?}", json_path))?;
+
+        let bin_path = plan_artifact_dir.join("plans.bin");
+        let bin_content = bincode::serialize(&plans)
+            .context("Failed to serialize plans to binary")?;
+        fs::write(&bin_path, bin_content)
+            .with_context(|| format!("Failed to write plans.bin at {:?}", bin_path))?;
+
+        let total_plans = plans.len();
+        let total_targets = plans.len();
+        let total_collateral_reduced = plans.iter().map(|p| p.collateral_load_before.saturating_sub(p.collateral_load_after)).sum();
+
+        let manifest = PlanManifest {
+            repository_root: repository_root.to_path_buf(),
+            total_plans,
+            total_targets,
+            total_collateral_reduced,
+        };
+
+        let manifest_path = plan_artifact_dir.join("manifest.json");
+        let manifest_content = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize plan manifest")?;
+        fs::write(&manifest_path, manifest_content)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        Ok(plan_artifact_dir)
+    }
+
+    pub fn load_plan_artifacts(&self) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
+        let plan_artifact_dir = self.artifact_root.join("plans");
+        let bin_path = plan_artifact_dir.join("plans.bin");
+        let bin_content = fs::read(&bin_path)
+            .with_context(|| format!("Failed to read plans.bin at {:?}", bin_path))?;
+        let plans: Vec<ariadne_cluster::plan::OptimizationPlan> = bincode::deserialize(&bin_content)
+            .context("Failed to deserialize plans")?;
+        Ok(plans)
+    }
 }
 
 #[cfg(test)]
@@ -246,5 +517,129 @@ mod tests {
         assert!(inc_dir.join("edges.bin").exists());
         assert!(inc_dir.join("closures.bin").exists());
         assert!(inc_dir.join("report.json").exists());
+    }
+
+    #[test]
+    fn test_save_index_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let index_result = ariadne_index::IndexResult::new(root.to_path_buf(), vec![]);
+
+        let index_dir = mgr.save_index_artifacts(&index_result).unwrap();
+        assert!(index_dir.join("tu_analyses.bin").exists());
+        assert!(index_dir.join("index.json").exists());
+        assert!(index_dir.join("manifest.json").exists());
+    }
+
+    #[test]
+    fn test_save_reduced_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let index_result = ariadne_index::IndexResult::new(root.to_path_buf(), vec![]);
+        let reduced = ariadne_graph::ReducedSemanticModel::reduce(&index_result);
+
+        let reduced_dir = mgr.save_reduced_artifacts(&reduced).unwrap();
+        assert!(reduced_dir.join("symbols.bin").exists());
+        assert!(reduced_dir.join("edges.bin").exists());
+        assert!(reduced_dir.join("tu-usage.bin").exists());
+        assert!(reduced_dir.join("file-symbols.bin").exists());
+        assert!(reduced_dir.join("manifest.json").exists());
+    }
+
+    #[test]
+    fn test_load_reduced_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let index_result = ariadne_index::IndexResult::new(root.to_path_buf(), vec![]);
+        let reduced = ariadne_graph::ReducedSemanticModel::reduce(&index_result);
+
+        mgr.save_reduced_artifacts(&reduced).unwrap();
+
+        let loaded = mgr.load_reduced_artifacts().unwrap();
+        assert_eq!(reduced.repo_root, loaded.repo_root);
+        assert_eq!(reduced.symbols, loaded.symbols);
+        assert_eq!(reduced.edges, loaded.edges);
+        assert_eq!(reduced.tu_usage, loaded.tu_usage);
+        assert_eq!(reduced.file_symbols, loaded.file_symbols);
+    }
+
+    #[test]
+    fn test_save_and_load_load_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let report = LoadReport {
+            repository_root: root.to_path_buf(),
+            symbol_metrics: vec![
+                ariadne_graph::LoadMetric {
+                    target_name: "TestSymbol".to_string(),
+                    target_file: Some(PathBuf::from("test.cpp")),
+                    semantic_load: 10,
+                    include_load: 20,
+                    collateral_load: 10,
+                    total_load: 20,
+                    semantic_symbols: vec![],
+                    collateral_symbols: vec![],
+                    collateral_sources: vec![],
+                    largest_collateral_source: None,
+                }
+            ],
+            file_metrics: vec![],
+        };
+
+        let load_dir = mgr.save_load_artifacts(&report).unwrap();
+        assert!(load_dir.join("report.json").exists());
+        assert!(load_dir.join("report.bin").exists());
+        assert!(load_dir.join("manifest.json").exists());
+
+        let loaded = mgr.load_load_artifacts().unwrap();
+        assert_eq!(report.repository_root, loaded.repository_root);
+        assert_eq!(report.symbol_metrics.len(), loaded.symbol_metrics.len());
+        assert_eq!(report.symbol_metrics[0].target_name, loaded.symbol_metrics[0].target_name);
+    }
+
+    #[test]
+    fn test_save_and_load_plan_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let plan = ariadne_cluster::plan::OptimizationPlan {
+            id: ariadne_cluster::plan::PlanId("test-plan".to_string()),
+            target_file: PathBuf::from("test.cpp"),
+            target_file_id: FileId::from_relative_path("test.cpp"),
+            problem: "too big".to_string(),
+            collateral_load_before: 100,
+            collateral_load_after: 58,
+            proposed_extractions: vec![],
+            optimization_frontier: vec![],
+            risk: ariadne_cluster::plan::RiskLevel::Conservative,
+            validation_required_tus: vec![],
+            rationale: "why not".to_string(),
+        };
+
+        let plans = vec![plan.clone()];
+        let plan_dir = mgr.save_plan_artifacts(root, &plans).unwrap();
+        
+        assert!(plan_dir.join("plans.json").exists());
+        assert!(plan_dir.join("plans.bin").exists());
+        assert!(plan_dir.join("manifest.json").exists());
+
+        let loaded = mgr.load_plan_artifacts().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].collateral_load_before, 100);
+        assert_eq!(loaded[0].collateral_load_after, 58);
     }
 }

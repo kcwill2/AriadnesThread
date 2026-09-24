@@ -12,6 +12,8 @@ bincode.workspace = true
 ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-graph = { path = "../graph" }
+ariadne-index = { path = "../index" }
+ariadne-cluster = { path = "../cluster" }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,21 +1,8 @@
 //! Semantic indexing abstractions.
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct SymbolId(pub String);
+pub mod types;
+pub mod analyzer;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum DependencyKind {
-    Complete,
-    Incomplete,
-}
+pub use types::*;
+pub use analyzer::*;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_symbol_id() {
-        let sym = SymbolId("Thing".to_string());
-        assert_eq!(sym.0, "Thing");
-    }
-}

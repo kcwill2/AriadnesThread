@@ -28,12 +28,33 @@
   - [x] Unit 3: Implement `IncludeGraph` engine with transitive closure, cycle detection, consumer TUs, and explain tree (`crates/graph/src/graph.rs`)
   - [x] Unit 4: Implement artifact persistence for `edges.bin`, `closures.bin`, and `report.json` (`crates/report/src/lib.rs`)
   - [x] Unit 5: Implement CLI commands `tool includes` and `tool includes explain` (`crates/cli`) and integration test suite (`tests/integration/tests/m3_include_graph_test.rs`)
+- [x] **M4 — Semantic Indexing**
+  - [x] Unit 1: Indexing data structures & types (`crates/index/src/types.rs`)
+  - [x] Unit 2: C++ Semantic analyzer & parser engine (`crates/index/src/analyzer.rs`, backend abstraction, and worker sidecar `tools/clang-worker`)
+  - [x] Unit 3: Index result aggregation & artifact persistence in `crates/report`
+  - [x] Unit 4: CLI command `tool index <repo>` in `crates/cli` and integration test suite (`tests/integration/tests/m4_semantic_indexing_test.rs`)
+
+- [x] **M5 — Reduced Semantic Model**
+  - [x] Unit 1: Reduced semantic model data structures & reduction engine (`crates/graph/src/reduced.rs`)
+  - [x] Unit 2: Reduced model artifact persistence in `crates/report` (`artifacts/reduced/`)
+  - [x] Unit 3: Query engine & CLI `tool query` commands (`crates/cli`, `crates/graph`)
+  - [x] Unit 4: Integration test suite & artifact determinism test (`tests/integration/tests/m5_reduced_model_test.rs`)
+
+- [x] **M6 — Dependency Load Analysis**
+  - [x] Unit 1: Define load analysis metrics and calculation engine with provenance (`crates/graph/src/load.rs`)
+  - [x] Unit 2: Implement load artifact persistence and reporting (`crates/report/src/lib.rs`)
+  - [x] Unit 3: Implement CLI commands `tool analyze load` and `tool explain load` (`crates/cli`)
+  - [x] Unit 4: Integration test suite for load analysis, collateral quantification, and explain provenance (`tests/integration/tests/m6_load_analysis_test.rs`)
+
+- [x] **M7 — Optimization Planning**
+  - [x] Unit 1: Define OptimizationPlan, PlanId, ProposedExtraction, RiskLevel, and RejectionReason types and formatters (`crates/cluster/src/plan.rs`)
+  - [x] Unit 2: Implement SCC analysis, movability checks, and constraint/rejection validator (`crates/cluster/src/scc.rs`, `crates/cluster/src/checker.rs`)
+  - [x] Unit 3: Implement FrontierAnalyzer and OptimizationPlanner engine generating deterministic explainable plans (`crates/cluster/src/frontier.rs`, `crates/cluster/src/planner.rs`)
+  - [x] Unit 4: Implement plan artifact persistence and loader in `crates/report` (`artifacts/plans/plans.json`, `plans.bin`, `manifest.json`)
+  - [x] Unit 5: Implement CLI commands `tool plan <repo>` and `tool plan show <repo> --id <ID>` in `crates/cli`
+  - [x] Unit 6: Integration test suite for optimization planning, golden plan fixtures, determinism, and rejection cases (`tests/integration/tests/m7_optimization_planning_test.rs`)
 
 ## Upcoming Milestones
-- [ ] **M4 — Semantic Indexing**
-- [ ] **M5 — Reduced Semantic Model**
-- [ ] **M6 — Dependency Load Analysis**
-- [ ] **M7 — Optimization Planning**
 - [ ] **M8 — Header Extraction**
 - [ ] **M9 — Consumer Rewriting**
 - [ ] **M10 — Validation & Transactions**

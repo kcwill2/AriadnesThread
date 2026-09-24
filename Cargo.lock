@@ -76,9 +76,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-build",
+ "ariadne-cluster",
  "ariadne-graph",
+ "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "bincode",
  "clap",
  "tracing",
  "tracing-subscriber",
@@ -90,7 +93,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-graph",
+ "ariadne-index",
+ "ariadne-repo",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -111,7 +117,10 @@ name = "ariadne-index"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
+ "ariadne-repo",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -121,10 +130,14 @@ dependencies = [
  "anyhow",
  "ariadne-build",
  "ariadne-cli",
+ "ariadne-cluster",
  "ariadne-graph",
+ "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -145,7 +158,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-build",
+ "ariadne-cluster",
  "ariadne-graph",
+ "ariadne-index",
  "ariadne-repo",
  "bincode",
  "serde",
