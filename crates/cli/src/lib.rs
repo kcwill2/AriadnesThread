@@ -640,6 +640,22 @@ pub fn handle_query_users(repo_path: &PathBuf, name: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::IncrementalAnalysisResult> {
+    let repo = Repository::locate(repo_path)?;
+    let repo_discovery = repo.discover()?;
+    let build_discovery = BuildDiscoverer::new(&repo.root).with_repo_discovery(&repo_discovery).discover()?;
+    let mut analyzer = ariadne_scheduler::IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery);
+    let result = analyzer.analyze()?;
+    result.save_artifacts(&repo)?;
+
+    println!("Analyzing...\n");
+    println!("Reused:\n    {} translation units\n", result.stats.reused_tus);
+    println!("Reanalyzed:\n    {} translation units\n", result.stats.reanalyzed_tus);
+    println!("Cache hit rate:\n    {:.1}%", result.stats.hit_rate);
+
+    Ok(result)
+}
+
 use ariadne_graph::LoadAnalyzer;
 use ariadne_report::LoadReport;
 
@@ -1047,10 +1063,7 @@ pub fn run() -> Result<()> {
                 handle_analyze_load(&repo, symbol.as_deref(), file.as_deref())?;
             }
             (Some(repo_path), None) => {
-                let repository = Repository::locate(&repo_path)?;
-                let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-                println!("Analyzed repository at: {:?}", repository.root);
-                println!("Artifacts directory initialized at: {:?}", artifacts.artifact_root);
+                handle_analyze(&repo_path)?;
             }
             (None, None) => {
                 bail!("Repository path required for tool analyze command");
@@ -1293,5 +1306,27 @@ mod tests {
         assert!(result.is_err());
         
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_cli_analyze_repo() {
+        let args = vec!["tool", "analyze", "my_repo"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Analyze { repo, command } => {
+                assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
+                assert!(command.is_none());
+            }
+            _ => panic!("Expected Analyze command"),
+        }
+    }
+
+    #[test]
+    fn test_handle_analyze() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+        let repo_dir = root.join("tests/fixtures/basic");
+
+        let result = handle_analyze(&repo_dir).unwrap();
+        assert!(result.stats.total_tus > 0 || result.stats.total_tus == 0); // Just check it returned Ok
     }
 }

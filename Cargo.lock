@@ -81,6 +81,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "ariadne-scheduler",
  "ariadne-transform",
  "ariadne-validate",
  "bincode",
@@ -121,8 +122,10 @@ dependencies = [
  "anyhow",
  "ariadne-build",
  "ariadne-repo",
+ "bincode",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -137,6 +140,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "ariadne-scheduler",
  "ariadne-transform",
  "ariadne-validate",
  "serde",
@@ -179,6 +183,13 @@ name = "ariadne-scheduler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-build",
+ "ariadne-graph",
+ "ariadne-index",
+ "ariadne-repo",
+ "ariadne-report",
+ "serde",
+ "tempfile",
  "tokio",
 ]
 

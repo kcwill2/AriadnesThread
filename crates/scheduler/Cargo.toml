@@ -7,3 +7,12 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true
+serde.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-build = { path = "../build" }
+ariadne-index = { path = "../index" }
+ariadne-graph = { path = "../graph" }
+ariadne-report = { path = "../report" }
+
+[dev-dependencies]
+tempfile.workspace = true

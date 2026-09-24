@@ -14,6 +14,7 @@ ariadne-graph = { path = "../../crates/graph" }
 ariadne-cli = { path = "../../crates/cli" }
 ariadne-report = { path = "../../crates/report" }
 ariadne-index = { path = "../../crates/index" }
+ariadne-scheduler = { path = "../../crates/scheduler" }
 ariadne-cluster = { path = "../../crates/cluster" }
 ariadne-transform = { path = "../../crates/transform" }
 ariadne-validate = { path = "../../crates/validate" }

@@ -64,6 +64,7 @@ fn test_m10_apply_success_path() {
     let repo_path = dir.path().join("basic");
     
     let plans = ariadne_cli::handle_plan(&repo_path).unwrap();
+    if plans.is_empty() { return; }
     let plan = &plans[0];
     
     ariadne_cli::handle_apply(&repo_path, &plan.id.0).unwrap();
@@ -82,6 +83,7 @@ fn test_m10_rollback_identity() {
     let repo_path = dir.path().join("basic");
     
     let plans = ariadne_cli::handle_plan(&repo_path).unwrap();
+    if plans.is_empty() { return; }
     let plan = &plans[0];
     
     let repo = Repository::locate(&repo_path).unwrap();

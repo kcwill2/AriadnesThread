@@ -85,7 +85,13 @@
   - [x] Unit 4: Add `tool measure <repo>` and `tool compare <before> <after>` CLI commands in `crates/cli`
   - [x] Unit 5: Controlled fixture with expensive headers and integration test suite (`tests/integration/tests/m11_measurement_test.rs`)
 
+- [x] **M12 — Incremental Analysis**
+  - [x] Unit 1: Define cache data structures, fingerprints, and validation rules (`crates/index/src/cache.rs`)
+  - [x] Unit 2: Implement cache artifact persistence and loading in `crates/report` (`artifacts/cache/`)
+  - [x] Unit 3: Implement `IncrementalAnalyzer` engine in `crates/scheduler` (selective TU invalidation & cache reuse)
+  - [x] Unit 4: Integrate CLI command `tool analyze <repo>` with required output format in `crates/cli`
+  - [x] Unit 5: Integration test suite for cache hit rate, header modification invalidation, compiler context invalidation, and analysis version mismatch (`tests/integration/tests/m12_incremental_analysis_test.rs`)
+
 ## Upcoming Milestones
-- [ ] **M12 — Incremental Analysis**
 - [ ] **M13 — Production-Scale Execution**
 - [ ] **M14 — End-to-End Optimization**

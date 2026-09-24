@@ -102,6 +102,16 @@ pub struct MeasureManifest {
     pub peak_memory_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheManifest {
+    pub repository_root: PathBuf,
+    pub analysis_version: String,
+    pub total_cached_tus: usize,
+    pub reused_tus: usize,
+    pub reanalyzed_tus: usize,
+    pub hit_rate: f64,
+}
+
 pub struct ArtifactManager {
     pub artifact_root: PathBuf,
 }
@@ -628,6 +638,56 @@ impl ArtifactManager {
 
         Ok(measure_dir)
     }
+
+    pub fn save_cache_artifacts(&self, cache: &ariadne_index::IncrementalCache, manifest: &CacheManifest) -> Result<PathBuf> {
+        let cache_dir = self.artifact_root.join("cache");
+        fs::create_dir_all(&cache_dir)
+            .with_context(|| format!("Failed to create cache artifact directory at {:?}", cache_dir))?;
+
+        let manifest_path = cache_dir.join("manifest.json");
+        let manifest_content = serde_json::to_string_pretty(manifest)
+            .context("Failed to serialize cache manifest to JSON")?;
+        fs::write(&manifest_path, manifest_content)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        let bin_path = cache_dir.join("cache.bin");
+        let bin_content = bincode::serialize(cache)
+            .context("Failed to serialize cache to binary")?;
+        fs::write(&bin_path, bin_content)
+            .with_context(|| format!("Failed to write cache.bin at {:?}", bin_path))?;
+
+        let json_path = cache_dir.join("cache.json");
+        // Convert to a Vec of entries so JSON serialization works
+        let entries: Vec<_> = cache.entries.values().collect();
+        let json_content = serde_json::to_string_pretty(&entries)
+            .context("Failed to serialize cache to JSON")?;
+        fs::write(&json_path, json_content)
+            .with_context(|| format!("Failed to write cache.json at {:?}", json_path))?;
+
+        Ok(cache_dir)
+    }
+
+    pub fn load_cache_artifacts(&self) -> Result<ariadne_index::IncrementalCache> {
+        let bin_path = self.artifact_root.join("cache").join("cache.bin");
+        let bin_content = fs::read(&bin_path)
+            .with_context(|| format!("Failed to read cache.bin at {:?}", bin_path))?;
+        let cache: ariadne_index::IncrementalCache = bincode::deserialize(&bin_content)
+            .context("Failed to deserialize cache")?;
+        Ok(cache)
+    }
+
+    pub fn load_cache_manifest(&self) -> Result<CacheManifest> {
+        let manifest_path = self.artifact_root.join("cache").join("manifest.json");
+        let manifest_json = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("Failed to read manifest.json at {:?}", manifest_path))?;
+        let manifest: CacheManifest = serde_json::from_str(&manifest_json)
+            .context("Failed to deserialize cache manifest")?;
+        Ok(manifest)
+    }
+
+    pub fn has_cache_artifacts(&self) -> bool {
+        self.artifact_root.join("cache").join("cache.bin").exists()
+    }
 }
 
 
@@ -1081,5 +1141,40 @@ mod tests {
         assert!(measure_dir.join("report.txt").exists());
         let report_content = fs::read_to_string(measure_dir.join("report.txt")).unwrap();
         assert!(!report_content.is_empty());
+    }
+
+    #[test]
+    fn test_save_and_load_cache_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        assert!(!mgr.has_cache_artifacts());
+
+        let cache = ariadne_index::IncrementalCache::new("v1.2.3");
+
+        let manifest = CacheManifest {
+            repository_root: root.to_path_buf(),
+            analysis_version: "v1.2.3".to_string(),
+            total_cached_tus: 10,
+            reused_tus: 8,
+            reanalyzed_tus: 2,
+            hit_rate: 0.8,
+        };
+
+        let cache_dir = mgr.save_cache_artifacts(&cache, &manifest).unwrap();
+        assert!(cache_dir.join("manifest.json").exists());
+        assert!(cache_dir.join("cache.bin").exists());
+        assert!(cache_dir.join("cache.json").exists());
+
+        assert!(mgr.has_cache_artifacts());
+
+        let loaded_cache = mgr.load_cache_artifacts().unwrap();
+        assert_eq!(cache.analysis_version, loaded_cache.analysis_version);
+
+        let loaded_manifest = mgr.load_cache_manifest().unwrap();
+        assert_eq!(manifest.analysis_version, loaded_manifest.analysis_version);
+        assert_eq!(manifest.hit_rate, loaded_manifest.hit_rate);
     }
 }

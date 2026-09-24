@@ -1,5 +1,8 @@
 //! Task scheduler for parallel analysis and indexing.
 
+pub mod incremental;
+pub use incremental::*;
+
 pub struct TaskScheduler {
     pub concurrency: usize,
 }

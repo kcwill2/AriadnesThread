@@ -25,4 +25,5 @@ ariadne-index = { path = "../index" }
 ariadne-cluster = { path = "../cluster" }
 ariadne-transform = { path = "../transform" }
 ariadne-validate = { path = "../validate" }
+ariadne-scheduler = { path = "../scheduler" }
 bincode.workspace = true
