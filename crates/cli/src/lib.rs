@@ -175,6 +175,17 @@ pub enum Commands {
         #[command(subcommand)]
         command: TransformSubcommands,
     },
+    /// Migrate consumers to generated headers
+    Migrate {
+        /// Path to repository root
+        repo: PathBuf,
+        /// Plan ID to migrate consumers for
+        #[arg(long)]
+        plan: String,
+        /// Preview changes without applying them
+        #[arg(long, default_value_t = false)]
+        preview: bool,
+    },
 }
 
 pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
@@ -754,6 +765,97 @@ pub fn handle_transform_extract(repo_path: &PathBuf, plan_id: &str) -> Result<()
     Ok(())
 }
 
+pub fn handle_migrate(repo_path: &PathBuf, plan_id: &str, preview: bool) -> Result<()> {
+    use ariadne_transform::{IncludeRewriter, GeneratedHeader};
+    use std::collections::BTreeMap;
+
+    let repository = Repository::locate(repo_path)?;
+    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+
+    // 1. Load the plan
+    let plans = artifacts.load_plan_artifacts()
+        .or_else(|_| handle_plan(repo_path).map(|_| vec![]))
+        .unwrap_or_default();
+    let plans = if plans.is_empty() {
+        artifacts.load_plan_artifacts()?
+    } else {
+        plans
+    };
+    let plan = plans.iter().find(|p| p.id.0 == plan_id)
+        .ok_or_else(|| anyhow::anyhow!("Plan {} not found", plan_id))?;
+
+    // 2. Build symbol_name_to_header map from plan's proposed_extractions
+    let mut symbol_name_to_header: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for ext in &plan.proposed_extractions {
+        symbol_name_to_header.insert(ext.symbol_name.clone(), ext.target_header.clone());
+    }
+
+    // 3. Build generated headers list (from proposed_extractions, conservative: no required_includes)
+    let mut header_map: BTreeMap<PathBuf, GeneratedHeader> = BTreeMap::new();
+    for ext in &plan.proposed_extractions {
+        header_map.entry(ext.target_header.clone()).or_insert_with(|| GeneratedHeader {
+            filename: ext.target_header.clone(),
+            pragma_once: true,
+            symbols: vec![],
+            required_includes: vec![],
+        });
+    }
+    let generated_headers: Vec<GeneratedHeader> = header_map.into_values().collect();
+
+    // 4. Find consumers: TUs that include the target file (heuristic: check source file content)
+    let repo_discovery = repository.discover()?;
+    let build_discoverer = BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
+    let build_result = build_discoverer.discover()?;
+
+    let target_include = plan.target_file.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    
+    let all_symbol_names: Vec<String> = plan.proposed_extractions.iter()
+        .map(|e| e.symbol_name.clone())
+        .collect();
+
+    let mut consumers: Vec<(PathBuf, Vec<PathBuf>, Vec<String>)> = Vec::new();
+    for tu in &build_result.translation_units {
+        let abs_path = repository.root.join(&tu.source_path);
+        if let Ok(content) = fs::read_to_string(&abs_path) {
+            // Check if this TU includes the target header
+            if content.contains(&format!("#include \"{}\"", target_include))
+                || content.contains(&format!("#include <{}>", target_include))
+            {
+                consumers.push((
+                    tu.source_path.clone(),
+                    vec![plan.target_file.clone()],
+                    all_symbol_names.clone(),   // conservative: all symbols
+                ));
+            }
+        }
+    }
+
+    // 5. Build preview
+    let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
+    let preview_result = rewriter.build_preview(plan_id.to_string(), &consumers);
+
+    // 6. Print diff
+    if preview {
+        println!("Migration preview for {}:", plan_id);
+        println!();
+        if preview_result.rewrites.is_empty() {
+            println!("  No consumers found for target: {}", plan.target_file.display());
+        } else {
+            println!("{}", preview_result.format_diff());
+            println!("No files changed.");
+        }
+    }
+
+    // 7. Save artifacts
+    artifacts.save_migration_artifacts(&preview_result)?;
+
+    println!("Migration preview: {} effective rewrites", preview_result.effective_rewrites());
+
+    Ok(())
+}
+
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -829,6 +931,9 @@ pub fn run() -> Result<()> {
             TransformSubcommands::Extract { repo, plan } => {
                 handle_transform_extract(&repo, &plan)?;
             }
+        },
+        Some(Commands::Migrate { repo, plan, preview }) => {
+            handle_migrate(&repo, &plan, preview)?;
         },
     }
 
@@ -906,6 +1011,34 @@ mod tests {
                 assert_eq!(plan, "PLAN-001");
             }
             _ => panic!("Expected Transform Extract command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_migrate_preview() {
+        let args = vec!["tool", "migrate", "my_repo", "--plan", "PLAN-001", "--preview"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Migrate { repo, plan, preview } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+                assert_eq!(plan, "PLAN-001");
+                assert!(preview);
+            }
+            _ => panic!("Expected Migrate command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_migrate_no_preview_flag() {
+        let args = vec!["tool", "migrate", "my_repo", "--plan", "PLAN-001"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Migrate { repo, plan, preview } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+                assert_eq!(plan, "PLAN-001");
+                assert!(!preview); // default is false
+            }
+            _ => panic!("Expected Migrate command"),
         }
     }
 }
