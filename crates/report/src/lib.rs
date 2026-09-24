@@ -85,6 +85,23 @@ pub struct MigrationManifest {
     pub effective_rewrites: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionManifest {
+    pub plan_id: String,
+    pub outcome: String,
+    pub tiers_run: usize,
+    pub tiers_passed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeasureManifest {
+    pub repository_root: PathBuf,
+    pub total_tus: usize,
+    pub full_build_wall_time_ms: u128,
+    pub total_frontend_cpu_ms: u128,
+    pub peak_memory_bytes: u64,
+}
+
 pub struct ArtifactManager {
     pub artifact_root: PathBuf,
 }
@@ -520,6 +537,97 @@ impl ArtifactManager {
             .context("Failed to deserialize migration preview")?;
         Ok(preview)
     }
+
+    pub fn save_transaction_artifacts(
+        &self,
+        plan_id: &str,
+        outcome: &ariadne_validate::ApplyOutcome,
+    ) -> Result<PathBuf> {
+        let transaction_dir = self.artifact_root.join("transaction");
+        fs::create_dir_all(&transaction_dir)?;
+
+        let (outcome_str, tiers_run, tiers_passed) = match outcome {
+            ariadne_validate::ApplyOutcome::Committed { tiers_passed } => {
+                ("Committed", tiers_passed.len(), tiers_passed.len())
+            }
+            ariadne_validate::ApplyOutcome::RolledBack { failed_tier: _, tiers_passed } => {
+                ("RolledBack", tiers_passed.len() + 1, tiers_passed.len())
+            }
+        };
+
+        let manifest = TransactionManifest {
+            plan_id: plan_id.to_string(),
+            outcome: outcome_str.to_string(),
+            tiers_run,
+            tiers_passed,
+        };
+
+        let manifest_path = transaction_dir.join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+        let outcome_path = transaction_dir.join("outcome.json");
+        fs::write(&outcome_path, serde_json::to_string_pretty(outcome)?)?;
+
+        Ok(transaction_dir)
+    }
+
+    pub fn save_measurement_artifacts(&self, measurement: &ariadne_build::BuildMeasurement) -> Result<PathBuf> {
+        let measure_dir = self.artifact_root.join("measure");
+        fs::create_dir_all(&measure_dir)?;
+
+        let manifest = MeasureManifest {
+            repository_root: measurement.repo_root.clone(),
+            total_tus: measurement.tu_measurements.len(),
+            full_build_wall_time_ms: measurement.full_build_wall_time.as_millis(),
+            total_frontend_cpu_ms: measurement.total_frontend_cpu_time.as_millis(),
+            peak_memory_bytes: measurement.peak_memory_bytes,
+        };
+
+        fs::write(measure_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
+        fs::write(measure_dir.join("measurements.json"), serde_json::to_string_pretty(measurement)?)?;
+        fs::write(measure_dir.join("measurements.bin"), bincode::serialize(measurement)?)?;
+
+        Ok(measure_dir)
+    }
+
+    pub fn load_measurement_artifacts(&self) -> Result<ariadne_build::BuildMeasurement> {
+        let measure_dir = self.artifact_root.join("measure");
+        Self::load_measurement_from_path(&measure_dir)
+    }
+
+    pub fn load_measurement_from_path<P: AsRef<Path>>(path: P) -> Result<ariadne_build::BuildMeasurement> {
+        let path = path.as_ref();
+        
+        let bin_path = if path.is_dir() { path.join("measurements.bin") } else { path.to_path_buf() };
+        let json_path = if path.is_dir() { path.join("measurements.json") } else { path.to_path_buf() };
+
+        if bin_path.exists() && bin_path.extension().and_then(|s| s.to_str()) == Some("bin") {
+            let data = fs::read(&bin_path)?;
+            if let Ok(m) = bincode::deserialize(&data) {
+                return Ok(m);
+            }
+        }
+        
+        if json_path.exists() && (json_path.extension().and_then(|s| s.to_str()) == Some("json") || path.is_dir()) {
+            if let Ok(data) = fs::read_to_string(&json_path) {
+                if let Ok(m) = serde_json::from_str(&data) {
+                    return Ok(m);
+                }
+            }
+        }
+
+        anyhow::bail!("Could not load measurement artifacts from path {:?}", path);
+    }
+
+    pub fn save_comparison_artifacts(&self, comparison: &ariadne_build::MeasurementComparison) -> Result<PathBuf> {
+        let measure_dir = self.artifact_root.join("measure");
+        fs::create_dir_all(&measure_dir)?;
+
+        fs::write(measure_dir.join("comparison.json"), serde_json::to_string_pretty(comparison)?)?;
+        fs::write(measure_dir.join("report.txt"), comparison.format_report())?;
+
+        Ok(measure_dir)
+    }
 }
 
 
@@ -868,5 +976,110 @@ mod tests {
         assert_eq!(manifest.plan_id, "PLAN-007");
         assert_eq!(manifest.total_rewrites, 2);
         assert_eq!(manifest.effective_rewrites, 1); // only a.cpp changes
+    }
+
+    #[test]
+    fn test_save_transaction_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let outcome = ariadne_validate::ApplyOutcome::Committed {
+            tiers_passed: vec![ariadne_validate::TierResult {
+                tier: ariadne_validate::ValidationTier::Structural,
+                status: ariadne_validate::ValidationStatus::Pass,
+            }],
+        };
+
+        let tx_dir = mgr.save_transaction_artifacts("PLAN-TX", &outcome).unwrap();
+        assert!(tx_dir.join("manifest.json").exists());
+        assert!(tx_dir.join("outcome.json").exists());
+        
+        let manifest_content = fs::read_to_string(tx_dir.join("manifest.json")).unwrap();
+        assert!(manifest_content.contains("PLAN-TX"));
+        assert!(manifest_content.contains("Committed"));
+    }
+
+    #[test]
+    fn test_save_and_load_measurement_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let measurement = ariadne_build::BuildMeasurement {
+            repo_root: root.to_path_buf(),
+            timestamp: 12345,
+            full_build_wall_time: std::time::Duration::from_millis(500),
+            total_frontend_cpu_time: std::time::Duration::from_millis(1500),
+            total_preprocessing_time: std::time::Duration::from_millis(200),
+            peak_memory_bytes: 1024,
+            tu_measurements: vec![],
+            collateral_load: Some(10),
+            affected_tus_count: Some(5),
+        };
+
+        let measure_dir = mgr.save_measurement_artifacts(&measurement).unwrap();
+        assert!(measure_dir.join("measurements.json").exists());
+        assert!(measure_dir.join("measurements.bin").exists());
+        assert!(measure_dir.join("manifest.json").exists());
+
+        let loaded = mgr.load_measurement_artifacts().unwrap();
+        assert_eq!(measurement.timestamp, loaded.timestamp);
+        assert_eq!(measurement.peak_memory_bytes, loaded.peak_memory_bytes);
+
+        // Test load_measurement_from_path with directory
+        let loaded_from_dir = ArtifactManager::load_measurement_from_path(&measure_dir).unwrap();
+        assert_eq!(measurement.timestamp, loaded_from_dir.timestamp);
+
+        // Test load_measurement_from_path with json file
+        let json_path = measure_dir.join("measurements.json");
+        let loaded_from_json = ArtifactManager::load_measurement_from_path(&json_path).unwrap();
+        assert_eq!(measurement.timestamp, loaded_from_json.timestamp);
+
+        // Test load_measurement_from_path with bin file
+        let bin_path = measure_dir.join("measurements.bin");
+        let loaded_from_bin = ArtifactManager::load_measurement_from_path(&bin_path).unwrap();
+        assert_eq!(measurement.timestamp, loaded_from_bin.timestamp);
+    }
+
+    #[test]
+    fn test_save_comparison_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let before = ariadne_build::BuildMeasurement {
+            repo_root: root.to_path_buf(),
+            timestamp: 12345,
+            full_build_wall_time: std::time::Duration::from_millis(500),
+            total_frontend_cpu_time: std::time::Duration::from_millis(1500),
+            total_preprocessing_time: std::time::Duration::from_millis(200),
+            peak_memory_bytes: 1024,
+            tu_measurements: vec![],
+            collateral_load: Some(10),
+            affected_tus_count: Some(5),
+        };
+
+        let after = ariadne_build::BuildMeasurement {
+            repo_root: root.to_path_buf(),
+            timestamp: 12346,
+            full_build_wall_time: std::time::Duration::from_millis(250),
+            total_frontend_cpu_time: std::time::Duration::from_millis(750),
+            total_preprocessing_time: std::time::Duration::from_millis(100),
+            peak_memory_bytes: 512,
+            tu_measurements: vec![],
+            collateral_load: Some(5),
+            affected_tus_count: Some(5),
+        };
+
+        let comparison = ariadne_build::MeasurementComparison::compare(before, after);
+        let measure_dir = mgr.save_comparison_artifacts(&comparison).unwrap();
+        assert!(measure_dir.join("comparison.json").exists());
+        assert!(measure_dir.join("report.txt").exists());
+        let report_content = fs::read_to_string(measure_dir.join("report.txt")).unwrap();
+        assert!(!report_content.is_empty());
     }
 }

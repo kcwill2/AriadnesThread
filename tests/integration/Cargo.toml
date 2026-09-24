@@ -15,5 +15,7 @@ ariadne-cli = { path = "../../crates/cli" }
 ariadne-report = { path = "../../crates/report" }
 ariadne-index = { path = "../../crates/index" }
 ariadne-cluster = { path = "../../crates/cluster" }
+ariadne-transform = { path = "../../crates/transform" }
+ariadne-validate = { path = "../../crates/validate" }
 sha2.workspace = true
 serde.workspace = true

@@ -68,9 +68,24 @@
   - [x] Unit 4: Implement `ArtifactManager::save_migration_artifacts` and `load_migration_artifacts` in `crates/report` (`artifacts/migration/preview.bin`, `preview.json`, `manifest.json`)
   - [x] Unit 5: Implement CLI command `tool migrate <repo> --plan <ID> --preview` in `crates/cli`
 
+- [x] **M10 — Validation & Transactions**
+  - [x] Unit 1: Define `ValidationTier`, `TierResult`, `ValidationStatus`, and `ApplyOutcome` types in `crates/validate/src/lib.rs`
+  - [x] Unit 2: Implement `FileSnapshot` — capture per-file content hashes before apply so rollback can restore the exact pre-apply state
+  - [x] Unit 3: Implement `TransactionApplier` — write generated headers and consumer rewrites to disk (actually modifying files)
+  - [x] Unit 4: Implement `TierValidator` — Tier 1 (structural: acyclic graph, no lost symbols), Tier 2 (generated headers self-containment check), Tier 3 (affected TU stub validation)
+  - [x] Unit 5: Implement `Rollback` — restore all snapshotted files, remove any newly created files, verify repository hash matches pre-apply state
+  - [x] Unit 6: Add `ArtifactManager::save_transaction_artifacts` in `crates/report` (`artifacts/transaction/`)
+  - [x] Unit 7: Implement CLI command `tool apply <repo> --plan <ID>` in `crates/cli` with full lifecycle output (Applying…, tier statuses, Committed. / Rolling back… / Repository restored.)
+  - [x] Unit 8: Integration test suite in `tests/integration/tests/m10_validation_test.rs` — success path, intentional-failure-then-rollback (repository hash identity), and multi-tier validation
+
+- [x] **M11 — Build Performance Measurement**
+  - [x] Unit 1: Define `TuMeasurement`, `BuildMeasurement`, and `MeasurementComparison` data types, metrics calculation, and formatting in `crates/build/src/measure.rs`
+  - [x] Unit 2: Implement `BuildMeasurer` engine with per-TU time/memory measurement, attribution, and structural load correlation
+  - [x] Unit 3: Implement measurement and comparison artifact persistence and loading in `crates/report` (`artifacts/measure/`)
+  - [x] Unit 4: Add `tool measure <repo>` and `tool compare <before> <after>` CLI commands in `crates/cli`
+  - [x] Unit 5: Controlled fixture with expensive headers and integration test suite (`tests/integration/tests/m11_measurement_test.rs`)
+
 ## Upcoming Milestones
-- [ ] **M10 — Validation & Transactions**
-- [ ] **M11 — Measurement**
 - [ ] **M12 — Incremental Analysis**
 - [ ] **M13 — Production-Scale Execution**
 - [ ] **M14 — End-to-End Optimization**

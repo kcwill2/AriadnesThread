@@ -1,0 +1,334 @@
+warning: unused import: `handle_explain_load`
+ --> tests\integration\tests\m6_load_analysis_test.rs:6:89
+  |
+6 | use ariadne_cli::{build_include_graph, get_or_build_reduced_model, handle_analyze_load, handle_explain_load, handle_index};
+  |                                                                                         ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `total_collateral_load` is never read
+  --> tests\integration\tests\m6_load_analysis_test.rs:14:9
+   |
+11 | struct LoadManifest {
+   |        ------------ field in this struct
+...
+14 |     pub total_collateral_load: usize,
+   |         ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `get_or_build_reduced_model`
+ --> tests\integration\tests\m5_reduced_model_test.rs:8:19
+  |
+8 | use ariadne_cli::{get_or_build_reduced_model, handle_query_symbol, handle_query_deps, handle_query_users, handle_index};
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `repo`
+  --> tests\integration\tests\m7_optimization_planning_test.rs:12:9
+   |
+12 |     let repo = ariadne_repo::Repository::locate(&repo_path)?;
+   |         ^^^^ help: if this is intentional, prefix it with an underscore: `_repo`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ariadne-integration-tests` (test "m6_load_analysis_test") generated 2 warnings (run `cargo fix --test "m6_load_analysis_test" -p ariadne-integration-tests` to apply 1 suggestion)
+warning: `ariadne-integration-tests` (test "m5_reduced_model_test") generated 1 warning (run `cargo fix --test "m5_reduced_model_test" -p ariadne-integration-tests` to apply 1 suggestion)
+warning: `ariadne-integration-tests` (test "m7_optimization_planning_test") generated 1 warning (run `cargo fix --test "m7_optimization_planning_test" -p ariadne-integration-tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src\lib.rs (target\debug\deps\ariadne_build-d1ad1031ff49b70e.exe)
+
+running 3 tests
+test types::tests::test_compilation_context_normalization ... ok
+test types::tests::test_build_discovery_result_determinism ... ok
+test discovery::tests::test_parse_compile_commands_debug_and_release ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_cli-bbe84f2fce7022b0.exe)
+
+running 7 tests
+test tests::test_cli_plan_show ... ok
+test tests::test_cli_plan ... ok
+test tests::test_cli_migrate_preview ... ok
+test tests::test_cli_explain_load ... ok
+test tests::test_cli_transform_extract ... ok
+test tests::test_cli_migrate_no_preview_flag ... ok
+test tests::test_cli_analyze_load ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\ariadne-fcadba673d359531.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\tool.rs (target\debug\deps\tool-c8ad5e66edcac9db.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_cluster-323db5792f16378c.exe)
+
+running 12 tests
+test checker::tests::test_rejection_cycle_creation_include ... ok
+test checker::tests::test_rejection_contract_violation ... ok
+test checker::tests::test_rejection_frozen_file ... ok
+test checker::tests::test_rejection_cycle_creation_scc ... ok
+test checker::tests::test_rejection_non_movable ... ok
+test checker::tests::test_valid_extraction ... ok
+test checker::tests::test_rejection_unresolved_dep ... ok
+test frontier::tests::test_frontier_analyzer ... ok
+test plan::tests::test_format_detail ... ok
+test planner::tests::test_planner_basic ... ok
+test scc::tests::test_acyclic_sccs ... ok
+test scc::tests::test_cyclic_sccs ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_graph-552437f75d286da9.exe)
+
+running 12 tests
+test graph::tests::test_cycle_detection ... ok
+test resolver::tests::test_parse_include_directives ... ok
+test graph::tests::test_include_graph_closure_and_explain ... ok
+test types::tests::test_include_edge_serialization ... ok
+test types::tests::test_include_closure_normalization ... ok
+test load::tests::test_explain_symbol_load ... ok
+test reduced::tests::test_query_helpers ... ok
+test reduced::tests::test_tu_usage_aggregation ... ok
+test reduced::tests::test_symbol_identity_resolution_and_aggregation ... ok
+test load::tests::test_analyze_symbol_load ... ok
+test reduced::tests::test_dependency_deduplication_and_precedence ... ok
+test reduced::tests::test_model_determinism ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_index-e6a6b61324477409.exe)
+
+running 6 tests
+test analyzer::tests::test_by_value_member_complete ... ok
+test analyzer::tests::test_function_declaration_return_incomplete ... ok
+test analyzer::tests::test_forward_declaration_incomplete ... ok
+test analyzer::tests::test_inheritance_complete ... ok
+test analyzer::tests::test_sizeof_complete ... ok
+test types::tests::test_types_and_index_result_aggregation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_integration_tests-7963e619b5b47bfd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\m0_skeleton_test.rs (target\debug\deps\m0_skeleton_test-2055eaf906af9b62.exe)
+
+running 1 test
+test test_m0_fixture_location_and_artifacts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\m1_discovery_test.rs (target\debug\deps\m1_discovery_test-d621f2f6472913a4.exe)
+
+running 2 tests
+test test_m1_discovery_determinism ... ok
+test test_m1_repository_discovery_on_basic_fixture ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\m2_build_discovery_test.rs (target\debug\deps\m2_build_discovery_test-39be3120ce7831f1.exe)
+
+running 2 tests
+test test_m2_cli_handle_build_discover ... ok
+test test_m2_build_discovery_determinism_and_contexts ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\m3_include_graph_test.rs (target\debug\deps\m3_include_graph_test-41d48c769e2b1911.exe)
+
+running 3 tests
+test test_m3_basic_fixture_include_graph ... ok
+test test_m3_cli_commands ... ok
+test test_m3_edge_cases_duplicates_system_missing_cycles ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\m4_semantic_indexing_test.rs (target\debug\deps\m4_semantic_indexing_test-d01772d358421d2f.exe)
+
+running 2 tests
+test test_m4_semantic_indexing ... ok
+test test_m4_semantic_critical_patterns ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\m5_reduced_model_test.rs (target\debug\deps\m5_reduced_model_test-874aa518dbe749c6.exe)
+
+running 2 tests
+test test_m5_reduced_model_aggregation_and_queries ... ok
+test test_m5_reduced_model_determinism ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\m6_load_analysis_test.rs (target\debug\deps\m6_load_analysis_test-3b1c58a4d00da25f.exe)
+
+running 4 tests
+test test_m6_explain_provenance ... ok
+test test_m6_load_artifacts ... ok
+test test_m6_symbol_load_and_collateral_quantification ... ok
+test test_m6_file_load_analysis ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\m7_optimization_planning_test.rs (target\debug\deps\m7_optimization_planning_test-1cd7be84d25c772f.exe)
+
+running 4 tests
+test test_m7_rejection_cases ... ok
+test test_m7_plan_show_formatting ... ok
+test test_m7_plan_generation_basic ... ok
+test test_m7_plan_artifacts_and_determinism ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_repo-6348a77bd7353484.exe)
+
+running 6 tests
+test policy::tests::test_generated_directory_detection ... ok
+test policy::tests::test_policy_precedence ... ok
+test policy::tests::test_ownership_classification ... ok
+test tests::test_stable_file_ids ... ok
+test tests::test_repository_locate ... ok
+test tests::test_path_canonicalization_and_discovery ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_report-446233409dbb50d4.exe)
+
+running 13 tests
+test tests::test_artifact_manager_creation ... ok
+test tests::test_load_migration_artifacts_roundtrip ... ok
+test tests::test_save_build_context_artifacts ... ok
+test tests::test_save_and_load_plan_artifacts ... ok
+test tests::test_save_migration_artifacts ... ok
+test tests::test_migration_manifest_content ... ok
+test tests::test_save_extraction_artifacts ... ok
+test tests::test_save_include_artifacts ... ok
+test tests::test_save_index_artifacts ... ok
+test tests::test_save_and_load_load_artifacts ... ok
+test tests::test_save_reduced_artifacts ... ok
+test tests::test_save_repository_artifacts ... ok
+test tests::test_load_reduced_artifacts ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_scheduler-9906a7a22a02e0f8.exe)
+
+running 1 test
+test tests::test_scheduler_init ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_transform-405c670fc757be3a.exe)
+
+running 16 tests
+test tests::test_consumer_rewrite_format_diff ... ok
+test tests::test_migration_preview_format_diff ... ok
+test tests::test_consumer_rewrite_is_noop ... ok
+test tests::test_include_rewriter_predecessor_includes ... ok
+test tests::test_extract_basic ... ok
+test tests::test_acyclic_includes ... ok
+test tests::test_include_rewriter_build_preview ... ok
+test tests::test_include_rewriter_side_effect_guard_no_symbols ... ok
+test tests::test_include_rewriter_single_symbol_to_single_header ... ok
+test tests::test_migration_preview_empty ... ok
+test tests::test_generated_header_fields ... ok
+test tests::test_migration_preview_side_effect_preservation ... ok
+test tests::test_no_symbol_lost_invariant ... ok
+test tests::test_transform_engine_init ... ok
+test tests::test_include_rewriter_multiple_symbols_to_multiple_headers ... ok
+test tests::test_write_to_disk ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\ariadne_validate-eaf852f30e6fb280.exe)
+
+running 1 test
+test tests::test_validation_harness_init ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\clang_worker-3b50ae884708ac34.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_build
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_cli
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_cluster
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_graph
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_index
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_integration_tests
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_repo
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_report
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_scheduler
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_transform
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ariadne_validate
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

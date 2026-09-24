@@ -82,6 +82,7 @@ dependencies = [
  "ariadne-repo",
  "ariadne-report",
  "ariadne-transform",
+ "ariadne-validate",
  "bincode",
  "clap",
  "tracing",
@@ -136,6 +137,8 @@ dependencies = [
  "ariadne-index",
  "ariadne-repo",
  "ariadne-report",
+ "ariadne-transform",
+ "ariadne-validate",
  "serde",
  "serde_json",
  "sha2",
@@ -164,6 +167,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-repo",
  "ariadne-transform",
+ "ariadne-validate",
  "bincode",
  "serde",
  "serde_json",
@@ -198,7 +202,13 @@ name = "ariadne-validate"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-cluster",
+ "ariadne-transform",
+ "bincode",
  "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

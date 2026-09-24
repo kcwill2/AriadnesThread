@@ -15,6 +15,7 @@ ariadne-graph = { path = "../graph" }
 ariadne-index = { path = "../index" }
 ariadne-cluster = { path = "../cluster" }
 ariadne-transform = { path = "../transform" }
+ariadne-validate = { path = "../validate" }
 
 [dev-dependencies]
 tempfile.workspace = true

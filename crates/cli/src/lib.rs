@@ -186,6 +186,26 @@ pub enum Commands {
         #[arg(long, default_value_t = false)]
         preview: bool,
     },
+    /// Apply an optimization plan transactionally
+    Apply {
+        /// Path to repository root
+        repo: PathBuf,
+        /// Plan ID to apply
+        #[arg(long)]
+        plan: String,
+    },
+    /// Measure build performance of a repository
+    Measure {
+        /// Path to repository root
+        repo: PathBuf,
+    },
+    /// Compare two build performance measurements
+    Compare {
+        /// Before measurement path
+        before: PathBuf,
+        /// After measurement path
+        after: PathBuf,
+    },
 }
 
 pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
@@ -856,6 +876,160 @@ pub fn handle_migrate(repo_path: &PathBuf, plan_id: &str, preview: bool) -> Resu
     Ok(())
 }
 
+pub fn handle_apply(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
+    let repository = Repository::locate(repo_path)?;
+    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+
+    let plans = artifacts.load_plan_artifacts()
+        .or_else(|_| handle_plan(repo_path).map(|_| vec![]))
+        .unwrap_or_default();
+    let plans = if plans.is_empty() {
+        artifacts.load_plan_artifacts()?
+    } else {
+        plans
+    };
+    let plan = plans.iter().find(|p| p.id.0 == plan_id)
+        .ok_or_else(|| anyhow::anyhow!("Plan {} not found", plan_id))?;
+
+    let model = artifacts.load_reduced_artifacts()?;
+    
+    let extractor = ariadne_transform::HeaderExtractor::new(&model);
+    let extraction = extractor.extract(plan);
+
+    let mut symbol_name_to_header = std::collections::BTreeMap::new();
+    let mut header_map = std::collections::BTreeMap::new();
+    
+    for ext in &plan.proposed_extractions {
+        symbol_name_to_header.insert(ext.symbol_name.clone(), ext.target_header.clone());
+        header_map.entry(ext.target_header.clone()).or_insert_with(|| ariadne_transform::GeneratedHeader {
+            filename: ext.target_header.clone(),
+            pragma_once: true,
+            symbols: vec![],
+            required_includes: vec![],
+        });
+    }
+    
+    let generated_headers: Vec<_> = header_map.into_values().collect();
+
+    let repo_discovery = repository.discover()?;
+    let build_discoverer = BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
+    let build_result = build_discoverer.discover()?;
+
+    let target_include = plan.target_file.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    
+    let all_symbol_names: Vec<String> = plan.proposed_extractions.iter()
+        .map(|e| e.symbol_name.clone())
+        .collect();
+
+    let mut consumers = Vec::new();
+    for tu in &build_result.translation_units {
+        let abs_path = repository.root.join(&tu.source_path);
+        if let Ok(content) = fs::read_to_string(&abs_path) {
+            if content.contains(&format!("#include \"{}\"", target_include))
+                || content.contains(&format!("#include <{}>", target_include))
+            {
+                consumers.push((
+                    tu.source_path.clone(),
+                    vec![plan.target_file.clone()],
+                    all_symbol_names.clone(),
+                ));
+            }
+        }
+    }
+
+    let rewriter = ariadne_transform::IncludeRewriter::new(symbol_name_to_header, generated_headers);
+    let migration = rewriter.build_preview(plan_id.to_string(), &consumers);
+
+    println!("Applying {}...\n", plan_id);
+    
+    let (snapshot, new_paths) = ariadne_validate::TransactionApplier::apply(&repository.root, &extraction, &migration)?;
+
+    let mut tiers_passed = Vec::new();
+    
+    let t1 = ariadne_validate::TierValidator::validate_structural(&extraction);
+    if t1.status == ariadne_validate::ValidationStatus::Pass {
+        tiers_passed.push(t1);
+    } else {
+        let outcome = ariadne_validate::ApplyOutcome::RolledBack { failed_tier: t1, tiers_passed };
+        println!("{}", outcome.format_output());
+        ariadne_validate::TransactionApplier::rollback(&snapshot, &new_paths)?;
+        artifacts.save_transaction_artifacts(plan_id, &outcome)?;
+        return Ok(());
+    }
+
+    let header_output_dir = repository.root.join("generated");
+    let t2 = ariadne_validate::TierValidator::validate_generated_headers(&extraction, &header_output_dir);
+    if t2.status == ariadne_validate::ValidationStatus::Pass {
+        tiers_passed.push(t2);
+    } else {
+        let outcome = ariadne_validate::ApplyOutcome::RolledBack { failed_tier: t2, tiers_passed };
+        println!("{}", outcome.format_output());
+        ariadne_validate::TransactionApplier::rollback(&snapshot, &new_paths)?;
+        artifacts.save_transaction_artifacts(plan_id, &outcome)?;
+        return Ok(());
+    }
+
+    let t3 = ariadne_validate::TierValidator::validate_affected_tus(&migration, &header_output_dir);
+    if t3.status == ariadne_validate::ValidationStatus::Pass {
+        tiers_passed.push(t3);
+    } else {
+        let outcome = ariadne_validate::ApplyOutcome::RolledBack { failed_tier: t3, tiers_passed };
+        println!("{}", outcome.format_output());
+        ariadne_validate::TransactionApplier::rollback(&snapshot, &new_paths)?;
+        artifacts.save_transaction_artifacts(plan_id, &outcome)?;
+        return Ok(());
+    }
+
+    let outcome = ariadne_validate::ApplyOutcome::Committed { tiers_passed };
+    println!("{}", outcome.format_output());
+    artifacts.save_transaction_artifacts(plan_id, &outcome)?;
+
+    Ok(())
+}
+
+pub fn handle_measure(repo_path: &PathBuf) -> Result<ariadne_build::BuildMeasurement> {
+    let repository = Repository::locate(repo_path)?;
+    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+
+    let repo_discovery = repository.discover().ok();
+    let mut build_discoverer = BuildDiscoverer::new(&repository.root);
+    if let Some(ref disc) = repo_discovery {
+        build_discoverer = build_discoverer.with_repo_discovery(disc);
+    }
+    let build_result = build_discoverer.discover()?;
+
+    let load_report = artifacts.load_load_artifacts().ok();
+    let collateral_load = load_report.map(|lr| {
+        lr.symbol_metrics.iter().map(|m| m.collateral_load).sum::<usize>()
+    });
+
+    let measurer = ariadne_build::BuildMeasurer::new(repository.root.clone())
+        .with_structural_metrics(collateral_load, Some(build_result.translation_units.len()));
+
+    println!("Measuring {} translation units...", build_result.translation_units.len());
+    let measurement = measurer.measure_all(&build_result.translation_units)?;
+
+    artifacts.save_measurement_artifacts(&measurement)?;
+
+    println!("Measured front-end CPU: {:.1}s", measurement.total_frontend_cpu_time.as_secs_f64());
+    println!("Measured wall time: {:.1}s", measurement.full_build_wall_time.as_secs_f64());
+    println!("Peak memory: {} bytes", measurement.peak_memory_bytes);
+
+    Ok(measurement)
+}
+
+pub fn handle_compare(before_path: &PathBuf, after_path: &PathBuf) -> Result<ariadne_build::MeasurementComparison> {
+    let before = ArtifactManager::load_measurement_from_path(before_path)?;
+    let after = ArtifactManager::load_measurement_from_path(after_path)?;
+
+    let comparison = ariadne_build::MeasurementComparison::compare(before, after);
+    println!("{}", comparison.format_report());
+
+    Ok(comparison)
+}
+
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -934,6 +1108,15 @@ pub fn run() -> Result<()> {
         },
         Some(Commands::Migrate { repo, plan, preview }) => {
             handle_migrate(&repo, &plan, preview)?;
+        },
+        Some(Commands::Apply { repo, plan }) => {
+            handle_apply(&repo, &plan)?;
+        },
+        Some(Commands::Measure { repo }) => {
+            handle_measure(&repo)?;
+        },
+        Some(Commands::Compare { before, after }) => {
+            handle_compare(&before, &after)?;
         },
     }
 
@@ -1040,5 +1223,75 @@ mod tests {
             }
             _ => panic!("Expected Migrate command"),
         }
+    }
+
+    #[test]
+    fn test_cli_apply() {
+        let args = vec!["tool", "apply", "my_repo", "--plan", "PLAN-001"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Apply { repo, plan } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+                assert_eq!(plan, "PLAN-001");
+            }
+            _ => panic!("Expected Apply command"),
+        }
+    }
+    #[test]
+    fn test_cli_measure() {
+        let args = vec!["tool", "measure", "my_repo"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Measure { repo } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+            }
+            _ => panic!("Expected Measure command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_compare() {
+        let args = vec!["tool", "compare", "before_dir", "after_dir"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Compare { before, after } => {
+                assert_eq!(before.to_str().unwrap(), "before_dir");
+                assert_eq!(after.to_str().unwrap(), "after_dir");
+            }
+            _ => panic!("Expected Compare command"),
+        }
+    }
+
+    #[test]
+    fn test_handle_measure() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+        let temp = std::env::temp_dir().join(format!("ariadne_test_meas_{}", unique));
+        let repo_dir = temp.join("repo");
+        fs::create_dir_all(repo_dir.join("src")).unwrap();
+        fs::write(repo_dir.join("ariadne.toml"), "").unwrap();
+        
+        let result = handle_measure(&repo_dir);
+        assert!(result.is_ok());
+        
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_handle_compare() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+        let temp = std::env::temp_dir().join(format!("ariadne_test_comp_{}", unique));
+        
+        let before_dir = temp.join("before");
+        fs::create_dir_all(&before_dir).unwrap();
+        
+        let after_dir = temp.join("after");
+        fs::create_dir_all(&after_dir).unwrap();
+        
+        let result = handle_compare(&before_dir, &after_dir);
+        // This will fail because there are no valid measurement artifacts, 
+        // but for now the command doesn't even exist.
+        assert!(result.is_err());
+        
+        let _ = fs::remove_dir_all(temp);
     }
 }
