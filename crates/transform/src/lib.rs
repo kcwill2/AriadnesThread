@@ -38,7 +38,7 @@ pub struct ExtractionResult {
 }
 
 /// Represents one consumer file's include migration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConsumerRewrite {
     /// The consumer source/header file being rewritten.
     pub consumer_file: std::path::PathBuf,
@@ -74,7 +74,7 @@ impl ConsumerRewrite {
 }
 
 /// A preview of include migrations for all consumers affected by a plan.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MigrationPreview {
     pub plan_id: String,
     pub rewrites: Vec<ConsumerRewrite>,

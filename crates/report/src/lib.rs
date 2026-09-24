@@ -78,6 +78,13 @@ pub struct ExtractionManifest {
     pub error_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrationManifest {
+    pub plan_id: String,
+    pub total_rewrites: usize,
+    pub effective_rewrites: usize,
+}
+
 pub struct ArtifactManager {
     pub artifact_root: PathBuf,
 }
@@ -465,6 +472,54 @@ impl ArtifactManager {
 
         Ok(output_dir.to_path_buf())
     }
+
+    /// Saves preview.bin, preview.json, and manifest.json into artifacts/migration/
+    pub fn save_migration_artifacts(
+        &self,
+        preview: &ariadne_transform::MigrationPreview,
+    ) -> Result<PathBuf> {
+        let migration_dir = self.artifact_root.join("migration");
+        fs::create_dir_all(&migration_dir)
+            .with_context(|| format!("Failed to create migration artifact directory at {:?}", migration_dir))?;
+
+        // 1. preview.bin
+        let bin_path = migration_dir.join("preview.bin");
+        let bin_content = bincode::serialize(preview)
+            .context("Failed to serialize migration preview to binary")?;
+        fs::write(&bin_path, &bin_content)
+            .with_context(|| format!("Failed to write preview.bin at {:?}", bin_path))?;
+
+        // 2. preview.json
+        let json_path = migration_dir.join("preview.json");
+        let json_content = serde_json::to_string_pretty(preview)
+            .context("Failed to serialize migration preview to JSON")?;
+        fs::write(&json_path, json_content)
+            .with_context(|| format!("Failed to write preview.json at {:?}", json_path))?;
+
+        // 3. manifest.json
+        let manifest = MigrationManifest {
+            plan_id: preview.plan_id.clone(),
+            total_rewrites: preview.rewrites.len(),
+            effective_rewrites: preview.effective_rewrites(),
+        };
+        let manifest_path = migration_dir.join("manifest.json");
+        let manifest_content = serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize migration manifest")?;
+        fs::write(&manifest_path, manifest_content)
+            .with_context(|| format!("Failed to write manifest.json at {:?}", manifest_path))?;
+
+        Ok(migration_dir)
+    }
+
+    /// Loads migration preview from artifacts/migration/preview.bin
+    pub fn load_migration_artifacts(&self) -> Result<ariadne_transform::MigrationPreview> {
+        let bin_path = self.artifact_root.join("migration").join("preview.bin");
+        let bin_content = fs::read(&bin_path)
+            .with_context(|| format!("Failed to read preview.bin at {:?}", bin_path))?;
+        let preview: ariadne_transform::MigrationPreview = bincode::deserialize(&bin_content)
+            .context("Failed to deserialize migration preview")?;
+        Ok(preview)
+    }
 }
 
 
@@ -710,5 +765,108 @@ mod tests {
 
         assert!(output_dir.join("manifest.json").exists());
         assert!(output_dir.join("headers").join("h1.h").exists());
+    }
+
+    #[test]
+    fn test_save_migration_artifacts() {
+        use ariadne_transform::{ConsumerRewrite, MigrationPreview};
+        use std::path::PathBuf;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let preview = MigrationPreview {
+            plan_id: "PLAN-001".to_string(),
+            rewrites: vec![
+                ConsumerRewrite {
+                    consumer_file: PathBuf::from("src/foo.cpp"),
+                    old_includes: vec![PathBuf::from("thing.h")],
+                    new_includes: vec![PathBuf::from("thing_types.h")],
+                    side_effect_preservations: vec![],
+                },
+            ],
+        };
+
+        let migration_dir = mgr.save_migration_artifacts(&preview).unwrap();
+        assert!(migration_dir.join("preview.bin").exists());
+        assert!(migration_dir.join("preview.json").exists());
+        assert!(migration_dir.join("manifest.json").exists());
+    }
+
+    #[test]
+    fn test_load_migration_artifacts_roundtrip() {
+        use ariadne_transform::{ConsumerRewrite, MigrationPreview};
+        use std::path::PathBuf;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let preview = MigrationPreview {
+            plan_id: "PLAN-042".to_string(),
+            rewrites: vec![
+                ConsumerRewrite {
+                    consumer_file: PathBuf::from("src/bar.cpp"),
+                    old_includes: vec![PathBuf::from("thing.h")],
+                    new_includes: vec![PathBuf::from("thing_core.h"), PathBuf::from("thing_types.h")],
+                    side_effect_preservations: vec![],
+                },
+                ConsumerRewrite {
+                    consumer_file: PathBuf::from("src/init.cpp"),
+                    old_includes: vec![PathBuf::from("thing.h"), PathBuf::from("registry.h")],
+                    new_includes: vec![PathBuf::from("thing_types.h")],
+                    side_effect_preservations: vec![PathBuf::from("registry.h")],
+                },
+            ],
+        };
+
+        mgr.save_migration_artifacts(&preview).unwrap();
+        let loaded = mgr.load_migration_artifacts().unwrap();
+
+        assert_eq!(loaded.plan_id, "PLAN-042");
+        assert_eq!(loaded.rewrites.len(), 2);
+        assert_eq!(loaded.rewrites[0].consumer_file, PathBuf::from("src/bar.cpp"));
+        assert_eq!(loaded.rewrites[1].side_effect_preservations, vec![PathBuf::from("registry.h")]);
+    }
+
+    #[test]
+    fn test_migration_manifest_content() {
+        use ariadne_transform::{ConsumerRewrite, MigrationPreview};
+        use std::path::PathBuf;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let preview = MigrationPreview {
+            plan_id: "PLAN-007".to_string(),
+            rewrites: vec![
+                ConsumerRewrite {
+                    consumer_file: PathBuf::from("src/a.cpp"),
+                    old_includes: vec![PathBuf::from("thing.h")],
+                    new_includes: vec![PathBuf::from("thing_types.h")],
+                    side_effect_preservations: vec![],
+                },
+                ConsumerRewrite {
+                    // noop rewrite
+                    consumer_file: PathBuf::from("src/b.cpp"),
+                    old_includes: vec![PathBuf::from("thing.h")],
+                    new_includes: vec![PathBuf::from("thing.h")],
+                    side_effect_preservations: vec![],
+                },
+            ],
+        };
+
+        let migration_dir = mgr.save_migration_artifacts(&preview).unwrap();
+        let manifest_content = std::fs::read_to_string(migration_dir.join("manifest.json")).unwrap();
+        let manifest: MigrationManifest = serde_json::from_str(&manifest_content).unwrap();
+
+        assert_eq!(manifest.plan_id, "PLAN-007");
+        assert_eq!(manifest.total_rewrites, 2);
+        assert_eq!(manifest.effective_rewrites, 1); // only a.cpp changes
     }
 }
