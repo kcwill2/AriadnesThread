@@ -54,9 +54,21 @@
   - [x] Unit 5: Implement CLI commands `tool plan <repo>` and `tool plan show <repo> --id <ID>` in `crates/cli`
   - [x] Unit 6: Integration test suite for optimization planning, golden plan fixtures, determinism, and rejection cases (`tests/integration/tests/m7_optimization_planning_test.rs`)
 
+- [x] **M8 — Header Extraction**
+  - [x] Unit 1: Define `ExtractedSymbol`, `GeneratedHeader`, and `ExtractionResult` data types (`crates/transform/src/lib.rs`)
+  - [x] Unit 2: Implement `HeaderExtractor` engine — groups proposed extractions by target header, resolves symbol kinds from the reduced model, and detects include cycles (`crates/transform/src/lib.rs`)
+  - [x] Unit 3: Implement `ExtractionResult::write_to_disk` — writes `#pragma once`, predecessor `#include`s, and symbol bodies to generated header files
+  - [x] Unit 4: Implement `ArtifactManager::save_extraction_artifacts` in `crates/report` (`artifacts/generated/`)
+  - [x] Unit 5: Implement CLI command `tool transform extract <repo> --plan <ID>` in `crates/cli`
+
+- [x] **M9 — Consumer Rewriting**
+  - [x] Unit 1: Define `ConsumerRewrite` and `MigrationPreview` data types with diff formatting and noop/effective-rewrite counting (`crates/transform/src/lib.rs`)
+  - [x] Unit 2: Implement `IncludeRewriter::compute_rewrite` — maps referenced symbol names to generated headers and adds required predecessor includes (`crates/transform/src/lib.rs`)
+  - [x] Unit 3: Side-effect guard — includes with zero referenced symbols are placed in `side_effect_preservations` and never silently removed (`crates/transform/src/lib.rs`)
+  - [x] Unit 4: Implement `ArtifactManager::save_migration_artifacts` and `load_migration_artifacts` in `crates/report` (`artifacts/migration/preview.bin`, `preview.json`, `manifest.json`)
+  - [x] Unit 5: Implement CLI command `tool migrate <repo> --plan <ID> --preview` in `crates/cli`
+
 ## Upcoming Milestones
-- [ ] **M8 — Header Extraction**
-- [ ] **M9 — Consumer Rewriting**
 - [ ] **M10 — Validation & Transactions**
 - [ ] **M11 — Measurement**
 - [ ] **M12 — Incremental Analysis**
