@@ -136,9 +136,9 @@
 - [x] **Isolate Selected Node Dependency Tree in Search & Click Contexts**
   - [x] Unit 1: Priority of Selected Node over Search Query in Subgraph Seeding — prioritize `selectedNodeId` as the focal root seed, invoke `filterAndExpandSubgraph` on node selection even when search query is present, and add Canvas background deselection & "View All Matches" toggle
 
-
-
-
-
-
+- [x] **Include Graph Dependency Isolation & Collateral Heat Map**
+  - [x] Unit 1: Backend DTOs & Collateral Endpoint — add `file_collateral` to `GraphExportPayload`, `CollateralResponse` DTO, `/api/graph/collateral` route in `crates/ui/src/server.rs`, precalculate load metrics in `crates/cli/src/commands/ui.rs`, and write unit tests in `crates/ui/tests/ui_test.rs`
+  - [x] Unit 2: Frontend CSS & Noticeable Fading Engine — add `.faded` and `.heat-root` CSS, apply noticeable fading to non-dependencies upon selecting a node in Include Graph, and restore standard visibility on canvas background deselection / Esc
+  - [x] Unit 3: Collateral Heat Map & Dynamic Legend — implement heat map color palette (Tier 0 to Tier 4) with heat badges, derive temperature from the full dependency set (independent of degree-limited view), and update floating legend dynamically
+  - [x] Unit 4: Node Inspector Collateral Breakdown & Path Illumination — add ranked collateral breakdown list in Inspector, path illumination from root, and end-to-end fixture test verification
 

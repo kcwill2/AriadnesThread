@@ -1,6 +1,6 @@
 use crate::dto::{
     CytoscapeElement, EntrypointsResponse, GraphExportPayload, PathQuery, SearchQuery,
-    SearchResultItem, TraverseQuery,
+    SearchResultItem, TraverseQuery, CollateralResponse,
 };
 use ariadne_graph::traversal::TraversalDirection;
 use ariadne_index::SymbolId;
@@ -34,6 +34,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/graph/path", get(api_graph_path))
         .route("/api/graph/entrypoints", get(api_graph_entrypoints))
         .route("/api/graph/search", get(api_graph_search))
+        .route("/api/graph/collateral", get(api_graph_collateral))
         .route("/api/source", get(api_source))
         .route("/api/export", get(api_export))
         .layer(CorsLayer::permissive())
@@ -327,4 +328,51 @@ async fn api_graph_search(
 
     results.truncate(limit);
     Json(results)
+}
+
+#[derive(Deserialize)]
+pub struct CollateralQuery {
+    pub file: String,
+}
+
+pub async fn api_graph_collateral(
+    State(state): State<Arc<UiState>>,
+    Query(query): Query<CollateralQuery>,
+) -> Json<CollateralResponse> {
+    let mut direct_collateral = std::collections::HashMap::new();
+    let mut transitive_collateral = std::collections::HashMap::new();
+    let mut total_collateral = 0;
+
+    if let Ok(file_id_num) = query.file.parse::<u64>() {
+        let file_id = ariadne_repo::FileId(file_id_num);
+
+        let analyzer = ariadne_graph::LoadAnalyzer::new(&state.include_graph, &state.reduced_model);
+        if let Some(path) = state.include_graph.file_paths.get(&file_id) {
+            if let Ok(metric) = analyzer.analyze_file_load(path) {
+                total_collateral = metric.collateral_load;
+                
+                let direct_includes = state.include_graph.direct_includes(file_id);
+                let mut direct_set = std::collections::HashSet::new();
+                for d in direct_includes {
+                    direct_set.insert(d);
+                }
+
+                for source in metric.collateral_sources {
+                    let src_str = source.file_id.0.to_string();
+                    if direct_set.contains(&source.file_id) {
+                        direct_collateral.insert(src_str, source.symbol_count);
+                    } else {
+                        transitive_collateral.insert(src_str, source.symbol_count);
+                    }
+                }
+            }
+        }
+    }
+
+    Json(CollateralResponse {
+        target_id: query.file.clone(),
+        total_collateral,
+        direct_collateral,
+        transitive_collateral,
+    })
 }

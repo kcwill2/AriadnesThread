@@ -381,6 +381,16 @@
       filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.65));
     }
 
+    .node-group.heat-critical rect {
+      filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
+    }
+
+    .heat-badge {
+      font-size: 9px;
+      font-family: monospace;
+      font-weight: 700;
+    }
+
     .edge-path {
       fill: none;
       stroke: #475569;
@@ -1003,6 +1013,14 @@
           <p id="inspInsightText">Select an element to analyze coupling, collateral load, or include cycles.</p>
         </div>
 
+        <div id="inspCollateralSection" style="display:none;">
+          <div class="link-list-title">
+            <span style="color:var(--amber);">Collateral Breakdown</span>
+            <span id="inspCollateralCount" style="font-family:monospace;">0 symbols</span>
+          </div>
+          <div class="link-list" id="inspCollateralList" style="max-height:160px;overflow-y:auto;"></div>
+        </div>
+
         <div>
           <div class="link-list-title">
             <span id="inspUpstreamTitle">Incoming (Includers / Callers)</span>
@@ -1115,6 +1133,51 @@
         default:
           return { bg: '#1e293b', border: '#475569', text: '#94a3b8' };
       }
+    }
+
+    // 5-tier thermal palette. t = collateral / maxCollateral (0..1).
+    // Temperature must be derived from graphData.file_collateral (full dataset),
+    // not from the degree-limited canvas.
+    function getHeatColor(collateral, maxCollateral) {
+      const t = maxCollateral > 0 ? collateral / maxCollateral : 0;
+      if (t <= 0.15) return { bg: '#06283d', border: '#38bdf8', text: '#7dd3fc', tier: 0 }; // Cool Ice
+      if (t <= 0.35) return { bg: '#063721', border: '#22c55e', text: '#86efac', tier: 1 }; // Emerald
+      if (t <= 0.60) return { bg: '#382a04', border: '#eab308', text: '#fde047', tier: 2 }; // Amber
+      if (t <= 0.85) return { bg: '#431407', border: '#f97316', text: '#fdba74', tier: 3 }; // Hot Orange
+      return { bg: '#450a0a', border: '#ef4444', text: '#fca5a5', tier: 4 };                // Blazing Crimson
+    }
+
+    const HEAT_LEGEND = [
+      { color: '#38bdf8', label: 'Cool — Low Collateral' },
+      { color: '#22c55e', label: 'Mild Collateral' },
+      { color: '#eab308', label: 'Moderate Collateral' },
+      { color: '#f97316', label: 'High Collateral' },
+      { color: '#ef4444', label: 'Critical Collateral' },
+    ];
+
+    function updateHeatLegend(targetLabel, depCount, totalCollateral) {
+      document.getElementById('legendViewLabel').textContent = 'Heat Map';
+      const legendList = document.getElementById('legendItems');
+      const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
+        + `${depCount} dep(s) · ${totalCollateral} symbols</div>`;
+      legendList.innerHTML = summary + HEAT_LEGEND.map(item => `
+        <div class="legend-row">
+          <div class="legend-color" style="background:${item.color};"></div>
+          <span>${item.label}</span>
+        </div>
+      `).join('');
+    }
+
+    function restoreStandardLegend() {
+      document.getElementById('legendViewLabel').textContent =
+        currentTab === 'include' ? 'Include Graph' : (currentTab === 'symbol' ? 'Symbol Dependency' : 'Call Graph');
+      const legendList = document.getElementById('legendItems');
+      legendList.innerHTML = (legends[currentTab] || []).map(item => `
+        <div class="legend-row">
+          <div class="legend-color" style="background:${item.color};"></div>
+          <span>${item.label}</span>
+        </div>
+      `).join('');
     }
 
     // Initialize application
@@ -1395,6 +1458,7 @@
         edgeEl.setAttribute('marker-end', markerUrl);
         edgeEl.dataset.edgeId = e.id;
         edgeEl.dataset.edgeSource = e.source;
+        edgeEl.dataset.edgeTarget = e.target;
         edgesLayer.appendChild(edgeEl);
       };
 
@@ -1450,23 +1514,59 @@
         nodesLayer.appendChild(g);
       });
 
-      // Apply include-graph fading and heat-root after all nodes are rendered
+      // Apply include-graph fading, heat colors, and legend when a node is selected
       if (currentTab === 'include' && selectedNodeId) {
         const reachableDependencies = computeFullDependencies(selectedNodeId);
+        const collateralMap = (graphData.file_collateral || {})[selectedNodeId] || {};
+        const depCollaterals = [...reachableDependencies].map(id => collateralMap[id] || 0);
+        const maxCollateral = depCollaterals.length > 0 ? Math.max(...depCollaterals) : 0;
+        let totalCollateral = depCollaterals.reduce((s, c) => s + c, 0);
+
         nodesLayer.querySelectorAll('.node-group').forEach(el => {
           const nid = el.dataset.nodeId;
           if (nid === selectedNodeId) {
             el.classList.add('heat-root');
-          } else if (!reachableDependencies.has(nid)) {
+            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            badge.setAttribute('class', 'heat-badge');
+            badge.setAttribute('x', '32');
+            badge.setAttribute('y', '36');
+            badge.setAttribute('fill', 'var(--cyan)');
+            badge.textContent = '[ROOT]';
+            el.appendChild(badge);
+          } else if (reachableDependencies.has(nid)) {
+            const c = collateralMap[nid] || 0;
+            const hc = getHeatColor(c, maxCollateral);
+            const rect = el.querySelector('rect');
+            if (rect) {
+              rect.setAttribute('fill', hc.bg);
+              rect.setAttribute('stroke', hc.border);
+            }
+            const txt = el.querySelector('text');
+            if (txt) txt.setAttribute('fill', hc.text);
+            if (hc.tier === 4) el.classList.add('heat-critical');
+            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            badge.setAttribute('class', 'heat-badge');
+            badge.setAttribute('x', '32');
+            badge.setAttribute('y', '36');
+            badge.setAttribute('fill', hc.border);
+            badge.textContent = `+${c} col`;
+            el.appendChild(badge);
+          } else {
             el.classList.add('faded');
           }
         });
+
         edgesLayer.querySelectorAll('.edge-path').forEach(el => {
           const src = el.dataset.edgeSource;
           if (!reachableDependencies.has(src) && src !== selectedNodeId) {
             el.classList.add('faded');
           }
         });
+
+        const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+        updateHeatLegend(rootNode ? rootNode.label : selectedNodeId, reachableDependencies.size, totalCollateral);
+      } else {
+        restoreStandardLegend();
       }
     }
 
@@ -1552,12 +1652,107 @@
         `;
       }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Leaf)</div>';
 
+      // Populate Collateral Breakdown
+      const collateralSection = document.getElementById('inspCollateralSection');
+      const collateralList = document.getElementById('inspCollateralList');
+      if (currentTab === 'include') {
+        const reachableDeps = computeFullDependencies(id);
+        const collateralMap = (graphData.file_collateral || {})[id] || {};
+        const entries = [...reachableDeps].map(depId => {
+          const depNode = tabAllNodes.find(n => n.id === depId);
+          const col = collateralMap[depId] || 0;
+          return { id: depId, label: depNode ? depNode.label : depId, col };
+        }).sort((a, b) => b.col - a.col);
+
+        const totalCol = entries.reduce((acc, e) => acc + e.col, 0);
+        const maxCol = entries.length > 0 ? entries[0].col : 0;
+
+        if (entries.length > 0 && collateralSection) {
+          collateralSection.style.display = 'block';
+          document.getElementById('inspCollateralCount').textContent = `${totalCol} symbols`;
+          collateralList.innerHTML = entries.map(entry => {
+            const hc = getHeatColor(entry.col, maxCol);
+            return `
+              <div class="link-item" onclick="illuminatePath('${id}', '${entry.id}')" title="Click to illuminate path from ${node.label} to ${entry.label}">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="width:8px;height:8px;border-radius:2px;background:${hc.border};display:inline-block;"></span>
+                  <span>${entry.label}</span>
+                </div>
+                <span style="font-family:monospace;font-weight:700;color:${hc.text};">+${entry.col}</span>
+              </div>
+            `;
+          }).join('');
+
+          const top = entries[0];
+          if (top && top.col > 0) {
+            insightText.textContent = `Total Collateral: ${totalCol} symbols. Top contributor: ${top.label} (+${top.col} symbols).`;
+          }
+        } else if (collateralSection) {
+          collateralSection.style.display = 'none';
+        }
+      } else if (collateralSection) {
+        collateralSection.style.display = 'none';
+      }
+
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('selected'));
       renderSvg();
 
       if (!skipFilter) {
         filterAndExpandSubgraph();
       }
+    }
+
+    function findIncludePath(fromId, toId) {
+      if (fromId === toId) return [fromId];
+      const queue = [[fromId]];
+      const visited = new Set([fromId]);
+      while (queue.length > 0) {
+        const path = queue.shift();
+        const curr = path[path.length - 1];
+        if (curr === toId) return path;
+        tabAllEdges.forEach(e => {
+          if (e.source === curr && !visited.has(e.target)) {
+            visited.add(e.target);
+            queue.push([...path, e.target]);
+          }
+        });
+      }
+      return null;
+    }
+
+    function illuminatePath(fromId, toId) {
+      const path = findIncludePath(fromId, toId);
+      if (!path) return;
+      const pathNodes = new Set(path);
+      const pathEdgeKeys = new Set();
+      for (let i = 0; i < path.length - 1; i++) {
+        pathEdgeKeys.add(`${path[i]}->${path[i + 1]}`);
+      }
+
+      const nodesLayer = document.getElementById('nodesLayer');
+      const edgesLayer = document.getElementById('edgesLayer');
+      if (!nodesLayer || !edgesLayer) return;
+
+      nodesLayer.querySelectorAll('.node-group').forEach(el => {
+        const nid = el.dataset.nodeId;
+        if (pathNodes.has(nid)) {
+          el.classList.remove('faded');
+        } else {
+          el.classList.add('faded');
+        }
+      });
+
+      edgesLayer.querySelectorAll('.edge-path').forEach(el => {
+        const src = el.dataset.edgeSource;
+        const dst = el.dataset.edgeTarget;
+        if (pathEdgeKeys.has(`${src}->${dst}`)) {
+          el.classList.add('highlighted');
+          el.classList.remove('faded');
+        } else {
+          el.classList.remove('highlighted');
+          el.classList.add('faded');
+        }
+      });
     }
 
     function clearInspector() {
@@ -1567,6 +1762,8 @@
       document.getElementById('inspDegree').textContent = '0';
       document.getElementById('inspUpstreamList').innerHTML = '';
       document.getElementById('inspDownstreamList').innerHTML = '';
+      const collateralSection = document.getElementById('inspCollateralSection');
+      if (collateralSection) collateralSection.style.display = 'none';
     }
 
     // Canvas panning and zooming

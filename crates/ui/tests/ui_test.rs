@@ -596,3 +596,50 @@ fn test_ui_noticeable_fading_elements() {
     assert!(html.contains("reachableDependencies.add") || html.contains("reachableDependencies"));
     assert!(html.contains("faded"));
 }
+
+#[test]
+fn test_ui_heat_map_coloring() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    // Heat-critical CSS class for drop-shadow glow
+    assert!(html.contains(".node-group.heat-critical"), "missing .node-group.heat-critical CSS");
+
+    // getHeatColor function must exist and derive color from collateral ratio
+    assert!(html.contains("getHeatColor"), "missing getHeatColor function");
+
+    // Heat tier thresholds: 5-tier (0, 0.15, 0.35, 0.60, 0.85)
+    assert!(html.contains("0.15") && html.contains("0.35") && html.contains("0.60") && html.contains("0.85"),
+        "missing heat tier thresholds");
+
+    // graphData.file_collateral used to retrieve collateral counts
+    assert!(html.contains("file_collateral"), "missing file_collateral lookup");
+
+    // Dynamic legend switch to heat mode when selectedNodeId is active in include graph
+    assert!(html.contains("updateHeatLegend") || html.contains("Heat Map"),
+        "missing dynamic legend heat mode");
+
+    // Heat badges on node cards ([ROOT] pill and +XX col badge)
+    assert!(html.contains("[ROOT]") && html.contains("col") && html.contains("heat-badge"),
+        "missing heat badges on node cards");
+}
+
+#[test]
+fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    // Inspector collateral breakdown list container
+    assert!(html.contains("inspCollateralList"), "missing inspCollateralList container in HTML");
+
+    // Sorting by highest collateral first
+    assert!(html.contains(".col - a.col") || html.contains("b.col - a.col"),
+        "missing descending collateral sort in inspector");
+
+    // Collateral summary update in inspector insight
+    assert!(html.contains("Total Collateral:") || html.contains("Top contributor:"),
+        "missing collateral summary in inspector insight");
+
+    // Path illumination helper to trace path from selected root to dependency
+    assert!(html.contains("illuminatePath") || html.contains("findIncludePath"),
+        "missing path illumination logic");
+}
+

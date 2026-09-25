@@ -56,12 +56,22 @@ pub struct SummaryStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollateralResponse {
+    pub target_id: String,
+    pub total_collateral: usize,
+    pub direct_collateral: std::collections::HashMap<String, usize>,
+    pub transitive_collateral: std::collections::HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphExportPayload {
     pub repo_name: String,
     pub include_graph: Vec<CytoscapeElement>,
     pub symbol_graph: Vec<CytoscapeElement>,
     pub call_graph: Vec<CytoscapeElement>,
     pub stats: SummaryStats,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub file_collateral: std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
 }
 
 pub fn build_include_elements(
