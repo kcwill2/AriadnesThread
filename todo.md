@@ -1,6 +1,5 @@
-# Task: Early Web Server Startup with Live UI Progress Streaming
+# Task: Restore CLI Progress Meters in Async UI Server Mode
 
 ## Status
-- [x] Unit 1: Backend async `UiState` with `ServerProgress` in `crates/ui/src/server.rs` & `crates/ui/src/dto.rs`
-- [x] Unit 2: Early server launch and progress reporting in `crates/cli/src/commands/ui.rs`
-- [x] Unit 3: Frontend live `/api/status` polling and progress display in `crates/ui/assets/index.html`
+- [x] Unit 1: Restore `print_progress` calls in `crates/cli/src/commands/ui.rs` (async background task) for `Building call graph` and `Analyzing collateral`
+- [x] Unit 2: Ensure label consistency (`Indexing translation units`) across `index.rs` and `ui.rs`

@@ -19,7 +19,7 @@ pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
     let total_tus = build_result.translation_units.len();
 
     for (i, tu) in build_result.translation_units.iter().enumerate() {
-        crate::commands::progress::print_progress(i, total_tus, "Indexing", "TUs");
+        crate::commands::progress::print_progress(i, total_tus, "Indexing translation units", "TUs");
         let abs_path = repository.root.join(&tu.source_path);
         let content = fs::read_to_string(&abs_path)?;
         let target_ctx = build_result.contexts.iter().find(|c| c.name == tu.context_name)
@@ -78,7 +78,7 @@ pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
             call_sites: combined_call_sites,
         });
     }
-    crate::commands::progress::print_progress(total_tus, total_tus, "Indexing", "TUs");
+    crate::commands::progress::print_progress(total_tus, total_tus, "Indexing translation units", "TUs");
 
     let index_result = IndexResult::new(repository.root.clone(), tu_analyses);
 

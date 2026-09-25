@@ -129,7 +129,7 @@ impl EndToEndOptimizer {
         let before_measurement = measurer.measure_all(&build_discovery.translation_units)?;
 
         // 2. Include analysis
-        let (_repo_copy, graph, _closures, _report) = crate::build_include_graph(&self.repo_path)?;
+        let (_repo_copy, graph, closures, _report) = crate::build_include_graph(&self.repo_path)?;
 
         // 3. Semantic analysis & reduction
         let prod_analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
@@ -142,7 +142,7 @@ impl EndToEndOptimizer {
         let total_semantic_edges = model.edges.len();
 
         // 4. Load analysis
-        let load_analyzer = LoadAnalyzer::new(&graph, &model);
+        let load_analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
         let mut header_collateral_map: HashMap<String, usize> = HashMap::new();
 
         for sym in model.symbols.values() {

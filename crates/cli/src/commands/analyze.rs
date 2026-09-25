@@ -47,10 +47,10 @@ pub fn handle_production_analyze(repo_path: &PathBuf, workers: Option<usize>) ->
 }
 
 pub fn handle_analyze_load(repo_path: &PathBuf, symbol: Option<&str>, file: Option<&Path>) -> Result<()> {
-    let (repository, graph, _closures, _report) = build_include_graph(repo_path)?;
+    let (repository, graph, closures, _report) = build_include_graph(repo_path)?;
     let (_, model) = get_or_build_reduced_model(repo_path)?;
 
-    let analyzer = LoadAnalyzer::new(&graph, &model);
+    let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
     let mut load_report = LoadReport {
         repository_root: repository.root.clone(),
         symbol_metrics: Vec::new(),
@@ -92,10 +92,10 @@ pub fn handle_analyze_load(repo_path: &PathBuf, symbol: Option<&str>, file: Opti
 }
 
 pub fn handle_explain_load(repo_path: &PathBuf, symbol: Option<&str>, file: Option<&Path>, source: Option<&str>) -> Result<()> {
-    let (_repository, graph, _closures, _report) = build_include_graph(repo_path)?;
+    let (_repository, graph, closures, _report) = build_include_graph(repo_path)?;
     let (_, model) = get_or_build_reduced_model(repo_path)?;
 
-    let analyzer = LoadAnalyzer::new(&graph, &model);
+    let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
 
     if let Some(sym_name) = symbol {
         let explanation = analyzer.explain_symbol_load(sym_name, source)?;

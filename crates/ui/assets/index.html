@@ -729,6 +729,133 @@
       border-radius: 2px;
     }
 
+    /* HOTSPOTS PANEL */
+    .hotspot-panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 300px;
+      max-height: calc(100% - 40px);
+      background: rgba(17, 24, 39, 0.92);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .hotspot-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .hotspot-title {
+      font-weight: 700;
+      color: var(--text-main);
+      white-space: nowrap;
+    }
+
+    .hotspot-close {
+      margin-left: auto;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 4px;
+    }
+
+    .hotspot-close:hover {
+      color: var(--text-main);
+    }
+
+    .hotspot-hint {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .hotspot-list {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hotspot-row {
+      display: grid;
+      grid-template-columns: 16px 1fr auto;
+      column-gap: 6px;
+      row-gap: 2px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .hotspot-row:hover {
+      background: #1e293b;
+    }
+
+    .hotspot-row.active {
+      background: rgba(56, 189, 248, 0.12);
+      outline: 1px solid rgba(56, 189, 248, 0.4);
+    }
+
+    .hotspot-rank {
+      grid-row: span 2;
+      color: var(--text-muted);
+      font-family: monospace;
+      padding-top: 1px;
+    }
+
+    .hotspot-name {
+      color: var(--text-main);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hotspot-path {
+      color: var(--text-sub);
+      font-size: 9px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hotspot-val {
+      grid-row: span 2;
+      align-self: center;
+      font-family: monospace;
+      font-weight: 700;
+      color: var(--amber);
+    }
+
+    .hotspot-bar {
+      grid-column: 2 / span 2;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(148, 163, 184, 0.2);
+      overflow: hidden;
+    }
+
+    .hotspot-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #f97316, #ef4444);
+    }
+
+    .btn-secondary.active {
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
     /* BOTTOM SOURCE DRAWER */
     .drawer {
       height: 0;
@@ -971,6 +1098,7 @@
   <!-- SECONDARY TOOLBAR -->
   <div class="toolbar">
     <div class="toolbar-left">
+      <button class="btn-secondary" id="btnHotspots" onclick="toggleHotspots()" style="display:none;">&#128293; Hotspots</button>
       <div class="tool-group">
         <span>Layout:</span>
         <select class="select-dark" id="layoutSelect" onchange="applyLayout()">
@@ -1061,6 +1189,23 @@
           <span id="legendViewLabel" style="font-weight:400;color:var(--text-sub);">Include Graph</span>
         </div>
         <div id="legendItems"></div>
+      </div>
+
+      <!-- HOTSPOTS PANEL (include tab) -->
+      <div class="hotspot-panel" id="hotspotPanel" style="display:none;">
+        <div class="hotspot-head">
+          <span class="hotspot-title">&#128293; Hotspots</span>
+          <select class="select-dark" id="hotspotMetric" onchange="renderHotspots()" style="font-size:11px; padding:2px 4px;">
+            <option value="burden" selected>Collateral burden</option>
+            <option value="fanin">Fan-in</option>
+            <option value="fanout">Fan-out</option>
+            <option value="closure">Closure burden</option>
+            <option value="cycle">Cycle participation</option>
+          </select>
+          <button class="hotspot-close" onclick="closeHotspots()" title="Close">&#10005;</button>
+        </div>
+        <div class="hotspot-hint" id="hotspotHint"></div>
+        <div class="hotspot-list" id="hotspotList"></div>
       </div>
     </div>
 
@@ -1224,10 +1369,12 @@
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
           <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts.</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
+          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list.</p>
         </div>
         <div id="helpTab-recipes" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">How-To Recipes</h4>
           <p><strong>Finding & Decoupling Header Bloat:</strong> Select a header -> inspect Collateral Breakdown -> click a heavy contributor to illuminate the include path -> refactor or forward-declare.</p>
+          <p><strong>Triage Worst Offenders:</strong> Open 🔥 Hotspots in the toolbar -> switch the metric to rank by burden, degree, closure, or cycles -> click a row to inspect its heat map -> optionally set a directory scope chip first to rank one subtree.</p>
           <p><strong>Isolating Focused Subgraphs:</strong> Set Direction (Dependencies / Consumers) and step Degree (1 deg, 2 deg) or use ALL-WITH-CAP with safety node caps.</p>
           <p><strong>Breaking Circular Dependencies:</strong> Toggle Highlight Cycle -> inspect circular links -> use Pathfinder to see the loop.</p>
         </div>
@@ -1242,13 +1389,14 @@
   <script>
     // State
     let currentTab = 'include';
-    let graphData = {
-      repo_name: 'Ariadne Codebase',
-      include_graph: [],
-      symbol_graph: [],
-      call_graph: [],
-      stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 }
-    };
+      let graphData = {
+        repo_name: 'Ariadne Codebase',
+        include_graph: [],
+        symbol_graph: [],
+        call_graph: [],
+        stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
+        file_collateral: {}
+      };
     let activeNodes = [];
     let activeEdges = [];
     let tabAllNodes = [];
@@ -1266,6 +1414,11 @@
     let qoExpanded = new Set();
     let qoActiveRow = -1;
     let qoRows = [];
+
+    // Hotspots panel (Include tab only)
+    let hotspotOpen = false;
+    let hotspotBurdenCache = null;      // { burden: {dep: symbols}, affected: {dep: rootCount} }
+    let hotspotBurdenSource = null;     // file_collateral object the cache was built from
 
     // Viewport transform
     let panX = 40;
@@ -1423,15 +1576,20 @@
                 if (status.stats) graphData.stats = status.stats;
                 
                 updateProgress(90, 'Fetching graph endpoints...');
-                const [incRes, symRes, callRes] = await Promise.all([
+                const [incRes, symRes, callRes, exportRes] = await Promise.all([
                   fetch('/api/graph/include').catch(() => null),
                   fetch('/api/graph/symbol').catch(() => null),
                   fetch('/api/graph/call').catch(() => null),
+                  fetch('/api/export').catch(() => null),
                 ]);
 
                 if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
                 if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
                 if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
+                if (exportRes && exportRes.ok) {
+                  const exportPayload = await exportRes.json();
+                  graphData.file_collateral = exportPayload.file_collateral || {};
+                }
 
                 updateProgress(100, 'Rendering visualization... 100%');
                 applyLoadedData();
@@ -1471,6 +1629,12 @@
           else btn.classList.remove('active');
         }
       });
+
+      // Hotspots are include-tab only: hide button + panel elsewhere, restore open state here.
+      const hsBtn = document.getElementById('btnHotspots');
+      if (hsBtn) hsBtn.style.display = tab === 'include' ? 'inline-block' : 'none';
+      const hsPanel = document.getElementById('hotspotPanel');
+      if (hsPanel) hsPanel.style.display = (tab === 'include' && hotspotOpen) ? 'flex' : 'none';
 
       // Update legend
       document.getElementById('legendViewLabel').textContent = 
@@ -1523,6 +1687,8 @@
             path: el.data.path || el.data.label || el.data.id,
             kind: el.data.kind || 'NODE',
             closure: el.data.closure || 0,
+            in_degree: el.data.in_degree || 0,
+            out_degree: el.data.out_degree || 0,
             is_cycle: el.data.is_cycle || el.classes === 'cycle',
             x: 0,
             y: 0,
@@ -1531,6 +1697,7 @@
       });
 
       filterAndExpandSubgraph();
+      renderHotspots();
     }
 
     // DAG Hierarchical / Topological Layout
@@ -1949,6 +2116,7 @@
       if (!skipFilter) {
         filterAndExpandSubgraph();
       }
+      renderHotspots();
     }
 
     function findIncludePath(fromId, toId) {
@@ -2026,13 +2194,14 @@
       }
 
       container.addEventListener('mousedown', e => {
-        if (e.target.closest('.node-group')) return;
+        if (e.target.closest('.node-group') || e.target.closest('.hotspot-panel')) return;
         isDragging = true;
         dragStartX = e.clientX - panX;
         dragStartY = e.clientY - panY;
       });
 
       container.addEventListener('click', e => {
+        if (e.target.closest('.hotspot-panel')) return;
         if (!e.target.closest('.node-group') && dragStartX === e.clientX - panX && dragStartY === e.clientY - panY) {
           selectedNodeId = null;
           filterAndExpandSubgraph();
@@ -2049,6 +2218,15 @@
       window.addEventListener('mouseup', () => { isDragging = false; });
 
       container.addEventListener('wheel', e => {
+        // Over the hotspot panel: scroll the list while it can absorb the delta,
+        // otherwise (edges, non-scrollable, header) let the wheel drive the graph view.
+        if (e.target.closest('.hotspot-panel')) {
+          const hsList = document.getElementById('hotspotList');
+          const scrollable = hsList && hsList.scrollHeight - hsList.clientHeight > 1;
+          const atTop = hsList.scrollTop <= 0;
+          const atBottom = hsList.scrollTop + hsList.clientHeight >= hsList.scrollHeight - 1;
+          if (scrollable && ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom))) return;
+        }
         e.preventDefault();
         const zoomDelta = e.deltaY < 0 ? 1.1 : 0.9;
         const newScale = Math.min(2.5, Math.max(0.2, zoomScale * zoomDelta));
@@ -2167,6 +2345,7 @@
       } else if (e.key === 'Escape' && selectedNodeId) {
         selectedNodeId = null;
         renderSvg();
+        renderHotspots();
       } else if (e.key === 'Escape' && dirScope) {
         clearDirScope();
       }
@@ -2388,6 +2567,7 @@
       }
       
       isFiltering = false;
+      renderHotspots();
     }
 
     function stepDegree(delta) {
@@ -2582,12 +2762,14 @@
       closeQuickOpen();
       updateDirChip();
       filterAndExpandSubgraph();
+      renderHotspots();
     }
 
     function clearDirScope() {
       dirScope = null;
       updateDirChip();
       filterAndExpandSubgraph();
+      renderHotspots();
     }
 
     function updateDirChip() {
@@ -2599,6 +2781,118 @@
       } else {
         chip.style.display = 'none';
       }
+    }
+
+    // === HOTSPOTS PANEL (Include tab) ===
+    // Aggregate collateral burden over the full file_collateral map (rootFileId -> {depId: symbols}).
+    // Cached by object identity; a payload reload swaps graphData.file_collateral and invalidates it.
+    function getBurdenMaps() {
+      const collateral = graphData.file_collateral || {};
+      if (hotspotBurdenSource !== collateral) {
+        const burden = {};
+        const affected = {};
+        Object.keys(collateral).forEach(root => {
+          const deps = collateral[root] || {};
+          Object.keys(deps).forEach(dep => {
+            burden[dep] = (burden[dep] || 0) + deps[dep];
+            affected[dep] = (affected[dep] || 0) + 1;
+          });
+        });
+        hotspotBurdenCache = { burden, affected };
+        hotspotBurdenSource = collateral;
+      }
+      return hotspotBurdenCache;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Rank ALL files (not just the capped active view), optionally filtered by dirScope.
+    function computeHotspots(metric) {
+      let nodes = metric === 'cycle' ? tabAllNodes.filter(n => n.is_cycle) : tabAllNodes.slice();
+      if (dirScope) nodes = nodes.filter(n => (n.path || '').startsWith(dirScope));
+
+      let entries;
+      if (metric === 'burden') {
+        const maps = getBurdenMaps();
+        entries = nodes.map(n => ({ node: n, value: maps.burden[n.id] || 0, affected: maps.affected[n.id] || 0 }));
+      } else if (metric === 'fanin') {
+        entries = nodes.map(n => ({ node: n, value: n.in_degree || 0 }));
+      } else if (metric === 'fanout') {
+        entries = nodes.map(n => ({ node: n, value: n.out_degree || 0 }));
+      } else if (metric === 'closure') {
+        entries = nodes.map(n => ({ node: n, value: n.closure || 0 }));
+      } else {
+        entries = nodes.map(n => ({ node: n, value: (n.in_degree || 0) + (n.out_degree || 0) }));
+      }
+      entries.sort((a, b) => b.value - a.value);
+      return entries.filter(e => e.value > 0);
+    }
+
+    function renderHotspots() {
+      const panel = document.getElementById('hotspotPanel');
+      if (!hotspotOpen || !panel || currentTab !== 'include') return;
+
+      let metric = document.getElementById('hotspotMetric').value;
+      const hint = document.getElementById('hotspotHint');
+      if (metric === 'burden' && Object.keys(graphData.file_collateral || {}).length === 0) {
+        metric = 'fanin';
+        document.getElementById('hotspotMetric').value = 'fanin';
+        hint.textContent = 'No collateral data in this payload — showing Fan-in instead.';
+      } else {
+        hint.textContent = dirScope ? 'Scoped to 📁 ' + dirScope : 'Top offenders across all files';
+      }
+
+      const entries = computeHotspots(metric).slice(0, 25);
+      const top = entries.length > 0 ? entries[0].value : 0;
+      const list = document.getElementById('hotspotList');
+      if (entries.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-sub);font-style:italic;padding:4px;">No hotspots for this metric.</div>';
+        return;
+      }
+      list.innerHTML = entries.map((e, i) => {
+        const pct = top > 0 ? Math.max(4, Math.round((e.value / top) * 100)) : 0;
+        let tip = String(e.value);
+        if (metric === 'burden') tip = e.affected + ' file(s) pay ' + e.value + ' symbols';
+        else if (metric === 'cycle') tip = e.node.in_degree + ' in / ' + e.node.out_degree + ' out';
+        const active = e.node.id === selectedNodeId ? ' active' : '';
+        return `
+          <div class="hotspot-row${active}" onclick="selectHotspotRow('${e.node.id}')" title="${escapeHtml(tip)}">
+            <span class="hotspot-rank">${i + 1}</span>
+            <span class="hotspot-name">${escapeHtml(e.node.label)}</span>
+            <span class="hotspot-val">${e.value}</span>
+            <span class="hotspot-path">${escapeHtml(e.node.path || '')}</span>
+            <span class="hotspot-bar"><span class="hotspot-bar-fill" style="width:${pct}%;"></span></span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectHotspotRow(id) {
+      selectNode(id);
+    }
+
+    function openHotspots() {
+      if (currentTab !== 'include') return;
+      hotspotOpen = true;
+      document.getElementById('hotspotPanel').style.display = 'flex';
+      document.getElementById('btnHotspots').classList.add('active');
+      renderHotspots();
+    }
+
+    function closeHotspots() {
+      hotspotOpen = false;
+      const panel = document.getElementById('hotspotPanel');
+      if (panel) panel.style.display = 'none';
+      const btn = document.getElementById('btnHotspots');
+      if (btn) btn.classList.remove('active');
+    }
+
+    function toggleHotspots() {
+      if (currentTab !== 'include') return;
+      if (hotspotOpen) closeHotspots();
+      else openHotspots();
     }
 
     document.addEventListener('click', e => {

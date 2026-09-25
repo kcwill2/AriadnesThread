@@ -1,9 +1,10 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use anyhow::{Result, anyhow};
 use ariadne_repo::FileId;
 use ariadne_index::types::SymbolId;
-use crate::{IncludeGraph, ReducedSemanticModel};
+use crate::{IncludeClosure, IncludeGraph, ReducedSemanticModel};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,11 +95,23 @@ impl LoadExplanation {
 pub struct LoadAnalyzer<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
+    closures: RefCell<Option<HashMap<FileId, IncludeClosure>>>,
+    symbol_adjacency: RefCell<Option<HashMap<SymbolId, Vec<SymbolId>>>>,
 }
 
 impl<'a> LoadAnalyzer<'a> {
     pub fn new(include_graph: &'a IncludeGraph, model: &'a ReducedSemanticModel) -> Self {
-        Self { include_graph, model }
+        Self { include_graph, model, closures: RefCell::new(None), symbol_adjacency: RefCell::new(None) }
+    }
+
+    /// Reuse include closures already computed elsewhere (e.g. by `build_include_graph`)
+    /// instead of recomputing them lazily on the first query.
+    pub fn with_closures(
+        include_graph: &'a IncludeGraph,
+        model: &'a ReducedSemanticModel,
+        closures: HashMap<FileId, IncludeClosure>,
+    ) -> Self {
+        Self { include_graph, model, closures: RefCell::new(Some(closures)), symbol_adjacency: RefCell::new(None) }
     }
 
     fn find_symbol_id(&self, symbol_name_or_id: &str) -> Option<SymbolId> {
@@ -109,7 +122,8 @@ impl<'a> LoadAnalyzer<'a> {
     }
 
     fn get_transitive_includes(&self, file_id: FileId) -> HashSet<FileId> {
-        let closures = self.include_graph.compute_closures();
+        let mut guard = self.closures.borrow_mut();
+        let closures = guard.get_or_insert_with(|| self.include_graph.compute_closures());
         let mut all = HashSet::new();
         all.insert(file_id);
         if let Some(closure) = closures.get(&file_id) {
@@ -119,19 +133,28 @@ impl<'a> LoadAnalyzer<'a> {
     }
 
     fn get_semantic_closure_of_symbols(&self, start_symbols: &[SymbolId]) -> HashSet<SymbolId> {
+        let mut guard = self.symbol_adjacency.borrow_mut();
+        let adjacency = guard.get_or_insert_with(|| {
+            let mut adj: HashMap<SymbolId, Vec<SymbolId>> = HashMap::new();
+            for edge in &self.model.edges {
+                adj.entry(edge.src_symbol.clone()).or_default().push(edge.dst_symbol.clone());
+            }
+            adj
+        });
+
         let mut visited = HashSet::new();
         let mut stack = Vec::new();
         for s in start_symbols {
             stack.push(s.clone());
             visited.insert(s.clone());
         }
-        
+
         while let Some(current) = stack.pop() {
-            for edge in &self.model.edges {
-                if edge.src_symbol == current {
-                    if !visited.contains(&edge.dst_symbol) {
-                        visited.insert(edge.dst_symbol.clone());
-                        stack.push(edge.dst_symbol.clone());
+            if let Some(nexts) = adjacency.get(&current) {
+                for next in nexts {
+                    if !visited.contains(next) {
+                        visited.insert(next.clone());
+                        stack.push(next.clone());
                     }
                 }
             }

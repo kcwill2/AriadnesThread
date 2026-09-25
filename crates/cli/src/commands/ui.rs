@@ -8,7 +8,7 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
     
     if let Some(path) = export_opt {
         // Synchronous run
-        let (repository, include_graph, _closures, report) = build_include_graph(&repo_path)?;
+        let (repository, include_graph, closures, report) = build_include_graph(&repo_path)?;
         let index_result = handle_index(&repo_path)?;
         let reduced_model = ReducedSemanticModel::reduce(&index_result);
         
@@ -17,8 +17,9 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
         crate::commands::progress::print_progress(1, 1, "Building call graph", "phase");
         
         let cycles = include_graph.detect_cycles();
+        let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
         
-        let analyzer = ariadne_graph::LoadAnalyzer::new(&include_graph, &reduced_model);
+        let analyzer = ariadne_graph::LoadAnalyzer::with_closures(&include_graph, &reduced_model, closures);
         let mut file_collateral = std::collections::HashMap::new();
         let total_files = include_graph.file_paths.len();
         for (i, (file_id, path)) in include_graph.file_paths.iter().enumerate() {
@@ -39,7 +40,7 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
 
         let payload = ariadne_ui::GraphExportPayload {
             repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-            include_graph: ariadne_ui::build_include_elements(&include_graph, &_closures, &cycles),
+            include_graph: include_elements,
             symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
             call_graph: ariadne_ui::build_call_elements(&call_graph),
             stats: ariadne_ui::SummaryStats {
@@ -77,7 +78,7 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
             };
 
             update_progress("[1/4] Discovering include graph...", "Parsing includes", 10);
-            let (repository, include_graph, _closures, report) = match build_include_graph(&repo_path_clone) {
+            let (repository, include_graph, closures, report) = match build_include_graph(&repo_path_clone) {
                 Ok(res) => res,
                 Err(e) => {
                     let mut p = state_clone.progress.write().unwrap();
@@ -102,13 +103,17 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
             let reduced_model = ReducedSemanticModel::reduce(&index_result);
             
             update_progress("[3/4] Building call graph...", "Constructing call graph", 70);
+            let total_tus = index_result.tu_analyses.len();
+            crate::commands::progress::print_progress(0, total_tus, "Building call graph", "TUs");
             let call_graph = ariadne_graph::CallGraph::build_from_index(&index_result, &reduced_model);
+            crate::commands::progress::print_progress(total_tus, total_tus, "Building call graph", "TUs");
             update_progress("[3/4] Building call graph...", "Done constructing call graph", 80);
             
             update_progress("[4/4] Analyzing collateral...", "Detecting cycles", 85);
             let cycles = include_graph.detect_cycles();
+            let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
             
-            let analyzer = ariadne_graph::LoadAnalyzer::new(&include_graph, &reduced_model);
+            let analyzer = ariadne_graph::LoadAnalyzer::with_closures(&include_graph, &reduced_model, closures);
             let mut file_collateral = std::collections::HashMap::new();
             let total_files = include_graph.file_paths.len();
             for (i, (file_id, path)) in include_graph.file_paths.iter().enumerate() {
@@ -116,6 +121,7 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
                     let percent = 85 + (10 * i / total_files.max(1));
                     update_progress("[4/4] Analyzing collateral...", &format!("File {}/{}", i, total_files), percent);
                 }
+                crate::commands::progress::print_progress(i, total_files, "Analyzing collateral", "files");
                 if let Ok(metric) = analyzer.analyze_file_load(path) {
                     let mut collat = std::collections::HashMap::new();
                     for src in metric.collateral_sources {
@@ -128,11 +134,12 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
                     }
                 }
             }
+            crate::commands::progress::print_progress(total_files, total_files, "Analyzing collateral", "files");
             update_progress("[4/4] Analyzing collateral...", "Done analyzing", 95);
 
             let payload = ariadne_ui::GraphExportPayload {
                 repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                include_graph: ariadne_ui::build_include_elements(&include_graph, &_closures, &cycles),
+                include_graph: include_elements,
                 symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
                 call_graph: ariadne_ui::build_call_elements(&call_graph),
                 stats: ariadne_ui::SummaryStats {
@@ -161,4 +168,19 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
     }
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_progress_calls_present() {
+        let ui_code = include_str!("ui.rs");
+        assert!(ui_code.contains("print_progress(0, total_tus, \"Building call graph\", \"TUs\")"));
+        assert!(ui_code.contains("print_progress(total_tus, total_tus, \"Building call graph\", \"TUs\")"));
+        assert!(ui_code.contains("print_progress(i, total_files, \"Analyzing collateral\", \"files\")"));
+        assert!(ui_code.contains("print_progress(total_files, total_files, \"Analyzing collateral\", \"files\")"));
+        
+        let index_code = include_str!("index.rs");
+        assert!(index_code.contains("print_progress(i, total_tus, \"Indexing translation units\", \"TUs\")"));
+    }
 }

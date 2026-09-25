@@ -82,8 +82,15 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .with_state(state)
 }
 
-async fn api_index() -> axum::response::Html<&'static str> {
-    axum::response::Html(crate::INDEX_HTML)
+async fn api_index() -> axum::response::Response {
+    // UI assets change between server builds; stale cached HTML silently hides
+    // new features, so browsers must never reuse a previous copy of the page.
+    axum::response::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CACHE_CONTROL, "no-store")
+        .header(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(axum::body::Body::from(crate::INDEX_HTML))
+        .unwrap()
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

@@ -46,6 +46,23 @@ impl IncludeGraph {
         None
     }
 
+    /// Builds a `source -> sorted, deduplicated destinations` map from the edge list.
+    /// Matches `direct_includes` semantics; lets whole-graph traversals run in O(V + E)
+    /// instead of rescanning the edge list at every visited node.
+    fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
+        let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
+        for edge in &self.edges {
+            if let Some(dest) = edge.destination {
+                adj.entry(edge.source).or_default().push(dest);
+            }
+        }
+        for dests in adj.values_mut() {
+            dests.sort();
+            dests.dedup();
+        }
+        adj
+    }
+
     /// Returns direct outgoing include file IDs for a source file.
     pub fn direct_includes(&self, file_id: FileId) -> Vec<FileId> {
         let mut direct = Vec::new();
@@ -65,6 +82,7 @@ impl IncludeGraph {
     /// Computes direct and transitive include closures for all known files in the graph.
     pub fn compute_closures(&self) -> HashMap<FileId, IncludeClosure> {
         let mut closures = HashMap::new();
+        let adj = self.adjacency();
 
         let mut all_files: HashSet<FileId> = self.file_paths.keys().copied().collect();
         for edge in &self.edges {
@@ -75,7 +93,7 @@ impl IncludeGraph {
         }
 
         for &file_id in &all_files {
-            let direct = self.direct_includes(file_id);
+            let direct: Vec<FileId> = adj.get(&file_id).cloned().unwrap_or_default();
             let mut transitive = HashSet::new();
             let mut visited = HashSet::new();
             let mut stack = direct.clone();
@@ -89,9 +107,11 @@ impl IncludeGraph {
                 visited.insert(current);
                 transitive.insert(current);
 
-                for next_dest in self.direct_includes(current) {
-                    if !visited.contains(&next_dest) {
-                        stack.push(next_dest);
+                if let Some(next_dests) = adj.get(&current) {
+                    for &next_dest in next_dests {
+                        if !visited.contains(&next_dest) {
+                            stack.push(next_dest);
+                        }
                     }
                 }
             }
@@ -138,11 +158,13 @@ impl IncludeGraph {
 
         let mut all_files: Vec<FileId> = self.file_paths.keys().copied().collect();
         all_files.sort();
+        let adj = self.adjacency();
 
         for &node in &all_files {
             if !visited.contains(&node) {
-                self.dfs_cycle(
+                Self::dfs_cycle(
                     node,
+                    &adj,
                     &mut visited,
                     &mut rec_stack,
                     &mut current_path,
@@ -155,8 +177,8 @@ impl IncludeGraph {
     }
 
     fn dfs_cycle(
-        &self,
         node: FileId,
+        adj: &HashMap<FileId, Vec<FileId>>,
         visited: &mut HashSet<FileId>,
         rec_stack: &mut HashSet<FileId>,
         current_path: &mut Vec<FileId>,
@@ -166,13 +188,15 @@ impl IncludeGraph {
         rec_stack.insert(node);
         current_path.push(node);
 
-        for neighbor in self.direct_includes(node) {
-            if !visited.contains(&neighbor) {
-                self.dfs_cycle(neighbor, visited, rec_stack, current_path, cycles);
-            } else if rec_stack.contains(&neighbor) {
-                if let Some(pos) = current_path.iter().position(|&n| n == neighbor) {
-                    let cycle = current_path[pos..].to_vec();
-                    cycles.push(cycle);
+        if let Some(neighbors) = adj.get(&node) {
+            for &neighbor in neighbors {
+                if !visited.contains(&neighbor) {
+                    Self::dfs_cycle(neighbor, adj, visited, rec_stack, current_path, cycles);
+                } else if rec_stack.contains(&neighbor) {
+                    if let Some(pos) = current_path.iter().position(|&n| n == neighbor) {
+                        let cycle = current_path[pos..].to_vec();
+                        cycles.push(cycle);
+                    }
                 }
             }
         }

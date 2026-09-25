@@ -367,6 +367,8 @@ async fn test_server_index_route() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    assert_eq!(res.headers().get("Cache-Control").unwrap(), "no-store",
+        "index must never be cached: stale HTML silently hides new UI features");
 }
 
 #[test]
@@ -681,6 +683,16 @@ fn test_ui_heat_map_coloring() {
 }
 
 #[test]
+fn test_ui_live_mode_fetches_file_collateral() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    // Live server mode must fetch the full payload (incl. file_collateral) from /api/export;
+    // regression guard: without it, heat map and Collateral Breakdown show 0 for every file.
+    assert!(html.contains("fetch('/api/export')"), "live mode must fetch /api/export for file_collateral");
+    assert!(html.contains("graphData.file_collateral ="), "live mode must assign graphData.file_collateral");
+}
+
+#[test]
 fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
     let html = ariadne_ui::INDEX_HTML;
 
@@ -767,4 +779,53 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(html.contains("pollStatus"));
     assert!(html.contains("status.progress.state === 'loading'"));
     assert!(html.contains("status.progress.state === 'ready'"));
+}
+
+#[test]
+fn test_ui_hotspots_panel() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    // Panel, toggle button, and metric selector markup
+    assert!(html.contains("id=\"hotspotPanel\""), "missing hotspotPanel container");
+    assert!(html.contains("id=\"btnHotspots\""), "missing btnHotspots toggle button");
+    assert!(html.contains("id=\"hotspotMetric\""), "missing hotspotMetric selector");
+    assert!(html.contains("toggleHotspots"), "missing toggleHotspots handler");
+
+    // Ranking + rendering logic
+    assert!(html.contains("function computeHotspots"), "missing computeHotspots ranking");
+    assert!(html.contains("function renderHotspots"), "missing renderHotspots renderer");
+
+    // Collateral burden aggregation must read the full file_collateral map and cache it
+    assert!(html.contains("function getBurdenMaps"), "missing collateral burden aggregation");
+    assert!(html.contains("graphData.file_collateral") && html.contains("hotspotBurdenSource"),
+        "burden aggregation must read graphData.file_collateral with cache invalidation");
+
+    // List capped at top 25 rows; rows flow through selectNode so heat/fade/inspector apply
+    assert!(html.contains("slice(0, 25)"), "hotspot list must cap at 25 rows");
+    assert!(html.contains("selectHotspotRow") && html.contains("selectNode(id)"),
+        "hotspot row click must route through selectNode");
+
+    // All 5 metrics present, collateral burden is default
+    assert!(html.contains(">Collateral burden<") && html.contains(">Fan-in<")
+        && html.contains(">Fan-out<") && html.contains(">Closure burden<")
+        && html.contains(">Cycle participation<"), "missing hotspot metrics");
+    assert!(html.contains("value=\"burden\" selected"), "collateral burden must be default metric");
+
+    // Older exports without file_collateral degrade to Fan-in with an inline hint
+    assert!(html.contains("showing Fan-in instead"), "missing Fan-in fallback hint");
+
+    // Include-tab-only gating
+    assert!(html.contains("currentTab !== 'include'"), "hotspots must gate on the include tab");
+
+    // Bar normalized to top score
+    assert!(html.contains("hotspot-bar-fill") && html.contains("e.value / top"),
+        "missing normalized hotspot bar");
+
+    // Panel clicks/scrolls must not reach canvas handlers (deselect-on-click, pan, zoom)
+    assert!(html.matches("closest('.hotspot-panel')").count() >= 3,
+        "canvas mousedown/click/wheel handlers must ignore events inside the hotspot panel");
+
+    // Wheel over the panel scrolls the list, falling through to the graph view at its edges
+    assert!(html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
+        "wheel over hotspot panel should scroll the list, then reach the graph view at the edges");
 }
