@@ -130,6 +130,10 @@
   - [x] Unit 2: Frontend Filter & Degree Stepper UI Elements — add degree stepper (`[-]`, `[+]`), `ALL-WITH-CAP` toggle, node cap dropdown, and enhanced search bar in `crates/ui/assets/index.html`
   - [x] Unit 3: Frontend Subgraph Filter, BFS Expansion & Node Capping Engine — implement `matchesFilter`, `filterAndExpandSubgraph`, clean DAG/concentric/grid layout filtering, and capped status indicator
 
+- [x] **Dependency Tree Isolation & Direction-Preserving Traversal**
+  - [x] Unit 1: Direction-Preserving Traversal & Dependency-First Defaulting — default `dirSelect` to `out`, prevent BFS zig-zagging into sibling consumers, and verify via tests in `crates/ui/tests/ui_test.rs`
+
+
 
 
 

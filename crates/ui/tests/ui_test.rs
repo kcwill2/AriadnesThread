@@ -412,6 +412,21 @@ fn test_ui_subgraph_filter_and_expansion_engine() {
 }
 
 #[test]
+fn test_ui_dependency_tree_direction_preserving() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    // Check dirSelect default is 'out' (Dependencies)
+    assert!(html.contains("<option value=\"out\" selected>"));
+    
+    // Check BFS uses branchDir logic
+    assert!(html.contains("let branchDir = 'both'"));
+    assert!(html.contains("branchDir: nextDir"));
+    assert!(html.contains("branchDir === 'both'"));
+    assert!(html.contains("branchDir === 'out'"));
+    assert!(html.contains("branchDir === 'in'"));
+}
+
+#[test]
 fn test_build_symbol_elements_filters_unindexed() {
     let mut symbols = std::collections::BTreeMap::new();
     let sym_a = ariadne_index::SymbolId("A".to_string());

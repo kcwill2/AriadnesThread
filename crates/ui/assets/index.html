@@ -865,9 +865,9 @@
       <div class="tool-group">
         <span>Direction:</span>
         <select class="select-dark" id="dirSelect">
-          <option value="both">Both</option>
-          <option value="out">Out</option>
-          <option value="in">In</option>
+          <option value="out" selected>Dependencies (&rarr;)</option>
+          <option value="in">Consumers (&larr;)</option>
+          <option value="both">Both (Strict)</option>
         </select>
       </div>
       <button class="btn-secondary" onclick="document.getElementById('pathfinderModal').style.display='block';document.getElementById('modalOverlay').style.display='block';">Pathfinder</button>
@@ -1789,7 +1789,10 @@
       
       seeds.forEach(s => {
         includedNodes.add(s.id);
-        queue.push({ id: s.id, dist: 0 });
+        let branchDir = 'both';
+        if (dir === 'out') branchDir = 'out';
+        if (dir === 'in') branchDir = 'in';
+        queue.push({ id: s.id, dist: 0, branchDir });
       });
 
       let isCapped = false;
@@ -1803,22 +1806,22 @@
       }
 
       while (queue.length > 0 && !capReached()) {
-        const { id, dist } = queue.shift();
+        const { id, dist, branchDir } = queue.shift();
         
         if (!isAllCapped && dist >= currentDegree) continue;
 
         let neighbors = [];
-        if (dir === 'both' || dir === 'out') {
-          neighbors.push(...(adjOut[id] || []));
+        if (branchDir === 'both' || branchDir === 'out') {
+          (adjOut[id] || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'out' }));
         }
-        if (dir === 'both' || dir === 'in') {
-          neighbors.push(...(adjIn[id] || []));
+        if (branchDir === 'both' || branchDir === 'in') {
+          (adjIn[id] || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'in' }));
         }
 
-        for (const nxt of neighbors) {
+        for (const { nxt, nextDir } of neighbors) {
           if (!includedNodes.has(nxt)) {
             includedNodes.add(nxt);
-            queue.push({ id: nxt, dist: dist + 1 });
+            queue.push({ id: nxt, dist: dist + 1, branchDir: nextDir });
             if (capReached()) {
               isCapped = true;
               break;
