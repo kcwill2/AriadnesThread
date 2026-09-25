@@ -142,3 +142,8 @@
   - [x] Unit 3: Collateral Heat Map & Dynamic Legend — implement heat map color palette (Tier 0 to Tier 4) with heat badges, derive temperature from the full dependency set (independent of degree-limited view), and update floating legend dynamically
   - [x] Unit 4: Node Inspector Collateral Breakdown & Path Illumination — add ranked collateral breakdown list in Inspector, path illumination from root, and end-to-end fixture test verification
 
+- [x] **UI Onboarding & Interactive Help Reference Center**
+  - [x] Unit 1: Define failing test for onboarding elements, welcome modal, tour controller, and help reference in `crates/ui/tests/ui_test.rs` (RED)
+  - [x] Unit 2: Implement onboarding UI, spotlight tour walkthrough, Help Center modal with first-visit re-trigger button, keyboard shortcuts, and persistent state in `crates/ui/assets/index.html` (GREEN)
+  - [x] Unit 3: Verify tests, standalone HTML export, and refactor (REFACTOR)
+

@@ -643,3 +643,18 @@ fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
         "missing path illumination logic");
 }
 
+#[test]
+fn test_onboarding_and_help_content() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    assert!(html.contains("id=\"tourOverlay\""));
+    assert!(html.contains("id=\"tourCard\""));
+    assert!(html.contains("id=\"welcomeModal\""));
+    assert!(html.contains("id=\"helpCenterModal\""));
+    assert!(html.contains("id=\"btnHelp\""));
+    
+    assert!(html.contains("function startTour"));
+    assert!(html.contains("function triggerFirstVisitExperience"));
+    assert!(html.contains("function openHelpCenter"));
+}
+
