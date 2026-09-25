@@ -1,0 +1,11 @@
+[package]
+name = "ariadne-lang"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+ariadne-repo  = { path = "../repo" }
+ariadne-index = { path = "../index" }
+anyhow.workspace = true
+serde.workspace = true
