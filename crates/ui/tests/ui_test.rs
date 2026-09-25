@@ -232,3 +232,25 @@ fn test_export_html_empty_template_uses_index() {
     assert!(content.contains("window.__ARIADNE_DATA__"));
     assert!(content.contains("Include Graph")); // Check if it used the INDEX_HTML
 }
+
+#[test]
+fn test_selected_node_edge_highlighting() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    // Check edge detection relative to selectedNodeId
+    assert!(html.contains("e.target === selectedNodeId"));
+    assert!(html.contains("e.source === selectedNodeId"));
+    
+    // Check highlighted classes
+    assert!(html.contains("highlighted"));
+    assert!(html.contains("entering") || html.contains("edge-entering"));
+    assert!(html.contains("leaving") || html.contains("edge-leaving"));
+    
+    // Check marker assignment
+    assert!(html.contains("url(#arrow-selected)"));
+    assert!(html.contains("url(#arrow-entering)"));
+    assert!(html.contains("url(#arrow-leaving)"));
+    
+    // Check CSS rules
+    assert!(html.contains(".edge-path.highlighted"));
+}

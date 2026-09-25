@@ -117,3 +117,9 @@
   - [x] Unit 2: UI DTOs & Axum Server Traversal Endpoints in `ariadne-ui` (`/api/graph/traverse`, `/api/graph/path`, `/api/graph/entrypoints`, `/api/graph/search`)
   - [x] Unit 3: Interactive Frontend Traversal, Ariadne's Thread Bar & Pathfinder in `crates/ui/assets/index.html`
   - [x] Unit 4: End-to-End Integration Tests & Standalone HTML Export Verification
+
+## Active Feature Tasks
+
+- [x] **Node Selection Edge Highlighting in UI**
+  - [x] Unit 1: Add unit tests in `crates/ui/tests/ui_test.rs` verifying node selection edge highlighting logic, classes (`highlighted`, entering, leaving), and `arrow-selected` marker in `INDEX_HTML` (RED)
+  - [x] Unit 2: Implement entering and leaving edge highlighting, dynamic marker selection, edge layering, and visual styling in `crates/ui/assets/index.html` (GREEN & REFACTOR)

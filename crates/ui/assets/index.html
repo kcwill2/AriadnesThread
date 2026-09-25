@@ -387,9 +387,25 @@
       filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8));
     }
 
+    .edges-has-selection .edge-path {
+      opacity: 0.35;
+    }
+
     .edge-path.highlighted {
       stroke: var(--cyan) !important;
       stroke-width: 2.5px !important;
+      filter: drop-shadow(0 0 6px var(--cyan-glow));
+      opacity: 1 !important;
+    }
+
+    .edge-path.edge-entering {
+      stroke: var(--green) !important;
+      filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.4));
+    }
+
+    .edge-path.edge-leaving {
+      stroke: var(--amber) !important;
+      filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.4));
     }
 
     /* INSPECTOR SIDEBAR */
@@ -887,6 +903,12 @@
           <marker id="arrow-cycle" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444"/>
           </marker>
+          <marker id="arrow-entering" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#4ade80"/>
+          </marker>
+          <marker id="arrow-leaving" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#fb923c"/>
+          </marker>
         </defs>
         <g id="viewportGroup">
           <g id="edgesLayer"></g>
@@ -1282,16 +1304,36 @@
       nodesLayer.innerHTML = '';
       edgesLayer.innerHTML = '';
 
+      if (selectedNodeId) {
+        edgesLayer.classList.add('edges-has-selection');
+      } else {
+        edgesLayer.classList.remove('edges-has-selection');
+      }
+
       const nodeMap = {};
       activeNodes.forEach(n => { nodeMap[n.id] = n; });
 
-      // Render Edges
+      const normalEdges = [];
+      const highlightedEdges = [];
+
       activeEdges.forEach(e => {
+        if (cyclesOnly && !e.is_cycle) return;
+        
+        const isEntering = Boolean(selectedNodeId && e.target === selectedNodeId);
+        const isLeaving = Boolean(selectedNodeId && e.source === selectedNodeId);
+        const isHighlighted = isEntering || isLeaving;
+        
+        if (isHighlighted) {
+          highlightedEdges.push({e, isEntering, isLeaving, isHighlighted});
+        } else {
+          normalEdges.push({e, isEntering, isLeaving, isHighlighted});
+        }
+      });
+
+      const renderEdge = ({e, isEntering, isLeaving, isHighlighted}) => {
         const src = nodeMap[e.source];
         const dst = nodeMap[e.target];
         if (!src || !dst) return;
-
-        if (cyclesOnly && !e.is_cycle) return;
 
         const isCycle = e.is_cycle;
         const isIncomplete = e.incomplete;
@@ -1311,11 +1353,26 @@
 
         const edgeEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         edgeEl.setAttribute('d', pathD);
-        edgeEl.setAttribute('class', `edge-path ${isCycle ? 'cycle-edge' : ''} ${isIncomplete ? 'incomplete' : ''}`);
-        edgeEl.setAttribute('marker-end', isCycle ? 'url(#arrow-cycle)' : 'url(#arrow)');
+        
+        let classes = `edge-path ${isCycle ? 'cycle-edge' : ''} ${isIncomplete ? 'incomplete' : ''}`;
+        if (isHighlighted) classes += ' highlighted';
+        if (isEntering) classes += ' edge-entering';
+        if (isLeaving) classes += ' edge-leaving';
+        
+        edgeEl.setAttribute('class', classes.trim());
+        let markerUrl = 'url(#arrow)';
+        if (isCycle) markerUrl = 'url(#arrow-cycle)';
+        else if (isEntering) markerUrl = 'url(#arrow-entering)';
+        else if (isLeaving) markerUrl = 'url(#arrow-leaving)';
+        else if (isHighlighted) markerUrl = 'url(#arrow-selected)';
+        
+        edgeEl.setAttribute('marker-end', markerUrl);
         edgeEl.dataset.edgeId = e.id;
         edgesLayer.appendChild(edgeEl);
-      });
+      };
+
+      normalEdges.forEach(renderEdge);
+      highlightedEdges.forEach(renderEdge);
 
       // Render Nodes
       activeNodes.forEach(n => {
