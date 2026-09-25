@@ -182,6 +182,71 @@
       stroke: var(--text-sub);
     }
 
+    .quick-open-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      width: 340px;
+      max-height: 320px;
+      overflow-y: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      z-index: 300;
+      padding: 4px;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .qo-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--text-main);
+      white-space: nowrap;
+    }
+
+    .qo-row:hover, .qo-row.active {
+      background: var(--bg-card-hover);
+    }
+
+    .qo-caret {
+      width: 12px;
+      flex: 0 0 12px;
+      color: var(--text-sub);
+      cursor: pointer;
+      font-size: 9px;
+    }
+
+    .qo-dir { color: var(--cyan); font-weight: 600; }
+    .qo-file { color: var(--text-main); }
+    .qo-count { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+    .qo-more { color: var(--text-muted); padding: 3px 8px; font-style: italic; }
+
+    .dir-chip {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: var(--cyan);
+      border-radius: 999px;
+      font-size: 11px;
+      font-family: monospace;
+      cursor: pointer;
+      white-space: nowrap;
+      max-width: 200px;
+    }
+
+    .dir-chip .dir-chip-close { color: var(--text-muted); font-size: 10px; }
+    .dir-chip:hover .dir-chip-close { color: var(--text-main); }
+
     .stat-badge {
       padding: 4px 8px;
       background: #1e293b;
@@ -795,6 +860,13 @@
   </style>
 </head>
 <body>
+  <div id="loadingOverlay" style="display: none; position: fixed; inset: 0; background: var(--bg-surface); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; gap: 16px; transition: opacity 0.3s ease;">
+    <div style="width: 300px; height: 6px; background: var(--bg-card); border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
+      <div id="loadingProgress" style="width: 0%; height: 100%; background: var(--cyan); transition: width 0.3s ease; box-shadow: 0 0 8px var(--cyan-glow);"></div>
+    </div>
+    <div id="loadingText" style="font-size: 14px; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em;">[1/3] Loading... 0%</div>
+    <div id="loadingDetail" style="font-size: 11px; font-family: monospace; color: var(--text-muted);">Initializing</div>
+  </div>
 
   <!-- TOP HEADER -->
   <header>
@@ -837,17 +909,21 @@
 
     <!-- ACTIONS -->
     <div class="header-actions">
+      <span id="dirScopeChip" class="dir-chip" title="Directory scope — click to clear" onclick="clearDirScope()">
+        <span id="dirScopeLabel">📁</span><span class="dir-chip-close">✕</span>
+      </span>
       <div class="search-wrap">
         <svg class="search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search node... (Ctrl+K)" oninput="handleSearch(this.value)">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search node... (Ctrl+K)" oninput="handleSearch(this.value)" onfocus="openQuickOpen()" onkeydown="qoKeyDown(event)">
         <span id="searchMatchCount" class="stat-badge" style="display:none; position:absolute; right:30px; top:6px; font-size:10px; padding: 2px 4px; border:none; background: transparent; color: var(--text-muted);">0</span>
         <button id="searchClearBtn" class="btn-icon" style="display:none; position:absolute; right:4px; top:4px; padding:2px; height:22px; width:22px;" onclick="clearSearch()">
           <svg style="width:12px; height:12px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+        <div id="quickOpenPanel" class="quick-open-panel" onclick="qoPanelClick(event)"></div>
       </div>
       <button id="btnShowAllMatches" class="btn-secondary" style="display:none;font-size:10px;padding:2px 6px;" onclick="selectedNodeId = null; filterAndExpandSubgraph();">View All Matches</button>
 
@@ -1134,6 +1210,7 @@
           <h4 style="margin-bottom: 8px; color: var(--cyan);">Keyboard Shortcuts</h4>
           <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px;">
             <div><kbd>Ctrl+K</kbd> or <kbd>/</kbd></div><div>Focus Search</div>
+            <div><kbd>↓</kbd> (from Search)</div><div>Open directory quick-open navigator, then <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Enter</kbd> to open a file or set a directory scope, <kbd>←</kbd>/<kbd>→</kbd> to collapse/expand folders</div>
             <div><kbd>?</kbd> or <kbd>Shift+/</kbd> or <kbd>F1</kbd></div><div>Open Help Center</div>
             <div><kbd>Esc</kbd></div><div>Dismiss modals/tour or clear selection</div>
             <div><kbd>ArrowLeft</kbd> / <kbd>ArrowRight</kbd></div><div>Navigate Tour</div>
@@ -1155,7 +1232,7 @@
           <p><strong>Breaking Circular Dependencies:</strong> Toggle Highlight Cycle -> inspect circular links -> use Pathfinder to see the loop.</p>
         </div>
       </div>
-    </div>
+    <div id="quickOpenPanel" style="display:none;"></div>
   </div>
 
   <!-- EMBEDDED DATA PLACEHOLDER -->
@@ -1182,6 +1259,13 @@
     let selectedNodeId = null;
     let hopDepth = 0;
     let cyclesOnly = false;
+
+    // Directory quick-open navigation (Include tab only)
+    let dirScope = null;            // e.g. "include/" — always ends with '/'
+    let qoOpen = false;
+    let qoExpanded = new Set();
+    let qoActiveRow = -1;
+    let qoRows = [];
 
     // Viewport transform
     let panX = 40;
@@ -1274,17 +1358,54 @@
       `).join('');
     }
 
+    function showProgress(stageText, percent) {
+      const overlay = document.getElementById('loadingOverlay');
+      const prog = document.getElementById('loadingProgress');
+      const txt = document.getElementById('loadingText');
+      if (overlay) overlay.style.display = 'flex';
+      if (prog) prog.style.width = percent + '%';
+      if (txt) txt.textContent = stageText;
+    }
+
+    function updateProgress(percent, detailText) {
+      const prog = document.getElementById('loadingProgress');
+      const detail = document.getElementById('loadingDetail');
+      if (prog) prog.style.width = percent + '%';
+      if (detail && detailText) detail.textContent = detailText;
+    }
+
+    function hideProgress() {
+      const overlay = document.getElementById('loadingOverlay');
+      if (overlay) {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.style.display = 'none';
+          overlay.style.opacity = '1';
+        }, 300);
+      }
+    }
+
     // Initialize application
     async function init() {
       setupCanvasPanZoom();
 
       if (window.__ARIADNE_DATA__ && window.__ARIADNE_DATA__.include_graph) {
+        showProgress('[1/3] Loading graph datasets... 25%', 25);
         // Use standalone exported data
         graphData = window.__ARIADNE_DATA__;
-        applyLoadedData();
+        setTimeout(() => {
+          updateProgress(65, '[2/3] Processing graph models... 65%');
+          setTimeout(() => {
+             updateProgress(100, '[3/3] Rendering visualization... 100%');
+             applyLoadedData();
+             hideProgress();
+          }, 50);
+        }, 50);
       } else {
+        showProgress('[1/3] Loading graph datasets... 25%', 25);
         // Live server mode: fetch from endpoints
         try {
+          updateProgress(35, 'Fetching status...');
           const statusRes = await fetch('/api/status');
           if (statusRes.ok) {
             const status = await statusRes.json();
@@ -1292,20 +1413,25 @@
             graphData.stats = status.stats || graphData.stats;
           }
 
+          updateProgress(50, 'Fetching graph endpoints...');
           const [incRes, symRes, callRes] = await Promise.all([
             fetch('/api/graph/include').catch(() => null),
             fetch('/api/graph/symbol').catch(() => null),
             fetch('/api/graph/call').catch(() => null),
           ]);
 
+          updateProgress(65, '[2/3] Processing graph models... 65%');
           if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
           if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
           if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
 
+          updateProgress(100, '[3/3] Rendering visualization... 100%');
           applyLoadedData();
+          hideProgress();
         } catch (e) {
           console.warn('Live fetch failed, using fallback empty state', e);
           applyLoadedData();
+          hideProgress();
         }
       }
     }
@@ -1338,18 +1464,27 @@
       `).join('');
 
       // Load elements for active tab
-      let rawElements = [];
-      if (tab === 'include') rawElements = graphData.include_graph || [];
-      else if (tab === 'symbol') rawElements = graphData.symbol_graph || [];
-      else if (tab === 'call') rawElements = graphData.call_graph || [];
+      showProgress('Switching tab...', 20);
+      setTimeout(() => {
+        updateProgress(50, 'Parsing elements...');
+        let rawElements = [];
+        if (tab === 'include') rawElements = graphData.include_graph || [];
+        else if (tab === 'symbol') rawElements = graphData.symbol_graph || [];
+        else if (tab === 'call') rawElements = graphData.call_graph || [];
 
-      parseAndRenderElements(rawElements);
+        parseAndRenderElements(rawElements);
+        updateProgress(100, 'Done');
+        hideProgress();
+      }, 10);
     }
 
     function parseAndRenderElements(rawElements) {
       tabAllNodes = [];
       tabAllEdges = [];
       selectedNodeId = null;
+      dirScope = null;
+      updateDirChip();
+      closeQuickOpen();
 
       rawElements.forEach(el => {
         if (el.data.source && el.data.target) {
@@ -1935,6 +2070,10 @@
     function handleSearch(q) {
       selectedNodeId = null;
       filterAndExpandSubgraph();
+      if (currentTab === 'include') {
+        if (qoOpen) renderQuickOpen();
+        else openQuickOpen();
+      }
     }
 
     // Source Code Drawer
@@ -2003,9 +2142,13 @@
         e.preventDefault();
         document.getElementById('searchInput').focus();
       }
-      if (e.key === 'Escape' && selectedNodeId) {
+      if (e.key === 'Escape' && qoOpen) {
+        closeQuickOpen();
+      } else if (e.key === 'Escape' && selectedNodeId) {
         selectedNodeId = null;
         renderSvg();
+      } else if (e.key === 'Escape' && dirScope) {
+        clearDirScope();
       }
     });
 
@@ -2094,6 +2237,7 @@
     }
 
     function matchesFilter(node, matcher) {
+      if (dirScope && !((node.path || '').startsWith(dirScope))) return false;
       if (!matcher) return true;
       if (matcher.field) {
         const val = node[matcher.field] || '';
@@ -2122,6 +2266,8 @@
         if (n) seeds = [n];
       } else if (q) {
         seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
+      } else if (dirScope) {
+        seeds = tabAllNodes.filter(n => (n.path || '').startsWith(dirScope));
       } else {
         const inDeg = {};
         const outDeg = {};
@@ -2261,6 +2407,184 @@
 
     document.getElementById('dirSelect').onchange = () => filterAndExpandSubgraph();
 
+    // === DIRECTORY QUICK-OPEN NAVIGATION (Include tab) ===
+    function buildDirTree(nodes) {
+      const root = { dirs: new Map(), files: [], prefix: '' };
+      nodes.forEach(n => {
+        const p = n.path || '';
+        if (!p || p === n.label || !p.includes('/')) { root.files.push(n); return; }
+        const segs = p.split('/');
+        let cur = root;
+        for (let i = 0; i < segs.length - 1; i++) {
+          const seg = segs[i];
+          if (!cur.dirs.has(seg)) cur.dirs.set(seg, { dirs: new Map(), files: [], prefix: segs.slice(0, i + 1).join('/') + '/' });
+          cur = cur.dirs.get(seg);
+        }
+        cur.files.push(n);
+      });
+      return root;
+    }
+
+    function countMatchesIn(sub, matcher) {
+      let c = sub.files.filter(n => matchesFilter(n, matcher)).length;
+      sub.dirs.forEach(d => { c += countMatchesIn(d, matcher); });
+      return c;
+    }
+
+    function renderQuickOpen() {
+      const panel = document.getElementById('quickOpenPanel');
+      if (!panel) return;
+      if (!qoOpen || currentTab !== 'include') { panel.style.display = 'none'; return; }
+
+      const q = document.getElementById('searchInput').value.trim();
+      const matcher = q ? compileMatcher(q) : null;
+      const tree = buildDirTree(tabAllNodes);
+      qoRows = [];
+
+      function collect(sub, depth) {
+        const dirs = Array.from(sub.dirs.entries()).sort((a, b) => a[0] < b[0] ? -1 : 1);
+        dirs.forEach(([name, child]) => {
+          let count = 0;
+          if (matcher) {
+            count = countMatchesIn(child, matcher);
+            if (count === 0) return;
+          }
+          const expanded = matcher ? true : (qoExpanded.has(child.prefix) || depth === 0);
+          qoRows.push({ type: 'dir', name: name + '/', prefix: child.prefix, depth, expanded, count });
+          if (expanded) collect(child, depth + 1);
+        });
+        sub.files.slice().sort((a, b) => a.label < b.label ? -1 : 1).forEach(n => {
+          if (matcher && !matchesFilter(n, matcher)) return;
+          qoRows.push({ type: 'file', node: n, depth });
+        });
+      }
+      collect(tree, 0);
+
+      const capped = qoRows.length > 200;
+      if (capped) {
+        const dropped = qoRows.length - 200;
+        qoRows = qoRows.slice(0, 200);
+        qoRows.push({ type: 'more', text: `… ${dropped} more files` });
+      }
+
+      panel.innerHTML = qoRows.map((r, i) => {
+        const pad = r.depth * 14;
+        if (r.type === 'dir') {
+          return `<div class="qo-row qo-dir${i === qoActiveRow ? ' active' : ''}" data-idx="${i}" style="padding-left:${8 + pad}px">` +
+            `<span class="qo-caret">${r.expanded ? '▾' : '▸'}</span><span>${escapeHtml(r.name)}</span>` +
+            (r.count ? `<span class="qo-count">${r.count}</span>` : '') + `</div>`;
+        }
+        if (r.type === 'file') {
+          return `<div class="qo-row qo-file${i === qoActiveRow ? ' active' : ''}" data-idx="${i}" style="padding-left:${8 + pad + 12}px">` +
+            `<span>${escapeHtml(r.node.label)}</span><span class="qo-count">${escapeHtml(r.node.kind || '')}</span></div>`;
+        }
+        return `<div class="qo-more" style="padding-left:${8 + pad}px">${escapeHtml(r.text)}</div>`;
+      }).join('');
+      panel.style.display = 'block';
+    }
+
+    function openQuickOpen() {
+      if (currentTab !== 'include') return;
+      qoOpen = true;
+      qoActiveRow = -1;
+      renderQuickOpen();
+    }
+
+    function closeQuickOpen() {
+      qoOpen = false;
+      qoActiveRow = -1;
+      const panel = document.getElementById('quickOpenPanel');
+      if (panel) panel.style.display = 'none';
+    }
+
+    function moveQoRow(delta) {
+      if (qoRows.length === 0) return;
+      let idx = qoActiveRow;
+      for (let step = 0; step < qoRows.length; step++) {
+        idx = (idx + delta + qoRows.length) % qoRows.length;
+        if (qoRows[idx].type !== 'more') break;
+      }
+      if (qoRows[idx].type === 'more') return;
+      qoActiveRow = idx;
+      renderQuickOpen();
+      const active = document.getElementById('quickOpenPanel').querySelector('.qo-row.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function activateQoRow(row) {
+      if (!row) return;
+      if (row.type === 'dir') setDirScope(row.prefix);
+      else if (row.type === 'file') { closeQuickOpen(); selectNode(row.node.id); }
+    }
+
+    function qoPanelClick(e) {
+      const rowEl = e.target.closest('.qo-row');
+      if (!rowEl) return;
+      const row = qoRows[Number(rowEl.dataset.idx)];
+      if (!row) return;
+      if (e.target.closest('.qo-caret') && row.type === 'dir') {
+        if (qoExpanded.has(row.prefix)) qoExpanded.delete(row.prefix);
+        else qoExpanded.add(row.prefix);
+        renderQuickOpen();
+        return;
+      }
+      activateQoRow(row);
+    }
+
+    function qoKeyDown(e) {
+      if (currentTab !== 'include') return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!qoOpen) openQuickOpen();
+        else moveQoRow(1);
+      } else if (e.key === 'ArrowUp' && qoOpen) {
+        e.preventDefault();
+        moveQoRow(-1);
+      } else if (e.key === 'Enter' && qoOpen && qoActiveRow >= 0) {
+        e.preventDefault();
+        activateQoRow(qoRows[qoActiveRow]);
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && qoOpen) {
+        const r = qoRows[qoActiveRow];
+        if (r && r.type === 'dir') {
+          e.preventDefault();
+          if (e.key === 'ArrowLeft') qoExpanded.delete(r.prefix);
+          else qoExpanded.add(r.prefix);
+          renderQuickOpen();
+        }
+      } else if (e.key === 'Escape') {
+        if (qoOpen) { e.stopPropagation(); closeQuickOpen(); }
+        else if (dirScope) { e.stopPropagation(); clearDirScope(); }
+      }
+    }
+
+    function setDirScope(prefix) {
+      dirScope = prefix;
+      closeQuickOpen();
+      updateDirChip();
+      filterAndExpandSubgraph();
+    }
+
+    function clearDirScope() {
+      dirScope = null;
+      updateDirChip();
+      filterAndExpandSubgraph();
+    }
+
+    function updateDirChip() {
+      const chip = document.getElementById('dirScopeChip');
+      if (!chip) return;
+      if (dirScope && currentTab === 'include') {
+        chip.style.display = 'inline-flex';
+        document.getElementById('dirScopeLabel').textContent = '📁 ' + dirScope;
+      } else {
+        chip.style.display = 'none';
+      }
+    }
+
+    document.addEventListener('click', e => {
+      if (qoOpen && !e.target.closest('.search-wrap')) closeQuickOpen();
+    });
+
     // === ONBOARDING & HELP ===
     const tourSteps = [
       { id: '#tabInclude', title: 'Graph Perspectives', text: 'Switch between Include, Symbol, and Call graphs to analyze your codebase from different angles.' },
@@ -2268,7 +2592,7 @@
       { id: '.toolbar', title: 'Direction & Degree Navigation', text: 'Control Direction (Dependencies -> vs Consumers <-), step Degree (-/+), or use ALL-WITH-CAP to expand safely up to the node cap limit.' },
       { id: '#ariadneThread', title: 'Pathfinder & Breadcrumbs', text: 'Use Pathfinder for shortest paths and Ariadne\'s Thread to navigate your breadcrumb history.' },
       { id: '.inspector', title: 'Collateral Heat Map', text: 'Select a header to calculate collateral load. Dependencies are colored by heat tier (Cold to Red). Click a contributor to illuminate the include path.' },
-      { id: '#btnCycles', title: 'Search & Tools', text: 'Use wildcard/regex search to find files, and Highlight Cycle to detect circular dependencies.' }
+      { id: '#btnCycles', title: 'Search & Tools', text: 'Use wildcard/regex search to find files, press ↓ to browse folders in the directory navigator and scope the graph to one, and Highlight Cycle to detect circular dependencies.' }
     ];
     let currentTourStep = -1;
 

@@ -7,3 +7,4 @@ pub mod plan;
 pub mod transform;
 pub mod measure;
 pub mod ui;
+pub mod progress;

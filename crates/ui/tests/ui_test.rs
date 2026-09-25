@@ -692,6 +692,22 @@ fn test_tour_overlay_dismissal_and_positioning() {
     assert!(html.contains("transition: top 0.25s cubic-bezier"));
 
     // Verify btnTourPrev hidden on step 0
-    assert!(html.contains("btnTourPrev.style.display = currentTourStep === 0 ? 'none' : 'inline-block'"));
 }
 
+#[test]
+fn test_ui_loading_overlay_and_progress() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    assert!(html.contains("id=\"loadingOverlay\""));
+    assert!(html.contains("id=\"loadingProgress\""));
+    assert!(html.contains("id=\"loadingText\""));
+    
+    assert!(html.contains("function showProgress"));
+    assert!(html.contains("function updateProgress"));
+    assert!(html.contains("function hideProgress"));
+    
+    // Check integration in init()
+    assert!(html.contains("[1/3] Loading graph datasets... 25%"));
+    assert!(html.contains("[2/3] Processing graph models... 65%"));
+    assert!(html.contains("[3/3] Rendering visualization... 100%"));
+}

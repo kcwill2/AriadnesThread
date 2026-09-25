@@ -21,7 +21,9 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
     
     let analyzer = ariadne_graph::LoadAnalyzer::new(&include_graph, &reduced_model);
     let mut file_collateral = std::collections::HashMap::new();
-    for (file_id, path) in &include_graph.file_paths {
+    let total_files = include_graph.file_paths.len();
+    for (i, (file_id, path)) in include_graph.file_paths.iter().enumerate() {
+        crate::commands::progress::print_progress(i, total_files, "Analyzing collateral", "files");
         if let Ok(metric) = analyzer.analyze_file_load(path) {
             let mut collat = std::collections::HashMap::new();
             for src in metric.collateral_sources {
@@ -34,6 +36,7 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
             }
         }
     }
+    crate::commands::progress::print_progress(total_files, total_files, "Analyzing collateral", "files");
 
     let payload = ariadne_ui::GraphExportPayload {
         repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
