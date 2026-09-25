@@ -427,6 +427,21 @@ fn test_ui_dependency_tree_direction_preserving() {
 }
 
 #[test]
+fn test_ui_selected_node_focal_priority() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    // selectedNodeId should take precedence over q when determining seeds
+    assert!(html.contains("if (selectedNodeId) {"));
+    assert!(html.contains("} else if (q) {"));
+    
+    // selectNode should trigger filterAndExpandSubgraph regardless of search input
+    assert!(html.contains("if (!skipFilter) {"));
+    
+    // btnShowAllMatches should exist
+    assert!(html.contains("id=\"btnShowAllMatches\""));
+}
+
+#[test]
 fn test_build_symbol_elements_filters_unindexed() {
     let mut symbols = std::collections::BTreeMap::new();
     let sym_a = ariadne_index::SymbolId("A".to_string());

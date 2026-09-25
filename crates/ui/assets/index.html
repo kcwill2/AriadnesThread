@@ -816,6 +816,7 @@
           </svg>
         </button>
       </div>
+      <button id="btnShowAllMatches" class="btn-secondary" style="display:none;font-size:10px;padding:2px 6px;" onclick="selectedNodeId = null; filterAndExpandSubgraph();">View All Matches</button>
 
       <span class="stat-badge" id="badgeNodes">0 Nodes</span>
       <span class="stat-badge" id="badgeEdges">0 Edges</span>
@@ -1500,7 +1501,7 @@
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('selected'));
       renderSvg();
 
-      if (!skipFilter && !document.getElementById('searchInput').value.trim()) {
+      if (!skipFilter) {
         filterAndExpandSubgraph();
       }
     }
@@ -1529,6 +1530,13 @@
         isDragging = true;
         dragStartX = e.clientX - panX;
         dragStartY = e.clientY - panY;
+      });
+
+      container.addEventListener('click', e => {
+        if (!e.target.closest('.node-group') && dragStartX === e.clientX - panX && dragStartY === e.clientY - panY) {
+          selectedNodeId = null;
+          filterAndExpandSubgraph();
+        }
       });
 
       window.addEventListener('mousemove', e => {
@@ -1580,6 +1588,7 @@
     }
 
     function handleSearch(q) {
+      selectedNodeId = null;
       filterAndExpandSubgraph();
     }
 
@@ -1753,11 +1762,17 @@
       const dir = document.getElementById('dirSelect').value;
       
       let seeds = [];
+      let matchCount = 0;
       if (q) {
-        seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
-      } else if (selectedNodeId) {
+        let matches = tabAllNodes.filter(n => matchesFilter(n, matcher));
+        matchCount = matches.length;
+      }
+      
+      if (selectedNodeId) {
         const n = tabAllNodes.find(n => n.id === selectedNodeId);
         if (n) seeds = [n];
+      } else if (q) {
+        seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
       } else {
         const inDeg = {};
         tabAllNodes.forEach(n => inDeg[n.id] = 0);
@@ -1769,11 +1784,13 @@
       const matchCountBadge = document.getElementById('searchMatchCount');
       if (q) {
         matchCountBadge.style.display = 'inline-block';
-        matchCountBadge.textContent = seeds.length + ' matches';
+        matchCountBadge.textContent = matchCount + ' matches';
         document.getElementById('searchClearBtn').style.display = 'inline-flex';
+        document.getElementById('btnShowAllMatches').style.display = selectedNodeId ? 'inline-block' : 'none';
       } else {
         matchCountBadge.style.display = 'none';
         document.getElementById('searchClearBtn').style.display = 'none';
+        document.getElementById('btnShowAllMatches').style.display = 'none';
       }
 
       const adjOut = {};

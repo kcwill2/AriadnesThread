@@ -133,6 +133,11 @@
 - [x] **Dependency Tree Isolation & Direction-Preserving Traversal**
   - [x] Unit 1: Direction-Preserving Traversal & Dependency-First Defaulting — default `dirSelect` to `out`, prevent BFS zig-zagging into sibling consumers, and verify via tests in `crates/ui/tests/ui_test.rs`
 
+- [x] **Isolate Selected Node Dependency Tree in Search & Click Contexts**
+  - [x] Unit 1: Priority of Selected Node over Search Query in Subgraph Seeding — prioritize `selectedNodeId` as the focal root seed, invoke `filterAndExpandSubgraph` on node selection even when search query is present, and add Canvas background deselection & "View All Matches" toggle
+
+
+
 
 
 
