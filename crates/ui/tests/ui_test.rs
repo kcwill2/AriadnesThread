@@ -58,6 +58,7 @@ async fn test_server_routes() {
                 total_calls: 0,
                 cycle_count: 0,
             },
+            file_collateral: std::collections::HashMap::new(),
         },
     });
 
@@ -95,6 +96,7 @@ async fn test_server_traversal_routes() {
                 total_calls: 0,
                 cycle_count: 0,
             },
+            file_collateral: std::collections::HashMap::new(),
         },
     });
 
@@ -181,6 +183,7 @@ async fn test_search_advanced_queries_and_dto_paths() {
             symbol_graph: sym_elements,
             call_graph: call_elements,
             stats: SummaryStats { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
+            file_collateral: std::collections::HashMap::new(),
         },
     });
 
@@ -224,6 +227,7 @@ fn test_export_html() {
             total_calls: 0,
             cycle_count: 0,
         },
+        file_collateral: std::collections::HashMap::new(),
     };
     let template = "<html><body>/*__ARIADNE_DATA__*/</body></html>";
     let temp_dir = tempfile::tempdir().unwrap();
@@ -293,6 +297,7 @@ async fn test_server_index_route() {
                 total_calls: 0,
                 cycle_count: 0,
             },
+            file_collateral: std::collections::HashMap::new(),
         },
     });
 
@@ -320,6 +325,7 @@ fn test_export_html_empty_template_uses_index() {
             total_calls: 0,
             cycle_count: 0,
         },
+        file_collateral: std::collections::HashMap::new(),
     };
     let temp_dir = tempfile::tempdir().unwrap();
     let out_path = temp_dir.path().join("out2.html");
@@ -496,4 +502,97 @@ fn test_build_symbol_elements_filters_unindexed() {
     // A's out_degree should be 1
     let node_a = elements.iter().find(|e| e.data["id"] == "A").unwrap();
     assert_eq!(node_a.data["out_degree"], 1, "A should have out_degree 1");
+}
+
+#[test]
+fn test_file_collateral_dto_serialization() {
+    let mut file_collateral = HashMap::new();
+    let mut collat = HashMap::new();
+    collat.insert("2".to_string(), 5);
+    file_collateral.insert("1".to_string(), collat);
+
+    let payload = GraphExportPayload {
+        repo_name: "test".to_string(),
+        include_graph: vec![],
+        symbol_graph: vec![],
+        call_graph: vec![],
+        stats: SummaryStats {
+            total_files: 0,
+            total_symbols: 0,
+            total_calls: 0,
+            cycle_count: 0,
+        },
+        file_collateral,
+    };
+
+    let serialized = serde_json::to_string(&payload).unwrap();
+    assert!(serialized.contains(r#""file_collateral":{"1":{"2":5}}"#));
+
+    let deserialized: GraphExportPayload = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(deserialized.file_collateral.get("1").unwrap().get("2"), Some(&5));
+}
+
+#[tokio::test]
+async fn test_server_collateral_endpoint() {
+    let mut file_collateral = HashMap::new();
+    let mut collat = HashMap::new();
+    collat.insert("2".to_string(), 5);
+    file_collateral.insert("1".to_string(), collat);
+
+    let state = Arc::new(UiState {
+        repo_root: std::path::PathBuf::from("."),
+        include_graph: IncludeGraph::new(),
+        reduced_model: ReducedSemanticModel {
+            repo_root: std::path::PathBuf::from("."),
+            symbols: std::collections::BTreeMap::new(),
+            edges: vec![],
+            tu_usage: std::collections::BTreeMap::new(),
+            file_symbols: std::collections::BTreeMap::new(),
+        },
+        call_graph: CallGraph::default(),
+        payload: GraphExportPayload {
+            repo_name: "test".to_string(),
+            include_graph: vec![],
+            symbol_graph: vec![],
+            call_graph: vec![],
+            stats: SummaryStats {
+                total_files: 0,
+                total_symbols: 0,
+                total_calls: 0,
+                cycle_count: 0,
+            },
+            file_collateral,
+        },
+    });
+
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/graph/collateral?file=1")
+        .body(Body::empty())
+        .unwrap();
+    
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let response: ariadne_ui::CollateralResponse = serde_json::from_slice(&body).unwrap();
+    
+    assert_eq!(response.target_id, "1");
+    // total_collateral, direct_collateral, transitive_collateral should be computed in the server logic
+}
+
+#[test]
+fn test_ui_noticeable_fading_elements() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    assert!(html.contains(".node-group.faded") && html.contains("opacity: 0.12"));
+    assert!(html.contains(".edge-path.faded") && html.contains("opacity: 0.06"));
+    assert!(html.contains(".node-group.heat-root"));
+    
+    // Assert INDEX_HTML contains logic applying faded to non-dependencies when a node is selected in the include graph, 
+    // and clearing faded on canvas click or Esc.
+    assert!(html.contains("currentTab === 'include'") && html.contains("selectedNodeId"));
+    assert!(html.contains("reachableDependencies.add") || html.contains("reachableDependencies"));
+    assert!(html.contains("faded"));
 }

@@ -369,6 +369,18 @@
       filter: drop-shadow(0 0 14px var(--cyan-glow));
     }
 
+    .node-group.faded {
+      opacity: 0.12 !important;
+      filter: grayscale(80%) brightness(0.65);
+      transition: opacity 0.25s ease, filter 0.25s ease;
+    }
+
+    .node-group.heat-root rect {
+      stroke: var(--cyan) !important;
+      stroke-width: 2.5px !important;
+      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.65));
+    }
+
     .edge-path {
       fill: none;
       stroke: #475569;
@@ -379,6 +391,10 @@
     .edge-path.incomplete {
       stroke: #64748b;
       stroke-dasharray: 4, 4;
+    }
+
+    .edge-path.faded {
+      opacity: 0.06 !important;
     }
 
     .edge-path.cycle-edge {
@@ -1378,6 +1394,7 @@
         
         edgeEl.setAttribute('marker-end', markerUrl);
         edgeEl.dataset.edgeId = e.id;
+        edgeEl.dataset.edgeSource = e.source;
         edgesLayer.appendChild(edgeEl);
       };
 
@@ -1394,6 +1411,7 @@
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         g.setAttribute('class', `node-group ${isSelected ? 'selected' : ''}`);
         g.setAttribute('transform', `translate(${n.x}, ${n.y})`);
+        g.dataset.nodeId = n.id;
         g.onclick = (evt) => {
           evt.stopPropagation();
           selectNode(n.id);
@@ -1431,6 +1449,42 @@
         g.appendChild(text);
         nodesLayer.appendChild(g);
       });
+
+      // Apply include-graph fading and heat-root after all nodes are rendered
+      if (currentTab === 'include' && selectedNodeId) {
+        const reachableDependencies = computeFullDependencies(selectedNodeId);
+        nodesLayer.querySelectorAll('.node-group').forEach(el => {
+          const nid = el.dataset.nodeId;
+          if (nid === selectedNodeId) {
+            el.classList.add('heat-root');
+          } else if (!reachableDependencies.has(nid)) {
+            el.classList.add('faded');
+          }
+        });
+        edgesLayer.querySelectorAll('.edge-path').forEach(el => {
+          const src = el.dataset.edgeSource;
+          if (!reachableDependencies.has(src) && src !== selectedNodeId) {
+            el.classList.add('faded');
+          }
+        });
+      }
+    }
+
+    // BFS over the full (unfiltered) edge dataset to find all outgoing include deps.
+    // Temperature/heat must use this set, not the degree-limited activeEdges.
+    function computeFullDependencies(nodeId) {
+      const reachableDependencies = new Set();
+      const queue = [nodeId];
+      while (queue.length > 0) {
+        const curr = queue.shift();
+        tabAllEdges.forEach(e => {
+          if (e.source === curr && !reachableDependencies.has(e.target)) {
+            reachableDependencies.add(e.target);
+            queue.push(e.target);
+          }
+        });
+      }
+      return reachableDependencies;
     }
 
     function selectNode(id, skipFilter = false) {
@@ -1657,6 +1711,10 @@
       if ((e.ctrlKey && e.key === 'k') || e.key === '/') {
         e.preventDefault();
         document.getElementById('searchInput').focus();
+      }
+      if (e.key === 'Escape' && selectedNodeId) {
+        selectedNodeId = null;
+        renderSvg();
       }
     });
 
