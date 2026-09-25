@@ -30,9 +30,9 @@ fn test_m6_symbol_load_and_collateral_quantification() -> Result<()> {
     let metric = analyzer.analyze_symbol_load("Thing")?;
     
     assert_eq!(metric.semantic_load, 2);
-    assert_eq!(metric.include_load, 4);
-    assert_eq!(metric.total_load, 4);
-    assert_eq!(metric.collateral_load, 2);
+    assert_eq!(metric.include_load, 6);
+    assert_eq!(metric.total_load, 6);
+    assert_eq!(metric.collateral_load, 4);
     
     // Check that ThingConfig is present in semantic_symbols and NOT in collateral_symbols
     let thing_config = model.find_symbol("ThingConfig").expect("ThingConfig symbol should exist");
@@ -80,9 +80,9 @@ fn test_m6_file_load_analysis() -> Result<()> {
     let file_path = PathBuf::from("include/thing.h");
     let metric = analyzer.analyze_file_load(&file_path)?;
     
-    assert_eq!(metric.semantic_load, 2);
+    assert_eq!(metric.semantic_load, 4);
     assert_eq!(metric.collateral_load, 2);
-    assert_eq!(metric.total_load, 4);
+    assert_eq!(metric.total_load, 6);
     
     let largest = metric.largest_collateral_source.expect("Largest collateral source should be Some");
     assert_eq!(largest.path.file_name().unwrap().to_str().unwrap(), "heavy.h");

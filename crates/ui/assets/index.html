@@ -2124,9 +2124,18 @@
         seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
       } else {
         const inDeg = {};
-        tabAllNodes.forEach(n => inDeg[n.id] = 0);
-        tabAllEdges.forEach(e => { if (inDeg[e.target] !== undefined) inDeg[e.target]++; });
-        let sorted = tabAllNodes.slice().sort((a,b) => inDeg[a.id] - inDeg[b.id]);
+        const outDeg = {};
+        tabAllNodes.forEach(n => { inDeg[n.id] = 0; outDeg[n.id] = 0; });
+        tabAllEdges.forEach(e => { 
+          if (inDeg[e.target] !== undefined) inDeg[e.target]++; 
+          if (outDeg[e.source] !== undefined) outDeg[e.source]++; 
+        });
+        let sorted = tabAllNodes.slice().sort((a,b) => {
+          const aHasOut = outDeg[a.id] > 0 ? 0 : 1;
+          const bHasOut = outDeg[b.id] > 0 ? 0 : 1;
+          if (aHasOut !== bHasOut) return aHasOut - bHasOut;
+          return inDeg[a.id] - inDeg[b.id];
+        });
         seeds = sorted.slice(0, Math.min(sorted.length, nodeCap));
       }
 

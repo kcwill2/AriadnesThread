@@ -33,7 +33,18 @@ impl CallGraph {
             for site in &tu.call_sites {
                 let caller = site.caller_symbol.clone();
                 
-                let callee_opt = model.symbols.values().find(|sym| sym.name == site.callee_name || sym.id.0 == site.callee_name);
+                let callee_opt = model.symbols.values().find(|sym| {
+                    if sym.name == site.callee_name || sym.id.0 == site.callee_name {
+                        return true;
+                    }
+                    if sym.id.0.ends_with(&format!("::{}", site.callee_name)) {
+                        return true;
+                    }
+                    if site.callee_name.ends_with(&format!("::{}", sym.name)) {
+                        return true;
+                    }
+                    false
+                });
                 
                 if let Some(callee_sym) = callee_opt {
                     let callee = callee_sym.id.clone();
@@ -311,5 +322,59 @@ mod tests {
         let path = graph.shortest_call_path(&SymbolId::new("A"), &SymbolId::new("C"));
         assert!(path.is_some());
         assert_eq!(path.unwrap(), vec![SymbolId::new("A"), SymbolId::new("B"), SymbolId::new("C")]);
+    }
+
+    #[test]
+    fn test_callgraph_build_qualified_names() {
+        let f1 = FileId::from_relative_path("main.rs");
+        let sym_caller = SymbolId::new("caller");
+        let sym_callee = SymbolId::new("ns::MyClass::callee");
+
+        let tu = TuAnalysis {
+            tu_file_id: f1.clone(),
+            context_name: "test".into(),
+            symbols: vec![
+                SymbolRecord {
+                    id: sym_caller.clone(),
+                    name: "caller".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: f1.clone(),
+                    declarations: vec![],
+                    definition: None,
+                },
+                SymbolRecord {
+                    id: sym_callee.clone(),
+                    name: "callee".into(), // The name might be just "callee"
+                    kind: SymbolKind::Function,
+                    owning_file: f1.clone(),
+                    declarations: vec![],
+                    definition: None,
+                },
+            ],
+            declarations: vec![],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![
+                CallSite {
+                    caller_symbol: sym_caller.clone(),
+                    callee_name: "callee".into(), // Caller just says "callee()"
+                    location: FileLocation { file_id: f1.clone(), line: 10, column: 5 },
+                },
+                CallSite {
+                    caller_symbol: sym_caller.clone(),
+                    callee_name: "MyClass::callee".into(), // Caller uses fully qualified name
+                    location: FileLocation { file_id: f1.clone(), line: 11, column: 5 },
+                }
+            ],
+        };
+
+        let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let model = ReducedSemanticModel::reduce(&index_result);
+        
+        let graph = CallGraph::build_from_index(&index_result, &model);
+        
+        let callers = graph.callers_of(&sym_callee);
+        assert_eq!(callers.len(), 1, "Should map both call sites to the same callee");
+        assert_eq!(callers[0].call_count, 2, "Should have 2 calls");
     }
 }
