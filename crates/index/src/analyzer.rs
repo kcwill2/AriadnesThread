@@ -71,324 +71,369 @@ fn tokenize(source: &str) -> Vec<Token> {
     tokens
 }
 
-pub struct CppSemanticAnalyzer;
+struct ParserCtx<'a> {
+    tu_file_id: FileId,
+    tokens: &'a [Token],
+    edges: Vec<SemanticEdge>,
+    symbols: Vec<SymbolRecord>,
+    declarations: Vec<SymbolDecl>,
+    call_sites: Vec<CallSite>,
+    current_class: Option<(String, usize)>,
+    current_function: Option<(SymbolId, usize)>,
+    brace_depth: usize,
+    decl_counter: usize,
+    i: usize,
+}
 
-impl CppSemanticAnalyzer {
-    pub fn analyze_source(tu_file_id: FileId, source_code: &str, context_name: &str) -> TuAnalysis {
-        let tokens = tokenize(source_code);
-        let mut edges = Vec::new();
-        let mut symbols = Vec::new();
-        let mut declarations = Vec::new();
-        let mut call_sites = Vec::new();
+impl<'a> ParserCtx<'a> {
+    fn new(tu_file_id: FileId, tokens: &'a [Token]) -> Self {
+        Self {
+            tu_file_id,
+            tokens,
+            edges: Vec::new(),
+            symbols: Vec::new(),
+            declarations: Vec::new(),
+            call_sites: Vec::new(),
+            current_class: None,
+            current_function: None,
+            brace_depth: 0,
+            decl_counter: 0,
+            i: 0,
+        }
+    }
 
-        let mut current_class: Option<(String, usize)> = None;
-        let mut current_function: Option<(SymbolId, usize)> = None;
-        let mut brace_depth = 0;
-        let mut i = 0;
+    fn handle_brace_open(&mut self) {
+        self.brace_depth += 1;
+    }
 
-        let mut decl_counter = 0;
+    fn handle_brace_close(&mut self) {
+        self.brace_depth -= 1;
+        if let Some((_, depth)) = self.current_class {
+            if self.brace_depth < depth {
+                self.current_class = None;
+            }
+        }
+        if let Some((_, depth)) = self.current_function {
+            if self.brace_depth < depth {
+                self.current_function = None;
+            }
+        }
+    }
 
-        while i < tokens.len() {
-            let token = &tokens[i];
-            match &token.kind {
-                TokenKind::Punct(p) if p == "{" => {
-                    brace_depth += 1;
+    fn handle_class_or_struct(&mut self, w: &str) {
+        if self.i + 1 >= self.tokens.len() {
+            return;
+        }
+        if let TokenKind::Word(name) = &self.tokens[self.i + 1].kind {
+            let loc = FileLocation {
+                file_id: self.tu_file_id.clone(),
+                line: self.tokens[self.i + 1].line,
+                column: self.tokens[self.i + 1].column,
+            };
+            let symbol_id = SymbolId::new(name.clone());
+            self.decl_counter += 1;
+            let decl_id = DeclId::new(format!("decl_{}", self.decl_counter));
+
+            let mut is_definition = false;
+            
+            if self.i + 2 < self.tokens.len() {
+                match &self.tokens[self.i + 2].kind {
+                    TokenKind::Punct(p) if p == ";" => {
+                        is_definition = false;
+                        self.i += 2;
+                    }
+                    TokenKind::Punct(p) if p == "{" => {
+                        is_definition = true;
+                        self.current_class = Some((name.clone(), self.brace_depth + 1));
+                        self.i += 1;
+                    }
+                    TokenKind::Punct(p) if p == ":" => {
+                        is_definition = true;
+                        self.current_class = Some((name.clone(), self.brace_depth + 1));
+                        let mut j = self.i + 3;
+                        while j < self.tokens.len() {
+                            if let TokenKind::Word(base_w) = &self.tokens[j].kind {
+                                if base_w != "public" && base_w != "private" && base_w != "protected" {
+                                    self.edges.push(SemanticEdge {
+                                        src_symbol: SymbolId::new(name.clone()),
+                                        dst_symbol: SymbolId::new(base_w.clone()),
+                                        kind: DependencyKind::Complete,
+                                        src_file: self.tu_file_id.clone(),
+                                        dst_file: self.tu_file_id.clone(),
+                                    });
+                                    break;
+                                }
+                            }
+                            j += 1;
+                        }
+                        self.i = j;
+                    }
+                    _ => {}
                 }
-                TokenKind::Punct(p) if p == "}" => {
-                    brace_depth -= 1;
-                    if let Some((_, depth)) = current_class {
-                        if brace_depth < depth {
-                            current_class = None;
+            }
+
+            self.declarations.push(SymbolDecl {
+                id: decl_id.clone(),
+                symbol_id: symbol_id.clone(),
+                location: loc,
+                is_definition,
+            });
+
+            let kind = if w == "class" { SymbolKind::Class } else { SymbolKind::Struct };
+
+            if let Some(existing) = self.symbols.iter_mut().find(|s| s.id == symbol_id) {
+                existing.declarations.push(decl_id.clone());
+                if is_definition {
+                    existing.definition = Some(decl_id);
+                }
+            } else {
+                self.symbols.push(SymbolRecord {
+                    id: symbol_id,
+                    name: name.clone(),
+                    kind,
+                    owning_file: self.tu_file_id.clone(),
+                    declarations: vec![decl_id.clone()],
+                    definition: if is_definition { Some(decl_id) } else { None },
+                });
+            }
+        }
+    }
+
+    fn handle_sizeof(&mut self) {
+        if self.i + 2 < self.tokens.len() {
+            if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
+                if p == "(" {
+                    if let TokenKind::Word(target) = &self.tokens[self.i + 2].kind {
+                        if let Some((ref class_name, _)) = self.current_class {
+                            self.edges.push(SemanticEdge {
+                                src_symbol: SymbolId::new(class_name.clone()),
+                                dst_symbol: SymbolId::new(target.clone()),
+                                kind: DependencyKind::Complete,
+                                src_file: self.tu_file_id.clone(),
+                                dst_file: self.tu_file_id.clone(),
+                            });
                         }
                     }
-                    if let Some((_, depth)) = current_function {
-                        if brace_depth < depth {
-                            current_function = None;
+                }
+            }
+        }
+    }
+
+    fn handle_new(&mut self) {
+        if self.i + 1 < self.tokens.len() {
+            if let TokenKind::Word(target) = &self.tokens[self.i + 1].kind {
+                if let Some((ref class_name, _)) = self.current_class {
+                    self.edges.push(SemanticEdge {
+                        src_symbol: SymbolId::new(class_name.clone()),
+                        dst_symbol: SymbolId::new(target.clone()),
+                        kind: DependencyKind::Complete,
+                        src_file: self.tu_file_id.clone(),
+                        dst_file: self.tu_file_id.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    fn handle_word(&mut self, w: &str, token: &Token) {
+        self.handle_call_site(w, token);
+        self.handle_global_function(w, token);
+        self.handle_variable_decl(w);
+    }
+
+    fn handle_call_site(&mut self, w: &str, token: &Token) {
+        if let Some((ref func_symbol, _)) = self.current_function {
+            if self.brace_depth > 0 && self.i + 1 < self.tokens.len() {
+                if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
+                    if p == "(" {
+                        let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw"];
+                        if !reserved.contains(&w) {
+                            self.call_sites.push(CallSite {
+                                caller_symbol: func_symbol.clone(),
+                                callee_name: w.to_string(),
+                                location: FileLocation {
+                                    file_id: self.tu_file_id.clone(),
+                                    line: token.line,
+                                    column: token.column,
+                                },
+                            });
                         }
                     }
                 }
-                TokenKind::Word(w) if w == "class" || w == "struct" => {
-                    if i + 1 < tokens.len() {
-                        if let TokenKind::Word(name) = &tokens[i + 1].kind {
+            }
+        }
+    }
+
+    fn handle_global_function(&mut self, w: &str, token: &Token) {
+        if self.brace_depth == 0 && self.i >= 1 && self.i + 1 < self.tokens.len() {
+            if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
+                if p == "(" {
+                    if let TokenKind::Word(prev_w) = &self.tokens[self.i - 1].kind {
+                        if prev_w != "class" && prev_w != "struct" {
+                            let name = w.to_string();
                             let loc = FileLocation {
-                                file_id: tu_file_id.clone(),
-                                line: tokens[i + 1].line,
-                                column: tokens[i + 1].column,
+                                file_id: self.tu_file_id.clone(),
+                                line: token.line,
+                                column: token.column,
                             };
                             let symbol_id = SymbolId::new(name.clone());
-                            decl_counter += 1;
-                            let decl_id = DeclId::new(format!("decl_{}", decl_counter));
-
-                            let mut is_definition = false;
+                            self.decl_counter += 1;
+                            let decl_id = DeclId::new(format!("decl_{}", self.decl_counter));
                             
-                            // Check forward decl vs definition vs inheritance
-                            if i + 2 < tokens.len() {
-                                match &tokens[i + 2].kind {
-                                    TokenKind::Punct(p) if p == ";" => {
-                                        // Forward decl
-                                        is_definition = false;
-                                        i += 2;
-                                    }
-                                    TokenKind::Punct(p) if p == "{" => {
+                            let mut is_definition = false;
+                            let mut j = self.i + 2;
+                            let mut paren_depth = 1;
+                            while j < self.tokens.len() && paren_depth > 0 {
+                                if let TokenKind::Punct(p2) = &self.tokens[j].kind {
+                                    if p2 == "(" { paren_depth += 1; }
+                                    else if p2 == ")" { paren_depth -= 1; }
+                                }
+                                j += 1;
+                            }
+                            if j < self.tokens.len() {
+                                if let TokenKind::Punct(p3) = &self.tokens[j].kind {
+                                    if p3 == "{" {
                                         is_definition = true;
-                                        current_class = Some((name.clone(), brace_depth + 1));
-                                        i += 2; // will hit '{' in next iterations, wait actually we skip it if we i+=2. So just i+=1 and let the main loop handle '{'
-                                        i -= 1; 
+                                        self.current_function = Some((symbol_id.clone(), self.brace_depth + 1));
                                     }
-                                    TokenKind::Punct(p) if p == ":" => {
-                                        is_definition = true;
-                                        current_class = Some((name.clone(), brace_depth + 1));
-                                        // Find base class
-                                        let mut j = i + 3;
-                                        while j < tokens.len() {
-                                            if let TokenKind::Word(base_w) = &tokens[j].kind {
-                                                if base_w != "public" && base_w != "private" && base_w != "protected" {
-                                                    edges.push(SemanticEdge {
-                                                        src_symbol: SymbolId::new(name.clone()),
-                                                        dst_symbol: SymbolId::new(base_w.clone()),
-                                                        kind: DependencyKind::Complete,
-                                                        src_file: tu_file_id.clone(),
-                                                        dst_file: tu_file_id.clone(),
-                                                    });
-                                                    break;
-                                                }
-                                            }
-                                            j += 1;
-                                        }
-                                        i = j;
-                                    }
-                                    _ => {}
                                 }
                             }
 
-                            declarations.push(SymbolDecl {
+                            self.declarations.push(SymbolDecl {
                                 id: decl_id.clone(),
                                 symbol_id: symbol_id.clone(),
                                 location: loc,
                                 is_definition,
                             });
 
-                            let kind = if w == "class" { SymbolKind::Class } else { SymbolKind::Struct };
-
-                            if let Some(existing) = symbols.iter_mut().find(|s: &&mut SymbolRecord| s.id == symbol_id) {
+                            if let Some(existing) = self.symbols.iter_mut().find(|s| s.id == symbol_id) {
                                 existing.declarations.push(decl_id.clone());
                                 if is_definition {
                                     existing.definition = Some(decl_id);
                                 }
                             } else {
-                                symbols.push(SymbolRecord {
+                                self.symbols.push(SymbolRecord {
                                     id: symbol_id,
                                     name: name.clone(),
-                                    kind,
-                                    owning_file: tu_file_id.clone(),
+                                    kind: SymbolKind::Function,
+                                    owning_file: self.tu_file_id.clone(),
                                     declarations: vec![decl_id.clone()],
                                     definition: if is_definition { Some(decl_id) } else { None },
                                 });
                             }
-                            
-                            i += 1;
-                            continue;
                         }
                     }
                 }
-                TokenKind::Word(w) if w == "sizeof" => {
-                    if i + 2 < tokens.len() {
-                        if let TokenKind::Punct(p) = &tokens[i + 1].kind {
-                            if p == "(" {
-                                if let TokenKind::Word(target) = &tokens[i + 2].kind {
-                                    if let Some((ref class_name, _)) = current_class {
-                                        edges.push(SemanticEdge {
-                                            src_symbol: SymbolId::new(class_name.clone()),
-                                            dst_symbol: SymbolId::new(target.clone()),
-                                            kind: DependencyKind::Complete,
-                                            src_file: tu_file_id.clone(),
-                                            dst_file: tu_file_id.clone(),
-                                        });
-                                    }
+            }
+        }
+    }
+
+    fn handle_variable_decl(&mut self, w: &str) {
+        if let Some((ref class_name, _)) = self.current_class {
+            if self.i + 1 < self.tokens.len() {
+                let type_name = w.to_string();
+                if let TokenKind::Word(_) = &self.tokens[self.i + 1].kind {
+                    if type_name != "void" && type_name != "return" {
+                        let mut is_function = false;
+                        if self.i + 2 < self.tokens.len() {
+                            if let TokenKind::Punct(p) = &self.tokens[self.i + 2].kind {
+                                if p == "(" {
+                                    is_function = true;
                                 }
                             }
                         }
+                        
+                        self.edges.push(SemanticEdge {
+                            src_symbol: SymbolId::new(class_name.clone()),
+                            dst_symbol: SymbolId::new(type_name),
+                            kind: if is_function { DependencyKind::Incomplete } else { DependencyKind::Complete },
+                            src_file: self.tu_file_id.clone(),
+                            dst_file: self.tu_file_id.clone(),
+                        });
                     }
-                }
-                TokenKind::Word(w) if w == "new" => {
-                    if i + 1 < tokens.len() {
-                        if let TokenKind::Word(target) = &tokens[i + 1].kind {
-                            if let Some((ref class_name, _)) = current_class {
-                                edges.push(SemanticEdge {
+                } else if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
+                    if p == "*" || p == "&" {
+                        self.edges.push(SemanticEdge {
+                            src_symbol: SymbolId::new(class_name.clone()),
+                            dst_symbol: SymbolId::new(type_name),
+                            kind: DependencyKind::Incomplete,
+                            src_file: self.tu_file_id.clone(),
+                            dst_file: self.tu_file_id.clone(),
+                        });
+                    } else if p == "<" {
+                        if type_name == "unique_ptr" || type_name == "shared_ptr" {
+                            if self.i + 2 < self.tokens.len() {
+                                if let TokenKind::Word(target) = &self.tokens[self.i + 2].kind {
+                                    self.edges.push(SemanticEdge {
+                                        src_symbol: SymbolId::new(class_name.clone()),
+                                        dst_symbol: SymbolId::new(target.clone()),
+                                        kind: DependencyKind::Incomplete,
+                                        src_file: self.tu_file_id.clone(),
+                                        dst_file: self.tu_file_id.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    } else if p == "(" {
+                        if self.i > 0 {
+                            if let TokenKind::Word(_) = &self.tokens[self.i - 1].kind {
+                                // Something like `new B()`
+                            } else {
+                                self.edges.push(SemanticEdge {
                                     src_symbol: SymbolId::new(class_name.clone()),
-                                    dst_symbol: SymbolId::new(target.clone()),
+                                    dst_symbol: SymbolId::new(type_name),
                                     kind: DependencyKind::Complete,
-                                    src_file: tu_file_id.clone(),
-                                    dst_file: tu_file_id.clone(),
+                                    src_file: self.tu_file_id.clone(),
+                                    dst_file: self.tu_file_id.clone(),
                                 });
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+pub struct CppSemanticAnalyzer;
+
+impl CppSemanticAnalyzer {
+    pub fn analyze_source(tu_file_id: FileId, source_code: &str, context_name: &str) -> TuAnalysis {
+        let tokens = tokenize(source_code);
+        let mut ctx = ParserCtx::new(tu_file_id.clone(), &tokens);
+
+        while ctx.i < ctx.tokens.len() {
+            let token = ctx.tokens[ctx.i].clone();
+            match &token.kind {
+                TokenKind::Punct(p) if p == "{" => ctx.handle_brace_open(),
+                TokenKind::Punct(p) if p == "}" => ctx.handle_brace_close(),
+                TokenKind::Word(w) if w == "class" || w == "struct" => {
+                    let w = w.clone();
+                    ctx.handle_class_or_struct(&w);
+                }
+                TokenKind::Word(w) if w == "sizeof" => {
+                    ctx.handle_sizeof();
+                }
+                TokenKind::Word(w) if w == "new" => {
+                    ctx.handle_new();
+                }
                 TokenKind::Word(w) => {
-                    if let Some((ref func_symbol, _)) = current_function {
-                        if brace_depth > 0 && i + 1 < tokens.len() {
-                            if let TokenKind::Punct(p) = &tokens[i + 1].kind {
-                                if p == "(" {
-                                    let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw"];
-                                    if !reserved.contains(&w.as_str()) {
-                                        call_sites.push(CallSite {
-                                            caller_symbol: func_symbol.clone(),
-                                            callee_name: w.clone(),
-                                            location: FileLocation {
-                                                file_id: tu_file_id.clone(),
-                                                line: token.line,
-                                                column: token.column,
-                                            },
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if brace_depth == 0 && i >= 1 && i + 1 < tokens.len() {
-                        if let TokenKind::Punct(p) = &tokens[i + 1].kind {
-                            if p == "(" {
-                                if let TokenKind::Word(prev_w) = &tokens[i - 1].kind {
-                                    if prev_w != "class" && prev_w != "struct" {
-                                        // This looks like a global function definition/declaration
-                                        let name = w.clone();
-                                        let loc = FileLocation {
-                                            file_id: tu_file_id.clone(),
-                                            line: token.line,
-                                            column: token.column,
-                                        };
-                                        let symbol_id = SymbolId::new(name.clone());
-                                        decl_counter += 1;
-                                        let decl_id = DeclId::new(format!("decl_{}", decl_counter));
-                                        
-                                        // Find if it's a definition (has body later)
-                                        let mut is_definition = false;
-                                        let mut j = i + 2;
-                                        let mut paren_depth = 1;
-                                        while j < tokens.len() && paren_depth > 0 {
-                                            if let TokenKind::Punct(p2) = &tokens[j].kind {
-                                                if p2 == "(" { paren_depth += 1; }
-                                                else if p2 == ")" { paren_depth -= 1; }
-                                            }
-                                            j += 1;
-                                        }
-                                        if j < tokens.len() {
-                                            if let TokenKind::Punct(p3) = &tokens[j].kind {
-                                                if p3 == "{" {
-                                                    is_definition = true;
-                                                    current_function = Some((symbol_id.clone(), brace_depth + 1));
-                                                }
-                                            }
-                                        }
-
-                                        declarations.push(SymbolDecl {
-                                            id: decl_id.clone(),
-                                            symbol_id: symbol_id.clone(),
-                                            location: loc,
-                                            is_definition,
-                                        });
-
-                                        if let Some(existing) = symbols.iter_mut().find(|s: &&mut SymbolRecord| s.id == symbol_id) {
-                                            existing.declarations.push(decl_id.clone());
-                                            if is_definition {
-                                                existing.definition = Some(decl_id);
-                                            }
-                                        } else {
-                                            symbols.push(SymbolRecord {
-                                                id: symbol_id,
-                                                name: name.clone(),
-                                                kind: SymbolKind::Function,
-                                                owning_file: tu_file_id.clone(),
-                                                declarations: vec![decl_id.clone()],
-                                                definition: if is_definition { Some(decl_id) } else { None },
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Check for variable declarations inside class
-                    if let Some((ref class_name, _)) = current_class {
-                        if i + 1 < tokens.len() {
-                            let type_name = w.clone();
-                            if let TokenKind::Word(_) = &tokens[i + 1].kind {
-                                if type_name != "void" && type_name != "return" {
-                                    let mut is_function = false;
-                                    if i + 2 < tokens.len() {
-                                        if let TokenKind::Punct(p) = &tokens[i + 2].kind {
-                                            if p == "(" {
-                                                is_function = true;
-                                            }
-                                        }
-                                    }
-                                    
-                                    edges.push(SemanticEdge {
-                                        src_symbol: SymbolId::new(class_name.clone()),
-                                        dst_symbol: SymbolId::new(type_name),
-                                        kind: if is_function { DependencyKind::Incomplete } else { DependencyKind::Complete },
-                                        src_file: tu_file_id.clone(),
-                                        dst_file: tu_file_id.clone(),
-                                    });
-                                }
-                            } else if let TokenKind::Punct(p) = &tokens[i + 1].kind {
-                                if p == "*" || p == "&" {
-                                    edges.push(SemanticEdge {
-                                        src_symbol: SymbolId::new(class_name.clone()),
-                                        dst_symbol: SymbolId::new(type_name),
-                                        kind: DependencyKind::Incomplete,
-                                        src_file: tu_file_id.clone(),
-                                        dst_file: tu_file_id.clone(),
-                                    });
-                                } else if p == "<" {
-                                    if type_name == "unique_ptr" || type_name == "shared_ptr" {
-                                        if i + 2 < tokens.len() {
-                                            if let TokenKind::Word(target) = &tokens[i + 2].kind {
-                                                edges.push(SemanticEdge {
-                                                    src_symbol: SymbolId::new(class_name.clone()),
-                                                    dst_symbol: SymbolId::new(target.clone()),
-                                                    kind: DependencyKind::Incomplete,
-                                                    src_file: tu_file_id.clone(),
-                                                    dst_file: tu_file_id.clone(),
-                                                });
-                                            }
-                                        }
-                                    }
-                                } else if p == "(" {
-                                    if i > 0 {
-                                        if let TokenKind::Word(_) = &tokens[i - 1].kind {
-                                            // Something like `new B()`
-                                        } else {
-                                            edges.push(SemanticEdge {
-                                                src_symbol: SymbolId::new(class_name.clone()),
-                                                dst_symbol: SymbolId::new(type_name),
-                                                kind: DependencyKind::Complete,
-                                                src_file: tu_file_id.clone(),
-                                                dst_file: tu_file_id.clone(),
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let w = w.clone();
+                    ctx.handle_word(&w, &token);
                 }
                 _ => {}
             }
-            i += 1;
+            ctx.i += 1;
         }
 
         TuAnalysis {
             tu_file_id,
             context_name: context_name.to_string(),
-            symbols,
-            declarations,
-            edges,
+            symbols: ctx.symbols,
+            declarations: ctx.declarations,
+            edges: ctx.edges,
             references: vec![],
-            call_sites,
+            call_sites: ctx.call_sites,
         }
     }
 

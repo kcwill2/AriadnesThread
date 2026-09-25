@@ -27,11 +27,17 @@ impl fmt::Display for FileId {
     }
 }
 
-/// Category of file based on C++ role.
+/// Category of file based on its language role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FileKind {
+    // C / C++
     Header,
     Source,
+    // Scala
+    ScalaSource,
+    ScalaScript,
+    BuildDefinition,
+    // Catch-all
     Other,
 }
 
@@ -40,12 +46,38 @@ impl FileKind {
         match path.extension().and_then(|ext| ext.to_str()).map(|s| s.to_lowercase()).as_deref() {
             Some("h" | "hpp" | "hxx" | "hh" | "inl" | "ipp") => FileKind::Header,
             Some("cpp" | "cc" | "cxx" | "c") => FileKind::Source,
+            Some("scala") => FileKind::ScalaSource,
+            Some("sc") => FileKind::ScalaScript,
+            Some("sbt" | "mill") => FileKind::BuildDefinition,
             _ => FileKind::Other,
         }
     }
 
     pub fn is_source_or_header(&self) -> bool {
         matches!(self, FileKind::Header | FileKind::Source)
+    }
+
+    /// Returns `true` for any file kind that should be semantically analysed.
+    pub fn is_analyzable(&self) -> bool {
+        matches!(self, FileKind::Header | FileKind::Source | FileKind::ScalaSource)
+    }
+}
+
+/// The programming language associated with a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SourceLanguage {
+    Cpp,
+    Scala,
+    Other,
+}
+
+impl SourceLanguage {
+    pub fn from_file_kind(kind: FileKind) -> Self {
+        match kind {
+            FileKind::Header | FileKind::Source => SourceLanguage::Cpp,
+            FileKind::ScalaSource | FileKind::ScalaScript | FileKind::BuildDefinition => SourceLanguage::Scala,
+            FileKind::Other => SourceLanguage::Other,
+        }
     }
 }
 

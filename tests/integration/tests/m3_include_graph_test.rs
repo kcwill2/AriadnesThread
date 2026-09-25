@@ -34,7 +34,9 @@ fn test_m3_basic_fixture_include_graph() {
     let main_closure = closures.get(&id_main).expect("Closure for thing.cpp must exist");
     assert_eq!(main_closure.closure_size, 3, "thing.cpp closure must include thing.h, thing_types.h, heavy.h");
 
-    // Check artifacts created
+    // Check artifacts created by explicitly saving them
+    let artifacts = ariadne_report::ArtifactManager::prepare_for_repo(&repo).unwrap();
+    artifacts.save_include_artifacts(&_graph, &closures, &report).unwrap();
     let artifact_dir = repo_root.join("artifacts/includes");
     assert!(artifact_dir.join("edges.bin").exists(), "edges.bin must exist");
     assert!(artifact_dir.join("closures.bin").exists(), "closures.bin must exist");

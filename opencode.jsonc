@@ -1,4 +1,5 @@
 {
+  "$schema": "https://app.kilo.ai/config.json",
   "mcp": {
     "code-review-graph": {
       "type": "local",
@@ -8,6 +9,15 @@
         "serve",
         "--repo",
         "C:\\Users\\Kurt\\Code\\AriadnesThread"
+      ],
+      "enabled": true
+    },
+    "memory": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
       ]
     }
   }

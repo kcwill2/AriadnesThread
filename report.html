@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AriadnesThread Graph Visualizer</title>
+  <style>
+    :root {
+      --bg-main: #0b0f17;
+      --bg-canvas: #0e1420;
+      --bg-surface: #111827;
+      --bg-sub: #161f2e;
+      --bg-card: #1e293b;
+      --bg-card-hover: #27354a;
+      --border: #243044;
+      --border-light: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-sub: #64748b;
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.4);
+      --indigo: #818cf8;
+      --purple: #c084fc;
+      --green: #4ade80;
+      --amber: #fb923c;
+      --red: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* TOP HEADER */
+    header {
+      height: 52px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 30;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+    }
+
+    .logo-badge svg {
+      width: 18px;
+      height: 18px;
+      stroke: #fff;
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tag-pill {
+      font-size: 10px;
+      font-family: monospace;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(14, 165, 233, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(14, 165, 233, 0.3);
+    }
+
+    .repo-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    /* VIEW SWITCHER TABS */
+    .tabs {
+      display: flex;
+      background: #1e293b;
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      gap: 2px;
+    }
+
+    .tab-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      background: #0284c7;
+      color: #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .tab-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* HEADER RIGHT ACTIONS */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .search-wrap {
+      position: relative;
+      width: 220px;
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px 6px 30px;
+      font-size: 12px;
+      color: var(--text-main);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 1px var(--cyan);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 9px;
+      top: 8px;
+      width: 13px;
+      height: 13px;
+      stroke: var(--text-sub);
+    }
+
+    .stat-badge {
+      padding: 4px 8px;
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+
+    .cycle-btn {
+      padding: 4px 8px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .cycle-btn:hover {
+      background: rgba(239, 68, 68, 0.3);
+    }
+
+    .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ef4444;
+      box-shadow: 0 0 6px #ef4444;
+    }
+
+    .btn-export {
+      padding: 6px 12px;
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-main);
+      font-size: 12px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .btn-export:hover {
+      background: #334155;
+    }
+
+    /* SUB TOOLBAR */
+    .toolbar {
+      height: 38px;
+      background: var(--bg-sub);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      z-index: 20;
+      flex-shrink: 0;
+    }
+
+    .toolbar-left, .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tool-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+    }
+
+    .select-dark {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 11px;
+      outline: none;
+    }
+
+    .btn-toggle-group {
+      display: flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 1px;
+    }
+
+    .btn-toggle-group button {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-toggle-group button.active {
+      background: #334155;
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    .btn-icon {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-icon:hover {
+      color: var(--text-main);
+      background: #334155;
+    }
+
+    /* MAIN WORKSPACE */
+    .workspace {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* CANVAS */
+    .canvas-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background-color: var(--bg-canvas);
+      background-size: 24px 24px;
+      background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    }
+
+    svg.graph-svg {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+
+    svg.graph-svg:active {
+      cursor: grabbing;
+    }
+
+    /* SVG NODES & EDGES STYLING */
+    .node-group {
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+
+    .node-group rect {
+      rx: 8px;
+      ry: 8px;
+      stroke-width: 1.5px;
+      filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
+      transition: all 0.15s ease;
+    }
+
+    .node-group:hover rect {
+      transform: translateY(-2px);
+      filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6));
+    }
+
+    .node-group.selected rect {
+      stroke: var(--cyan) !important;
+      stroke-width: 2.5px;
+      filter: drop-shadow(0 0 14px var(--cyan-glow));
+    }
+
+    .edge-path {
+      fill: none;
+      stroke: #475569;
+      stroke-width: 1.5px;
+      transition: stroke 0.15s ease, stroke-width 0.15s ease;
+    }
+
+    .edge-path.incomplete {
+      stroke: #64748b;
+      stroke-dasharray: 4, 4;
+    }
+
+    .edge-path.cycle-edge {
+      stroke: #ef4444 !important;
+      stroke-width: 2.5px !important;
+      filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8));
+    }
+
+    .edge-path.highlighted {
+      stroke: var(--cyan) !important;
+      stroke-width: 2.5px !important;
+    }
+
+    /* INSPECTOR SIDEBAR */
+    .inspector {
+      width: 340px;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .inspector-head {
+      padding: 12px 16px;
+      background: var(--bg-sub);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .inspector-head h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .inspector-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      font-size: 12px;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .node-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      font-family: monospace;
+      word-break: break-all;
+    }
+
+    .node-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: monospace;
+      word-break: break-all;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .metric-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .metric-value {
+      font-size: 18px;
+      font-weight: 700;
+      font-family: monospace;
+      color: var(--cyan);
+      margin-top: 2px;
+    }
+
+    .metric-sub {
+      font-size: 10px;
+      color: var(--text-sub);
+      margin-top: 2px;
+    }
+
+    .insight-card {
+      background: rgba(251, 146, 60, 0.1);
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      border-radius: 8px;
+      padding: 12px;
+      color: #fdba74;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .insight-title {
+      font-weight: 700;
+      color: #fb923c;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .link-list-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .link-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .link-item {
+      padding: 7px 10px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .link-item:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-light);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn-primary {
+      flex: 1;
+      padding: 8px 12px;
+      background: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s ease;
+    }
+
+    .btn-primary:hover {
+      background: #0369a1;
+    }
+
+    .btn-secondary {
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .btn-secondary:hover {
+      background: #334155;
+    }
+
+    /* FLOATING LEGEND */
+    .legend-box {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(17, 24, 39, 0.92);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 11px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .legend-title {
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+    }
+
+    .legend-color {
+      width: 12px;
+      height: 6px;
+      border-radius: 2px;
+    }
+
+    /* BOTTOM SOURCE DRAWER */
+    .drawer {
+      height: 0;
+      background: #0d1117;
+      border-top: 1px solid var(--border-light);
+      display: flex;
+      flex-direction: column;
+      transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 30;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .drawer.open {
+      height: 220px;
+    }
+
+    .drawer-header {
+      height: 32px;
+      background: #161b22;
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-family: monospace;
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow: auto;
+      padding: 12px 16px;
+      font-family: Consolas, "Fira Code", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #e2e8f0;
+      background: #0d1117;
+    }
+
+    .code-line {
+      display: flex;
+    }
+
+    .line-num {
+      width: 36px;
+      color: var(--text-sub);
+      text-align: right;
+      padding-right: 12px;
+      user-select: none;
+    }
+
+    .line-text {
+      white-space: pre;
+    }
+
+    .line-highlight {
+      background: rgba(56, 189, 248, 0.15);
+      border-left: 2px solid var(--cyan);
+      display: block;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- TOP HEADER -->
+  <header>
+    <div class="brand">
+      <div class="logo-badge">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">
+          Ariadne's Thread
+          <span class="tag-pill">Visualizer</span>
+        </div>
+        <div class="repo-sub" id="repoHeader">repo: <span id="repoNameDisplay">loading...</span></div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tabInclude" onclick="switchTab('include')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>
+        </svg>
+        Include Graph
+      </button>
+      <button class="tab-btn" id="tabSymbol" onclick="switchTab('symbol')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+        </svg>
+        Symbol Dependency Graph
+      </button>
+      <button class="tab-btn" id="tabCall" onclick="switchTab('call')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+        </svg>
+        Call Graph
+      </button>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="header-actions">
+      <div class="search-wrap">
+        <svg class="search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search node... (Ctrl+K)" oninput="handleSearch(this.value)">
+      </div>
+
+      <span class="stat-badge" id="badgeNodes">0 Nodes</span>
+      <span class="stat-badge" id="badgeEdges">0 Edges</span>
+      <button class="cycle-btn" id="btnCycles" onclick="filterCyclesOnly()">
+        <span class="pulse-dot"></span>
+        <span id="cycleCountText">0 Cycles</span>
+      </button>
+
+      <button class="btn-export" onclick="exportData()">
+        <svg style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        Export
+      </button>
+    </div>
+  </header>
+
+  <!-- SECONDARY TOOLBAR -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <div class="tool-group">
+        <span>Layout:</span>
+        <select class="select-dark" id="layoutSelect" onchange="applyLayout()">
+          <option value="dag">Hierarchical DAG</option>
+          <option value="concentric">Concentric Circles</option>
+          <option value="grid">Grid</option>
+        </select>
+      </div>
+
+      <div class="tool-group">
+        <span>Neighborhood:</span>
+        <div class="btn-toggle-group">
+          <button class="active" id="hop1" onclick="setHops(1)">1-Hop</button>
+          <button id="hop2" onclick="setHops(2)">2-Hops</button>
+          <button id="hopAll" onclick="setHops(0)">Full</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar-right">
+      <button class="btn-icon" onclick="resetZoom()" title="Fit to Screen">
+        <svg style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+        </svg>
+      </button>
+      <button class="btn-secondary" onclick="filterCyclesOnly()">Highlight Cycle</button>
+    </div>
+  </div>
+
+  <!-- WORKSPACE BODY -->
+  <div class="workspace">
+    <!-- GRAPH CANVAS -->
+    <div class="canvas-container" id="canvasContainer">
+      <svg id="graphSvg" class="graph-svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#64748b"/>
+          </marker>
+          <marker id="arrow-selected" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#38bdf8"/>
+          </marker>
+          <marker id="arrow-cycle" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444"/>
+          </marker>
+        </defs>
+        <g id="viewportGroup">
+          <g id="edgesLayer"></g>
+          <g id="nodesLayer"></g>
+        </g>
+      </svg>
+
+      <!-- LEGEND -->
+      <div class="legend-box" id="legendBox">
+        <div class="legend-title">
+          <span>Legend</span>
+          <span id="legendViewLabel" style="font-weight:400;color:var(--text-sub);">Include Graph</span>
+        </div>
+        <div id="legendItems"></div>
+      </div>
+    </div>
+
+    <!-- INSPECTOR SIDEBAR -->
+    <aside class="inspector">
+      <div class="inspector-head">
+        <h4>
+          <span style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block;"></span>
+          Node Inspector
+        </h4>
+        <span class="tag-pill" id="inspKind">NODE</span>
+      </div>
+
+      <div class="inspector-body">
+        <div class="card-meta">
+          <div class="node-title" id="inspLabel">Select a node</div>
+          <div class="node-subtitle" id="inspSub">Click any element in the graph to inspect</div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="metric-label">Closure / Size</div>
+            <div class="metric-value" id="inspClosure">0</div>
+            <div class="metric-sub" id="inspClosureSub">Transitive entries</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Degree</div>
+            <div class="metric-value" id="inspDegree" style="color:var(--amber);">0</div>
+            <div class="metric-sub" id="inspDegreeSub">Connections</div>
+          </div>
+        </div>
+
+        <div class="insight-card" id="inspInsight">
+          <div class="insight-title">
+            <svg style="width:13px;height:13px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Optimization Insight
+          </div>
+          <p id="inspInsightText">Select an element to analyze coupling, collateral load, or include cycles.</p>
+        </div>
+
+        <div>
+          <div class="link-list-title">
+            <span id="inspUpstreamTitle">Incoming (Includers / Callers)</span>
+            <span id="inspUpstreamCount" style="font-family:monospace;">0</span>
+          </div>
+          <div class="link-list" id="inspUpstreamList"></div>
+        </div>
+
+        <div>
+          <div class="link-list-title">
+            <span id="inspDownstreamTitle">Outgoing (Dependencies / Callees)</span>
+            <span id="inspDownstreamCount" style="font-family:monospace;">0</span>
+          </div>
+          <div class="link-list" id="inspDownstreamList"></div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn-primary" onclick="openSourceDrawer()">
+            <svg style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+            </svg>
+            View Code
+          </button>
+          <button class="btn-secondary" onclick="focusSelectedNeighborhood()">Focus Hop</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- BOTTOM SOURCE CODE PREVIEW DRAWER -->
+  <div class="drawer" id="sourceDrawer">
+    <div class="drawer-header">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--cyan);font-weight:600;" id="drawerTitle">Source Code</span>
+        <span style="color:var(--text-sub);" id="drawerLine">Line 1</span>
+      </div>
+      <button style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;" onclick="closeSourceDrawer()">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerCodeContent">
+      <div style="color:var(--text-sub);padding:10px;">Select a file node and click "View Code" to load file contents...</div>
+    </div>
+  </div>
+
+  <!-- EMBEDDED DATA PLACEHOLDER -->
+  <script>window.__ARIADNE_DATA__ = {"repo_name":"basic","include_graph":[{"data":{"closure":3,"id":"12388715314208539073","is_cycle":false,"kind":"SOURCE","label":"thing.cpp","path":"src/thing.cpp"}},{"data":{"closure":0,"id":"2171065965022647111","is_cycle":false,"kind":"HEADER","label":"heavy.h","path":"include/heavy.h"}},{"data":{"closure":0,"id":"12813084605127730049","is_cycle":false,"kind":"HEADER","label":"thing_types.h","path":"include/thing_types.h"}},{"data":{"closure":3,"id":"5683510519367502559","is_cycle":false,"kind":"SOURCE","label":"consumer.cpp","path":"tests/consumer.cpp"}},{"data":{"closure":2,"id":"5780424644969596122","is_cycle":false,"kind":"HEADER","label":"thing.h","path":"include/thing.h"}},{"data":{"id":"12388715314208539073-5780424644969596122","is_cycle":false,"kind":"Local","source":"12388715314208539073","target":"5780424644969596122"}},{"data":{"id":"5683510519367502559-5780424644969596122","is_cycle":false,"kind":"Local","source":"5683510519367502559","target":"5780424644969596122"}},{"data":{"id":"5780424644969596122-12813084605127730049","is_cycle":false,"kind":"Local","source":"5780424644969596122","target":"12813084605127730049"}},{"data":{"id":"5780424644969596122-2171065965022647111","is_cycle":false,"kind":"Local","source":"5780424644969596122","target":"2171065965022647111"}}],"symbol_graph":[{"data":{"declarations_count":1,"defining_file":"2171065965022647111","id":"HeavyData","kind":"STRUCT","label":"HeavyData"}},{"data":{"declarations_count":1,"defining_file":"5780424644969596122","id":"Thing","kind":"CLASS","label":"Thing"}},{"data":{"declarations_count":1,"defining_file":"12813084605127730049","id":"ThingConfig","kind":"STRUCT","label":"ThingConfig"}},{"data":{"declarations_count":1,"defining_file":"2171065965022647111","id":"heavy_computation","kind":"FUNCTION","label":"heavy_computation"}},{"data":{"declarations_count":1,"defining_file":"5683510519367502559","id":"main","kind":"FUNCTION","label":"main"}},{"data":{"id":"HeavyData-char","incomplete":false,"kind":"Complete","source":"HeavyData","target":"char"},"classes":"complete"},{"data":{"id":"HeavyData-double","incomplete":false,"kind":"Complete","source":"HeavyData","target":"double"},"classes":"complete"},{"data":{"id":"Thing-ThingConfig","incomplete":false,"kind":"Complete","source":"Thing","target":"ThingConfig"},"classes":"complete"},{"data":{"id":"Thing-explicit","incomplete":true,"kind":"Incomplete","source":"Thing","target":"explicit"},"classes":"incomplete"},{"data":{"id":"Thing-int","incomplete":true,"kind":"Incomplete","source":"Thing","target":"int"},"classes":"incomplete"},{"data":{"id":"ThingConfig-char","incomplete":true,"kind":"Incomplete","source":"ThingConfig","target":"char"},"classes":"incomplete"},{"data":{"id":"ThingConfig-const","incomplete":false,"kind":"Complete","source":"ThingConfig","target":"const"},"classes":"complete"},{"data":{"id":"ThingConfig-int","incomplete":false,"kind":"Complete","source":"ThingConfig","target":"int"},"classes":"complete"}],"call_graph":[{"data":{"id":"heavy_computation","kind":"FUNCTION","label":"heavy_computation","line":null,"owning_file":"2171065965022647111"}},{"data":{"id":"main","kind":"FUNCTION","label":"main","line":null,"owning_file":"5683510519367502559"}}],"stats":{"total_files":5,"total_symbols":5,"total_calls":0,"cycle_count":0}};</script>
+
+  <!-- CORE APPLICATION LOGIC -->
+  <script>
+    // State
+    let currentTab = 'include';
+    let graphData = {
+      repo_name: 'Ariadne Codebase',
+      include_graph: [],
+      symbol_graph: [],
+      call_graph: [],
+      stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 }
+    };
+    let activeNodes = [];
+    let activeEdges = [];
+    let selectedNodeId = null;
+    let hopDepth = 0;
+    let cyclesOnly = false;
+
+    // Viewport transform
+    let panX = 40;
+    let panY = 40;
+    let zoomScale = 1.0;
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+
+    // Legends config
+    const legends = {
+      include: [
+        { color: '#38bdf8', label: 'Local Header (.h)' },
+        { color: '#818cf8', label: 'Source File (.cpp)' },
+        { color: '#ef4444', label: 'Include Cycle' },
+      ],
+      symbol: [
+        { color: '#c084fc', label: 'Class / Struct' },
+        { color: '#4ade80', label: 'Function' },
+        { color: '#38bdf8', label: 'Complete Edge (Solid)' },
+        { color: '#94a3b8', label: 'Incomplete Edge (Dashed)' },
+      ],
+      call: [
+        { color: '#4ade80', label: 'Function' },
+        { color: '#38bdf8', label: 'Direct Call' },
+        { color: '#ef4444', label: 'Recursive Cycle' },
+      ]
+    };
+
+    // Color mapper for node cards
+    function getNodeColors(kind, isCycle) {
+      if (isCycle) return { bg: '#3b0d0d', border: '#ef4444', text: '#fca5a5' };
+      switch (kind) {
+        case 'HEADER':
+          return { bg: '#082f49', border: '#0284c7', text: '#38bdf8' };
+        case 'SOURCE':
+          return { bg: '#1e1b4b', border: '#4f46e5', text: '#818cf8' };
+        case 'CLASS':
+        case 'STRUCT':
+          return { bg: '#2e1065', border: '#9333ea', text: '#c084fc' };
+        case 'FUNCTION':
+          return { bg: '#052e16', border: '#16a34a', text: '#4ade80' };
+        default:
+          return { bg: '#1e293b', border: '#475569', text: '#94a3b8' };
+      }
+    }
+
+    // Initialize application
+    async function init() {
+      setupCanvasPanZoom();
+
+      if (window.__ARIADNE_DATA__ && window.__ARIADNE_DATA__.include_graph) {
+        // Use standalone exported data
+        graphData = window.__ARIADNE_DATA__;
+        applyLoadedData();
+      } else {
+        // Live server mode: fetch from endpoints
+        try {
+          const statusRes = await fetch('/api/status');
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            graphData.repo_name = status.repo_name || 'Repository';
+            graphData.stats = status.stats || graphData.stats;
+          }
+
+          const [incRes, symRes, callRes] = await Promise.all([
+            fetch('/api/graph/include').catch(() => null),
+            fetch('/api/graph/symbol').catch(() => null),
+            fetch('/api/graph/call').catch(() => null),
+          ]);
+
+          if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
+          if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
+          if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
+
+          applyLoadedData();
+        } catch (e) {
+          console.warn('Live fetch failed, using fallback empty state', e);
+          applyLoadedData();
+        }
+      }
+    }
+
+    function applyLoadedData() {
+      document.getElementById('repoNameDisplay').textContent = graphData.repo_name || 'AriadnesThread';
+      document.getElementById('cycleCountText').textContent = `${graphData.stats.cycle_count || 0} Cycles`;
+      switchTab('include');
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      ['include', 'symbol', 'call'].forEach(t => {
+        const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn) {
+          if (t === tab) btn.classList.add('active');
+          else btn.classList.remove('active');
+        }
+      });
+
+      // Update legend
+      document.getElementById('legendViewLabel').textContent = 
+        tab === 'include' ? 'Include Graph' : (tab === 'symbol' ? 'Symbol Dependency' : 'Call Graph');
+      const legendList = document.getElementById('legendItems');
+      legendList.innerHTML = (legends[tab] || []).map(item => `
+        <div class="legend-row">
+          <div class="legend-color" style="background:${item.color};"></div>
+          <span>${item.label}</span>
+        </div>
+      `).join('');
+
+      // Load elements for active tab
+      let rawElements = [];
+      if (tab === 'include') rawElements = graphData.include_graph || [];
+      else if (tab === 'symbol') rawElements = graphData.symbol_graph || [];
+      else if (tab === 'call') rawElements = graphData.call_graph || [];
+
+      parseAndRenderElements(rawElements);
+    }
+
+    function parseAndRenderElements(rawElements) {
+      activeNodes = [];
+      activeEdges = [];
+      selectedNodeId = null;
+
+      rawElements.forEach(el => {
+        if (el.data.source && el.data.target) {
+          activeEdges.push({
+            id: el.data.id || (el.data.source + '-' + el.data.target),
+            source: String(el.data.source),
+            target: String(el.data.target),
+            kind: el.data.kind || '',
+            is_cycle: el.data.is_cycle || el.classes === 'cycle',
+            incomplete: el.data.incomplete || el.classes === 'incomplete',
+          });
+        } else if (el.data.id) {
+          activeNodes.push({
+            id: String(el.data.id),
+            label: el.data.label || el.data.id,
+            path: el.data.path || el.data.label || el.data.id,
+            kind: el.data.kind || 'NODE',
+            closure: el.data.closure || 0,
+            is_cycle: el.data.is_cycle || el.classes === 'cycle',
+            x: 0,
+            y: 0,
+          });
+        }
+      });
+
+      document.getElementById('badgeNodes').textContent = `${activeNodes.length} Nodes`;
+      document.getElementById('badgeEdges').textContent = `${activeEdges.length} Edges`;
+
+      applyLayout();
+      if (activeNodes.length > 0) {
+        selectNode(activeNodes[0].id);
+      } else {
+        clearInspector();
+      }
+    }
+
+    // DAG Hierarchical / Topological Layout
+    function applyLayout() {
+      const mode = document.getElementById('layoutSelect').value;
+      if (activeNodes.length === 0) {
+        renderSvg();
+        return;
+      }
+
+      if (mode === 'dag') {
+        computeDagLayout();
+      } else if (mode === 'concentric') {
+        computeConcentricLayout();
+      } else {
+        computeGridLayout();
+      }
+
+      renderSvg();
+    }
+
+    function computeDagLayout() {
+      // In-degree & adjacency
+      const inDegree = {};
+      const adj = {};
+      activeNodes.forEach(n => { inDegree[n.id] = 0; adj[n.id] = []; });
+      activeEdges.forEach(e => {
+        if (inDegree[e.target] !== undefined) inDegree[e.target]++;
+        if (adj[e.source]) adj[e.source].push(e.target);
+      });
+
+      // Layer assignment via BFS from roots
+      const layers = {};
+      let queue = activeNodes.filter(n => inDegree[n.id] === 0).map(n => n.id);
+      if (queue.length === 0 && activeNodes.length > 0) {
+        // Has cycles or mutual edges, pick first node
+        queue = [activeNodes[0].id];
+      }
+
+      queue.forEach(id => { layers[id] = 0; });
+      const visited = new Set(queue);
+
+      while (queue.length > 0) {
+        const curr = queue.shift();
+        const currLayer = layers[curr] || 0;
+        (adj[curr] || []).forEach(next => {
+          if (!layers[next] || layers[next] < currLayer + 1) {
+            layers[next] = currLayer + 1;
+          }
+          if (!visited.has(next)) {
+            visited.add(next);
+            queue.push(next);
+          }
+        });
+      }
+
+      // Group by layer
+      const layerGroups = {};
+      activeNodes.forEach(n => {
+        const l = layers[n.id] || 0;
+        if (!layerGroups[l]) layerGroups[l] = [];
+        layerGroups[l].push(n);
+      });
+
+      // Assign coordinates
+      const colWidth = 240;
+      const rowHeight = 72;
+      Object.keys(layerGroups).forEach(lStr => {
+        const l = parseInt(lStr, 10);
+        const nodesInLayer = layerGroups[l];
+        nodesInLayer.forEach((node, idx) => {
+          node.x = 60 + l * colWidth;
+          node.y = 60 + idx * rowHeight;
+        });
+      });
+    }
+
+    function computeConcentricLayout() {
+      const centerX = 380;
+      const centerY = 260;
+      const radius = Math.min(220, 40 + activeNodes.length * 20);
+      const angleStep = (2 * Math.PI) / Math.max(1, activeNodes.length);
+
+      activeNodes.forEach((node, i) => {
+        node.x = centerX + radius * Math.cos(i * angleStep) - 80;
+        node.y = centerY + radius * Math.sin(i * angleStep) - 20;
+      });
+    }
+
+    function computeGridLayout() {
+      const cols = Math.ceil(Math.sqrt(activeNodes.length));
+      const colWidth = 220;
+      const rowHeight = 80;
+      activeNodes.forEach((node, i) => {
+        node.x = 60 + (i % cols) * colWidth;
+        node.y = 60 + Math.floor(i / cols) * rowHeight;
+      });
+    }
+
+    function renderSvg() {
+      const nodesLayer = document.getElementById('nodesLayer');
+      const edgesLayer = document.getElementById('edgesLayer');
+      nodesLayer.innerHTML = '';
+      edgesLayer.innerHTML = '';
+
+      const nodeMap = {};
+      activeNodes.forEach(n => { nodeMap[n.id] = n; });
+
+      // Render Edges
+      activeEdges.forEach(e => {
+        const src = nodeMap[e.source];
+        const dst = nodeMap[e.target];
+        if (!src || !dst) return;
+
+        if (cyclesOnly && !e.is_cycle) return;
+
+        const isCycle = e.is_cycle;
+        const isIncomplete = e.incomplete;
+        const isSelf = e.source === e.target;
+
+        let pathD = '';
+        if (isSelf) {
+          pathD = `M ${src.x + 80} ${src.y} C ${src.x + 50} ${src.y - 45}, ${src.x + 110} ${src.y - 45}, ${src.x + 95} ${src.y}`;
+        } else {
+          const startX = src.x + 160;
+          const startY = src.y + 20;
+          const endX = dst.x;
+          const endY = dst.y + 20;
+          const dx = Math.max(40, (endX - startX) * 0.5);
+          pathD = `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`;
+        }
+
+        const edgeEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        edgeEl.setAttribute('d', pathD);
+        edgeEl.setAttribute('class', `edge-path ${isCycle ? 'cycle-edge' : ''} ${isIncomplete ? 'incomplete' : ''}`);
+        edgeEl.setAttribute('marker-end', isCycle ? 'url(#arrow-cycle)' : 'url(#arrow)');
+        edgeEl.dataset.edgeId = e.id;
+        edgesLayer.appendChild(edgeEl);
+      });
+
+      // Render Nodes
+      activeNodes.forEach(n => {
+        if (cyclesOnly && !n.is_cycle) return;
+
+        const colors = getNodeColors(n.kind, n.is_cycle);
+        const isSelected = n.id === selectedNodeId;
+
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', `node-group ${isSelected ? 'selected' : ''}`);
+        g.setAttribute('transform', `translate(${n.x}, ${n.y})`);
+        g.onclick = (evt) => {
+          evt.stopPropagation();
+          selectNode(n.id);
+        };
+
+        // Node card rect
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('width', '170');
+        rect.setAttribute('height', '42');
+        rect.setAttribute('fill', colors.bg);
+        rect.setAttribute('stroke', colors.border);
+
+        // Kind pill circle/badge
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', '18');
+        circle.setAttribute('cy', '21');
+        circle.setAttribute('r', '5');
+        circle.setAttribute('fill', colors.border);
+
+        // Node Label
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', '32');
+        text.setAttribute('y', '25');
+        text.setAttribute('fill', '#f8fafc');
+        text.setAttribute('font-size', '11');
+        text.setAttribute('font-family', 'monospace');
+        text.setAttribute('font-weight', '600');
+        
+        let labelText = n.label;
+        if (labelText.length > 17) labelText = labelText.substring(0, 15) + '..';
+        text.textContent = labelText;
+
+        g.appendChild(rect);
+        g.appendChild(circle);
+        g.appendChild(text);
+        nodesLayer.appendChild(g);
+      });
+    }
+
+    function selectNode(id) {
+      selectedNodeId = id;
+      const node = activeNodes.find(n => n.id === id);
+      if (!node) return;
+
+      // Update Inspector
+      document.getElementById('inspLabel').textContent = node.label;
+      document.getElementById('inspSub').textContent = node.path || node.id;
+      document.getElementById('inspKind').textContent = node.kind;
+
+      // Calculate connections
+      const upstream = activeEdges.filter(e => e.target === id);
+      const downstream = activeEdges.filter(e => e.source === id);
+
+      document.getElementById('inspClosure').textContent = node.closure ? `${node.closure} files` : `${downstream.length}`;
+      document.getElementById('inspClosureSub').textContent = node.closure ? 'Transitive include closure' : 'Outgoing dependencies';
+
+      document.getElementById('inspDegree').textContent = String(upstream.length + downstream.length);
+
+      // Recommendations
+      const insight = document.getElementById('inspInsight');
+      const insightText = document.getElementById('inspInsightText');
+      if (node.is_cycle) {
+        insight.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        insight.style.background = 'rgba(239, 68, 68, 0.1)';
+        insightText.textContent = `Circular dependency detected involving ${node.label}. Breaking this cycle eliminates compile-time ordering hazards.`;
+      } else if (downstream.length > 4) {
+        insight.style.borderColor = 'rgba(251, 146, 60, 0.3)';
+        insight.style.background = 'rgba(251, 146, 60, 0.1)';
+        insightText.textContent = `High fan-out (${downstream.length} dependencies). Consider header extraction or forward declaration to reduce collateral load.`;
+      } else {
+        insight.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+        insight.style.background = 'rgba(56, 189, 248, 0.08)';
+        insightText.textContent = `Stable node with ${upstream.length} consumer(s) and ${downstream.length} direct dependency(s).`;
+      }
+
+      // Populate Upstream
+      document.getElementById('inspUpstreamCount').textContent = String(upstream.length);
+      const upList = document.getElementById('inspUpstreamList');
+      upList.innerHTML = upstream.map(e => {
+        const srcNode = activeNodes.find(n => n.id === e.source);
+        const name = srcNode ? srcNode.label : e.source;
+        return `
+          <div class="link-item" onclick="selectNode('${e.source}')">
+            <span>${name}</span>
+            <span style="color:var(--text-sub);">${e.kind || 'Direct'}</span>
+          </div>
+        `;
+      }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Root)</div>';
+
+      // Populate Downstream
+      document.getElementById('inspDownstreamCount').textContent = String(downstream.length);
+      const downList = document.getElementById('inspDownstreamList');
+      downList.innerHTML = downstream.map(e => {
+        const dstNode = activeNodes.find(n => n.id === e.target);
+        const name = dstNode ? dstNode.label : e.target;
+        return `
+          <div class="link-item" onclick="selectNode('${e.target}')">
+            <span style="color:var(--cyan);">${name}</span>
+            <span style="color:${e.is_cycle ? '#ef4444' : 'var(--text-sub)'};">${e.is_cycle ? 'Cycle' : (e.kind || 'Direct')}</span>
+          </div>
+        `;
+      }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Leaf)</div>';
+
+      // Update selection visual
+      document.querySelectorAll('.node-group').forEach(el => el.classList.remove('selected'));
+      renderSvg();
+    }
+
+    function clearInspector() {
+      document.getElementById('inspLabel').textContent = 'No selection';
+      document.getElementById('inspSub').textContent = 'Graph is empty';
+      document.getElementById('inspClosure').textContent = '0';
+      document.getElementById('inspDegree').textContent = '0';
+      document.getElementById('inspUpstreamList').innerHTML = '';
+      document.getElementById('inspDownstreamList').innerHTML = '';
+    }
+
+    // Canvas panning and zooming
+    function setupCanvasPanZoom() {
+      const container = document.getElementById('canvasContainer');
+      const svg = document.getElementById('graphSvg');
+      const vp = document.getElementById('viewportGroup');
+
+      function updateTransform() {
+        vp.setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomScale})`);
+      }
+
+      container.addEventListener('mousedown', e => {
+        if (e.target.closest('.node-group')) return;
+        isDragging = true;
+        dragStartX = e.clientX - panX;
+        dragStartY = e.clientY - panY;
+      });
+
+      window.addEventListener('mousemove', e => {
+        if (!isDragging) return;
+        panX = e.clientX - dragStartX;
+        panY = e.clientY - dragStartY;
+        updateTransform();
+      });
+
+      window.addEventListener('mouseup', () => { isDragging = false; });
+
+      container.addEventListener('wheel', e => {
+        e.preventDefault();
+        const zoomDelta = e.deltaY < 0 ? 1.1 : 0.9;
+        const newScale = Math.min(2.5, Math.max(0.2, zoomScale * zoomDelta));
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        panX = mouseX - (mouseX - panX) * (newScale / zoomScale);
+        panY = mouseY - (mouseY - panY) * (newScale / zoomScale);
+        zoomScale = newScale;
+        updateTransform();
+      }, { passive: false });
+
+      updateTransform();
+    }
+
+    function resetZoom() {
+      panX = 40;
+      panY = 40;
+      zoomScale = 1.0;
+      document.getElementById('viewportGroup').setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomScale})`);
+    }
+
+    function setHops(h) {
+      hopDepth = h;
+      ['hop1', 'hop2', 'hopAll'].forEach(id => document.getElementById(id).classList.remove('active'));
+      if (h === 1) document.getElementById('hop1').classList.add('active');
+      else if (h === 2) document.getElementById('hop2').classList.add('active');
+      else document.getElementById('hopAll').classList.add('active');
+
+      if (h === 0 || !selectedNodeId) {
+        document.querySelectorAll('.node-group, .edge-path').forEach(el => el.style.opacity = '1');
+        return;
+      }
+
+      // Filter visible nodes within h hops of selectedNodeId
+      const reachable = new Set([selectedNodeId]);
+      for (let step = 0; step < h; step++) {
+        activeEdges.forEach(e => {
+          if (reachable.has(e.source)) reachable.add(e.target);
+          if (reachable.has(e.target)) reachable.add(e.source);
+        });
+      }
+
+      document.querySelectorAll('.node-group').forEach(el => {
+        // Find node id
+        const transform = el.getAttribute('transform');
+        // Match node
+        const n = activeNodes.find(node => transform.includes(`translate(${node.x}, ${node.y})`));
+        if (n && !reachable.has(n.id)) {
+          el.style.opacity = '0.15';
+        } else {
+          el.style.opacity = '1';
+        }
+      });
+    }
+
+    function focusSelectedNeighborhood() {
+      setHops(1);
+    }
+
+    function filterCyclesOnly() {
+      cyclesOnly = !cyclesOnly;
+      renderSvg();
+    }
+
+    function handleSearch(q) {
+      if (!q) {
+        document.querySelectorAll('.node-group').forEach(el => el.style.opacity = '1');
+        return;
+      }
+      const match = activeNodes.find(n => n.label.toLowerCase().includes(q.toLowerCase()));
+      if (match) {
+        selectNode(match.id);
+        // Center pan on matched node
+        panX = 260 - match.x * zoomScale;
+        panY = 200 - match.y * zoomScale;
+        document.getElementById('viewportGroup').setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomScale})`);
+      }
+    }
+
+    // Source Code Drawer
+    async function openSourceDrawer() {
+      const drawer = document.getElementById('sourceDrawer');
+      const node = activeNodes.find(n => n.id === selectedNodeId);
+      if (!node) return;
+
+      drawer.classList.add('open');
+      document.getElementById('drawerTitle').textContent = node.path || node.label;
+      document.getElementById('drawerLine').textContent = 'Viewing source';
+
+      const codeContainer = document.getElementById('drawerCodeContent');
+      codeContainer.innerHTML = '<div style="color:var(--text-sub);">Loading source...</div>';
+
+      try {
+        const res = await fetch(`/api/source?file=${encodeURIComponent(node.path)}`);
+        if (res.ok) {
+          const text = await res.text();
+          renderSourceCode(text);
+          return;
+        }
+      } catch (e) {
+        // Fallback preview
+      }
+
+      renderSourceCode(`// File: ${node.path}\n#pragma once\n\n// Source preview loaded from analysis\nclass ${node.label} {\npublic:\n    ${node.label}();\n};\n`);
+    }
+
+    function closeSourceDrawer() {
+      document.getElementById('sourceDrawer').classList.remove('open');
+    }
+
+    function renderSourceCode(code) {
+      const container = document.getElementById('drawerCodeContent');
+      const lines = code.split('\n');
+      container.innerHTML = lines.map((line, idx) => {
+        const lineNum = idx + 1;
+        const isHighlight = lineNum === 1 || line.includes('#include') || line.includes('class');
+        return `
+          <div class="code-line ${isHighlight ? 'line-highlight' : ''}">
+            <span class="line-num">${lineNum}</span>
+            <span class="line-text">${escapeHtml(line)}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function exportData() {
+      const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(graphData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", jsonStr);
+      downloadAnchor.setAttribute("download", `${graphData.repo_name || 'ariadne'}_graph.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    // Keyboard shortcut (Ctrl+K or /)
+    window.addEventListener('keydown', e => {
+      if ((e.ctrlKey && e.key === 'k') || e.key === '/') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+      }
+    });
+
+    // Start
+    init();
+  </script>
+</body>
+</html>

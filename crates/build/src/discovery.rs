@@ -107,12 +107,23 @@ impl<'a> BuildDiscoverer<'a> {
                 entry.directory.join(&entry.file)
             };
 
-            let rel_path = source_path
-                .strip_prefix(root)
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|_| source_path.clone());
+            let rel_path = if entry.file.is_relative() {
+                entry.file.clone()
+            } else if let Ok(stripped) = source_path.strip_prefix(root) {
+                stripped.to_path_buf()
+            } else {
+                let norm_source = source_path.to_string_lossy().replace('\\', "/");
+                let norm_root = root.to_string_lossy().replace('\\', "/");
+                let clean_root = norm_root.trim_start_matches("//?/");
+                if let Some(stripped) = norm_source.strip_prefix(clean_root) {
+                    PathBuf::from(stripped.trim_start_matches('/'))
+                } else {
+                    source_path.clone()
+                }
+            };
 
-            let file_id = FileId::from_relative_path(&rel_path.to_string_lossy());
+            let norm_rel_str = rel_path.to_string_lossy().replace('\\', "/");
+            let file_id = FileId::from_relative_path(&norm_rel_str);
 
             let cmd_args = if !entry.arguments.is_empty() {
                 entry.arguments.clone()

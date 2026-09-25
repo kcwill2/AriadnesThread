@@ -3,6 +3,18 @@
 pub mod incremental;
 pub use incremental::*;
 
+pub mod queue;
+pub use queue::*;
+
+pub mod worker;
+pub use worker::*;
+
+pub mod shard;
+pub use shard::*;
+
+pub mod engine;
+pub use engine::*;
+
 pub struct TaskScheduler {
     pub concurrency: usize,
 }

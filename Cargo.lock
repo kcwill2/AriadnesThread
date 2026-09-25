@@ -159,6 +159,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne-lang"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ariadne-index",
+ "ariadne-repo",
+ "serde",
+]
+
+[[package]]
 name = "ariadne-repo"
 version = "0.1.0"
 dependencies = [
@@ -392,7 +402,11 @@ name = "clang-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-index",
+ "ariadne-repo",
+ "clap",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

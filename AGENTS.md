@@ -43,3 +43,8 @@ gives you structural context (callers, dependents, test coverage) that file sear
 3. Use `get_affected_flows_tool` to understand impact.
 4. Use `query_graph_tool` pattern="tests_for" to check coverage.
 <!-- /code-review-graph MCP tools -->
+
+### Code Hygiene
+Keep code readable.
+Kepp files smaller than 1500 lines.
+Functions less than 100 lines.
