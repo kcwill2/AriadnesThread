@@ -92,6 +92,24 @@
   - [x] Unit 4: Integrate CLI command `tool analyze <repo>` with required output format in `crates/cli`
   - [x] Unit 5: Integration test suite for cache hit rate, header modification invalidation, compiler context invalidation, and analysis version mismatch (`tests/integration/tests/m12_incremental_analysis_test.rs`)
 
-## Upcoming Milestones
-- [ ] **M13 — Production-Scale Execution**
-- [ ] **M14 — End-to-End Optimization**
+- [x] **M13 — Production-Scale Execution**
+  - [x] Unit 1: Straggler-mitigating TU scheduling & prioritized work queue (`crates/scheduler/src/queue.rs`)
+  - [x] Unit 2: Worker pool with process-level isolation, failure recovery & memory tracking (`crates/scheduler/src/worker.rs`)
+  - [x] Unit 3: Shard generation, hash-partitioned shuffle & parallel reducers (`crates/scheduler/src/shard.rs`)
+  - [x] Unit 4: Resumability, checkpointing & progress reporting (`crates/scheduler/src/engine.rs`)
+  - [x] Unit 5: CLI integration (`tool analyze <repo> --workers <N>`) and production-scale integration test suite (`tests/integration/tests/m13_production_scale_test.rs`)
+
+- [x] **M14 — End-to-End Optimization**
+  - [x] Unit 1: Optimization summary report & M14 formatted reporting (`crates/cli/src/optimize.rs`)
+  - [x] Unit 2: End-to-end automated optimization pipeline engine (`crates/cli/src/optimize.rs`)
+  - [x] Unit 3: CLI command `tool optimize <repo>` integration (`crates/cli/src/lib.rs`)
+  - [x] Unit 4: End-to-end integration test suite & failure rollback verification (`tests/integration/tests/m14_end_to_end_test.rs`)
+
+- [x] **M15 — Graphical Interface & Call Graphs**
+  - [x] Unit 1: Call Site Extraction & Semantic Indexing (`crates/index`)
+  - [x] Unit 2: CallGraph Data Structure & Analysis Engine (`crates/graph`, `crates/report`)
+  - [x] Unit 3: Graph DTOs, Web Server & Export Engine (`crates/ui`)
+  - [x] Unit 4: Interactive Frontend SPA (`crates/ui/assets`)
+  - [x] Unit 5: CLI Integration & End-to-End Integration Suite (`crates/cli`, `tests/integration`)
+
+

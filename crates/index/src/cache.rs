@@ -207,6 +207,7 @@ mod tests {
                 declarations: vec![],
                 edges: vec![],
                 references: vec![],
+                call_sites: vec![],
             },
         }.is_valid(&fp1));
 
@@ -222,6 +223,7 @@ mod tests {
                 declarations: vec![],
                 edges: vec![],
                 references: vec![],
+                call_sites: vec![],
             },
         }.is_valid(&fp2));
     }

@@ -79,8 +79,10 @@ impl CppSemanticAnalyzer {
         let mut edges = Vec::new();
         let mut symbols = Vec::new();
         let mut declarations = Vec::new();
+        let mut call_sites = Vec::new();
 
         let mut current_class: Option<(String, usize)> = None;
+        let mut current_function: Option<(SymbolId, usize)> = None;
         let mut brace_depth = 0;
         let mut i = 0;
 
@@ -97,6 +99,11 @@ impl CppSemanticAnalyzer {
                     if let Some((_, depth)) = current_class {
                         if brace_depth < depth {
                             current_class = None;
+                        }
+                    }
+                    if let Some((_, depth)) = current_function {
+                        if brace_depth < depth {
+                            current_function = None;
                         }
                     }
                 }
@@ -219,6 +226,27 @@ impl CppSemanticAnalyzer {
                     }
                 }
                 TokenKind::Word(w) => {
+                    if let Some((ref func_symbol, _)) = current_function {
+                        if brace_depth > 0 && i + 1 < tokens.len() {
+                            if let TokenKind::Punct(p) = &tokens[i + 1].kind {
+                                if p == "(" {
+                                    let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw"];
+                                    if !reserved.contains(&w.as_str()) {
+                                        call_sites.push(CallSite {
+                                            caller_symbol: func_symbol.clone(),
+                                            callee_name: w.clone(),
+                                            location: FileLocation {
+                                                file_id: tu_file_id.clone(),
+                                                line: token.line,
+                                                column: token.column,
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if brace_depth == 0 && i >= 1 && i + 1 < tokens.len() {
                         if let TokenKind::Punct(p) = &tokens[i + 1].kind {
                             if p == "(" {
@@ -250,6 +278,7 @@ impl CppSemanticAnalyzer {
                                             if let TokenKind::Punct(p3) = &tokens[j].kind {
                                                 if p3 == "{" {
                                                     is_definition = true;
+                                                    current_function = Some((symbol_id.clone(), brace_depth + 1));
                                                 }
                                             }
                                         }
@@ -359,6 +388,7 @@ impl CppSemanticAnalyzer {
             declarations,
             edges,
             references: vec![],
+            call_sites,
         }
     }
 
@@ -469,5 +499,34 @@ mod tests {
         let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Incomplete);
+    }
+
+    #[test]
+    fn test_call_site_extraction() {
+        let code = r#"
+            void helper() {}
+            void target() {
+                helper();
+                helper();
+            }
+            void recursive() {
+                recursive();
+            }
+        "#;
+        let tu = CppSemanticAnalyzer::analyze_source(
+            FileId::from_relative_path("test.cpp"),
+            code,
+            "Debug|x64",
+        );
+        assert_eq!(tu.call_sites.len(), 3);
+        
+        let target_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "target").collect();
+        assert_eq!(target_calls.len(), 2);
+        assert_eq!(target_calls[0].callee_name, "helper");
+        assert_eq!(target_calls[1].callee_name, "helper");
+        
+        let recursive_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "recursive").collect();
+        assert_eq!(recursive_calls.len(), 1);
+        assert_eq!(recursive_calls[0].callee_name, "recursive");
     }
 }

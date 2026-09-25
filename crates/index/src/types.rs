@@ -47,12 +47,33 @@ pub struct FileLocation {
     pub column: usize,
 }
 
+impl Default for FileLocation {
+    fn default() -> Self {
+        Self {
+            file_id: FileId(0),
+            line: 0,
+            column: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolDecl {
     pub id: DeclId,
     pub symbol_id: SymbolId,
     pub location: FileLocation,
     pub is_definition: bool,
+}
+
+impl Default for SymbolDecl {
+    fn default() -> Self {
+        Self {
+            id: DeclId(String::new()),
+            symbol_id: SymbolId(String::new()),
+            location: FileLocation::default(),
+            is_definition: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +86,19 @@ pub struct SymbolRecord {
     pub definition: Option<DeclId>,
 }
 
+impl Default for SymbolRecord {
+    fn default() -> Self {
+        Self {
+            id: SymbolId(String::new()),
+            name: String::new(),
+            kind: SymbolKind::Other,
+            owning_file: FileId(0),
+            declarations: Vec::new(),
+            definition: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticEdge {
     pub src_symbol: SymbolId,
@@ -72,6 +106,35 @@ pub struct SemanticEdge {
     pub kind: DependencyKind,
     pub src_file: FileId,
     pub dst_file: FileId,
+}
+
+impl Default for SemanticEdge {
+    fn default() -> Self {
+        Self {
+            src_symbol: SymbolId(String::new()),
+            dst_symbol: SymbolId(String::new()),
+            kind: DependencyKind::Incomplete,
+            src_file: FileId(0),
+            dst_file: FileId(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallSite {
+    pub caller_symbol: SymbolId,
+    pub callee_name: String,
+    pub location: FileLocation,
+}
+
+impl Default for CallSite {
+    fn default() -> Self {
+        Self {
+            caller_symbol: SymbolId(String::new()),
+            callee_name: String::new(),
+            location: FileLocation::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +153,21 @@ pub struct TuAnalysis {
     pub declarations: Vec<SymbolDecl>,
     pub edges: Vec<SemanticEdge>,
     pub references: Vec<SymbolReference>,
+    pub call_sites: Vec<CallSite>,
+}
+
+impl Default for TuAnalysis {
+    fn default() -> Self {
+        Self {
+            tu_file_id: FileId(0),
+            context_name: String::new(),
+            symbols: Vec::new(),
+            declarations: Vec::new(),
+            edges: Vec::new(),
+            references: Vec::new(),
+            call_sites: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +253,7 @@ mod tests {
             declarations: vec![],
             edges: vec![edge],
             references: vec![],
+            call_sites: vec![],
         };
 
         let result = IndexResult::new(PathBuf::from("/test"), vec![tu]);

@@ -1,3 +1,6 @@
+pub mod optimize;
+pub use optimize::*;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
@@ -128,6 +131,9 @@ pub enum Commands {
     Analyze {
         /// Path to repository root
         repo: Option<PathBuf>,
+        /// Number of parallel workers
+        #[arg(long)]
+        workers: Option<usize>,
         #[command(subcommand)]
         command: Option<AnalyzeSubcommands>,
     },
@@ -205,6 +211,25 @@ pub enum Commands {
         before: PathBuf,
         /// After measurement path
         after: PathBuf,
+    },
+    /// Optimize repository dependencies end-to-end
+    Optimize {
+        /// Path to repository root
+        repo: PathBuf,
+    },
+    /// Launch interactive graphical dependency and call graph interface
+    Ui {
+        /// Path to repository root
+        repo: Option<PathBuf>,
+        /// Port to bind web server
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+        /// Do not open browser automatically
+        #[arg(long, default_value_t = false)]
+        no_open: bool,
+        /// Export standalone HTML report to path
+        #[arg(long)]
+        export: Option<PathBuf>,
     },
 }
 
@@ -461,6 +486,7 @@ pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
             declarations: combined_declarations,
             edges: combined_edges,
             references: vec![],
+            call_sites: vec![],
         });
     }
 
@@ -652,6 +678,29 @@ pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::Incremen
     println!("Reused:\n    {} translation units\n", result.stats.reused_tus);
     println!("Reanalyzed:\n    {} translation units\n", result.stats.reanalyzed_tus);
     println!("Cache hit rate:\n    {:.1}%", result.stats.hit_rate);
+
+    Ok(result)
+}
+
+pub fn handle_production_analyze(repo_path: &PathBuf, workers: Option<usize>) -> Result<ariadne_scheduler::ProductionAnalysisResult> {
+    let repo = Repository::locate(repo_path)?;
+    let repo_discovery = repo.discover()?;
+    let build_discovery = BuildDiscoverer::new(&repo.root).with_repo_discovery(&repo_discovery).discover()?;
+
+    let num_workers = workers.unwrap_or(4);
+    let analyzer = ariadne_scheduler::ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
+        .with_workers(num_workers);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = rt.block_on(analyzer.analyze())?;
+
+    let manager = ArtifactManager::prepare_for_repo(&repo)?;
+    manager.save_reduced_artifacts(&result.reduced_model)?;
+    manager.save_index_artifacts(&result.index_result)?;
+
+    println!("{}", result.stats.format_m13_output());
 
     Ok(result)
 }
@@ -1046,6 +1095,61 @@ pub fn handle_compare(before_path: &PathBuf, after_path: &PathBuf) -> Result<ari
     Ok(comparison)
 }
 
+pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_opt: Option<PathBuf>) -> Result<()> {
+    let repo_path = repo_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+    
+    // Discover files, build compilation contexts, build include graph & closures & cycles.
+    let (repository, include_graph, _closures, report) = build_include_graph(&repo_path)?;
+    
+    // Index source files & build reduced semantic model.
+    let index_result = handle_index(&repo_path)?;
+    let reduced_model = ReducedSemanticModel::reduce(&index_result);
+    
+    // Build CallGraph from index result & reduced model.
+    let call_graph = ariadne_graph::CallGraph::build_from_index(&index_result, &reduced_model);
+    
+    // Build GraphExportPayload
+    let payload = ariadne_ui::GraphExportPayload {
+        repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        include_graph: ariadne_ui::build_include_elements(&include_graph, &_closures, &[]),
+        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
+        call_graph: ariadne_ui::build_call_elements(&call_graph),
+        stats: ariadne_ui::SummaryStats {
+            total_files: include_graph.file_paths.len(),
+            total_symbols: reduced_model.symbols.len(),
+            total_calls: call_graph.edges.len(),
+            cycle_count: report.cycle_count,
+        }
+    };
+    
+    if let Some(path) = export_opt {
+        ariadne_ui::export_standalone_html(&payload, "", &path)?;
+        println!("Report exported successfully to {}", path.display());
+    } else {
+        println!("AriadnesThread Visualizer running at http://localhost:{}", port);
+        
+        let state = std::sync::Arc::new(ariadne_ui::UiState {
+            repo_root: repository.root.clone(),
+            include_graph,
+            reduced_model,
+            call_graph,
+            payload,
+        });
+        
+        let app = ariadne_ui::build_router(state);
+        
+        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+        
+        if !no_open {
+            let _ = open::that(format!("http://localhost:{}", port));
+        }
+        
+        axum::serve(listener, app).await?;
+    }
+    
+    Ok(())
+}
+
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -1054,7 +1158,7 @@ pub fn run() -> Result<()> {
         Some(Commands::Version) | None => {
             println!("tool version 0.1.0");
         }
-        Some(Commands::Analyze { repo, command }) => match (repo, command) {
+        Some(Commands::Analyze { repo, workers, command }) => match (repo, command) {
             (Some(repo_path), Some(AnalyzeSubcommands::Load { repo: load_repo, symbol, file })) => {
                 let r = if repo_path != load_repo { load_repo } else { repo_path };
                 handle_analyze_load(&r, symbol.as_deref(), file.as_deref())?;
@@ -1063,7 +1167,11 @@ pub fn run() -> Result<()> {
                 handle_analyze_load(&repo, symbol.as_deref(), file.as_deref())?;
             }
             (Some(repo_path), None) => {
-                handle_analyze(&repo_path)?;
+                if let Some(w) = workers {
+                    handle_production_analyze(&repo_path, Some(w))?;
+                } else {
+                    handle_analyze(&repo_path)?;
+                }
             }
             (None, None) => {
                 bail!("Repository path required for tool analyze command");
@@ -1131,6 +1239,13 @@ pub fn run() -> Result<()> {
         Some(Commands::Compare { before, after }) => {
             handle_compare(&before, &after)?;
         },
+        Some(Commands::Optimize { repo }) => {
+            handle_optimize(&repo)?;
+        },
+        Some(Commands::Ui { repo, port, no_open, export }) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(run_ui(repo, port, no_open, export))?;
+        },
     }
 
     Ok(())
@@ -1146,7 +1261,7 @@ mod tests {
         let args = vec!["tool", "analyze", "load", "my_repo", "--symbol", "MyClass"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Analyze { repo, command: Some(AnalyzeSubcommands::Load { repo: load_repo, symbol, file }) } => {
+            Commands::Analyze { repo, workers: _, command: Some(AnalyzeSubcommands::Load { repo: load_repo, symbol, file }) } => {
                 assert_eq!(repo, None);
                 assert_eq!(load_repo.to_str().unwrap(), "my_repo");
                 assert_eq!(symbol.unwrap(), "MyClass");
@@ -1313,11 +1428,26 @@ mod tests {
         let args = vec!["tool", "analyze", "my_repo"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Analyze { repo, command } => {
+            Commands::Analyze { repo, workers, command } => {
                 assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
+                assert_eq!(workers, None);
                 assert!(command.is_none());
             }
             _ => panic!("Expected Analyze command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_analyze_workers_flag() {
+        let args = vec!["tool", "analyze", "my_repo", "--workers", "32"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Analyze { repo, workers, command } => {
+                assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
+                assert_eq!(workers, Some(32));
+                assert!(command.is_none());
+            }
+            _ => panic!("Expected Analyze command with --workers"),
         }
     }
 
@@ -1328,5 +1458,17 @@ mod tests {
 
         let result = handle_analyze(&repo_dir).unwrap();
         assert!(result.stats.total_tus > 0 || result.stats.total_tus == 0); // Just check it returned Ok
+    }
+
+    #[test]
+    fn test_cli_optimize() {
+        let args = vec!["tool", "optimize", "my_repo"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Optimize { repo } => {
+                assert_eq!(repo.to_str().unwrap(), "my_repo");
+            }
+            _ => panic!("Expected Optimize command"),
+        }
     }
 }

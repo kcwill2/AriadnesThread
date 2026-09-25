@@ -1,0 +1,22 @@
+[package]
+name = "ariadne-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-build = { path = "../build" }
+ariadne-graph = { path = "../graph" }
+ariadne-index = { path = "../index" }
+ariadne-report = { path = "../report" }
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { version = "0.4", features = ["util"] }

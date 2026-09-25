@@ -56,6 +56,14 @@ pub struct LoadManifest {
     pub total_collateral_load: usize,
 }
 
+/// Metadata manifest for call graph artifact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallGraphManifest {
+    pub total_functions: usize,
+    pub total_calls: usize,
+    pub recursion_cycles: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadReport {
     pub repository_root: PathBuf,
@@ -376,6 +384,36 @@ impl ArtifactManager {
             tu_usage,
             file_symbols,
         })
+    }
+
+    pub fn save_callgraph_artifacts(&self, callgraph: &ariadne_graph::CallGraph) -> Result<PathBuf> {
+        let callgraph_dir = self.artifact_root.join("callgraph");
+        fs::create_dir_all(&callgraph_dir)
+            .with_context(|| format!("Failed to create callgraph artifact directory at {:?}", callgraph_dir))?;
+
+        let json_path = callgraph_dir.join("callgraph.json");
+        fs::write(&json_path, serde_json::to_string_pretty(callgraph)?)?;
+
+        let bin_path = callgraph_dir.join("callgraph.bin");
+        fs::write(&bin_path, bincode::serialize(callgraph)?)?;
+
+        let cycles = callgraph.detect_recursion_cycles().len();
+        let manifest = CallGraphManifest {
+            total_functions: callgraph.nodes.len(),
+            total_calls: callgraph.edges.iter().map(|e| e.call_count).sum(),
+            recursion_cycles: cycles,
+        };
+        let manifest_path = callgraph_dir.join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+        Ok(callgraph_dir)
+    }
+
+    pub fn load_callgraph_artifacts(&self) -> Result<ariadne_graph::CallGraph> {
+        let bin_path = self.artifact_root.join("callgraph").join("callgraph.bin");
+        let data = fs::read(&bin_path)
+            .with_context(|| format!("Failed to read callgraph.bin at {:?}", bin_path))?;
+        Ok(bincode::deserialize(&data)?)
     }
 
     pub fn save_load_artifacts(&self, report: &LoadReport) -> Result<PathBuf> {
@@ -1176,5 +1214,31 @@ mod tests {
         let loaded_manifest = mgr.load_cache_manifest().unwrap();
         assert_eq!(manifest.analysis_version, loaded_manifest.analysis_version);
         assert_eq!(manifest.hit_rate, loaded_manifest.hit_rate);
+    }
+    #[test]
+    fn test_save_load_callgraph_artifacts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let repo = Repository::locate(root).unwrap();
+        let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+        let mut callgraph = ariadne_graph::CallGraph::default();
+        let f1 = FileId::from_relative_path("main.cpp");
+        let s1 = ariadne_index::types::SymbolId::new("A");
+        callgraph.nodes.push(ariadne_graph::CallNode {
+            symbol_id: s1.clone(),
+            name: "A".into(),
+            owning_file: f1.clone(),
+            location: None,
+        });
+
+        let callgraph_dir = mgr.save_callgraph_artifacts(&callgraph).unwrap();
+        assert!(callgraph_dir.join("callgraph.json").exists());
+        assert!(callgraph_dir.join("callgraph.bin").exists());
+        assert!(callgraph_dir.join("manifest.json").exists());
+
+        let loaded = mgr.load_callgraph_artifacts().unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.nodes[0].name, "A");
     }
 }

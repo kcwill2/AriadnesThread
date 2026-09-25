@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ariadne's Thread - Codebase Graph</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 0; }
+        header { background: #333; color: white; padding: 10px; }
+        .tabs { display: flex; gap: 10px; margin-top: 10px; }
+        .tab { background: #555; padding: 5px 10px; cursor: pointer; }
+        .toolbar { padding: 10px; background: #eee; }
+        #canvas { height: 600px; border: 1px solid #ccc; margin: 10px; }
+        .inspector { float: right; width: 300px; padding: 10px; border-left: 1px solid #ccc; height: 600px; overflow-y: auto;}
+        .drawer { position: fixed; bottom: 0; width: 100%; height: 200px; background: #fafafa; border-top: 1px solid #aaa; display: none; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Ariadne's Thread</h1>
+        <div class="tabs">
+            <div class="tab">Include Graph</div>
+            <div class="tab">Symbol Dependency Graph</div>
+            <div class="tab">Call Graph</div>
+        </div>
+    </header>
+    <div class="toolbar">
+        <button>Export</button>
+    </div>
+    <div class="inspector">Inspector</div>
+    <div id="canvas">Graph goes here</div>
+    <div class="drawer">Source code drawer</div>
+
+    <script>/*__ARIADNE_DATA__*/</script>
+    <script>
+        // Use window.__ARIADNE_DATA__ if present, else fetch from /api/...
+    </script>
+</body>
+</html>

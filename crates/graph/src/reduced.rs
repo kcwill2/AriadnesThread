@@ -203,6 +203,7 @@ mod tests {
                 }
             ],
             references: vec![],
+            call_sites: vec![],
         };
 
         let tu2 = TuAnalysis {
@@ -236,6 +237,7 @@ mod tests {
                     is_write: false,
                 }
             ],
+            call_sites: vec![],
         };
 
         IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2])
