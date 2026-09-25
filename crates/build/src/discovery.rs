@@ -421,7 +421,7 @@ mod tests {
             "stdafx.h".to_string(),
         ];
         
-        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
+        let (compiler, defines, inc_dirs, __sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
         
         assert_eq!(compiler, "cl.exe");
         assert_eq!(inc_dirs, vec![PathBuf::from("include"), PathBuf::from("C:\\Program Files\\include")]);

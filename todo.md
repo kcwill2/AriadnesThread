@@ -1,5 +1,5 @@
-# Task: Implement Progress Meters for Long Loading Times
+# Task: Optimize Graph Resolution & Add Intermediate Phase Progress Meters
 
 ## Status
-- [x] Unit 1: CLI Indexing & Analysis progress meter in `crates/cli`
-- [x] Unit 2: Web Visualizer UI multi-stage progress meter & loader overlay in `crates/ui/assets/index.html`
+- [x] Unit 1: Optimize `CallGraph::build_from_index` with $O(1)$ pre-indexed symbol lookups (eliminate quadratic scan & string formatting allocations)
+- [x] Unit 2: Add progress meters for intermediate graph processing phases (model reduction, call graph building, collateral analysis) in `crates/cli/src/commands/ui.rs`

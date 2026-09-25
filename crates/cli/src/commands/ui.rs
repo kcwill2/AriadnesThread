@@ -14,7 +14,9 @@ pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_
     let reduced_model = ReducedSemanticModel::reduce(&index_result);
     
     // Build CallGraph from index result & reduced model.
+    crate::commands::progress::print_progress(0, 1, "Building call graph", "phase");
     let call_graph = ariadne_graph::CallGraph::build_from_index(&index_result, &reduced_model);
+    crate::commands::progress::print_progress(1, 1, "Building call graph", "phase");
     
     // Build GraphExportPayload
     let cycles = include_graph.detect_cycles();

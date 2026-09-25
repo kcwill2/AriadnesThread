@@ -29,22 +29,39 @@ impl CallGraph {
         let mut nodes: std::collections::BTreeMap<SymbolId, CallNode> = std::collections::BTreeMap::new();
         let mut edges: std::collections::BTreeMap<(SymbolId, SymbolId), CallEdge> = std::collections::BTreeMap::new();
 
+        let mut exact_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> = std::collections::HashMap::new();
+        let mut suffix_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> = std::collections::HashMap::new();
+
+        for sym in model.symbols.values() {
+            exact_map.insert(sym.id.0.as_str(), sym);
+            exact_map.entry(sym.name.as_str()).or_insert(sym);
+
+            let mut current = sym.id.0.as_str();
+            while let Some(idx) = current.find("::") {
+                current = &current[idx + 2..];
+                suffix_map.entry(current).or_insert(sym);
+            }
+        }
+
         for tu in &index_result.tu_analyses {
             for site in &tu.call_sites {
                 let caller = site.caller_symbol.clone();
+                let callee_name = site.callee_name.as_str();
                 
-                let callee_opt = model.symbols.values().find(|sym| {
-                    if sym.name == site.callee_name || sym.id.0 == site.callee_name {
-                        return true;
-                    }
-                    if sym.id.0.ends_with(&format!("::{}", site.callee_name)) {
-                        return true;
-                    }
-                    if site.callee_name.ends_with(&format!("::{}", sym.name)) {
-                        return true;
-                    }
-                    false
-                });
+                let callee_opt = exact_map.get(callee_name)
+                    .copied()
+                    .or_else(|| suffix_map.get(callee_name).copied())
+                    .or_else(|| {
+                        let mut current = callee_name;
+                        while let Some(idx) = current.find("::") {
+                            current = &current[idx + 2..];
+                            if let Some(&sym) = exact_map.get(current) {
+                                return Some(sym);
+                            }
+                        }
+                        None
+                    });
+
                 
                 if let Some(callee_sym) = callee_opt {
                     let callee = callee_sym.id.clone();
@@ -376,5 +393,58 @@ mod tests {
         let callers = graph.callers_of(&sym_callee);
         assert_eq!(callers.len(), 1, "Should map both call sites to the same callee");
         assert_eq!(callers[0].call_count, 2, "Should have 2 calls");
+    }
+
+    #[test]
+    fn test_callgraph_resolution_priority() {
+        let f1 = FileId::from_relative_path("main.rs");
+        let sym_caller = SymbolId::new("caller");
+        // We have two symbols. One matches exactly by name, one matches by suffix.
+        let sym_exact = SymbolId::new("exact::method");
+        let sym_suffix = SymbolId::new("other::exact::method");
+
+        let tu = TuAnalysis {
+            tu_file_id: f1.clone(),
+            context_name: "test".into(),
+            symbols: vec![
+                SymbolRecord {
+                    id: sym_exact.clone(),
+                    name: "exact::method".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: f1.clone(),
+                    declarations: vec![],
+                    definition: None,
+                },
+                SymbolRecord {
+                    id: sym_suffix.clone(),
+                    name: "method".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: f1.clone(),
+                    declarations: vec![],
+                    definition: None,
+                },
+            ],
+            declarations: vec![],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![
+                CallSite {
+                    caller_symbol: sym_caller.clone(),
+                    callee_name: "exact::method".into(), // exact match for sym_exact by ID/Name
+                    location: FileLocation { file_id: f1.clone(), line: 10, column: 5 },
+                },
+            ],
+        };
+
+        let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let model = ReducedSemanticModel::reduce(&index_result);
+        
+        let graph = CallGraph::build_from_index(&index_result, &model);
+        
+        // Because of HashMap random order in the old implementation, it could pick sym_suffix 
+        // since `callee_name` ("exact::method") ends with `::sym.name` ("::method").
+        // We want to ensure it strictly picks exact matches first.
+        let callers = graph.callers_of(&sym_exact);
+        assert_eq!(callers.len(), 1, "Should prefer exact match over suffix match");
     }
 }
