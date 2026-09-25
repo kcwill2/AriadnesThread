@@ -286,25 +286,22 @@ fn parse_args(
     let mut arch = None;
     let mut raw_flags = Vec::new();
 
-    let is_flag = |s: &str| s.starts_with('-') || (s.starts_with('/') && !s[1..].contains('/') && !s[1..].contains('\\'));
-
-    if let Some(first) = raw_args.first() {
-        if !is_flag(first) {
-            compiler = first.clone();
-        }
-    }
+    let is_flag = |s: &str| s.starts_with('-') || (s.starts_with('/') && !s.contains("usr") && !s.contains("bin") && !s.ends_with("c++") && !s.ends_with("g++") && !s.ends_with("clang") && !s.ends_with("clang++"));
 
     let mut iter = raw_args.iter().peekable();
+
+    if let Some(first) = iter.peek() {
+        if !is_flag(first) {
+            compiler = (*first).clone();
+            iter.next();
+        }
+    }
     while let Some(arg) = iter.next() {
         if arg.starts_with("-D") || arg.starts_with("/D") {
             let val = if arg.len() > 2 {
                 &arg[2..]
-            } else if let Some(next) = iter.peek() {
-                if !is_flag(next) {
-                    iter.next().unwrap()
-                } else {
-                    ""
-                }
+            } else if let Some(_next) = iter.peek() {
+                iter.next().unwrap()
             } else {
                 ""
             };
@@ -330,12 +327,8 @@ fn parse_args(
         } else if arg.starts_with("-I") || arg.starts_with("/I") {
             let val = if arg.len() > 2 {
                 &arg[2..]
-            } else if let Some(next) = iter.peek() {
-                if !is_flag(next) {
-                    iter.next().unwrap()
-                } else {
-                    ""
-                }
+            } else if let Some(_next) = iter.peek() {
+                iter.next().unwrap()
             } else {
                 ""
             };
@@ -345,12 +338,8 @@ fn parse_args(
         } else if arg.starts_with("-FI") || arg.starts_with("/FI") {
             let val = if arg.len() > 3 {
                 &arg[3..]
-            } else if let Some(next) = iter.peek() {
-                if !is_flag(next) {
-                    iter.next().unwrap()
-                } else {
-                    ""
-                }
+            } else if let Some(_next) = iter.peek() {
+                iter.next().unwrap()
             } else {
                 ""
             };
@@ -403,7 +392,7 @@ mod tests {
             "/path/to/prefix.h".to_string(),
         ];
         
-        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
         
         assert_eq!(compiler, "/usr/bin/c++");
         assert_eq!(sys_inc_dirs, vec![PathBuf::from("/usr/include"), PathBuf::from("/usr/local/include")]);
@@ -432,7 +421,7 @@ mod tests {
             "stdafx.h".to_string(),
         ];
         
-        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
         
         assert_eq!(compiler, "cl.exe");
         assert_eq!(inc_dirs, vec![PathBuf::from("include"), PathBuf::from("C:\\Program Files\\include")]);
@@ -447,7 +436,7 @@ mod tests {
         let cmd = Some("cl.exe /I \"C:\\Program Files\\include\" /D MACRO=\"spaced val\" src.cpp".to_string());
         let args = vec![];
         
-        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        let (compiler, defines, inc_dirs, _sys_inc_dirs, _forced_incs, _lang_std, _arch, _raw_flags) = parse_args(&cmd, &args);
         
         assert_eq!(compiler, "cl.exe");
         assert_eq!(inc_dirs, vec![PathBuf::from("C:\\Program Files\\include")]);

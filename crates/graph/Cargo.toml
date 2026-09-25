@@ -12,3 +12,6 @@ bincode.workspace = true
 ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-index = { path = "../index" }
+
+[dev-dependencies]
+tempfile.workspace = true

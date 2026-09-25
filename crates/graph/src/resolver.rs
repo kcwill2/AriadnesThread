@@ -92,14 +92,25 @@ impl<'a> IncludeResolver<'a> {
             match component {
                 std::path::Component::CurDir => {}
                 std::path::Component::ParentDir => {
-                    components.pop();
+                    match components.last() {
+                        Some(&std::path::Component::ParentDir) | None => {
+                            components.push(component);
+                        }
+                        Some(&std::path::Component::RootDir) | Some(&std::path::Component::Prefix(_)) => {
+                            // Cannot resolve `..` above root, so do nothing.
+                        }
+                        Some(&std::path::Component::Normal(_)) => {
+                            components.pop();
+                        }
+                        _ => {}
+                    }
                 }
-                c => components.push(c.as_os_str()),
+                c => components.push(c),
             }
         }
         let mut normalized = PathBuf::new();
         for c in components {
-            normalized.push(c);
+            normalized.push(c.as_os_str());
         }
         normalized
     }
@@ -222,6 +233,22 @@ impl<'a> IncludeResolver<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use ariadne_repo::{FileKind, FileOwnership, OptimizationPolicy, FileRecord};
+    use ariadne_build::CompilationContext;
+
+    fn mock_file(root: &Path, rel: &str, ownership: FileOwnership) -> FileRecord {
+        FileRecord {
+            id: FileId::from_relative_path(rel),
+            path: PathBuf::from(rel),
+            canonical_path: root.join(rel),
+            kind: FileKind::Header,
+            size: 0,
+            content_hash: String::new(),
+            ownership,
+            optimization_policy: OptimizationPolicy::Optimizable,
+        }
+    }
 
     #[test]
     fn test_parse_include_directives() {
@@ -245,5 +272,133 @@ mod tests {
         assert_eq!(directives[2].raw_path, "heavy.h");
         assert!(!directives[2].is_angled);
         assert_eq!(directives[2].line, 5);
+    }
+
+    #[test]
+    fn test_normalize_path() {
+        // Redundant separators
+        assert_eq!(IncludeResolver::normalize_path(Path::new("a//b///c")), PathBuf::from("a/b/c"));
+        
+        // Single dots
+        assert_eq!(IncludeResolver::normalize_path(Path::new("a/./b/./c")), PathBuf::from("a/b/c"));
+        
+        // Double dots (traversal)
+        assert_eq!(IncludeResolver::normalize_path(Path::new("a/b/../c")), PathBuf::from("a/c"));
+        
+        // Multiple double dots
+        assert_eq!(IncludeResolver::normalize_path(Path::new("a/b/../../c")), PathBuf::from("c"));
+        
+        // Relative traversal starting with .. should keep the ..
+        assert_eq!(IncludeResolver::normalize_path(Path::new("../a")), PathBuf::from("../a"));
+        
+        // Traversal above current dir from a known path
+        assert_eq!(IncludeResolver::normalize_path(Path::new("a/../../b")), PathBuf::from("../b"));
+    }
+
+    #[test]
+    fn test_resolve_directive() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        
+        let mut files = Vec::new();
+        files.push(mock_file(root, "common/helper.h", FileOwnership::Repository));
+        files.push(mock_file(root, "third_party/lib/lib.h", FileOwnership::ThirdParty));
+        files.push(mock_file(root, "usr/include/system.h", FileOwnership::Toolchain));
+        
+        let discovery = RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files,
+            ownership_summary: HashMap::new(),
+            policy_summary: HashMap::new(),
+        };
+        
+        let mut context = CompilationContext::new("test", "clang");
+        context.include_dirs = vec![PathBuf::from("third_party/lib")];
+        context.system_include_dirs = vec![PathBuf::from("usr/include")];
+        
+        let resolver = IncludeResolver::new(root)
+            .with_repo_discovery(&discovery)
+            .with_context(&context);
+            
+        let source_id = FileId::from_relative_path("src/main.cpp");
+        let source_rel_path = Path::new("src/main.cpp");
+        
+        // Setup a real disk file for the fallback test
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/sibling.h"), "").unwrap();
+
+        // 1. Quoted local relative includes
+        // Disk fallback (sibling.h is not in discovery)
+        let dir1 = RawIncludeDirective { raw_path: "sibling.h".into(), is_angled: false, line: 1, column: 1 };
+        let edge1 = resolver.resolve_directive(source_id, source_rel_path, &dir1);
+        assert_eq!(edge1.kind, IncludeKind::Local);
+        assert_eq!(edge1.destination, Some(FileId::from_relative_path("src/sibling.h")));
+        assert_eq!(edge1.resolved_path, Some(PathBuf::from("src/sibling.h")));
+
+        // Found in discovery (repo local traversal)
+        let dir2 = RawIncludeDirective { raw_path: "../common/helper.h".into(), is_angled: false, line: 2, column: 1 };
+        let edge2 = resolver.resolve_directive(source_id, source_rel_path, &dir2);
+        assert_eq!(edge2.kind, IncludeKind::Local);
+        assert_eq!(edge2.destination, Some(FileId::from_relative_path("common/helper.h")));
+
+        // 2. Angled includes
+        // Toolchain (System)
+        let dir3 = RawIncludeDirective { raw_path: "system.h".into(), is_angled: true, line: 3, column: 1 };
+        let edge3 = resolver.resolve_directive(source_id, source_rel_path, &dir3);
+        assert_eq!(edge3.kind, IncludeKind::System);
+        assert_eq!(edge3.destination, Some(FileId::from_relative_path("usr/include/system.h")));
+
+        // ThirdParty (External) - Note: include_dirs maps to External if the file is ThirdParty
+        let dir4 = RawIncludeDirective { raw_path: "lib.h".into(), is_angled: true, line: 4, column: 1 };
+        let edge4 = resolver.resolve_directive(source_id, source_rel_path, &dir4);
+        assert_eq!(edge4.kind, IncludeKind::External);
+        assert_eq!(edge4.destination, Some(FileId::from_relative_path("third_party/lib/lib.h")));
+
+        // 3. Unresolved include
+        let dir5 = RawIncludeDirective { raw_path: "nonexistent.h".into(), is_angled: false, line: 5, column: 1 };
+        let edge5 = resolver.resolve_directive(source_id, source_rel_path, &dir5);
+        assert_eq!(edge5.destination, None);
+        assert_eq!(edge5.resolved_path, None);
+    }
+
+    #[test]
+    fn test_resolve_file_includes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        
+        let mut files = Vec::new();
+        files.push(mock_file(root, "include/header.h", FileOwnership::Repository));
+        
+        let discovery = RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files,
+            ownership_summary: HashMap::new(),
+            policy_summary: HashMap::new(),
+        };
+        
+        let mut context = CompilationContext::new("test", "clang");
+        context.include_dirs = vec![PathBuf::from("include")];
+        
+        let resolver = IncludeResolver::new(root)
+            .with_repo_discovery(&discovery)
+            .with_context(&context);
+            
+        let content = r#"
+#include "header.h"
+#include <missing.h>
+"#;
+        let edges = resolver.resolve_file_includes(
+            FileId::from_relative_path("src/lib.cpp"),
+            Path::new("src/lib.cpp"),
+            content,
+        );
+        
+        assert_eq!(edges.len(), 2);
+        
+        assert_eq!(edges[0].raw_path, "header.h");
+        assert_eq!(edges[0].destination, Some(FileId::from_relative_path("include/header.h")));
+        
+        assert_eq!(edges[1].raw_path, "missing.h");
+        assert_eq!(edges[1].destination, None);
     }
 }

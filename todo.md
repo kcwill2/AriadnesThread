@@ -147,3 +147,12 @@
   - [x] Unit 2: Implement onboarding UI, spotlight tour walkthrough, Help Center modal with first-visit re-trigger button, keyboard shortcuts, and persistent state in `crates/ui/assets/index.html` (GREEN)
   - [x] Unit 3: Verify tests, standalone HTML export, and refactor (REFACTOR)
 
+- [x] **Unit Test Coverage Gaps & Robustness Verification**
+  - [x] Unit 1: IncludeResolver path resolution, directory search, ownership classification & disk fallback in `crates/graph/src/resolver.rs`
+  - [x] Unit 2: Build compilation command argument parsing, compiler flags, and context inference in `crates/build/src/discovery.rs`
+  - [x] Unit 3: File load analysis, file load explanation & summary formatting in `crates/graph/src/load.rs`
+  - [x] Unit 4: Repository traversal filtering, hashing, and discovery result construction in `crates/repo/src/discovery.rs`
+  - [x] Unit 5: SCC algorithm edge cases (self-loops, disconnected components, multi-cycle graphs) in `crates/cluster/src/scc.rs`
+
+
+

@@ -785,6 +785,13 @@
       cursor: pointer;
     }
     
+    .tour-highlighted-element {
+      position: relative !important;
+      z-index: 1002 !important;
+      outline: 2px solid var(--cyan) !important;
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.7) !important;
+      border-radius: 6px;
+    }
   </style>
 </head>
 <body>
@@ -1073,7 +1080,7 @@
 
   <!-- ONBOARDING & HELP CENTER MODALS -->
   <div class="modal-overlay" id="tourOverlay" onclick="endTour()" style="z-index: 1000; background: rgba(0,0,0,0.7); display: none;"></div>
-  <div id="tourCard" style="display: none; position: fixed; z-index: 1001; background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 8px; width: 320px; padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+  <div id="tourCard" style="display: none; position: fixed; z-index: 1003; transition: top 0.25s cubic-bezier(0.4, 0, 0.2, 1), left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 8px; width: 320px; padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 style="margin:0; font-size: 14px; color: var(--cyan);" id="tourTitle">Tour Step</h3>
       <button onclick="endTour()" style="background:none; border:none; color: var(--text-muted); cursor: pointer;">✕</button>
@@ -2271,11 +2278,17 @@
         endTour();
         return;
       }
+      document.querySelectorAll('.tour-highlighted-element').forEach(el => el.classList.remove('tour-highlighted-element'));
       const step = tourSteps[currentTourStep];
       document.getElementById('tourTitle').textContent = step.title;
       document.getElementById('tourText').textContent = step.text;
       document.getElementById('tourStepIndicator').textContent = `Step ${currentTourStep + 1} of ${tourSteps.length}`;
       
+      const btnTourPrev = document.getElementById('btnTourPrev');
+      if (btnTourPrev) {
+        btnTourPrev.style.display = currentTourStep === 0 ? 'none' : 'inline-block';
+      }
+
       const btnNext = document.getElementById('btnTourNext');
       if (currentTourStep === tourSteps.length - 1) {
         btnNext.textContent = 'Finish';
@@ -2285,6 +2298,7 @@
 
       const targetEl = document.querySelector(step.id);
       if (targetEl) {
+        targetEl.classList.add('tour-highlighted-element');
         positionTourCard(targetEl);
       }
     }
@@ -2294,22 +2308,34 @@
       const card = document.getElementById('tourCard');
       
       let top, left;
-      const cardWidth = 320; // from inline style width: 320px + padding
-      const cardHeight = card.offsetHeight || 180; // approximate if not rendered yet
+      const cardWidth = 320; 
+      const cardHeight = card.offsetHeight || 180; 
+      const margin = 16;
+      const winW = window.innerWidth;
+      const winH = window.innerHeight;
       
       if (targetEl.id === 'canvasContainer') {
-        top = rect.top + 30;
-        left = rect.left + 30;
+        top = Math.max(margin + 120, (winH - cardHeight) / 2);
+        left = Math.max(margin, (winW - 340 - cardWidth) / 2);
+      } else if (targetEl.id === 'tabInclude' || targetEl.closest('.tabs')) {
+        top = rect.bottom + 10;
+        left = rect.left + (rect.width - cardWidth) / 2;
       } else if (targetEl.classList.contains('inspector')) {
-        top = rect.top + 30;
-        left = rect.left - cardWidth - 20;
+        left = rect.left - cardWidth - margin;
+        top = Math.max(margin, rect.top + 40);
+      } else if (targetEl.id === 'btnCycles' || targetEl.closest('.header-actions')) {
+        top = rect.bottom + 10;
+        left = rect.right - cardWidth;
+      } else if (targetEl.classList.contains('toolbar') || targetEl.id === 'ariadneThread') {
+        top = rect.bottom + 10;
+        left = rect.left + 20;
       } else {
         top = rect.bottom + 10;
         left = rect.left;
       }
       
-      top = Math.max(16, Math.min(window.innerHeight - cardHeight - 20, top));
-      left = Math.max(16, Math.min(window.innerWidth - cardWidth - 20, left));
+      top = Math.max(margin, Math.min(winH - cardHeight - margin, top));
+      left = Math.max(margin, Math.min(winW - cardWidth - margin, left));
       
       card.style.top = top + 'px';
       card.style.left = left + 'px';
@@ -2335,6 +2361,7 @@
       currentTourStep = -1;
       document.getElementById('tourOverlay').style.display = 'none';
       document.getElementById('tourCard').style.display = 'none';
+      document.querySelectorAll('.tour-highlighted-element').forEach(el => el.classList.remove('tour-highlighted-element'));
     }
 
     function triggerFirstVisitExperience() {

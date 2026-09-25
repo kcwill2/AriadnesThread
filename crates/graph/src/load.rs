@@ -451,4 +451,62 @@ mod tests {
         assert!(formatted.contains("HugeThirdParty.h is included by graphics.h."));
         assert!(formatted.contains("No semantic dependency from Thing reaches symbols owned by HugeThirdParty.h."));
     }
+
+    #[test]
+    fn test_analyze_file_load() {
+        let (ig, model) = setup_mock_data();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        
+        let metric = analyzer.analyze_file_load(std::path::Path::new("Thing.h")).expect("analyze_file_load failed");
+        assert_eq!(metric.target_name, "Thing.h");
+        assert_eq!(metric.semantic_load, 1);
+        assert_eq!(metric.include_load, 2);
+        assert_eq!(metric.collateral_load, 1);
+        assert_eq!(metric.total_load, 2);
+        assert_eq!(metric.largest_collateral_source.as_ref().unwrap().path, PathBuf::from("HugeThirdParty.h"));
+
+        // Error case
+        assert!(analyzer.analyze_file_load(std::path::Path::new("NonExistent.h")).is_err());
+    }
+
+    #[test]
+    fn test_explain_file_load() {
+        let (ig, model) = setup_mock_data();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        // Automatic largest collateral source
+        let explanation = analyzer.explain_file_load(std::path::Path::new("Thing.h"), None).expect("explain_file_load failed");
+        assert_eq!(explanation.target_name, "Thing.h");
+        assert_eq!(explanation.collateral_source, "HugeThirdParty.h");
+        assert_eq!(explanation.path, vec!["Thing.h", "graphics.h", "HugeThirdParty.h"]);
+        
+        // Explicit collateral source
+        let explanation_explicit = analyzer.explain_file_load(std::path::Path::new("Thing.h"), Some("HugeThirdParty")).expect("explain_file_load failed");
+        assert_eq!(explanation_explicit.collateral_source, "HugeThirdParty.h");
+
+        // Error cases
+        assert!(analyzer.explain_file_load(std::path::Path::new("NonExistent.h"), None).is_err());
+        assert!(analyzer.explain_file_load(std::path::Path::new("HugeThirdParty.h"), None).is_err());
+    }
+
+    #[test]
+    fn test_format_summary() {
+        let (ig, model) = setup_mock_data();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        // With largest collateral source
+        let metric = analyzer.analyze_file_load(std::path::Path::new("Thing.h")).unwrap();
+        let summary = metric.format_summary();
+        assert!(summary.contains("Thing.h"));
+        assert!(summary.contains("Semantic load:"));
+        assert!(summary.contains("1 symbols"));
+        assert!(summary.contains("Largest collateral source:"));
+        assert!(summary.contains("HugeThirdParty.h"));
+
+        // Without collateral source
+        let metric_empty = analyzer.analyze_file_load(std::path::Path::new("HugeThirdParty.h")).unwrap();
+        let summary_empty = metric_empty.format_summary();
+        assert!(summary_empty.contains("None"));
+        assert!(summary_empty.contains("0 symbols"));
+    }
 }

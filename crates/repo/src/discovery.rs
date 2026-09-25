@@ -107,3 +107,93 @@ pub fn build_discovery_result(
         policy_summary,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_compute_file_hash() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, b"hello world").unwrap();
+
+        let hash = compute_file_hash(&file_path).unwrap();
+        // SHA-256 of "hello world"
+        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+
+        let missing = dir.path().join("missing.txt");
+        assert!(compute_file_hash(&missing).is_err());
+    }
+
+    #[test]
+    fn test_discover_repository_files() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+
+        // Create some source files
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.cpp"), b"int main() {}").unwrap();
+        fs::write(root.join("src/utils.h"), b"void foo();").unwrap();
+        fs::write(root.join("src/data.txt"), b"some data").unwrap();
+
+        // Create ignored dirs
+        fs::create_dir(root.join(".hidden")).unwrap();
+        fs::write(root.join(".hidden/secret.cpp"), b"secret").unwrap();
+
+        fs::create_dir(root.join("target")).unwrap();
+        fs::write(root.join("target/out.cpp"), b"out").unwrap();
+
+        fs::create_dir(root.join("artifacts")).unwrap();
+        fs::write(root.join("artifacts/test.c"), b"test").unwrap();
+
+        fs::create_dir(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules/lib.cpp"), b"lib").unwrap();
+
+        let files = discover_repository_files(root).unwrap();
+
+        assert_eq!(files.len(), 2, "Should only contain main.cpp and utils.h");
+        
+        // Results should be alphabetically sorted
+        assert_eq!(files[0].path.to_str().unwrap(), "src/main.cpp");
+        assert_eq!(files[1].path.to_str().unwrap(), "src/utils.h");
+    }
+
+    #[test]
+    fn test_build_discovery_result() {
+        let file1 = FileRecord {
+            id: crate::types::FileId::from_relative_path("src/main.cpp"),
+            path: PathBuf::from("src/main.cpp"),
+            canonical_path: PathBuf::from("/mock/src/main.cpp"),
+            kind: crate::types::FileKind::Source,
+            size: 10,
+            content_hash: "hash1".to_string(),
+            ownership: FileOwnership::Repository,
+            optimization_policy: OptimizationPolicy::Optimizable,
+        };
+        let file2 = FileRecord {
+            id: crate::types::FileId::from_relative_path("third_party/lib.cpp"),
+            path: PathBuf::from("third_party/lib.cpp"),
+            canonical_path: PathBuf::from("/mock/third_party/lib.cpp"),
+            kind: crate::types::FileKind::Source,
+            size: 10,
+            content_hash: "hash2".to_string(),
+            ownership: FileOwnership::ThirdParty,
+            optimization_policy: OptimizationPolicy::Frozen,
+        };
+
+        let result = build_discovery_result(PathBuf::from("/mock"), vec![file1, file2]);
+
+        assert_eq!(result.ownership_summary[&FileOwnership::Repository], 1);
+        assert_eq!(result.ownership_summary[&FileOwnership::ThirdParty], 1);
+        assert_eq!(result.ownership_summary[&FileOwnership::Toolchain], 0);
+        assert_eq!(result.ownership_summary[&FileOwnership::Generated], 0);
+
+        assert_eq!(result.policy_summary[&OptimizationPolicy::Optimizable], 1);
+        assert_eq!(result.policy_summary[&OptimizationPolicy::Frozen], 1);
+        assert_eq!(result.policy_summary[&OptimizationPolicy::Contract], 0);
+    }
+}
+

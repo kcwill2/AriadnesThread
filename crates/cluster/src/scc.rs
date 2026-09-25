@@ -152,4 +152,88 @@ mod tests {
         assert!(cycle_scc.symbols.contains(&SymbolId::new("B")));
         assert!(cycle_scc.symbols.contains(&SymbolId::new("C")));
     }
+
+    #[test]
+    fn test_empty_input() {
+        let syms = vec![];
+        let edges = vec![];
+        let sccs = compute_symbol_sccs(&syms, &edges);
+        assert!(sccs.is_empty());
+    }
+
+    #[test]
+    fn test_disconnected_components() {
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+        ];
+        let edges = vec![];
+        let sccs = compute_symbol_sccs(&syms, &edges);
+        assert_eq!(sccs.len(), 2);
+    }
+
+    #[test]
+    fn test_self_loop() {
+        let syms = vec![
+            SymbolId::new("A"),
+        ];
+        let edges = vec![
+            edge("A", "A"),
+        ];
+        let sccs = compute_symbol_sccs(&syms, &edges);
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0].symbols.len(), 1);
+        assert_eq!(sccs[0].symbols[0], SymbolId::new("A"));
+    }
+
+    #[test]
+    fn test_multiple_disjoint_sccs() {
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+            SymbolId::new("D"),
+            SymbolId::new("E"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "A"),
+            edge("C", "D"),
+            edge("D", "E"),
+            edge("E", "C"),
+        ];
+        let mut sccs = compute_symbol_sccs(&syms, &edges);
+        assert_eq!(sccs.len(), 2);
+        sccs.sort_by_key(|scc| scc.symbols.len());
+        assert_eq!(sccs[0].symbols.len(), 2);
+        assert!(sccs[0].symbols.contains(&SymbolId::new("A")));
+        assert!(sccs[0].symbols.contains(&SymbolId::new("B")));
+        assert_eq!(sccs[1].symbols.len(), 3);
+        assert!(sccs[1].symbols.contains(&SymbolId::new("C")));
+        assert!(sccs[1].symbols.contains(&SymbolId::new("D")));
+        assert!(sccs[1].symbols.contains(&SymbolId::new("E")));
+    }
+
+    #[test]
+    fn test_connected_multi_scc_graph() {
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+            SymbolId::new("D"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "A"),
+            edge("B", "C"),
+            edge("C", "D"),
+            edge("D", "C"),
+        ];
+        let sccs = compute_symbol_sccs(&syms, &edges);
+        assert_eq!(sccs.len(), 2);
+        
+        let mut lengths: Vec<usize> = sccs.iter().map(|scc| scc.symbols.len()).collect();
+        lengths.sort();
+        assert_eq!(lengths, vec![2, 2]);
+    }
 }

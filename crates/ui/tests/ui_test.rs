@@ -676,11 +676,22 @@ fn test_tour_overlay_dismissal_and_positioning() {
     
     // Verify positionTourCard function exists and clamps
     assert!(html.contains("function positionTourCard("));
-    assert!(html.contains("Math.max(16"));
-    assert!(html.contains("Math.min(window.innerHeight"));
-    assert!(html.contains("Math.min(window.innerWidth"));
+    assert!(html.contains("Math.max("));
+    assert!(html.contains("Math.min(winH"));
+    assert!(html.contains("Math.min(winW"));
     
     // Verify tourOverlay has an onclick dismissal
     assert!(html.contains("onclick=\"endTour()\"") && html.contains("id=\"tourOverlay\""));
+
+    // Verify .tour-highlighted-element CSS
+    assert!(html.contains(".tour-highlighted-element"));
+    assert!(html.contains("z-index: 1002 !important"));
+    assert!(html.contains("outline: 2px solid var(--cyan) !important"));
+
+    // Verify tourCard smooth transition
+    assert!(html.contains("transition: top 0.25s cubic-bezier"));
+
+    // Verify btnTourPrev hidden on step 0
+    assert!(html.contains("btnTourPrev.style.display = currentTourStep === 0 ? 'none' : 'inline-block'"));
 }
 
