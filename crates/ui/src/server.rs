@@ -17,10 +17,51 @@ use tower_http::cors::CorsLayer;
 
 pub struct UiState {
     pub repo_root: std::path::PathBuf,
-    pub include_graph: ariadne_graph::IncludeGraph,
-    pub reduced_model: ariadne_graph::ReducedSemanticModel,
-    pub call_graph: ariadne_graph::CallGraph,
-    pub payload: GraphExportPayload,
+    pub include_graph: std::sync::RwLock<Option<ariadne_graph::IncludeGraph>>,
+    pub reduced_model: std::sync::RwLock<Option<ariadne_graph::ReducedSemanticModel>>,
+    pub call_graph: std::sync::RwLock<Option<ariadne_graph::CallGraph>>,
+    pub payload: std::sync::RwLock<Option<GraphExportPayload>>,
+    pub progress: std::sync::RwLock<crate::dto::ServerProgress>,
+}
+
+impl UiState {
+    pub fn new_loading(repo_root: std::path::PathBuf) -> Self {
+        Self {
+            repo_root,
+            include_graph: std::sync::RwLock::new(None),
+            reduced_model: std::sync::RwLock::new(None),
+            call_graph: std::sync::RwLock::new(None),
+            payload: std::sync::RwLock::new(None),
+            progress: std::sync::RwLock::new(crate::dto::ServerProgress {
+                state: "loading".to_string(),
+                phase: "Initializing".to_string(),
+                percent: 0,
+                message: "Server started".to_string(),
+            }),
+        }
+    }
+
+    pub fn new_loaded(
+        repo_root: std::path::PathBuf,
+        include_graph: ariadne_graph::IncludeGraph,
+        reduced_model: ariadne_graph::ReducedSemanticModel,
+        call_graph: ariadne_graph::CallGraph,
+        payload: GraphExportPayload,
+    ) -> Self {
+        Self {
+            repo_root,
+            include_graph: std::sync::RwLock::new(Some(include_graph)),
+            reduced_model: std::sync::RwLock::new(Some(reduced_model)),
+            call_graph: std::sync::RwLock::new(Some(call_graph)),
+            payload: std::sync::RwLock::new(Some(payload)),
+            progress: std::sync::RwLock::new(crate::dto::ServerProgress {
+                state: "ready".to_string(),
+                phase: "Done".to_string(),
+                percent: 100,
+                message: "Ready".to_string(),
+            }),
+        }
+    }
 }
 
 pub fn build_router(state: Arc<UiState>) -> axum::Router {
@@ -45,29 +86,37 @@ async fn api_index() -> axum::response::Html<&'static str> {
     axum::response::Html(crate::INDEX_HTML)
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct StatusResponse {
-    pub repo_name: String,
-    pub stats: crate::dto::SummaryStats,
+    pub repo_name: Option<String>,
+    pub stats: Option<crate::dto::SummaryStats>,
+    pub progress: crate::dto::ServerProgress,
 }
 
 async fn api_status(State(state): State<Arc<UiState>>) -> Json<StatusResponse> {
+    let payload = state.payload.read().unwrap();
+    let progress = state.progress.read().unwrap().clone();
+    
     Json(StatusResponse {
-        repo_name: state.payload.repo_name.clone(),
-        stats: state.payload.stats.clone(),
+        repo_name: payload.as_ref().map(|p| p.repo_name.clone()),
+        stats: payload.as_ref().map(|p| p.stats.clone()),
+        progress,
     })
 }
 
-async fn api_graph_include(State(state): State<Arc<UiState>>) -> Json<Vec<CytoscapeElement>> {
-    Json(state.payload.include_graph.clone())
+async fn api_graph_include(State(state): State<Arc<UiState>>) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+    let payload = state.payload.read().unwrap();
+    payload.as_ref().map(|p| Json(p.include_graph.clone())).ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
 }
 
-async fn api_graph_symbol(State(state): State<Arc<UiState>>) -> Json<Vec<CytoscapeElement>> {
-    Json(state.payload.symbol_graph.clone())
+async fn api_graph_symbol(State(state): State<Arc<UiState>>) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+    let payload = state.payload.read().unwrap();
+    payload.as_ref().map(|p| Json(p.symbol_graph.clone())).ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
 }
 
-async fn api_graph_call(State(state): State<Arc<UiState>>) -> Json<Vec<CytoscapeElement>> {
-    Json(state.payload.call_graph.clone())
+async fn api_graph_call(State(state): State<Arc<UiState>>) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+    let payload = state.payload.read().unwrap();
+    payload.as_ref().map(|p| Json(p.call_graph.clone())).ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
 }
 
 #[derive(Deserialize)]
@@ -85,14 +134,15 @@ async fn api_source(
         .map_err(|_| axum::http::StatusCode::NOT_FOUND)
 }
 
-async fn api_export(State(state): State<Arc<UiState>>) -> Json<GraphExportPayload> {
-    Json(state.payload.clone())
+async fn api_export(State(state): State<Arc<UiState>>) -> Result<Json<GraphExportPayload>, axum::http::StatusCode> {
+    let payload = state.payload.read().unwrap();
+    payload.as_ref().map(|p| Json(p.clone())).ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
 }
 
 async fn api_graph_traverse(
     State(state): State<Arc<UiState>>,
     Query(query): Query<TraverseQuery>,
-) -> Json<Vec<CytoscapeElement>> {
+) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
     let depth = query.depth.unwrap_or(1);
     let direction = match query.direction.as_deref() {
         Some("in") | Some("incoming") => TraversalDirection::Incoming,
@@ -101,33 +151,42 @@ async fn api_graph_traverse(
     };
 
     let mut elements = Vec::new();
+    let payload = state.payload.read().unwrap();
+    let payload_ref = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
     match query.graph_type.as_str() {
         "include" => {
             if let Ok(id) = query.center.parse::<u64>() {
                 let center = FileId(id);
-                let subgraph = state.include_graph.traverse_neighborhood(center, depth, direction);
+                let g = state.include_graph.read().unwrap();
+                let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                let subgraph = g_ref.traverse_neighborhood(center, depth, direction);
                 let node_ids: std::collections::HashSet<String> = subgraph.nodes.into_iter().map(|n| n.0.to_string()).collect();
                 let edge_ids: std::collections::HashSet<String> = subgraph.edges.into_iter().map(|(src, dst)| format!("{}-{}", src.0, dst.0)).collect();
-                elements = filter_elements(&state.payload.include_graph, &node_ids, &edge_ids);
+                elements = filter_elements(&payload_ref.include_graph, &node_ids, &edge_ids);
             }
         }
         "symbol" => {
             let center = SymbolId(query.center.clone());
-            let subgraph = state.reduced_model.traverse_neighborhood(&center, depth, direction);
+            let g = state.reduced_model.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let subgraph = g_ref.traverse_neighborhood(&center, depth, direction);
             let node_ids: std::collections::HashSet<String> = subgraph.nodes.into_iter().map(|n| n.0).collect();
             let edge_ids: std::collections::HashSet<String> = subgraph.edges.into_iter().map(|(src, dst)| format!("{}-{}", src.0, dst.0)).collect();
-            elements = filter_elements(&state.payload.symbol_graph, &node_ids, &edge_ids);
+            elements = filter_elements(&payload_ref.symbol_graph, &node_ids, &edge_ids);
         }
         "call" => {
             let center = SymbolId(query.center.clone());
-            let subgraph = state.call_graph.traverse_neighborhood(&center, depth, direction);
+            let g = state.call_graph.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let subgraph = g_ref.traverse_neighborhood(&center, depth, direction);
             let node_ids: std::collections::HashSet<String> = subgraph.nodes.into_iter().map(|n| n.0).collect();
             let edge_ids: std::collections::HashSet<String> = subgraph.edges.into_iter().map(|(src, dst)| format!("{}-{}", src.0, dst.0)).collect();
-            elements = filter_elements(&state.payload.call_graph, &node_ids, &edge_ids);
+            elements = filter_elements(&payload_ref.call_graph, &node_ids, &edge_ids);
         }
         _ => {}
     }
-    Json(elements)
+    Ok(Json(elements))
 }
 
 fn filter_elements(
@@ -155,27 +214,33 @@ fn filter_elements(
 async fn api_graph_path(
     State(state): State<Arc<UiState>>,
     Query(query): Query<PathQuery>,
-) -> Json<Option<Vec<String>>> {
+) -> Result<Json<Option<Vec<String>>>, axum::http::StatusCode> {
     let path = match query.graph_type.as_str() {
         "include" => {
             if let (Ok(from), Ok(to)) = (query.from.parse::<u64>(), query.to.parse::<u64>()) {
-                state.include_graph.shortest_include_path(FileId(from), FileId(to))
+                let g = state.include_graph.read().unwrap();
+                let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                g_ref.shortest_include_path(FileId(from), FileId(to))
                     .map(|p| p.into_iter().map(|id| id.0.to_string()).collect())
             } else {
                 None
             }
         }
         "symbol" => {
-            state.reduced_model.shortest_dependency_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
+            let g = state.reduced_model.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            g_ref.shortest_dependency_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
                 .map(|p| p.into_iter().map(|id| id.0).collect())
         }
         "call" => {
-            state.call_graph.shortest_call_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
+            let g = state.call_graph.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            g_ref.shortest_call_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
                 .map(|p| p.into_iter().map(|id| id.0).collect())
         }
         _ => None,
     };
-    Json(path)
+    Ok(Json(path))
 }
 
 #[derive(Deserialize)]
@@ -187,38 +252,47 @@ struct EntrypointsQuery {
 async fn api_graph_entrypoints(
     State(state): State<Arc<UiState>>,
     Query(query): Query<EntrypointsQuery>,
-) -> Json<EntrypointsResponse> {
+) -> Result<Json<EntrypointsResponse>, axum::http::StatusCode> {
     let limit = query.limit.unwrap_or(10);
     
+    let payload = state.payload.read().unwrap();
+    let payload_ref = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
     let (roots_ids, leaves_ids, hubs_ids, source_elements) = match query.graph_type.as_str() {
         "include" => {
-            let (r, l, h) = state.include_graph.get_entrypoints(limit);
+            let g = state.include_graph.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let (r, l, h) = g_ref.get_entrypoints(limit);
             (
                 r.into_iter().map(|id| id.0.to_string()).collect(),
                 l.into_iter().map(|id| id.0.to_string()).collect(),
                 h.into_iter().map(|id| id.0.to_string()).collect(),
-                &state.payload.include_graph
+                &payload_ref.include_graph
             )
         }
         "symbol" => {
-            let (r, l, h) = state.reduced_model.get_entrypoints(limit);
+            let g = state.reduced_model.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let (r, l, h) = g_ref.get_entrypoints(limit);
             (
                 r.into_iter().map(|id| id.0).collect(),
                 l.into_iter().map(|id| id.0).collect(),
                 h.into_iter().map(|id| id.0).collect(),
-                &state.payload.symbol_graph
+                &payload_ref.symbol_graph
             )
         }
         "call" => {
-            let (r, l, h) = state.call_graph.get_entrypoints(limit);
+            let g = state.call_graph.read().unwrap();
+            let g_ref = g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let (r, l, h) = g_ref.get_entrypoints(limit);
             (
                 r.into_iter().map(|id| id.0).collect(),
                 l.into_iter().map(|id| id.0).collect(),
                 h.into_iter().map(|id| id.0).collect(),
-                &state.payload.call_graph
+                &payload_ref.call_graph
             )
         }
-        _ => (Vec::new(), Vec::new(), Vec::new(), &state.payload.include_graph),
+        _ => (Vec::new(), Vec::new(), Vec::new(), &payload_ref.include_graph),
     };
 
     let mut roots = Vec::new();
@@ -251,21 +325,24 @@ async fn api_graph_entrypoints(
     // For now we can leave cycles empty or try to compute them, but let's just return empty as it's not specified how to get them here
     let cycles = Vec::new();
 
-    Json(EntrypointsResponse {
+    Ok(Json(EntrypointsResponse {
         graph_type: query.graph_type,
         cycles,
         top_hubs: hubs,
         roots,
         leaves,
-    })
+    }))
 }
 
 async fn api_graph_search(
     State(state): State<Arc<UiState>>,
     Query(query): Query<SearchQuery>,
-) -> Json<Vec<SearchResultItem>> {
+) -> Result<Json<Vec<SearchResultItem>>, axum::http::StatusCode> {
     let mut results = Vec::new();
     let limit = query.limit.unwrap_or(20);
+    
+    let payload = state.payload.read().unwrap();
+    let payload_ref = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
     let check_include = query.graph_type.as_deref() == Some("include") || query.graph_type.is_none();
     let check_symbol = query.graph_type.as_deref() == Some("symbol") || query.graph_type.is_none();
@@ -287,8 +364,6 @@ async fn api_graph_search(
         }
         
         if q_lower.contains('*') || q_lower.contains('?') {
-            // Very simple wildcard matching fallback for `*` or `?`.
-            // We can convert wildcard to regex
             let escaped = regex::escape(&q_lower).replace("\\*", ".*").replace("\\?", ".");
             if let Ok(re) = regex::Regex::new(&format!("^{}$", escaped)) {
                 return re.is_match(&label.to_lowercase()) || re.is_match(&path.to_lowercase());
@@ -317,17 +392,17 @@ async fn api_graph_search(
     };
 
     if check_include {
-        search_in(&state.payload.include_graph, "include", &mut results);
+        search_in(&payload_ref.include_graph, "include", &mut results);
     }
     if check_symbol {
-        search_in(&state.payload.symbol_graph, "symbol", &mut results);
+        search_in(&payload_ref.symbol_graph, "symbol", &mut results);
     }
     if check_call {
-        search_in(&state.payload.call_graph, "call", &mut results);
+        search_in(&payload_ref.call_graph, "call", &mut results);
     }
 
     results.truncate(limit);
-    Json(results)
+    Ok(Json(results))
 }
 
 #[derive(Deserialize)]
@@ -338,7 +413,7 @@ pub struct CollateralQuery {
 pub async fn api_graph_collateral(
     State(state): State<Arc<UiState>>,
     Query(query): Query<CollateralQuery>,
-) -> Json<CollateralResponse> {
+) -> Result<Json<CollateralResponse>, axum::http::StatusCode> {
     let mut direct_collateral = std::collections::HashMap::new();
     let mut transitive_collateral = std::collections::HashMap::new();
     let mut total_collateral = 0;
@@ -346,12 +421,18 @@ pub async fn api_graph_collateral(
     if let Ok(file_id_num) = query.file.parse::<u64>() {
         let file_id = ariadne_repo::FileId(file_id_num);
 
-        let analyzer = ariadne_graph::LoadAnalyzer::new(&state.include_graph, &state.reduced_model);
-        if let Some(path) = state.include_graph.file_paths.get(&file_id) {
+        let inc_g = state.include_graph.read().unwrap();
+        let reduced = state.reduced_model.read().unwrap();
+
+        let inc_g_ref = inc_g.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+        let reduced_ref = reduced.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
+        let analyzer = ariadne_graph::LoadAnalyzer::new(inc_g_ref, reduced_ref);
+        if let Some(path) = inc_g_ref.file_paths.get(&file_id) {
             if let Ok(metric) = analyzer.analyze_file_load(path) {
                 total_collateral = metric.collateral_load;
                 
-                let direct_includes = state.include_graph.direct_includes(file_id);
+                let direct_includes = inc_g_ref.direct_includes(file_id);
                 let mut direct_set = std::collections::HashSet::new();
                 for d in direct_includes {
                     direct_set.insert(d);
@@ -369,10 +450,10 @@ pub async fn api_graph_collateral(
         }
     }
 
-    Json(CollateralResponse {
+    Ok(Json(CollateralResponse {
         target_id: query.file.clone(),
         total_collateral,
         direct_collateral,
         transitive_collateral,
-    })
+    }))
 }

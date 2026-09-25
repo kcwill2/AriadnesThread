@@ -1402,37 +1402,57 @@
           }, 50);
         }, 50);
       } else {
-        showProgress('[1/3] Loading graph datasets... 25%', 25);
-        // Live server mode: fetch from endpoints
-        try {
-          updateProgress(35, 'Fetching status...');
-          const statusRes = await fetch('/api/status');
-          if (statusRes.ok) {
-            const status = await statusRes.json();
-            graphData.repo_name = status.repo_name || 'Repository';
-            graphData.stats = status.stats || graphData.stats;
+        showProgress('Connecting to backend...', 0);
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.style.display = 'flex';
+
+        const pollStatus = async () => {
+          try {
+            const statusRes = await fetch('/api/status');
+            if (statusRes.ok) {
+              const status = await statusRes.json();
+              
+              if (status.progress && status.progress.state === 'loading') {
+                updateProgress(status.progress.percent, status.progress.phase + ': ' + status.progress.message);
+                setTimeout(pollStatus, 150);
+                return;
+              }
+              
+              if (status.progress && status.progress.state === 'ready') {
+                graphData.repo_name = status.repo_name || 'Repository';
+                if (status.stats) graphData.stats = status.stats;
+                
+                updateProgress(90, 'Fetching graph endpoints...');
+                const [incRes, symRes, callRes] = await Promise.all([
+                  fetch('/api/graph/include').catch(() => null),
+                  fetch('/api/graph/symbol').catch(() => null),
+                  fetch('/api/graph/call').catch(() => null),
+                ]);
+
+                if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
+                if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
+                if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
+
+                updateProgress(100, 'Rendering visualization... 100%');
+                applyLoadedData();
+                hideProgress();
+                return;
+              }
+              
+              if (status.progress && status.progress.state === 'error') {
+                 updateProgress(100, 'Error: ' + status.progress.message);
+                 return;
+              }
+            }
+          } catch (e) {
+            console.warn('Live fetch failed, using fallback empty state', e);
+            applyLoadedData();
+            hideProgress();
+            return;
           }
-
-          updateProgress(50, 'Fetching graph endpoints...');
-          const [incRes, symRes, callRes] = await Promise.all([
-            fetch('/api/graph/include').catch(() => null),
-            fetch('/api/graph/symbol').catch(() => null),
-            fetch('/api/graph/call').catch(() => null),
-          ]);
-
-          updateProgress(65, '[2/3] Processing graph models... 65%');
-          if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
-          if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
-          if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
-
-          updateProgress(100, '[3/3] Rendering visualization... 100%');
-          applyLoadedData();
-          hideProgress();
-        } catch (e) {
-          console.warn('Live fetch failed, using fallback empty state', e);
-          applyLoadedData();
-          hideProgress();
-        }
+          setTimeout(pollStatus, 150);
+        };
+        pollStatus();
       }
     }
 

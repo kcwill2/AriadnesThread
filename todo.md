@@ -1,5 +1,6 @@
-# Task: Optimize Graph Resolution & Add Intermediate Phase Progress Meters
+# Task: Early Web Server Startup with Live UI Progress Streaming
 
 ## Status
-- [x] Unit 1: Optimize `CallGraph::build_from_index` with $O(1)$ pre-indexed symbol lookups (eliminate quadratic scan & string formatting allocations)
-- [x] Unit 2: Add progress meters for intermediate graph processing phases (model reduction, call graph building, collateral analysis) in `crates/cli/src/commands/ui.rs`
+- [x] Unit 1: Backend async `UiState` with `ServerProgress` in `crates/ui/src/server.rs` & `crates/ui/src/dto.rs`
+- [x] Unit 2: Early server launch and progress reporting in `crates/cli/src/commands/ui.rs`
+- [x] Unit 3: Frontend live `/api/status` polling and progress display in `crates/ui/assets/index.html`

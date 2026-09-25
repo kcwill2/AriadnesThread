@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerProgress {
+    pub state: String,
+    pub phase: String,
+    pub percent: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraverseQuery {
     pub graph_type: String,
     pub center: String,

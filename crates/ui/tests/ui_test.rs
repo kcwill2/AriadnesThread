@@ -36,18 +36,18 @@ async fn test_dto_builders() {
 
 #[tokio::test]
 async fn test_server_routes() {
-    let state = Arc::new(UiState {
-        repo_root: std::path::PathBuf::from("."),
-        include_graph: IncludeGraph::new(),
-        reduced_model: ReducedSemanticModel {
+    let state = Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        ReducedSemanticModel {
             repo_root: std::path::PathBuf::from("."),
             symbols: std::collections::BTreeMap::new(),
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
         },
-        call_graph: CallGraph::default(),
-        payload: GraphExportPayload {
+        CallGraph::default(),
+        GraphExportPayload {
             repo_name: "test".to_string(),
             include_graph: vec![],
             symbol_graph: vec![],
@@ -60,7 +60,7 @@ async fn test_server_routes() {
             },
             file_collateral: std::collections::HashMap::new(),
         },
-    });
+    ));
 
     let app = build_router(state);
 
@@ -74,18 +74,18 @@ async fn test_server_routes() {
 
 #[tokio::test]
 async fn test_server_traversal_routes() {
-    let state = Arc::new(UiState {
-        repo_root: std::path::PathBuf::from("."),
-        include_graph: IncludeGraph::new(),
-        reduced_model: ReducedSemanticModel {
+    let state = Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        ReducedSemanticModel {
             repo_root: std::path::PathBuf::from("."),
             symbols: std::collections::BTreeMap::new(),
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
         },
-        call_graph: CallGraph::default(),
-        payload: GraphExportPayload {
+        CallGraph::default(),
+        GraphExportPayload {
             repo_name: "test".to_string(),
             include_graph: vec![],
             symbol_graph: vec![],
@@ -98,7 +98,7 @@ async fn test_server_traversal_routes() {
             },
             file_collateral: std::collections::HashMap::new(),
         },
-    });
+    ));
 
     let app = build_router(state);
 
@@ -130,6 +130,63 @@ async fn test_server_traversal_routes() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn test_async_ui_state_loading() {
+    let state = Arc::new(UiState::new_loading(std::path::PathBuf::from(".")));
+    let app = build_router(state.clone());
+
+    // Before loading, status should be loading
+    let req = Request::builder().uri("/api/status").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let status: ariadne_ui::server::StatusResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status.progress.state, "loading");
+    assert_eq!(status.progress.percent, 0);
+
+    // Graph endpoints should return 503 or empty array when loading. Let's say empty array as per unit 1 or 503.
+    let req = Request::builder().uri("/api/graph/include").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    // Populate data
+    {
+        let mut progress = state.progress.write().unwrap();
+        progress.state = "ready".to_string();
+        progress.percent = 100;
+        *state.payload.write().unwrap() = Some(GraphExportPayload {
+            repo_name: "test".to_string(),
+            include_graph: vec![],
+            symbol_graph: vec![],
+            call_graph: vec![],
+            stats: SummaryStats { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
+            file_collateral: HashMap::new(),
+        });
+        *state.include_graph.write().unwrap() = Some(IncludeGraph::new());
+        *state.reduced_model.write().unwrap() = Some(ReducedSemanticModel {
+            repo_root: std::path::PathBuf::from("."),
+            symbols: std::collections::BTreeMap::new(),
+            edges: vec![],
+            tu_usage: std::collections::BTreeMap::new(),
+            file_symbols: std::collections::BTreeMap::new(),
+        });
+        *state.call_graph.write().unwrap() = Some(CallGraph::default());
+    }
+
+    // Now status should be ready
+    let req = Request::builder().uri("/api/status").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let status: ariadne_ui::server::StatusResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status.progress.state, "ready");
+    
+    // Graph endpoints should now return OK
+    let req = Request::builder().uri("/api/graph/include").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
 
 #[tokio::test]
 async fn test_search_advanced_queries_and_dto_paths() {
@@ -172,12 +229,12 @@ async fn test_search_advanced_queries_and_dto_paths() {
     assert_eq!(call_elements[0].data["path"], "1:10"); // DTO populates path as file_id:line
     assert_eq!(sym_elements[0].data["path"], "1");
 
-    let state = Arc::new(UiState {
-        repo_root: std::path::PathBuf::from("."),
+    let state = Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
         include_graph,
         reduced_model,
         call_graph,
-        payload: GraphExportPayload {
+        GraphExportPayload {
             repo_name: "test".to_string(),
             include_graph: include_elements,
             symbol_graph: sym_elements,
@@ -185,7 +242,7 @@ async fn test_search_advanced_queries_and_dto_paths() {
             stats: SummaryStats { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
             file_collateral: std::collections::HashMap::new(),
         },
-    });
+    ));
 
     let app = build_router(state);
 
@@ -275,18 +332,18 @@ fn test_ui_layout_and_interactive_traversal() {
 
 #[tokio::test]
 async fn test_server_index_route() {
-    let state = Arc::new(UiState {
-        repo_root: std::path::PathBuf::from("."),
-        include_graph: IncludeGraph::new(),
-        reduced_model: ReducedSemanticModel {
+    let state = Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        ReducedSemanticModel {
             repo_root: std::path::PathBuf::from("."),
             symbols: std::collections::BTreeMap::new(),
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
         },
-        call_graph: CallGraph::default(),
-        payload: GraphExportPayload {
+        CallGraph::default(),
+        GraphExportPayload {
             repo_name: "test".to_string(),
             include_graph: vec![],
             symbol_graph: vec![],
@@ -299,7 +356,7 @@ async fn test_server_index_route() {
             },
             file_collateral: std::collections::HashMap::new(),
         },
-    });
+    ));
 
     let app = build_router(state);
 
@@ -539,18 +596,18 @@ async fn test_server_collateral_endpoint() {
     collat.insert("2".to_string(), 5);
     file_collateral.insert("1".to_string(), collat);
 
-    let state = Arc::new(UiState {
-        repo_root: std::path::PathBuf::from("."),
-        include_graph: IncludeGraph::new(),
-        reduced_model: ReducedSemanticModel {
+    let state = Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        ReducedSemanticModel {
             repo_root: std::path::PathBuf::from("."),
             symbols: std::collections::BTreeMap::new(),
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
         },
-        call_graph: CallGraph::default(),
-        payload: GraphExportPayload {
+        CallGraph::default(),
+        GraphExportPayload {
             repo_name: "test".to_string(),
             include_graph: vec![],
             symbol_graph: vec![],
@@ -563,7 +620,7 @@ async fn test_server_collateral_endpoint() {
             },
             file_collateral,
         },
-    });
+    ));
 
     let app = build_router(state);
 
@@ -707,7 +764,7 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(html.contains("function hideProgress"));
     
     // Check integration in init()
-    assert!(html.contains("[1/3] Loading graph datasets... 25%"));
-    assert!(html.contains("[2/3] Processing graph models... 65%"));
-    assert!(html.contains("[3/3] Rendering visualization... 100%"));
+    assert!(html.contains("pollStatus"));
+    assert!(html.contains("status.progress.state === 'loading'"));
+    assert!(html.contains("status.progress.state === 'ready'"));
 }
