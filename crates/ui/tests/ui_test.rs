@@ -670,3 +670,17 @@ fn test_onboarding_and_help_content() {
     assert!(html.contains("function openHelpCenter"));
 }
 
+#[test]
+fn test_tour_overlay_dismissal_and_positioning() {
+    let html = ariadne_ui::INDEX_HTML;
+    
+    // Verify positionTourCard function exists and clamps
+    assert!(html.contains("function positionTourCard("));
+    assert!(html.contains("Math.max(16"));
+    assert!(html.contains("Math.min(window.innerHeight"));
+    assert!(html.contains("Math.min(window.innerWidth"));
+    
+    // Verify tourOverlay has an onclick dismissal
+    assert!(html.contains("onclick=\"endTour()\"") && html.contains("id=\"tourOverlay\""));
+}
+

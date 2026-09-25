@@ -1072,7 +1072,7 @@
   </div>
 
   <!-- ONBOARDING & HELP CENTER MODALS -->
-  <div class="modal-overlay" id="tourOverlay" style="z-index: 1000; background: rgba(0,0,0,0.7); display: none;"></div>
+  <div class="modal-overlay" id="tourOverlay" onclick="endTour()" style="z-index: 1000; background: rgba(0,0,0,0.7); display: none;"></div>
   <div id="tourCard" style="display: none; position: fixed; z-index: 1001; background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 8px; width: 320px; padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 style="margin:0; font-size: 14px; color: var(--cyan);" id="tourTitle">Tour Step</h3>
@@ -2285,11 +2285,34 @@
 
       const targetEl = document.querySelector(step.id);
       if (targetEl) {
-        const rect = targetEl.getBoundingClientRect();
-        const card = document.getElementById('tourCard');
-        card.style.top = Math.max(10, rect.bottom + 10) + 'px';
-        card.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left)) + 'px';
+        positionTourCard(targetEl);
       }
+    }
+
+    function positionTourCard(targetEl) {
+      const rect = targetEl.getBoundingClientRect();
+      const card = document.getElementById('tourCard');
+      
+      let top, left;
+      const cardWidth = 320; // from inline style width: 320px + padding
+      const cardHeight = card.offsetHeight || 180; // approximate if not rendered yet
+      
+      if (targetEl.id === 'canvasContainer') {
+        top = rect.top + 30;
+        left = rect.left + 30;
+      } else if (targetEl.classList.contains('inspector')) {
+        top = rect.top + 30;
+        left = rect.left - cardWidth - 20;
+      } else {
+        top = rect.bottom + 10;
+        left = rect.left;
+      }
+      
+      top = Math.max(16, Math.min(window.innerHeight - cardHeight - 20, top));
+      left = Math.max(16, Math.min(window.innerWidth - cardWidth - 20, left));
+      
+      card.style.top = top + 'px';
+      card.style.left = left + 'px';
     }
 
     function nextTourStep() {
