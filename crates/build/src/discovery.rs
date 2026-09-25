@@ -231,6 +231,31 @@ fn infer_context_name(defines: &[String]) -> String {
     }
 }
 
+fn split_command_string(cmd: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current_arg = String::new();
+    let mut in_quotes = false;
+
+    for c in cmd.chars() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ' ' | '\t' | '\n' | '\r' if !in_quotes => {
+                if !current_arg.is_empty() {
+                    args.push(current_arg.clone());
+                    current_arg.clear();
+                }
+            }
+            _ => current_arg.push(c),
+        }
+    }
+
+    if !current_arg.is_empty() {
+        args.push(current_arg);
+    }
+
+    args
+}
+
 fn parse_args(
     command: &Option<String>,
     arguments: &[String],
@@ -247,7 +272,7 @@ fn parse_args(
     let raw_args: Vec<String> = if !arguments.is_empty() {
         arguments.to_vec()
     } else if let Some(ref cmd) = command {
-        cmd.split_whitespace().map(|s| s.to_string()).collect()
+        split_command_string(cmd)
     } else {
         Vec::new()
     };
@@ -261,8 +286,10 @@ fn parse_args(
     let mut arch = None;
     let mut raw_flags = Vec::new();
 
+    let is_flag = |s: &str| s.starts_with('-') || (s.starts_with('/') && !s[1..].contains('/') && !s[1..].contains('\\'));
+
     if let Some(first) = raw_args.first() {
-        if !first.starts_with('-') && !first.starts_with('/') {
+        if !is_flag(first) {
             compiler = first.clone();
         }
     }
@@ -273,7 +300,7 @@ fn parse_args(
             let val = if arg.len() > 2 {
                 &arg[2..]
             } else if let Some(next) = iter.peek() {
-                if !next.starts_with('-') && !next.starts_with('/') {
+                if !is_flag(next) {
                     iter.next().unwrap()
                 } else {
                     ""
@@ -304,7 +331,7 @@ fn parse_args(
             let val = if arg.len() > 2 {
                 &arg[2..]
             } else if let Some(next) = iter.peek() {
-                if !next.starts_with('-') && !next.starts_with('/') {
+                if !is_flag(next) {
                     iter.next().unwrap()
                 } else {
                     ""
@@ -319,7 +346,7 @@ fn parse_args(
             let val = if arg.len() > 3 {
                 &arg[3..]
             } else if let Some(next) = iter.peek() {
-                if !next.starts_with('-') && !next.starts_with('/') {
+                if !is_flag(next) {
                     iter.next().unwrap()
                 } else {
                     ""
@@ -335,7 +362,7 @@ fn parse_args(
             lang_std = Some(arg[pos + 1..].to_string());
         } else if arg.starts_with("/arch:") {
             arch = Some(arg[6..].to_string());
-        } else if arg.starts_with('-') || arg.starts_with('/') {
+        } else if is_flag(arg) {
             raw_flags.push(arg.clone());
         }
     }
@@ -358,19 +385,93 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_parse_compile_commands_debug_and_release() {
+    fn test_parse_args_gcc_clang() {
+        let cmd = None;
+        let args = vec![
+            "/usr/bin/c++".to_string(),
+            "-isystem".to_string(),
+            "/usr/include".to_string(),
+            "-isystem/usr/local/include".to_string(),
+            "-I".to_string(),
+            "/path/to/include".to_string(),
+            "-Iinclude".to_string(),
+            "-D".to_string(),
+            "MACRO=1".to_string(),
+            "-DMACRO_2".to_string(),
+            "-std=c++20".to_string(),
+            "-FI".to_string(),
+            "/path/to/prefix.h".to_string(),
+        ];
+        
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        
+        assert_eq!(compiler, "/usr/bin/c++");
+        assert_eq!(sys_inc_dirs, vec![PathBuf::from("/usr/include"), PathBuf::from("/usr/local/include")]);
+        assert_eq!(inc_dirs, vec![PathBuf::from("/path/to/include"), PathBuf::from("include")]);
+        assert_eq!(defines, vec!["MACRO=1".to_string(), "MACRO_2".to_string()]);
+        assert_eq!(lang_std, Some("c++20".to_string()));
+        assert_eq!(forced_incs, vec![PathBuf::from("/path/to/prefix.h")]);
+        assert_eq!(arch, None);
+    }
+
+    #[test]
+    fn test_parse_args_msvc() {
+        let cmd = None;
+        let args = vec![
+            "cl.exe".to_string(),
+            "/I".to_string(),
+            "include".to_string(),
+            "/I".to_string(),
+            "C:\\Program Files\\include".to_string(),
+            "/D".to_string(),
+            "NDEBUG".to_string(),
+            "/DDEBUG".to_string(),
+            "/std:c++latest".to_string(),
+            "/arch:AVX2".to_string(),
+            "/FI".to_string(),
+            "stdafx.h".to_string(),
+        ];
+        
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        
+        assert_eq!(compiler, "cl.exe");
+        assert_eq!(inc_dirs, vec![PathBuf::from("include"), PathBuf::from("C:\\Program Files\\include")]);
+        assert_eq!(defines, vec!["NDEBUG".to_string(), "DEBUG".to_string()]);
+        assert_eq!(lang_std, Some("c++latest".to_string()));
+        assert_eq!(arch, Some("AVX2".to_string()));
+        assert_eq!(forced_incs, vec![PathBuf::from("stdafx.h")]);
+    }
+
+    #[test]
+    fn test_parse_args_quote_handling_in_command() {
+        let cmd = Some("cl.exe /I \"C:\\Program Files\\include\" /D MACRO=\"spaced val\" src.cpp".to_string());
+        let args = vec![];
+        
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) = parse_args(&cmd, &args);
+        
+        assert_eq!(compiler, "cl.exe");
+        assert_eq!(inc_dirs, vec![PathBuf::from("C:\\Program Files\\include")]);
+        assert_eq!(defines, vec!["MACRO=spaced val".to_string()]);
+    }
+
+    #[test]
+    fn test_infer_context_name() {
+        assert_eq!(infer_context_name(&["DEBUG".to_string()]), "Debug|x64");
+        assert_eq!(infer_context_name(&["_DEBUG".to_string()]), "Debug|x64");
+        assert_eq!(infer_context_name(&["NDEBUG".to_string()]), "Release|x64");
+        assert_eq!(infer_context_name(&["OTHER".to_string()]), "Default|x64");
+        assert_eq!(infer_context_name(&[]), "Default|x64");
+    }
+
+    #[test]
+    fn test_build_discoverer_compile_commands_with_args() {
         let dir = tempdir().unwrap();
         let root = dir.path();
 
         let json_content = r#"[
             {
                 "directory": "C:/src/project",
-                "command": "cl.exe /c /Iinclude /DDEBUG /std:c++17 src/thing.cpp",
-                "file": "src/thing.cpp"
-            },
-            {
-                "directory": "C:/src/project",
-                "command": "cl.exe /c /Iinclude /DNDEBUG /std:c++17 src/thing.cpp",
+                "arguments": ["clang++", "-I", "include", "-D", "DEBUG", "src/thing.cpp"],
                 "file": "src/thing.cpp"
             }
         ]"#;
@@ -381,13 +482,53 @@ mod tests {
         let discoverer = BuildDiscoverer::new(root);
         let result = discoverer.discover().unwrap();
 
-        assert_eq!(result.contexts.len(), 2);
-        assert_eq!(result.translation_units.len(), 2);
+        assert_eq!(result.contexts.len(), 1);
+        assert_eq!(result.translation_units.len(), 1);
+        
+        let ctx = &result.contexts[0];
+        assert_eq!(ctx.name, "Debug|x64");
+        assert_eq!(ctx.compiler, "clang++");
+        assert!(ctx.defines.contains(&"DEBUG".to_string()));
+        
+        let tu = &result.translation_units[0];
+        assert_eq!(tu.compile_command.arguments, vec!["clang++", "-I", "include", "-D", "DEBUG", "src/thing.cpp"]);
+    }
 
-        let debug_ctx = result.contexts.iter().find(|c| c.name == "Debug|x64").unwrap();
-        assert!(debug_ctx.defines.contains(&"DEBUG".to_string()));
+    #[test]
+    fn test_build_discoverer_infer_default() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        
+        // No compile_commands.json
+        // Mock a repository discovery result
+        let file_path = root.join("src").join("main.cpp");
+        let disc = RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files: vec![
+                ariadne_repo::FileRecord {
+                    id: ariadne_repo::FileId::from_relative_path("src/main.cpp"),
+                    path: std::path::PathBuf::from("src/main.cpp"),
+                    canonical_path: file_path.clone(),
+                    kind: ariadne_repo::FileKind::Source,
+                    size: 0,
+                    content_hash: "dummy".to_string(),
+                    ownership: ariadne_repo::FileOwnership::Repository,
+                    optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                }
+            ],
+            ownership_summary: Default::default(),
+            policy_summary: Default::default(),
+        };
 
-        let release_ctx = result.contexts.iter().find(|c| c.name == "Release|x64").unwrap();
-        assert!(release_ctx.defines.contains(&"NDEBUG".to_string()));
+        let discoverer = BuildDiscoverer::new(root).with_repo_discovery(&disc);
+        let result = discoverer.discover().unwrap();
+
+        assert_eq!(result.contexts.len(), 1);
+        let ctx = &result.contexts[0];
+        assert_eq!(ctx.name, "Default|x64");
+        assert!(ctx.defines.contains(&"NDEBUG".to_string()));
+
+        assert_eq!(result.translation_units.len(), 1);
+        assert_eq!(result.translation_units[0].source_path, file_path);
     }
 }
