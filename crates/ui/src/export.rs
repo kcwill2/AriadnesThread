@@ -12,7 +12,7 @@ pub fn export_standalone_html(
         template
     };
     let json_data = serde_json::to_string(payload)?;
-    let script = format!("<script>window.__ARIADNE_DATA__ = {};</script>", json_data);
+    let script = format!("window.__ARIADNE_DATA__ = {};", json_data);
     let output = tpl.replace("/*__ARIADNE_DATA__*/", &script);
     std::fs::write(output_path, output)?;
     Ok(())
