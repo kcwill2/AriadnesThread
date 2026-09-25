@@ -144,7 +144,12 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
     let mut elements = Vec::new();
     let mut in_degrees = std::collections::HashMap::new();
     let mut out_degrees = std::collections::HashMap::new();
-    for edge in &model.edges {
+    
+    let valid_edges: Vec<_> = model.edges.iter()
+        .filter(|e| model.symbols.contains_key(&e.src_symbol) && model.symbols.contains_key(&e.dst_symbol))
+        .collect();
+
+    for edge in &valid_edges {
         *out_degrees.entry(edge.src_symbol.clone()).or_insert(0) += 1;
         *in_degrees.entry(edge.dst_symbol.clone()).or_insert(0) += 1;
     }
@@ -153,12 +158,14 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
         let kind_str = format!("{:?}", sym.kind).to_uppercase();
         let in_degree = in_degrees.get(&sym.id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(&sym.id).copied().unwrap_or(0);
+        let path_str = sym.defining_file.map(|f| f.0.to_string()).unwrap_or_default();
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": sym.id.0.clone(),
                 "label": sym.name.clone(),
                 "kind": kind_str,
                 "defining_file": sym.defining_file.map(|f| f.0.to_string()),
+                "path": path_str,
                 "declarations_count": sym.declarations.len(),
                 "in_degree": in_degree,
                 "out_degree": out_degree,
@@ -166,7 +173,7 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
             classes: None,
         });
     }
-    for edge in &model.edges {
+    for edge in &valid_edges {
         let is_incomplete = edge.kind == ariadne_index::DependencyKind::Incomplete;
         elements.push(CytoscapeElement {
             data: serde_json::json!({
@@ -194,12 +201,18 @@ pub fn build_call_elements(callgraph: &ariadne_graph::CallGraph) -> Vec<Cytoscap
     for node in &callgraph.nodes {
         let in_degree = in_degrees.get(&node.symbol_id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(&node.symbol_id).copied().unwrap_or(0);
+        let path_str = if let Some(loc) = &node.location {
+            format!("{}:{}", loc.file_id.0, loc.line)
+        } else {
+            node.owning_file.0.to_string()
+        };
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": node.symbol_id.0.clone(),
                 "label": node.name.clone(),
                 "kind": "FUNCTION",
                 "owning_file": node.owning_file.0.to_string(),
+                "path": path_str,
                 "line": node.location.as_ref().map(|l| l.line),
                 "in_degree": in_degree,
                 "out_degree": out_degree,

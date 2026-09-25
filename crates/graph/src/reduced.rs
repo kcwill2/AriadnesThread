@@ -77,6 +77,11 @@ impl ReducedSemanticModel {
                     if entry.definition.is_none() {
                         entry.definition = Some(def.clone());
                         entry.defining_file = Some(sym.owning_file); // Owning file is the defining file usually
+                    } else if entry.kind != SymbolKind::Class && entry.kind != SymbolKind::Struct && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct) {
+                        // Class/Struct definitions take precedence over function definitions (like constructors)
+                        entry.definition = Some(def.clone());
+                        entry.defining_file = Some(sym.owning_file);
+                        entry.kind = sym.kind;
                     }
                 }
 

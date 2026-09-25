@@ -809,6 +809,12 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
         <input type="text" id="searchInput" class="search-input" placeholder="Search node... (Ctrl+K)" oninput="handleSearch(this.value)">
+        <span id="searchMatchCount" class="stat-badge" style="display:none; position:absolute; right:30px; top:6px; font-size:10px; padding: 2px 4px; border:none; background: transparent; color: var(--text-muted);">0</span>
+        <button id="searchClearBtn" class="btn-icon" style="display:none; position:absolute; right:4px; top:4px; padding:2px; height:22px; width:22px;" onclick="clearSearch()">
+          <svg style="width:12px; height:12px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       <span class="stat-badge" id="badgeNodes">0 Nodes</span>
@@ -869,13 +875,28 @@
     
 
       <div class="tool-group">
-        <span>Neighborhood:</span>
+        <span>Degree:</span>
         <div class="btn-toggle-group">
-          <button class="active" id="hop1" onclick="setHops(1)">1-Hop</button>
-          <button id="hop2" onclick="setHops(2)">2-Hops</button>
-          <button id="hopAll" onclick="setHops(0)">Full</button>
+          <button id="degMinus" onclick="stepDegree(-1)">-</button>
+          <span id="degValue" style="padding: 2px 6px; font-size: 11px;">1 deg</span>
+          <button id="degPlus" onclick="stepDegree(1)">+</button>
+          <button id="hopAllCap" class="active" onclick="toggleAllCapped()">ALL-WITH-CAP</button>
         </div>
       </div>
+      
+      <div class="tool-group">
+        <span>Cap:</span>
+        <select id="nodeCapSelect" class="select-dark" onchange="setNodeCap(Number(this.value))">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+        <span id="capWarningBadge" class="stat-badge cycle-btn" style="display:none; font-size:10px; padding:2px 4px;">Capped</span>
+      </div>
+      
+      <button id="btnClearFilter" class="btn-secondary" onclick="clearFilter()">Reset Filter</button>
     </div>
 
     <div class="toolbar-right">
@@ -1009,22 +1030,7 @@
   </div>
 
   <!-- EMBEDDED DATA PLACEHOLDER -->
-  <script>/*__ARIADNE_DATA__*/
-    function clientTraverseNeighborhood() {}
-    function clientShortestPath() {}
-    function clientGetEntrypoints() {}
-    function closeModals() {
-      document.getElementById('pathfinderModal').style.display='none';
-      document.getElementById('entrypointsModal').style.display='none';
-      document.getElementById('modalOverlay').style.display='none';
-    }
-    function findPath() {}
-    function showEntrypoints() {
-      document.getElementById('entrypointsModal').style.display='block';
-      document.getElementById('modalOverlay').style.display='block';
-    }
-    
-  </script>
+  <script>/*__ARIADNE_DATA__*/</script>
 
   <!-- CORE APPLICATION LOGIC -->
   <script>
@@ -1039,6 +1045,11 @@
     };
     let activeNodes = [];
     let activeEdges = [];
+    let tabAllNodes = [];
+    let tabAllEdges = [];
+    let nodeCap = 50;
+    let currentDegree = 1;
+    let isAllCapped = false;
     let selectedNodeId = null;
     let hopDepth = 0;
     let cyclesOnly = false;
@@ -1162,13 +1173,13 @@
     }
 
     function parseAndRenderElements(rawElements) {
-      activeNodes = [];
-      activeEdges = [];
+      tabAllNodes = [];
+      tabAllEdges = [];
       selectedNodeId = null;
 
       rawElements.forEach(el => {
         if (el.data.source && el.data.target) {
-          activeEdges.push({
+          tabAllEdges.push({
             id: el.data.id || (el.data.source + '-' + el.data.target),
             source: String(el.data.source),
             target: String(el.data.target),
@@ -1177,7 +1188,7 @@
             incomplete: el.data.incomplete || el.classes === 'incomplete',
           });
         } else if (el.data.id) {
-          activeNodes.push({
+          tabAllNodes.push({
             id: String(el.data.id),
             label: el.data.label || el.data.id,
             path: el.data.path || el.data.label || el.data.id,
@@ -1190,15 +1201,7 @@
         }
       });
 
-      document.getElementById('badgeNodes').textContent = `${activeNodes.length} Nodes`;
-      document.getElementById('badgeEdges').textContent = `${activeEdges.length} Edges`;
-
-      applyLayout();
-      if (activeNodes.length > 0) {
-        selectNode(activeNodes[0].id);
-      } else {
-        clearInspector();
-      }
+      filterAndExpandSubgraph();
     }
 
     // DAG Hierarchical / Topological Layout
@@ -1266,13 +1269,19 @@
       // Assign coordinates
       const colWidth = 240;
       const rowHeight = 72;
-      Object.keys(layerGroups).forEach(lStr => {
-        const l = parseInt(lStr, 10);
+      const maxRowsPerCol = 10;
+      let currentX = 60;
+      const sortedLayers = Object.keys(layerGroups).map(Number).sort((a, b) => a - b);
+      sortedLayers.forEach(l => {
         const nodesInLayer = layerGroups[l];
+        const numSubCols = Math.max(1, Math.ceil(nodesInLayer.length / maxRowsPerCol));
         nodesInLayer.forEach((node, idx) => {
-          node.x = 60 + l * colWidth;
-          node.y = 60 + idx * rowHeight;
+          const subCol = Math.floor(idx / maxRowsPerCol);
+          const row = idx % maxRowsPerCol;
+          node.x = currentX + subCol * colWidth;
+          node.y = 60 + row * rowHeight;
         });
+        currentX += numSubCols * colWidth + 60;
       });
     }
 
@@ -1423,9 +1432,9 @@
       });
     }
 
-    function selectNode(id) {
+    function selectNode(id, skipFilter = false) {
       selectedNodeId = id;
-      const node = activeNodes.find(n => n.id === id);
+      const node = activeNodes.find(n => n.id === id) || tabAllNodes.find(n => n.id === id);
       if (!node) return;
 
       // Update Inspector
@@ -1433,9 +1442,10 @@
       document.getElementById('inspSub').textContent = node.path || node.id;
       document.getElementById('inspKind').textContent = node.kind;
 
-      // Calculate connections
-      const upstream = activeEdges.filter(e => e.target === id);
-      const downstream = activeEdges.filter(e => e.source === id);
+      // Calculate connections from activeEdges (or tabAllEdges if you prefer, but UI usually shows visible)
+      // Actually let's show true global connections in inspector
+      const upstream = tabAllEdges.filter(e => e.target === id);
+      const downstream = tabAllEdges.filter(e => e.source === id);
 
       document.getElementById('inspClosure').textContent = node.closure ? `${node.closure} files` : `${downstream.length}`;
       document.getElementById('inspClosureSub').textContent = node.closure ? 'Transitive include closure' : 'Outgoing dependencies';
@@ -1463,7 +1473,7 @@
       document.getElementById('inspUpstreamCount').textContent = String(upstream.length);
       const upList = document.getElementById('inspUpstreamList');
       upList.innerHTML = upstream.map(e => {
-        const srcNode = activeNodes.find(n => n.id === e.source);
+        const srcNode = tabAllNodes.find(n => n.id === e.source);
         const name = srcNode ? srcNode.label : e.source;
         return `
           <div class="link-item" onclick="selectNode('${e.source}')">
@@ -1477,7 +1487,7 @@
       document.getElementById('inspDownstreamCount').textContent = String(downstream.length);
       const downList = document.getElementById('inspDownstreamList');
       downList.innerHTML = downstream.map(e => {
-        const dstNode = activeNodes.find(n => n.id === e.target);
+        const dstNode = tabAllNodes.find(n => n.id === e.target);
         const name = dstNode ? dstNode.label : e.target;
         return `
           <div class="link-item" onclick="selectNode('${e.target}')">
@@ -1487,9 +1497,12 @@
         `;
       }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Leaf)</div>';
 
-      // Update selection visual
       document.querySelectorAll('.node-group').forEach(el => el.classList.remove('selected'));
       renderSvg();
+
+      if (!skipFilter && !document.getElementById('searchInput').value.trim()) {
+        filterAndExpandSubgraph();
+      }
     }
 
     function clearInspector() {
@@ -1552,41 +1565,13 @@
     }
 
     function setHops(h) {
-      hopDepth = h;
-      ['hop1', 'hop2', 'hopAll'].forEach(id => document.getElementById(id).classList.remove('active'));
-      if (h === 1) document.getElementById('hop1').classList.add('active');
-      else if (h === 2) document.getElementById('hop2').classList.add('active');
-      else document.getElementById('hopAll').classList.add('active');
-
-      if (h === 0 || !selectedNodeId) {
-        document.querySelectorAll('.node-group, .edge-path').forEach(el => el.style.opacity = '1');
-        return;
-      }
-
-      // Filter visible nodes within h hops of selectedNodeId
-      const reachable = new Set([selectedNodeId]);
-      for (let step = 0; step < h; step++) {
-        activeEdges.forEach(e => {
-          if (reachable.has(e.source)) reachable.add(e.target);
-          if (reachable.has(e.target)) reachable.add(e.source);
-        });
-      }
-
-      document.querySelectorAll('.node-group').forEach(el => {
-        // Find node id
-        const transform = el.getAttribute('transform');
-        // Match node
-        const n = activeNodes.find(node => transform.includes(`translate(${node.x}, ${node.y})`));
-        if (n && !reachable.has(n.id)) {
-          el.style.opacity = '0.15';
-        } else {
-          el.style.opacity = '1';
-        }
-      });
+      // Legacy wrapper just in case
+      filterAndExpandSubgraph();
     }
 
     function focusSelectedNeighborhood() {
-      setHops(1);
+      // Button hook
+      filterAndExpandSubgraph();
     }
 
     function filterCyclesOnly() {
@@ -1595,18 +1580,7 @@
     }
 
     function handleSearch(q) {
-      if (!q) {
-        document.querySelectorAll('.node-group').forEach(el => el.style.opacity = '1');
-        return;
-      }
-      const match = activeNodes.find(n => n.label.toLowerCase().includes(q.toLowerCase()));
-      if (match) {
-        selectNode(match.id);
-        // Center pan on matched node
-        panX = 260 - match.x * zoomScale;
-        panY = 200 - match.y * zoomScale;
-        document.getElementById('viewportGroup').setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomScale})`);
-      }
+      filterAndExpandSubgraph();
     }
 
     // Source Code Drawer
@@ -1680,20 +1654,234 @@
     // Start
     init();
   
-    function clientTraverseNeighborhood() {}
-    function clientShortestPath() {}
-    function clientGetEntrypoints() {}
+    function clientTraverseNeighborhood(id) { setHops(1); }
+    function clientShortestPath(from, to) {
+      document.getElementById('pathFrom').value = from;
+      document.getElementById('pathTo').value = to;
+      document.getElementById('pathfinderModal').style.display='block';
+      document.getElementById('modalOverlay').style.display='block';
+      findPath();
+    }
+    function clientGetEntrypoints() { showEntrypoints(); }
     function closeModals() {
       document.getElementById('pathfinderModal').style.display='none';
       document.getElementById('entrypointsModal').style.display='none';
       document.getElementById('modalOverlay').style.display='none';
     }
-    function findPath() {}
-    function showEntrypoints() {
+    async function findPath() {
+      const from = document.getElementById('pathFrom').value;
+      const to = document.getElementById('pathTo').value;
+      const resultDiv = document.getElementById('pathResult');
+      resultDiv.innerHTML = 'Searching...';
+      try {
+        const res = await fetch(`/api/graph/path?graph_type=${currentTab}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        if (res.ok) {
+          const path = await res.json();
+          resultDiv.innerHTML = path.join(' &rarr; ');
+          if (path.length > 0) {
+            selectNode(path[0]);
+          }
+        } else {
+          resultDiv.innerHTML = 'Path not found.';
+        }
+      } catch(e) {
+        resultDiv.innerHTML = 'Error finding path.';
+      }
+    }
+    async function showEntrypoints() {
       document.getElementById('entrypointsModal').style.display='block';
       document.getElementById('modalOverlay').style.display='block';
+      const listDiv = document.getElementById('entrypointsList');
+      listDiv.innerHTML = 'Loading...';
+      try {
+        const res = await fetch(`/api/graph/entrypoints?graph_type=${currentTab}&limit=10`);
+        if (res.ok) {
+          const eps = await res.json();
+          listDiv.innerHTML = eps.map(ep => `<div style="cursor:pointer; color:var(--cyan); margin: 5px 0;" onclick="selectNode('${ep}'); closeModals();">${ep}</div>`).join('');
+        } else {
+          listDiv.innerHTML = 'No entrypoints found.';
+        }
+      } catch(e) {
+        listDiv.innerHTML = 'Error loading entrypoints.';
+      }
     }
+    let isFiltering = false;
     
+    function compileMatcher(query) {
+      if (!query) return null;
+      let field = null;
+      let val = query.trim();
+      
+      const parts = val.split(':');
+      if (parts.length > 1 && ['path', 'location', 'kind'].includes(parts[0].toLowerCase())) {
+        field = parts[0].toLowerCase();
+        if (field === 'location') field = 'path';
+        val = parts.slice(1).join(':').trim();
+      }
+      
+      let isRegex = val.startsWith('/') && val.endsWith('/') && val.length > 2;
+      let regex;
+      
+      if (isRegex) {
+        let pattern = val.substring(1, val.length - 1);
+        try { regex = new RegExp(pattern, 'i'); } catch (e) { regex = new RegExp(val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
+      } else if (val.includes('*') || val.includes('?')) {
+        let escaped = val.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+        regex = new RegExp(`^${escaped}$`, 'i');
+      } else {
+        let escaped = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        regex = new RegExp(escaped, 'i');
+      }
+      return { field, regex };
+    }
+
+    function matchesFilter(node, matcher) {
+      if (!matcher) return true;
+      if (matcher.field) {
+        const val = node[matcher.field] || '';
+        return matcher.regex.test(val);
+      }
+      return matcher.regex.test(node.label) || matcher.regex.test(node.path);
+    }
+
+    function filterAndExpandSubgraph() {
+      if (isFiltering) return;
+      isFiltering = true;
+      
+      const q = document.getElementById('searchInput').value.trim();
+      const matcher = compileMatcher(q);
+      const dir = document.getElementById('dirSelect').value;
+      
+      let seeds = [];
+      if (q) {
+        seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
+      } else if (selectedNodeId) {
+        const n = tabAllNodes.find(n => n.id === selectedNodeId);
+        if (n) seeds = [n];
+      } else {
+        const inDeg = {};
+        tabAllNodes.forEach(n => inDeg[n.id] = 0);
+        tabAllEdges.forEach(e => { if (inDeg[e.target] !== undefined) inDeg[e.target]++; });
+        let sorted = tabAllNodes.slice().sort((a,b) => inDeg[a.id] - inDeg[b.id]);
+        seeds = sorted.slice(0, Math.min(sorted.length, nodeCap));
+      }
+
+      const matchCountBadge = document.getElementById('searchMatchCount');
+      if (q) {
+        matchCountBadge.style.display = 'inline-block';
+        matchCountBadge.textContent = seeds.length + ' matches';
+        document.getElementById('searchClearBtn').style.display = 'inline-flex';
+      } else {
+        matchCountBadge.style.display = 'none';
+        document.getElementById('searchClearBtn').style.display = 'none';
+      }
+
+      const adjOut = {};
+      const adjIn = {};
+      tabAllNodes.forEach(n => { adjOut[n.id] = []; adjIn[n.id] = []; });
+      tabAllEdges.forEach(e => {
+        if(adjOut[e.source]) adjOut[e.source].push(e.target);
+        if(adjIn[e.target]) adjIn[e.target].push(e.source);
+      });
+
+      let includedNodes = new Set();
+      let queue = [];
+      
+      seeds.forEach(s => {
+        includedNodes.add(s.id);
+        queue.push({ id: s.id, dist: 0 });
+      });
+
+      let isCapped = false;
+      const capReached = () => includedNodes.size >= nodeCap;
+
+      if (includedNodes.size > nodeCap) {
+        const toKeep = new Set(Array.from(includedNodes).slice(0, nodeCap));
+        includedNodes = toKeep;
+        queue = queue.filter(q => includedNodes.has(q.id));
+        isCapped = true;
+      }
+
+      while (queue.length > 0 && !capReached()) {
+        const { id, dist } = queue.shift();
+        
+        if (!isAllCapped && dist >= currentDegree) continue;
+
+        let neighbors = [];
+        if (dir === 'both' || dir === 'out') {
+          neighbors.push(...(adjOut[id] || []));
+        }
+        if (dir === 'both' || dir === 'in') {
+          neighbors.push(...(adjIn[id] || []));
+        }
+
+        for (const nxt of neighbors) {
+          if (!includedNodes.has(nxt)) {
+            includedNodes.add(nxt);
+            queue.push({ id: nxt, dist: dist + 1 });
+            if (capReached()) {
+              isCapped = true;
+              break;
+            }
+          }
+        }
+      }
+
+      activeNodes = tabAllNodes.filter(n => includedNodes.has(n.id));
+      activeEdges = tabAllEdges.filter(e => includedNodes.has(e.source) && includedNodes.has(e.target));
+
+      document.getElementById('badgeNodes').textContent = `${activeNodes.length} / ${tabAllNodes.length} Nodes`;
+      document.getElementById('badgeEdges').textContent = `${activeEdges.length} Edges`;
+      document.getElementById('capWarningBadge').style.display = isCapped ? 'inline-block' : 'none';
+
+      applyLayout();
+
+      if (selectedNodeId && activeNodes.find(n => n.id === selectedNodeId)) {
+      } else if (activeNodes.length > 0) {
+        selectNode(activeNodes[0].id, true);
+      } else {
+        clearInspector();
+      }
+      
+      isFiltering = false;
+    }
+
+    function stepDegree(delta) {
+      currentDegree = Math.max(0, currentDegree + delta);
+      isAllCapped = false;
+      document.getElementById('degValue').textContent = currentDegree + ' deg';
+      document.getElementById('hopAllCap').classList.remove('active');
+      filterAndExpandSubgraph();
+    }
+
+    function toggleAllCapped() {
+      isAllCapped = !isAllCapped;
+      const btn = document.getElementById('hopAllCap');
+      if (isAllCapped) btn.classList.add('active');
+      else btn.classList.remove('active');
+      filterAndExpandSubgraph();
+    }
+
+    function setNodeCap(cap) {
+      nodeCap = cap;
+      filterAndExpandSubgraph();
+    }
+
+    function clearFilter() {
+      document.getElementById('searchInput').value = '';
+      currentDegree = 1;
+      isAllCapped = false;
+      document.getElementById('degValue').textContent = '1 deg';
+      document.getElementById('hopAllCap').classList.remove('active');
+      filterAndExpandSubgraph();
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      filterAndExpandSubgraph();
+    }
+
+    document.getElementById('dirSelect').onchange = () => filterAndExpandSubgraph();
   </script>
 </body>
 </html>

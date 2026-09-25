@@ -263,7 +263,6 @@ async fn api_graph_search(
     State(state): State<Arc<UiState>>,
     Query(query): Query<SearchQuery>,
 ) -> Json<Vec<SearchResultItem>> {
-    let q = query.q.to_lowercase();
     let mut results = Vec::new();
     let limit = query.limit.unwrap_or(20);
 
@@ -271,55 +270,59 @@ async fn api_graph_search(
     let check_symbol = query.graph_type.as_deref() == Some("symbol") || query.graph_type.is_none();
     let check_call = query.graph_type.as_deref() == Some("call") || query.graph_type.is_none();
 
+    let q = query.q.clone();
+    let is_regex = q.starts_with('/') && q.ends_with('/');
+    let regex_pattern = if is_regex && q.len() > 1 {
+        Some(regex::Regex::new(&q[1..q.len() - 1]).ok()).flatten()
+    } else {
+        None
+    };
+
+    let q_lower = q.to_lowercase();
+    
+    let is_match = |label: &str, path: &str| -> bool {
+        if let Some(re) = &regex_pattern {
+            return re.is_match(label) || re.is_match(path);
+        }
+        
+        if q_lower.contains('*') || q_lower.contains('?') {
+            // Very simple wildcard matching fallback for `*` or `?`.
+            // We can convert wildcard to regex
+            let escaped = regex::escape(&q_lower).replace("\\*", ".*").replace("\\?", ".");
+            if let Ok(re) = regex::Regex::new(&format!("^{}$", escaped)) {
+                return re.is_match(&label.to_lowercase()) || re.is_match(&path.to_lowercase());
+            }
+        }
+        
+        label.to_lowercase().contains(&q_lower) || path.to_lowercase().contains(&q_lower)
+    };
+
+    let search_in = |graph: &[CytoscapeElement], graph_type: &str, results: &mut Vec<SearchResultItem>| {
+        for el in graph {
+            if el.data.get("source").is_none() {
+                let label = el.data.get("label").and_then(|v| v.as_str()).unwrap_or_default();
+                let path = el.data.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+                
+                if is_match(label, path) {
+                    results.push(SearchResultItem {
+                        id: el.data.get("id").unwrap().as_str().unwrap().to_string(),
+                        label: label.to_string(),
+                        kind: el.data.get("kind").unwrap().as_str().unwrap().to_string(),
+                        graph_type: graph_type.to_string(),
+                    });
+                }
+            }
+        }
+    };
+
     if check_include {
-        for el in &state.payload.include_graph {
-            if el.data.get("source").is_none() {
-                if let Some(label) = el.data.get("label").and_then(|v| v.as_str()) {
-                    if label.to_lowercase().contains(&q) {
-                        results.push(SearchResultItem {
-                            id: el.data.get("id").unwrap().as_str().unwrap().to_string(),
-                            label: label.to_string(),
-                            kind: el.data.get("kind").unwrap().as_str().unwrap().to_string(),
-                            graph_type: "include".to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        search_in(&state.payload.include_graph, "include", &mut results);
     }
-
     if check_symbol {
-        for el in &state.payload.symbol_graph {
-            if el.data.get("source").is_none() {
-                if let Some(label) = el.data.get("label").and_then(|v| v.as_str()) {
-                    if label.to_lowercase().contains(&q) {
-                        results.push(SearchResultItem {
-                            id: el.data.get("id").unwrap().as_str().unwrap().to_string(),
-                            label: label.to_string(),
-                            kind: el.data.get("kind").unwrap().as_str().unwrap().to_string(),
-                            graph_type: "symbol".to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        search_in(&state.payload.symbol_graph, "symbol", &mut results);
     }
-
     if check_call {
-        for el in &state.payload.call_graph {
-            if el.data.get("source").is_none() {
-                if let Some(label) = el.data.get("label").and_then(|v| v.as_str()) {
-                    if label.to_lowercase().contains(&q) {
-                        results.push(SearchResultItem {
-                            id: el.data.get("id").unwrap().as_str().unwrap().to_string(),
-                            label: label.to_string(),
-                            kind: el.data.get("kind").unwrap().as_str().unwrap().to_string(),
-                            graph_type: "call".to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        search_in(&state.payload.call_graph, "call", &mut results);
     }
 
     results.truncate(limit);

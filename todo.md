@@ -120,6 +120,16 @@
 
 ## Active Feature Tasks
 
-- [x] **Node Selection Edge Highlighting in UI**
-  - [x] Unit 1: Add unit tests in `crates/ui/tests/ui_test.rs` verifying node selection edge highlighting logic, classes (`highlighted`, entering, leaving), and `arrow-selected` marker in `INDEX_HTML` (RED)
-  - [x] Unit 2: Implement entering and leaving edge highlighting, dynamic marker selection, edge layering, and visual styling in `crates/ui/assets/index.html` (GREEN & REFACTOR)
+- [x] **Fix Symbol Dependency Graph and Call Graph in UI & Backend**
+  - [x] Unit 1: Indexing & Call Graph Edge Extraction — pass `combined_call_sites` in `handle_index` and improve C++ function/call recognition in `CppSemanticAnalyzer`
+  - [x] Unit 2: Symbol Element Projection in `ariadne-ui` — filter phantom edges to non-existent symbol nodes and calculate accurate node degrees
+  - [x] Unit 3: UI Layout & Interactive Traversal — wrap multi-node DAG layers into multi-column grid, fix initial `1-Hop` active state, and wire Pathfinder/Entrypoints/Traversal
+
+- [x] **Graph Filtering, Degree Stepper & Node Capping**
+  - [x] Unit 1: Backend Search & DTO Location Filtering — support wildcard (`*`, `?`), regex (`/.../`), and location/path search in `/api/graph/search` and populate path fields in `crates/ui/src/dto.rs`
+  - [x] Unit 2: Frontend Filter & Degree Stepper UI Elements — add degree stepper (`[-]`, `[+]`), `ALL-WITH-CAP` toggle, node cap dropdown, and enhanced search bar in `crates/ui/assets/index.html`
+  - [x] Unit 3: Frontend Subgraph Filter, BFS Expansion & Node Capping Engine — implement `matchesFilter`, `filterAndExpandSubgraph`, clean DAG/concentric/grid layout filtering, and capped status indicator
+
+
+
+

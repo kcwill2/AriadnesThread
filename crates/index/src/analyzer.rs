@@ -265,63 +265,70 @@ impl<'a> ParserCtx<'a> {
     }
 
     fn handle_global_function(&mut self, w: &str, token: &Token) {
-        if self.brace_depth == 0 && self.i >= 1 && self.i + 1 < self.tokens.len() {
+        if self.current_class.is_none() && self.current_function.is_none() && self.i + 1 < self.tokens.len() {
             if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
                 if p == "(" {
-                    if let TokenKind::Word(prev_w) = &self.tokens[self.i - 1].kind {
-                        if prev_w != "class" && prev_w != "struct" {
-                            let name = w.to_string();
-                            let loc = FileLocation {
-                                file_id: self.tu_file_id.clone(),
-                                line: token.line,
-                                column: token.column,
-                            };
-                            let symbol_id = SymbolId::new(name.clone());
-                            self.decl_counter += 1;
-                            let decl_id = DeclId::new(format!("decl_{}", self.decl_counter));
-                            
-                            let mut is_definition = false;
-                            let mut j = self.i + 2;
-                            let mut paren_depth = 1;
-                            while j < self.tokens.len() && paren_depth > 0 {
-                                if let TokenKind::Punct(p2) = &self.tokens[j].kind {
-                                    if p2 == "(" { paren_depth += 1; }
-                                    else if p2 == ")" { paren_depth -= 1; }
-                                }
-                                j += 1;
-                            }
-                            if j < self.tokens.len() {
-                                if let TokenKind::Punct(p3) = &self.tokens[j].kind {
-                                    if p3 == "{" {
-                                        is_definition = true;
-                                        self.current_function = Some((symbol_id.clone(), self.brace_depth + 1));
-                                    }
-                                }
-                            }
+                    let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw", "class", "struct", "namespace", "else"];
+                    if reserved.contains(&w) {
+                        return;
+                    }
 
-                            self.declarations.push(SymbolDecl {
-                                id: decl_id.clone(),
-                                symbol_id: symbol_id.clone(),
-                                location: loc,
-                                is_definition,
-                            });
-
-                            if let Some(existing) = self.symbols.iter_mut().find(|s| s.id == symbol_id) {
-                                existing.declarations.push(decl_id.clone());
-                                if is_definition {
-                                    existing.definition = Some(decl_id);
-                                }
-                            } else {
-                                self.symbols.push(SymbolRecord {
-                                    id: symbol_id,
-                                    name: name.clone(),
-                                    kind: SymbolKind::Function,
-                                    owning_file: self.tu_file_id.clone(),
-                                    declarations: vec![decl_id.clone()],
-                                    definition: if is_definition { Some(decl_id) } else { None },
-                                });
+                    let name = w.to_string();
+                    let loc = FileLocation {
+                        file_id: self.tu_file_id.clone(),
+                        line: token.line,
+                        column: token.column,
+                    };
+                    let symbol_id = SymbolId::new(name.clone());
+                    
+                    let mut is_definition = false;
+                    let mut j = self.i + 2;
+                    let mut paren_depth = 1;
+                    while j < self.tokens.len() && paren_depth > 0 {
+                        if let TokenKind::Punct(p2) = &self.tokens[j].kind {
+                            if p2 == "(" { paren_depth += 1; }
+                            else if p2 == ")" { paren_depth -= 1; }
+                        }
+                        j += 1;
+                    }
+                    
+                    while j < self.tokens.len() {
+                        if let TokenKind::Punct(p3) = &self.tokens[j].kind {
+                            if p3 == "{" {
+                                is_definition = true;
+                                self.current_function = Some((symbol_id.clone(), self.brace_depth + 1));
+                                break;
+                            } else if p3 == ";" {
+                                break;
                             }
                         }
+                        j += 1;
+                    }
+
+                    self.decl_counter += 1;
+                    let decl_id = DeclId::new(format!("decl_{}", self.decl_counter));
+
+                    self.declarations.push(SymbolDecl {
+                        id: decl_id.clone(),
+                        symbol_id: symbol_id.clone(),
+                        location: loc,
+                        is_definition,
+                    });
+
+                    if let Some(existing) = self.symbols.iter_mut().find(|s| s.id == symbol_id) {
+                        existing.declarations.push(decl_id.clone());
+                        if is_definition && existing.kind == SymbolKind::Function {
+                            existing.definition = Some(decl_id);
+                        }
+                    } else {
+                        self.symbols.push(SymbolRecord {
+                            id: symbol_id,
+                            name: name.clone(),
+                            kind: SymbolKind::Function,
+                            owning_file: self.tu_file_id.clone(),
+                            declarations: vec![decl_id.clone()],
+                            definition: if is_definition { Some(decl_id) } else { None },
+                        });
                     }
                 }
             }
@@ -573,5 +580,36 @@ mod tests {
         let recursive_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "recursive").collect();
         assert_eq!(recursive_calls.len(), 1);
         assert_eq!(recursive_calls[0].callee_name, "recursive");
+    }
+
+    #[test]
+    fn test_namespace_and_qualified_function_definition() {
+        let code = r#"
+            namespace my_ns {
+                class MyClass {
+                    void method() const;
+                };
+
+                void MyClass::method() const {
+                    helper();
+                }
+
+                void global_func(int x) noexcept {
+                    helper2();
+                }
+            }
+        "#;
+        let tu = CppSemanticAnalyzer::analyze_source(
+            FileId::from_relative_path("test.cpp"),
+            code,
+            "Debug|x64",
+        );
+        let myclass_method_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "method").collect();
+        assert_eq!(myclass_method_calls.len(), 1, "Call site inside method must be extracted");
+        assert_eq!(myclass_method_calls[0].callee_name, "helper");
+
+        let global_func_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "global_func").collect();
+        assert_eq!(global_func_calls.len(), 1, "Call site inside global_func must be extracted");
+        assert_eq!(global_func_calls[0].callee_name, "helper2");
     }
 }

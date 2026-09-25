@@ -54,12 +54,16 @@ pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
         let mut combined_symbols = Vec::new();
         let mut combined_declarations = Vec::new();
         let mut combined_edges = Vec::new();
+        let mut combined_call_sites = Vec::new();
+        let mut combined_references = Vec::new();
 
         for (file_id, _, file_content) in all_files {
             let mut file_analysis = CppSemanticAnalyzer::analyze_source(file_id, &file_content, &tu.context_name);
             combined_symbols.append(&mut file_analysis.symbols);
             combined_declarations.append(&mut file_analysis.declarations);
             combined_edges.append(&mut file_analysis.edges);
+            combined_call_sites.append(&mut file_analysis.call_sites);
+            combined_references.append(&mut file_analysis.references);
         }
         
         tu_analyses.push(TuAnalysis {
@@ -68,8 +72,8 @@ pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
             symbols: combined_symbols,
             declarations: combined_declarations,
             edges: combined_edges,
-            references: vec![],
-            call_sites: vec![],
+            references: combined_references,
+            call_sites: combined_call_sites,
         });
     }
 

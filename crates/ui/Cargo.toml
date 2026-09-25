@@ -11,6 +11,7 @@ serde.workspace = true
 serde_json.workspace = true
 axum.workspace = true
 tower-http.workspace = true
+regex = "1.10"
 ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-graph = { path = "../graph" }
