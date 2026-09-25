@@ -53,6 +53,8 @@ impl WorkerBackend for ClangWorkerBackend {
         let req = serde_json::json!({
             "action": "analyze",
             "source_file": full_path.to_string_lossy().to_string(),
+            "file_id": task.tu.file_id,
+            "context_name": task.tu.context_name,
             "compiler": task.tu.compile_command.command.clone(),
             "defines": defines,
             "include_dirs": include_dirs,
@@ -64,12 +66,31 @@ impl WorkerBackend for ClangWorkerBackend {
         let req_path = temp_dir.join(format!("worker_req_{}.json", task.task_id));
         let _ = std::fs::write(&req_path, req.to_string());
 
-        let mut child_res = std::process::Command::new("clang-worker")
-            .arg("--file")
-            .arg(&req_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
+        let mut candidate_paths = vec![
+            std::path::PathBuf::from("clang-worker"),
+            std::path::PathBuf::from("target/debug/clang-worker.exe"),
+            std::path::PathBuf::from("target/debug/clang-worker"),
+        ];
+        if let Ok(cur_exe) = std::env::current_exe() {
+            if let Some(target_dir) = cur_exe.parent().and_then(|p| p.parent()) {
+                candidate_paths.push(target_dir.join("clang-worker.exe"));
+                candidate_paths.push(target_dir.join("clang-worker"));
+            }
+        }
+
+        let mut child_res = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not started"));
+        for bin in candidate_paths {
+            let res = std::process::Command::new(&bin)
+                .arg("--file")
+                .arg(&req_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn();
+            if res.is_ok() {
+                child_res = res;
+                break;
+            }
+        }
 
         if child_res.is_err() {
             // Try cargo run as fallback for dev environments

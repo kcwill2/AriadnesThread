@@ -18,6 +18,8 @@ struct Cli {
 pub struct WorkerRequest {
     pub action: String, // "analyze"
     pub source_file: String,
+    pub file_id: Option<FileId>,
+    pub context_name: Option<String>,
     pub compiler: Option<String>,
     pub defines: Vec<String>,
     pub include_dirs: Vec<String>,
@@ -58,7 +60,8 @@ fn process_request(req: WorkerRequest) -> WorkerResponse {
         }
     };
 
-    let file_id = FileId::from_relative_path(&req.source_file);
+    let file_id = req.file_id.unwrap_or_else(|| FileId::from_relative_path(&req.source_file));
+    let context_name = req.context_name.as_deref().unwrap_or("fallback_context");
 
     if check_clang_available() {
         // Construct MSVC compatibility command
@@ -93,7 +96,7 @@ fn process_request(req: WorkerRequest) -> WorkerResponse {
     }
 
     // Graceful fallback to built-in CppSemanticAnalyzer
-    let analysis = CppSemanticAnalyzer::analyze_source(file_id, &source_code, "fallback_context");
+    let analysis = CppSemanticAnalyzer::analyze_source(file_id, &source_code, context_name);
     
     WorkerResponse {
         status: "success".to_string(),
