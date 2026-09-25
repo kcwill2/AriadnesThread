@@ -653,6 +653,18 @@ fn test_onboarding_and_help_content() {
     assert!(html.contains("id=\"helpCenterModal\""));
     assert!(html.contains("id=\"btnHelp\""));
     
+    // Check for tour/help center content covering required features
+    assert!(html.contains("Collateral Heat Map"));
+    assert!(html.contains("Path Illumination"));
+    assert!(html.contains("Degree"));
+    assert!(html.contains("Breadcrumbs") || html.contains("Ariadne's Thread"));
+    assert!(html.contains("Direction"));
+    assert!(html.contains("ALL-WITH-CAP"));
+    assert!(html.contains("Cold/Teal")); // Heat map legend colors
+    assert!(html.contains("Finding & Decoupling Header Bloat"));
+    assert!(html.contains("Isolating Focused Subgraphs"));
+    assert!(html.contains("Breaking Circular Dependencies"));
+
     assert!(html.contains("function startTour"));
     assert!(html.contains("function triggerFirstVisitExperience"));
     assert!(html.contains("function openHelpCenter"));
