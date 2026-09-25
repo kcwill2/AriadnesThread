@@ -1,5 +1,45 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraverseQuery {
+    pub graph_type: String,
+    pub center: String,
+    pub depth: Option<usize>,
+    pub direction: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathQuery {
+    pub graph_type: String,
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchQuery {
+    pub graph_type: Option<String>,
+    pub q: String,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResultItem {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub graph_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntrypointsResponse {
+    pub graph_type: String,
+    pub cycles: Vec<Vec<String>>,
+    pub top_hubs: Vec<CytoscapeElement>,
+    pub roots: Vec<CytoscapeElement>,
+    pub leaves: Vec<CytoscapeElement>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CytoscapeElement {
     pub data: serde_json::Value,
@@ -45,6 +85,15 @@ pub fn build_include_elements(
         }
     }
 
+    let mut in_degrees = std::collections::HashMap::new();
+    let mut out_degrees = std::collections::HashMap::new();
+    for edge in &graph.edges {
+        if let Some(dest) = edge.destination {
+            *out_degrees.entry(edge.source).or_insert(0) += 1;
+            *in_degrees.entry(dest).or_insert(0) += 1;
+        }
+    }
+
     for (file_id, path) in &graph.file_paths {
         let path_str = path.to_string_lossy();
         let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or(&path_str);
@@ -55,6 +104,8 @@ pub fn build_include_elements(
         };
         let closure_size = closures.get(file_id).map(|c| c.closure_size).unwrap_or(0);
         let is_cycle = cycle_nodes.contains(file_id);
+        let in_degree = in_degrees.get(file_id).copied().unwrap_or(0);
+        let out_degree = out_degrees.get(file_id).copied().unwrap_or(0);
 
         elements.push(CytoscapeElement {
             data: serde_json::json!({
@@ -64,6 +115,8 @@ pub fn build_include_elements(
                 "kind": kind,
                 "closure": closure_size,
                 "is_cycle": is_cycle,
+                "in_degree": in_degree,
+                "out_degree": out_degree,
             }),
             classes: if is_cycle { Some("cycle".into()) } else { None },
         });
@@ -89,8 +142,17 @@ pub fn build_include_elements(
 
 pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec<CytoscapeElement> {
     let mut elements = Vec::new();
+    let mut in_degrees = std::collections::HashMap::new();
+    let mut out_degrees = std::collections::HashMap::new();
+    for edge in &model.edges {
+        *out_degrees.entry(edge.src_symbol.clone()).or_insert(0) += 1;
+        *in_degrees.entry(edge.dst_symbol.clone()).or_insert(0) += 1;
+    }
+
     for sym in model.symbols.values() {
         let kind_str = format!("{:?}", sym.kind).to_uppercase();
+        let in_degree = in_degrees.get(&sym.id).copied().unwrap_or(0);
+        let out_degree = out_degrees.get(&sym.id).copied().unwrap_or(0);
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": sym.id.0.clone(),
@@ -98,6 +160,8 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
                 "kind": kind_str,
                 "defining_file": sym.defining_file.map(|f| f.0.to_string()),
                 "declarations_count": sym.declarations.len(),
+                "in_degree": in_degree,
+                "out_degree": out_degree,
             }),
             classes: None,
         });
@@ -120,7 +184,16 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
 
 pub fn build_call_elements(callgraph: &ariadne_graph::CallGraph) -> Vec<CytoscapeElement> {
     let mut elements = Vec::new();
+    let mut in_degrees = std::collections::HashMap::new();
+    let mut out_degrees = std::collections::HashMap::new();
+    for edge in &callgraph.edges {
+        *out_degrees.entry(edge.caller.clone()).or_insert(0) += 1;
+        *in_degrees.entry(edge.callee.clone()).or_insert(0) += 1;
+    }
+
     for node in &callgraph.nodes {
+        let in_degree = in_degrees.get(&node.symbol_id).copied().unwrap_or(0);
+        let out_degree = out_degrees.get(&node.symbol_id).copied().unwrap_or(0);
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": node.symbol_id.0.clone(),
@@ -128,6 +201,8 @@ pub fn build_call_elements(callgraph: &ariadne_graph::CallGraph) -> Vec<Cytoscap
                 "kind": "FUNCTION",
                 "owning_file": node.owning_file.0.to_string(),
                 "line": node.location.as_ref().map(|l| l.line),
+                "in_degree": in_degree,
+                "out_degree": out_degree,
             }),
             classes: None,
         });

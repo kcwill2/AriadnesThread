@@ -71,6 +71,64 @@ async fn test_server_routes() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+async fn test_server_traversal_routes() {
+    let state = Arc::new(UiState {
+        repo_root: std::path::PathBuf::from("."),
+        include_graph: IncludeGraph::new(),
+        reduced_model: ReducedSemanticModel {
+            repo_root: std::path::PathBuf::from("."),
+            symbols: std::collections::BTreeMap::new(),
+            edges: vec![],
+            tu_usage: std::collections::BTreeMap::new(),
+            file_symbols: std::collections::BTreeMap::new(),
+        },
+        call_graph: CallGraph::default(),
+        payload: GraphExportPayload {
+            repo_name: "test".to_string(),
+            include_graph: vec![],
+            symbol_graph: vec![],
+            call_graph: vec![],
+            stats: SummaryStats {
+                total_files: 0,
+                total_symbols: 0,
+                total_calls: 0,
+                cycle_count: 0,
+            },
+        },
+    });
+
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/graph/traverse?graph_type=include&center=test")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .uri("/api/graph/path?graph_type=call&from=a&to=b")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .uri("/api/graph/entrypoints?graph_type=symbol")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .uri("/api/graph/search?q=test")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
 #[test]
 fn test_export_html() {
     let payload = GraphExportPayload {
@@ -102,6 +160,14 @@ fn test_index_html_content() {
     assert!(html.contains("Include Graph"));
     assert!(html.contains("Symbol Dependency Graph"));
     assert!(html.contains("Call Graph"));
+    
+    // M16 Unit 3: Interactive Frontend Traversal elements
+    assert!(html.contains("id=\"ariadneThread\"") || html.contains("class=\"thread-bar\""));
+    assert!(html.contains("id=\"entrypointsModal\"") || html.contains("id=\"entrypointsPanel\""));
+    assert!(html.contains("id=\"pathfinderModal\""));
+    assert!(html.contains("clientTraverseNeighborhood"));
+    assert!(html.contains("clientShortestPath"));
+    assert!(html.contains("clientGetEntrypoints"));
 }
 
 #[tokio::test]

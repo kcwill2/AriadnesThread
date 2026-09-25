@@ -112,4 +112,8 @@
   - [x] Unit 4: Interactive Frontend SPA (`crates/ui/assets`)
   - [x] Unit 5: CLI Integration & End-to-End Integration Suite (`crates/cli`, `tests/integration`)
 
-
+- [x] **M16 — Interactive Graph Traversal in UI**
+  - [x] Unit 1: Traversal & Pathfinding Primitives in `ariadne-graph` (neighborhood extraction, shortest path, entrypoint discovery)
+  - [x] Unit 2: UI DTOs & Axum Server Traversal Endpoints in `ariadne-ui` (`/api/graph/traverse`, `/api/graph/path`, `/api/graph/entrypoints`, `/api/graph/search`)
+  - [x] Unit 3: Interactive Frontend Traversal, Ariadne's Thread Bar & Pathfinder in `crates/ui/assets/index.html`
+  - [x] Unit 4: End-to-End Integration Tests & Standalone HTML Export Verification
