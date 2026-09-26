@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult};
@@ -390,7 +390,11 @@ impl Pipeline {
         }
 
         self.ensure_index()?;
-        let model = ReducedSemanticModel::reduce(self.index_cache.as_ref().unwrap());
+        let index = self
+            .index_cache
+            .as_ref()
+            .context("index stage cache must exist after ensure_index")?;
+        let model = ReducedSemanticModel::reduce(index);
         self.manager
             .save_reduced_artifacts(&model, &self.fps.reduced)?;
         self.reduced_cache = Some(model);
@@ -425,10 +429,15 @@ impl Pipeline {
 
         self.ensure_index()?;
         self.ensure_reduced()?;
-        let callgraph = CallGraph::build_from_index(
-            self.index_cache.as_ref().unwrap(),
-            self.reduced_cache.as_ref().unwrap(),
-        );
+        let index = self
+            .index_cache
+            .as_ref()
+            .context("index stage cache must exist after ensure_index")?;
+        let reduced = self
+            .reduced_cache
+            .as_ref()
+            .context("reduced stage cache must exist after ensure_reduced")?;
+        let callgraph = CallGraph::build_from_index(index, reduced);
         self.manager
             .save_callgraph_artifacts(&callgraph, &self.fps.callgraph)?;
         self.callgraph_cache = Some(callgraph);
@@ -460,8 +469,8 @@ impl Pipeline {
 
         self.ensure_include_graph()?;
         self.ensure_reduced()?;
-        let (graph, closures) = self.include_cache.clone().unwrap();
-        let reduced = self.reduced_cache.clone().unwrap();
+        let (graph, closures) = self.cached_include_graph()?;
+        let reduced = self.cached_reduced()?;
 
         let analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
         let mut symbol_metrics = Vec::new();
@@ -508,23 +517,33 @@ impl Pipeline {
     fn cached_include_graph(
         &self,
     ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
-        Ok(self.include_cache.clone().unwrap())
+        self.include_cache
+            .clone()
+            .context("include stage cache must exist after ensure_include_graph")
     }
 
     fn cached_index(&self) -> Result<IndexResult> {
-        Ok(self.index_cache.clone().unwrap())
+        self.index_cache
+            .clone()
+            .context("index stage cache must exist after ensure_index")
     }
 
     fn cached_reduced(&self) -> Result<ReducedSemanticModel> {
-        Ok(self.reduced_cache.clone().unwrap())
+        self.reduced_cache
+            .clone()
+            .context("reduced stage cache must exist after ensure_reduced")
     }
 
     fn cached_callgraph(&self) -> Result<CallGraph> {
-        Ok(self.callgraph_cache.clone().unwrap())
+        self.callgraph_cache
+            .clone()
+            .context("callgraph stage cache must exist after ensure_callgraph")
     }
 
     fn cached_load(&self) -> Result<LoadReport> {
-        Ok(self.load_cache.clone().unwrap())
+        self.load_cache
+            .clone()
+            .context("load stage cache must exist after ensure_load")
     }
 }
 
