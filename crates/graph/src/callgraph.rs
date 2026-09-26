@@ -24,6 +24,134 @@ pub struct CallGraph {
     pub edges: Vec<CallEdge>,
 }
 
+struct CalleeLookup<'m> {
+    by_exact_name: std::collections::HashMap<&'m str, &'m crate::ReducedSymbolRecord>,
+    by_id_suffix: std::collections::HashMap<&'m str, &'m crate::ReducedSymbolRecord>,
+}
+
+impl<'m> CalleeLookup<'m> {
+    fn from_model(model: &'m crate::ReducedSemanticModel) -> Self {
+        let mut by_exact_name: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
+            std::collections::HashMap::new();
+        let mut by_id_suffix: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
+            std::collections::HashMap::new();
+
+        for sym in model.symbols.values() {
+            by_exact_name.insert(sym.id.0.as_str(), sym);
+            by_exact_name.entry(sym.name.as_str()).or_insert(sym);
+
+            let mut current = sym.id.0.as_str();
+            while let Some(idx) = current.find("::") {
+                current = &current[idx + 2..];
+                by_id_suffix.entry(current).or_insert(sym);
+            }
+        }
+
+        Self {
+            by_exact_name,
+            by_id_suffix,
+        }
+    }
+
+    fn resolve(&self, callee_name: &str) -> Option<&'m crate::ReducedSymbolRecord> {
+        self.by_exact_name
+            .get(callee_name)
+            .copied()
+            .or_else(|| self.by_id_suffix.get(callee_name).copied())
+            .or_else(|| {
+                let mut current = callee_name;
+                while let Some(idx) = current.find("::") {
+                    current = &current[idx + 2..];
+                    if let Some(&sym) = self.by_exact_name.get(current) {
+                        return Some(sym);
+                    }
+                }
+                None
+            })
+    }
+}
+
+fn call_node(
+    symbol_id: SymbolId,
+    name: String,
+    defining_file: Option<ariadne_repo::FileId>,
+) -> CallNode {
+    CallNode {
+        symbol_id,
+        name,
+        owning_file: defining_file
+            .unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
+        location: None,
+    }
+}
+
+fn record_call_site(
+    nodes: &mut std::collections::BTreeMap<SymbolId, CallNode>,
+    edges: &mut std::collections::BTreeMap<(SymbolId, SymbolId), CallEdge>,
+    model: &crate::ReducedSemanticModel,
+    site: &ariadne_index::types::CallSite,
+    callee_sym: &crate::ReducedSymbolRecord,
+) {
+    let caller = site.caller_symbol.clone();
+    let callee = callee_sym.id.clone();
+
+    let edge = edges
+        .entry((caller.clone(), callee.clone()))
+        .or_insert_with(|| CallEdge {
+            caller: caller.clone(),
+            callee: callee.clone(),
+            call_count: 0,
+            call_locations: Vec::new(),
+        });
+
+    edge.call_count += 1;
+    if !edge.call_locations.contains(&site.location) {
+        edge.call_locations.push(site.location.clone());
+    }
+
+    if !nodes.contains_key(&caller) {
+        if let Some(record) = model.symbols.get(&caller) {
+            nodes.insert(
+                caller.clone(),
+                call_node(
+                    caller.clone(),
+                    record.name.clone(),
+                    record.defining_file.clone(),
+                ),
+            );
+        }
+    }
+    if !nodes.contains_key(&callee) {
+        nodes.insert(
+            callee.clone(),
+            call_node(
+                callee.clone(),
+                callee_sym.name.clone(),
+                callee_sym.defining_file.clone(),
+            ),
+        );
+    }
+}
+
+fn seed_uncalled_function_nodes(
+    nodes: &mut std::collections::BTreeMap<SymbolId, CallNode>,
+    model: &crate::ReducedSemanticModel,
+) {
+    for (sym_id, record) in &model.symbols {
+        if record.kind == ariadne_index::types::SymbolKind::Function && !nodes.contains_key(sym_id)
+        {
+            nodes.insert(
+                sym_id.clone(),
+                call_node(
+                    sym_id.clone(),
+                    record.name.clone(),
+                    record.defining_file.clone(),
+                ),
+            );
+        }
+    }
+}
+
 impl CallGraph {
     pub fn build_from_index(
         index_result: &ariadne_index::IndexResult,
@@ -34,110 +162,17 @@ impl CallGraph {
         let mut edges: std::collections::BTreeMap<(SymbolId, SymbolId), CallEdge> =
             std::collections::BTreeMap::new();
 
-        let mut exact_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
-            std::collections::HashMap::new();
-        let mut suffix_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
-            std::collections::HashMap::new();
-
-        for sym in model.symbols.values() {
-            exact_map.insert(sym.id.0.as_str(), sym);
-            exact_map.entry(sym.name.as_str()).or_insert(sym);
-
-            let mut current = sym.id.0.as_str();
-            while let Some(idx) = current.find("::") {
-                current = &current[idx + 2..];
-                suffix_map.entry(current).or_insert(sym);
-            }
-        }
+        let lookup = CalleeLookup::from_model(model);
 
         for tu in &index_result.tu_analyses {
             for site in &tu.call_sites {
-                let caller = site.caller_symbol.clone();
-                let callee_name = site.callee_name.as_str();
-
-                let callee_opt = exact_map
-                    .get(callee_name)
-                    .copied()
-                    .or_else(|| suffix_map.get(callee_name).copied())
-                    .or_else(|| {
-                        let mut current = callee_name;
-                        while let Some(idx) = current.find("::") {
-                            current = &current[idx + 2..];
-                            if let Some(&sym) = exact_map.get(current) {
-                                return Some(sym);
-                            }
-                        }
-                        None
-                    });
-
-                if let Some(callee_sym) = callee_opt {
-                    let callee = callee_sym.id.clone();
-
-                    let edge = edges
-                        .entry((caller.clone(), callee.clone()))
-                        .or_insert_with(|| CallEdge {
-                            caller: caller.clone(),
-                            callee: callee.clone(),
-                            call_count: 0,
-                            call_locations: Vec::new(),
-                        });
-
-                    edge.call_count += 1;
-                    if !edge.call_locations.contains(&site.location) {
-                        edge.call_locations.push(site.location.clone());
-                    }
-
-                    // Add to nodes if not present
-                    if !nodes.contains_key(&caller) {
-                        if let Some(record) = model.symbols.get(&caller) {
-                            nodes.insert(
-                                caller.clone(),
-                                CallNode {
-                                    symbol_id: caller.clone(),
-                                    name: record.name.clone(),
-                                    owning_file: record.defining_file.clone().unwrap_or_else(
-                                        || ariadne_repo::FileId::from_relative_path("unknown"),
-                                    ),
-                                    location: None,
-                                },
-                            );
-                        }
-                    }
-                    if !nodes.contains_key(&callee) {
-                        nodes.insert(
-                            callee.clone(),
-                            CallNode {
-                                symbol_id: callee.clone(),
-                                name: callee_sym.name.clone(),
-                                owning_file: callee_sym.defining_file.clone().unwrap_or_else(
-                                    || ariadne_repo::FileId::from_relative_path("unknown"),
-                                ),
-                                location: None,
-                            },
-                        );
-                    }
+                if let Some(callee_sym) = lookup.resolve(site.callee_name.as_str()) {
+                    record_call_site(&mut nodes, &mut edges, model, site, callee_sym);
                 }
             }
         }
 
-        for (sym_id, record) in &model.symbols {
-            if record.kind == ariadne_index::types::SymbolKind::Function
-                && !nodes.contains_key(sym_id)
-            {
-                nodes.insert(
-                    sym_id.clone(),
-                    CallNode {
-                        symbol_id: sym_id.clone(),
-                        name: record.name.clone(),
-                        owning_file: record
-                            .defining_file
-                            .clone()
-                            .unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
-                        location: None,
-                    },
-                );
-            }
-        }
+        seed_uncalled_function_nodes(&mut nodes, model);
 
         Self {
             nodes: nodes.into_values().collect(),
