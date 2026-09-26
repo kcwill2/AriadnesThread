@@ -169,10 +169,13 @@ fn plan_rewrite_targets(
     (symbol_name_to_header, header_map.into_values().collect())
 }
 
+/// Consumer rewrite input: (TU source path, old includes, symbol names).
+type PlanConsumers = Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>;
+
 fn find_plan_consumers(
     repository: &Repository,
     plan: &ariadne_cluster::plan::OptimizationPlan,
-) -> Result<Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>> {
+) -> Result<PlanConsumers> {
     let repo_discovery = repository.discover()?;
     let build_discoverer =
         BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
@@ -190,7 +193,7 @@ fn find_plan_consumers(
         .map(|e| e.symbol_name.clone())
         .collect();
 
-    let mut consumers: Vec<(PathBuf, Vec<PathBuf>, Vec<String>)> = Vec::new();
+    let mut consumers: PlanConsumers = Vec::new();
     for tu in &build_result.translation_units {
         let abs_path = repository.root.join(&tu.source_path);
         if let Ok(content) = fs::read_to_string(&abs_path) {
