@@ -39,21 +39,24 @@ impl WorkerBackend for DefaultWorkerBackend {
 
 pub struct ClangWorkerBackend;
 
-impl WorkerBackend for ClangWorkerBackend {
-    fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
-        let full_path = repo_root.join(&task.tu.source_path);
-
+impl ClangWorkerBackend {
+    fn collect_compiler_flags(arguments: &[String]) -> (Vec<String>, Vec<String>) {
         let mut defines = Vec::new();
         let mut include_dirs = Vec::new();
-        for arg in &task.tu.compile_command.arguments {
+        for arg in arguments {
             if arg.starts_with("-D") {
                 defines.push(arg[2..].to_string());
             } else if arg.starts_with("-I") {
                 include_dirs.push(arg[2..].to_string());
             }
         }
+        (defines, include_dirs)
+    }
 
-        let req = serde_json::json!({
+    fn build_analyze_request(task: &TuTask, full_path: &Path) -> serde_json::Value {
+        let (defines, include_dirs) =
+            Self::collect_compiler_flags(&task.tu.compile_command.arguments);
+        serde_json::json!({
             "action": "analyze",
             "source_file": full_path.to_string_lossy().to_string(),
             "file_id": task.tu.file_id,
@@ -62,13 +65,10 @@ impl WorkerBackend for ClangWorkerBackend {
             "defines": defines,
             "include_dirs": include_dirs,
             "language_standard": None::<String>
-        });
+        })
+    }
 
-        // Use `--file` argument to pass a temp file containing the request to avoid stdin issues with `cargo run`
-        let temp_dir = std::env::temp_dir();
-        let req_path = temp_dir.join(format!("worker_req_{}.json", task.task_id));
-        let _ = std::fs::write(&req_path, req.to_string());
-
+    fn discover_worker_binaries() -> Vec<std::path::PathBuf> {
         let mut candidate_paths = vec![
             std::path::PathBuf::from("clang-worker"),
             std::path::PathBuf::from("target/debug/clang-worker.exe"),
@@ -80,7 +80,10 @@ impl WorkerBackend for ClangWorkerBackend {
                 candidate_paths.push(target_dir.join("clang-worker"));
             }
         }
+        candidate_paths
+    }
 
+    fn spawn_worker_process(req_path: &Path) -> std::io::Result<std::process::Child> {
         // TEST-ONLY SEAM (Pass 1.3 characterization): when a fake worker command is
         // installed in FAKE_WORKER_CMD, it replaces the candidate-binary discovery and
         // the `--file` arg convention, and the `cargo run` fallback is suppressed so
@@ -90,9 +93,13 @@ impl WorkerBackend for ClangWorkerBackend {
         let fake_worker_cmd = fake_worker_cmd_override();
 
         #[cfg(test)]
-        if fake_worker_cmd.is_some() {
-            candidate_paths = Vec::new();
-        }
+        let candidate_paths = if fake_worker_cmd.is_some() {
+            Vec::new()
+        } else {
+            Self::discover_worker_binaries()
+        };
+        #[cfg(not(test))]
+        let candidate_paths = Self::discover_worker_binaries();
 
         let mut child_res = Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -111,7 +118,7 @@ impl WorkerBackend for ClangWorkerBackend {
         for bin in candidate_paths {
             let res = std::process::Command::new(&bin)
                 .arg("--file")
-                .arg(&req_path)
+                .arg(req_path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn();
@@ -139,48 +146,59 @@ impl WorkerBackend for ClangWorkerBackend {
                     "--",
                     "--file",
                 ])
-                .arg(&req_path)
+                .arg(req_path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn();
         }
 
-        let mut success = false;
-        let mut analysis_res = None;
+        child_res
+    }
 
-        if let Ok(child) = child_res {
-            if let Ok(out) = child.wait_with_output() {
-                if out.status.success() {
-                    let stdout_str = String::from_utf8_lossy(&out.stdout);
-                    for line in stdout_str.lines() {
-                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(line) {
-                            if resp.get("status").and_then(|s| s.as_str()) == Some("success") {
-                                if let Some(analysis_json) = resp.get("analysis") {
-                                    if let Ok(analysis) =
-                                        serde_json::from_value::<TuAnalysis>(analysis_json.clone())
-                                    {
-                                        success = true;
-                                        analysis_res = Some(analysis);
-                                        break;
-                                    }
-                                }
-                            }
+    fn extract_analysis_from_output(output: &std::process::Output) -> Option<TuAnalysis> {
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        for line in stdout_str.lines() {
+            if let Ok(resp) = serde_json::from_str::<serde_json::Value>(line) {
+                if resp.get("status").and_then(|s| s.as_str()) == Some("success") {
+                    if let Some(analysis_json) = resp.get("analysis") {
+                        if let Ok(analysis) =
+                            serde_json::from_value::<TuAnalysis>(analysis_json.clone())
+                        {
+                            return Some(analysis);
                         }
                     }
                 }
             }
         }
+        None
+    }
+}
+
+impl WorkerBackend for ClangWorkerBackend {
+    fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+        let full_path = repo_root.join(&task.tu.source_path);
+        let req = Self::build_analyze_request(task, &full_path);
+
+        // Use `--file` argument to pass a temp file containing the request to avoid stdin issues with `cargo run`
+        let temp_dir = std::env::temp_dir();
+        let req_path = temp_dir.join(format!("worker_req_{}.json", task.task_id));
+        let _ = std::fs::write(&req_path, req.to_string());
+
+        let analysis = match Self::spawn_worker_process(&req_path) {
+            Ok(child) => match child.wait_with_output() {
+                Ok(out) if out.status.success() => Self::extract_analysis_from_output(&out),
+                _ => None,
+            },
+            Err(_) => None,
+        };
 
         let _ = std::fs::remove_file(&req_path);
 
-        if success {
-            if let Some(analysis) = analysis_res {
-                return Ok(analysis);
-            }
+        match analysis {
+            Some(analysis) => Ok(analysis),
+            // Fallback if execution failed or response invalid
+            None => DefaultWorkerBackend.execute(task, repo_root),
         }
-
-        // Fallback if execution failed or response invalid
-        DefaultWorkerBackend.execute(task, repo_root)
     }
 }
 
