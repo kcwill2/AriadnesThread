@@ -6,7 +6,7 @@ use ariadne_graph::load::LoadAnalyzer;
 use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::SymbolId;
-use ariadne_repo::{FileId, FileRecord, OptimizationPolicy};
+use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,23 @@ pub struct OptimizationPlanner<'a> {
     pub model: &'a ReducedSemanticModel,
     pub file_records: &'a [FileRecord],
     pub tu_file_ids: &'a [FileId],
+}
+
+/// Optimization policy and ownership views built once per planning run.
+struct FilePolicyMaps {
+    by_id: HashMap<FileId, OptimizationPolicy>,
+    ownership_by_id: HashMap<FileId, FileOwnership>,
+    policy_by_path: HashMap<PathBuf, OptimizationPolicy>,
+}
+
+/// A header that passed the load, collateral-source, and policy screens and
+/// is eligible for extraction proposals.
+struct HeaderCandidate {
+    file_id: FileId,
+    path: PathBuf,
+    collateral_load: usize,
+    collateral_source_id: FileId,
+    collateral_source_path: PathBuf,
 }
 
 impl<'a> OptimizationPlanner<'a> {
@@ -33,13 +50,42 @@ impl<'a> OptimizationPlanner<'a> {
     }
 
     pub fn plan(&self) -> Vec<OptimizationPlan> {
-        let mut plans = Vec::new();
         let load_analyzer = LoadAnalyzer::new(self.include_graph, self.model);
         let frontier_analyzer = FrontierAnalyzer::new();
+        let policies = self.collect_file_policies();
+        let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
+        let mapped_edges = self.model_edges_without_file_endpoints();
+        let header_consumers = self
+            .include_graph
+            .map_header_consuming_tus(self.tu_file_ids);
 
-        let mut file_policies = HashMap::new();
-        let mut file_ownerships = HashMap::new();
-        let mut path_to_policy = HashMap::new();
+        let mut plans = Vec::new();
+        for file_id in self.sorted_header_ids() {
+            let Some(candidate) = self.candidate_header(file_id, &load_analyzer, &policies) else {
+                continue;
+            };
+            let proposed_extractions =
+                self.propose_extractions(&candidate, &mapped_edges, &checker);
+            if proposed_extractions.is_empty() {
+                continue;
+            }
+            plans.push(self.assemble_plan(
+                &candidate,
+                proposed_extractions,
+                plans.len() + 1,
+                &frontier_analyzer,
+                &policies,
+                &header_consumers,
+            ));
+        }
+
+        plans
+    }
+
+    fn collect_file_policies(&self) -> FilePolicyMaps {
+        let mut by_id = HashMap::new();
+        let mut ownership_by_id = HashMap::new();
+        let mut policy_by_path = HashMap::new();
         for record in self.file_records {
             let path = self
                 .include_graph
@@ -47,143 +93,163 @@ impl<'a> OptimizationPlanner<'a> {
                 .get(&record.id)
                 .cloned()
                 .unwrap_or_default();
-            file_policies.insert(record.id, record.optimization_policy);
-            file_ownerships.insert(record.id, record.ownership.clone());
+            by_id.insert(record.id, record.optimization_policy);
+            ownership_by_id.insert(record.id, record.ownership.clone());
             if !path.as_os_str().is_empty() {
-                path_to_policy.insert(path, record.optimization_policy);
+                policy_by_path.insert(path, record.optimization_policy);
             }
         }
+        FilePolicyMaps {
+            by_id,
+            ownership_by_id,
+            policy_by_path,
+        }
+    }
 
-        let checker = ConstraintChecker::new(path_to_policy, HashSet::new());
-        let mut plan_id_counter = 1;
+    fn sorted_header_ids(&self) -> Vec<FileId> {
         let mut sorted_headers: Vec<FileId> =
             self.include_graph.file_paths.keys().copied().collect();
         sorted_headers.sort();
+        sorted_headers
+    }
 
-        let header_consumers = self
-            .include_graph
-            .map_header_consuming_tus(self.tu_file_ids);
+    fn candidate_header(
+        &self,
+        file_id: FileId,
+        load_analyzer: &LoadAnalyzer,
+        policies: &FilePolicyMaps,
+    ) -> Option<HeaderCandidate> {
+        let path = self.include_graph.file_paths.get(&file_id)?.clone();
+        let metric = load_analyzer.analyze_file_load(&path).ok()?;
+        if metric.collateral_load == 0 {
+            return None;
+        }
+        let largest_collateral_source = metric.largest_collateral_source.as_ref()?;
 
-        for file_id in sorted_headers {
-            let path = self.include_graph.file_paths.get(&file_id).unwrap();
-            let metric_res = load_analyzer.analyze_file_load(path);
-            if metric_res.is_err() {
-                continue;
-            }
-            let metric = metric_res.unwrap();
+        let policy = policies
+            .by_id
+            .get(&file_id)
+            .copied()
+            .unwrap_or(OptimizationPolicy::Optimizable);
+        if policy != OptimizationPolicy::Optimizable {
+            return None;
+        }
 
-            if metric.collateral_load == 0 {
-                continue;
-            }
-            let lcs = match &metric.largest_collateral_source {
-                Some(src) => src,
-                None => continue,
-            };
+        Some(HeaderCandidate {
+            file_id,
+            path,
+            collateral_load: metric.collateral_load,
+            collateral_source_id: largest_collateral_source.file_id,
+            collateral_source_path: largest_collateral_source.path.clone(),
+        })
+    }
 
-            let policy = file_policies
-                .get(&file_id)
-                .copied()
-                .unwrap_or(OptimizationPolicy::Optimizable);
-            if policy != OptimizationPolicy::Optimizable {
-                continue;
-            }
+    /// Semantic edges with their file endpoints erased, as consumed by the
+    /// per-header SCC computation.
+    fn model_edges_without_file_endpoints(&self) -> Vec<ariadne_index::types::SemanticEdge> {
+        self.model
+            .edges
+            .iter()
+            .map(|e| ariadne_index::types::SemanticEdge {
+                src_symbol: e.src_symbol.clone(),
+                dst_symbol: e.dst_symbol.clone(),
+                kind: e.kind,
+                src_file: FileId(0),
+                dst_file: FileId(0),
+            })
+            .collect()
+    }
 
-            let file_syms = self
-                .model
-                .file_symbols
-                .get(&file_id)
-                .cloned()
-                .unwrap_or_default();
-            let mapped_edges: Vec<ariadne_index::types::SemanticEdge> = self
-                .model
-                .edges
-                .iter()
-                .map(|e| ariadne_index::types::SemanticEdge {
-                    src_symbol: e.src_symbol.clone(),
-                    dst_symbol: e.dst_symbol.clone(),
-                    kind: e.kind,
-                    src_file: FileId(0),
-                    dst_file: FileId(0),
-                })
-                .collect();
-            let sccs = scc::compute_symbol_sccs(&file_syms, &mapped_edges);
+    fn propose_extractions(
+        &self,
+        candidate: &HeaderCandidate,
+        mapped_edges: &[ariadne_index::types::SemanticEdge],
+        checker: &ConstraintChecker,
+    ) -> Vec<ProposedExtraction> {
+        let file_syms = self
+            .model
+            .file_symbols
+            .get(&candidate.file_id)
+            .cloned()
+            .unwrap_or_default();
+        let sccs = scc::compute_symbol_sccs(&file_syms, mapped_edges);
 
-            let mut proposed_extractions = Vec::new();
-
-            for scc in &sccs {
-                for sym_id in &scc.symbols {
-                    if let Some(record) = self.model.symbols.get(sym_id) {
-                        let new_header_path = path.with_file_name(format!(
-                            "{}_extracted.h",
-                            sanitize_header_stem(&record.name)
-                        ));
-                        if checker
-                            .validate_extraction(
-                                sym_id,
-                                &new_header_path,
-                                scc.symbols.len() > 1,
-                                false,
-                                None,
-                            )
-                            .is_ok()
-                        {
-                            proposed_extractions.push(ProposedExtraction {
-                                symbol_name: record.name.clone(),
-                                symbol_id: sym_id.clone(),
-                                target_header: new_header_path,
-                            });
-                        }
+        let mut proposed_extractions = Vec::new();
+        for scc in &sccs {
+            for sym_id in &scc.symbols {
+                if let Some(record) = self.model.symbols.get(sym_id) {
+                    let new_header_path = candidate.path.with_file_name(format!(
+                        "{}_extracted.h",
+                        sanitize_header_stem(&record.name)
+                    ));
+                    if checker
+                        .validate_extraction(
+                            sym_id,
+                            &new_header_path,
+                            scc.symbols.len() > 1,
+                            false,
+                            None,
+                        )
+                        .is_ok()
+                    {
+                        proposed_extractions.push(ProposedExtraction {
+                            symbol_name: record.name.clone(),
+                            symbol_id: sym_id.clone(),
+                            target_header: new_header_path,
+                        });
                     }
                 }
             }
-
-            if proposed_extractions.is_empty() {
-                continue;
-            }
-
-            let optimization_frontier = frontier_analyzer.find_frontiers(
-                file_id,
-                lcs.file_id,
-                self.include_graph,
-                &file_policies,
-                &file_ownerships,
-            );
-
-            let plan_id = format!("PLAN-{:03}", plan_id_counter);
-            plan_id_counter += 1;
-
-            let validation_required_tus = header_consumers
-                .get(&file_id)
-                .map(|tus| {
-                    tus.iter()
-                        .filter_map(|id| self.include_graph.file_paths.get(id).cloned())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let rationale = format!(
-                "File {} has {} collateral symbols mostly from {}. Extracting independent symbols.",
-                path.display(),
-                metric.collateral_load,
-                lcs.path.display()
-            );
-
-            plans.push(OptimizationPlan {
-                id: PlanId(plan_id),
-                target_file: path.clone(),
-                target_file_id: file_id,
-                problem: format!("{} symbols of collateral load", metric.collateral_load),
-                collateral_load_before: metric.collateral_load,
-                collateral_load_after: 0,
-                proposed_extractions,
-                optimization_frontier,
-                risk: RiskLevel::Conservative,
-                validation_required_tus,
-                rationale,
-            });
         }
+        proposed_extractions
+    }
 
-        plans
+    fn assemble_plan(
+        &self,
+        candidate: &HeaderCandidate,
+        proposed_extractions: Vec<ProposedExtraction>,
+        plan_number: usize,
+        frontier_analyzer: &FrontierAnalyzer,
+        policies: &FilePolicyMaps,
+        header_consumers: &HashMap<FileId, Vec<FileId>>,
+    ) -> OptimizationPlan {
+        let optimization_frontier = frontier_analyzer.find_frontiers(
+            candidate.file_id,
+            candidate.collateral_source_id,
+            self.include_graph,
+            &policies.by_id,
+            &policies.ownership_by_id,
+        );
+
+        let validation_required_tus = header_consumers
+            .get(&candidate.file_id)
+            .map(|tus| {
+                tus.iter()
+                    .filter_map(|id| self.include_graph.file_paths.get(id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let rationale = format!(
+            "File {} has {} collateral symbols mostly from {}. Extracting independent symbols.",
+            candidate.path.display(),
+            candidate.collateral_load,
+            candidate.collateral_source_path.display()
+        );
+
+        OptimizationPlan {
+            id: PlanId(format!("PLAN-{:03}", plan_number)),
+            target_file: candidate.path.clone(),
+            target_file_id: candidate.file_id,
+            problem: format!("{} symbols of collateral load", candidate.collateral_load),
+            collateral_load_before: candidate.collateral_load,
+            collateral_load_after: 0,
+            proposed_extractions,
+            optimization_frontier,
+            risk: RiskLevel::Conservative,
+            validation_required_tus,
+            rationale,
+        }
     }
 
     pub fn check_candidate_safety(
