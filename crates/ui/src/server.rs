@@ -15,6 +15,13 @@ use axum::{
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 
+/// Poison recovery: a poisoned lock only means some other thread already
+/// panicked while holding it; the data is still memory-consistent, so the UI
+/// keeps serving instead of cascading panics into every request handler.
+fn read_state<'a, T>(lock: &'a std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'a, T> {
+    lock.read().unwrap_or_else(|e| e.into_inner())
+}
+
 pub struct UiState {
     pub repo_root: std::path::PathBuf,
     pub include_graph: std::sync::RwLock<Option<ariadne_graph::IncludeGraph>>,
@@ -150,9 +157,9 @@ pub struct StatusResponse {
 }
 
 async fn api_status(State(state): State<Arc<UiState>>) -> Json<StatusResponse> {
-    let payload = state.payload.read().unwrap();
-    let progress = state.progress.read().unwrap().clone();
-    let stage_status = state.stage_status.read().unwrap().clone();
+    let payload = read_state(&state.payload);
+    let progress = read_state(&state.progress).clone();
+    let stage_status = read_state(&state.stage_status).clone();
 
     Json(StatusResponse {
         repo_name: payload.as_ref().map(|p| p.repo_name.clone()),
@@ -169,7 +176,7 @@ async fn api_status(State(state): State<Arc<UiState>>) -> Json<StatusResponse> {
 async fn api_graph_include(
     State(state): State<Arc<UiState>>,
 ) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     payload
         .as_ref()
         .map(|p| Json(p.include_graph.clone()))
@@ -179,7 +186,7 @@ async fn api_graph_include(
 async fn api_graph_symbol(
     State(state): State<Arc<UiState>>,
 ) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     payload
         .as_ref()
         .map(|p| Json(p.symbol_graph.clone()))
@@ -189,7 +196,7 @@ async fn api_graph_symbol(
 async fn api_graph_call(
     State(state): State<Arc<UiState>>,
 ) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     payload
         .as_ref()
         .map(|p| Json(p.call_graph.clone()))
@@ -214,7 +221,7 @@ async fn api_source(
 async fn api_export(
     State(state): State<Arc<UiState>>,
 ) -> Result<Json<GraphExportPayload>, axum::http::StatusCode> {
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     payload
         .as_ref()
         .map(|p| Json(p.clone()))
@@ -233,7 +240,7 @@ async fn api_graph_traverse(
     };
 
     let mut elements = Vec::new();
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     let payload_ref = payload
         .as_ref()
         .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -242,7 +249,7 @@ async fn api_graph_traverse(
         "include" => {
             if let Ok(id) = query.center.parse::<u64>() {
                 let center = FileId(id);
-                let g = state.include_graph.read().unwrap();
+                let g = read_state(&state.include_graph);
                 let g_ref = g
                     .as_ref()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -262,7 +269,7 @@ async fn api_graph_traverse(
         }
         "symbol" => {
             let center = SymbolId(query.center.clone());
-            let g = state.reduced_model.read().unwrap();
+            let g = read_state(&state.reduced_model);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -278,7 +285,7 @@ async fn api_graph_traverse(
         }
         "call" => {
             let center = SymbolId(query.center.clone());
-            let g = state.call_graph.read().unwrap();
+            let g = read_state(&state.call_graph);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -326,7 +333,7 @@ async fn api_graph_path(
     let path = match query.graph_type.as_str() {
         "include" => {
             if let (Ok(from), Ok(to)) = (query.from.parse::<u64>(), query.to.parse::<u64>()) {
-                let g = state.include_graph.read().unwrap();
+                let g = read_state(&state.include_graph);
                 let g_ref = g
                     .as_ref()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -338,7 +345,7 @@ async fn api_graph_path(
             }
         }
         "symbol" => {
-            let g = state.reduced_model.read().unwrap();
+            let g = read_state(&state.reduced_model);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -350,7 +357,7 @@ async fn api_graph_path(
                 .map(|p| p.into_iter().map(|id| id.0).collect())
         }
         "call" => {
-            let g = state.call_graph.read().unwrap();
+            let g = read_state(&state.call_graph);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -375,14 +382,14 @@ async fn api_graph_entrypoints(
 ) -> Result<Json<EntrypointsResponse>, axum::http::StatusCode> {
     let limit = query.limit.unwrap_or(10);
 
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     let payload_ref = payload
         .as_ref()
         .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
     let (roots_ids, leaves_ids, hubs_ids, source_elements) = match query.graph_type.as_str() {
         "include" => {
-            let g = state.include_graph.read().unwrap();
+            let g = read_state(&state.include_graph);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -395,7 +402,7 @@ async fn api_graph_entrypoints(
             )
         }
         "symbol" => {
-            let g = state.reduced_model.read().unwrap();
+            let g = read_state(&state.reduced_model);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -408,7 +415,7 @@ async fn api_graph_entrypoints(
             )
         }
         "call" => {
-            let g = state.call_graph.read().unwrap();
+            let g = read_state(&state.call_graph);
             let g_ref = g
                 .as_ref()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -474,7 +481,7 @@ async fn api_graph_search(
     let mut results = Vec::new();
     let limit = query.limit.unwrap_or(20);
 
-    let payload = state.payload.read().unwrap();
+    let payload = read_state(&state.payload);
     let payload_ref = payload
         .as_ref()
         .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
@@ -568,8 +575,8 @@ pub async fn api_graph_collateral(
     if let Ok(file_id_num) = query.file.parse::<u64>() {
         let file_id = ariadne_repo::FileId(file_id_num);
 
-        let inc_g = state.include_graph.read().unwrap();
-        let reduced = state.reduced_model.read().unwrap();
+        let inc_g = read_state(&state.include_graph);
+        let reduced = read_state(&state.reduced_model);
 
         let inc_g_ref = inc_g
             .as_ref()
