@@ -9,12 +9,13 @@ use ariadne_graph::ReducedSemanticModel;
 use ariadne_index::{IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
+use crate::pool::{WorkerPool, WorkerPoolConfig};
 use crate::queue::PrioritizedTuQueue;
 use crate::shard::ShardedReducer;
 use crate::tu_store::{
     compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint, TuStoreContext,
 };
-use crate::worker::{DefaultWorkerBackend, WorkerPool, WorkerPoolConfig};
+use crate::worker::DefaultWorkerBackend;
 
 #[derive(Debug, Clone)]
 pub struct ProductionAnalysisStats {

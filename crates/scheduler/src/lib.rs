@@ -9,6 +9,9 @@ pub use queue::*;
 pub mod worker;
 pub use worker::*;
 
+pub mod pool;
+pub use pool::*;
+
 pub mod shard;
 pub use shard::*;
 
