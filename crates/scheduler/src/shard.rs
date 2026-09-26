@@ -1,3 +1,7 @@
+use ariadne_graph::{ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord};
+use ariadne_index::types::{DependencyKind, SemanticEdge, SymbolId, SymbolRecord};
+use ariadne_repo::FileId;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hasher;
 
 pub struct HashPartitioner {
@@ -17,6 +21,18 @@ impl HashPartitioner {
     }
 }
 
+struct ReducerInput {
+    symbols: Vec<(SymbolRecord, FileId)>,
+    edges: Vec<(SemanticEdge, FileId)>,
+}
+
+struct PartitionAggregate {
+    symbols: BTreeMap<SymbolId, ReducedSymbolRecord>,
+    raw_edges: BTreeMap<(SymbolId, SymbolId), DependencyKind>,
+    tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>>,
+    file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>>,
+}
+
 pub struct ShardedReducer {
     pub num_reducers: usize,
 }
@@ -28,25 +44,10 @@ impl ShardedReducer {
         }
     }
 
-    pub async fn reduce(
-        &self,
-        repo_root: std::path::PathBuf,
-        analyses: &[ariadne_index::TuAnalysis],
-    ) -> ariadne_graph::ReducedSemanticModel {
-        use ariadne_graph::{ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord};
-        use ariadne_index::types::{DependencyKind, SymbolId};
-        use ariadne_repo::FileId;
-        use std::collections::{BTreeMap, BTreeSet};
+    fn partition_analyses(&self, analyses: &[ariadne_index::TuAnalysis]) -> Vec<ReducerInput> {
+        let partitioner = HashPartitioner::new(self.num_reducers);
 
-        let num_reducers = self.num_reducers;
-        let partitioner = HashPartitioner::new(num_reducers);
-
-        struct ReducerInput {
-            symbols: Vec<(ariadne_index::types::SymbolRecord, FileId)>,
-            edges: Vec<(ariadne_index::types::SemanticEdge, FileId)>,
-        }
-
-        let mut partitions: Vec<ReducerInput> = (0..num_reducers)
+        let mut partitions: Vec<ReducerInput> = (0..self.num_reducers)
             .map(|_| ReducerInput {
                 symbols: Vec::new(),
                 edges: Vec::new(),
@@ -65,97 +66,122 @@ impl ShardedReducer {
             }
         }
 
-        let mut handles = Vec::new();
-        for input in partitions {
-            let handle = tokio::spawn(async move {
-                let mut symbols: BTreeMap<SymbolId, ReducedSymbolRecord> = BTreeMap::new();
-                let mut raw_edges: BTreeMap<(SymbolId, SymbolId), DependencyKind> = BTreeMap::new();
-                let mut tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>> = BTreeMap::new();
-                let mut file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
+        partitions
+    }
 
-                for (sym, tu_file) in input.symbols {
-                    let entry =
-                        symbols
-                            .entry(sym.id.clone())
-                            .or_insert_with(|| ReducedSymbolRecord {
-                                id: sym.id.clone(),
-                                name: sym.name.clone(),
-                                kind: sym.kind,
-                                defining_file: None,
-                                declarations: Vec::new(),
-                                definition: None,
-                            });
+    async fn reduce_partition(input: ReducerInput) -> PartitionAggregate {
+        let mut symbols: BTreeMap<SymbolId, ReducedSymbolRecord> = BTreeMap::new();
+        let mut raw_edges: BTreeMap<(SymbolId, SymbolId), DependencyKind> = BTreeMap::new();
+        let mut tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>> = BTreeMap::new();
+        let mut file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
 
-                    for decl in sym.declarations {
-                        if !entry.declarations.contains(&decl) {
-                            entry.declarations.push(decl);
-                        }
-                    }
-                    entry.declarations.sort();
+        for (sym, tu_file) in input.symbols {
+            let entry = symbols
+                .entry(sym.id.clone())
+                .or_insert_with(|| ReducedSymbolRecord {
+                    id: sym.id.clone(),
+                    name: sym.name.clone(),
+                    kind: sym.kind,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                });
 
-                    if let Some(def) = sym.definition {
-                        if entry.definition.is_none() {
-                            entry.definition = Some(def);
-                            entry.defining_file = Some(sym.owning_file.clone());
-                        }
-                    }
-
-                    tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
-                    file_symbols
-                        .entry(sym.owning_file)
-                        .or_default()
-                        .insert(sym.id);
+            for decl in sym.declarations {
+                if !entry.declarations.contains(&decl) {
+                    entry.declarations.push(decl);
                 }
+            }
+            entry.declarations.sort();
 
-                for (edge, tu_file) in input.edges {
-                    tu_usage
-                        .entry(edge.src_symbol.clone())
-                        .or_default()
-                        .insert(tu_file.clone());
-                    tu_usage
-                        .entry(edge.dst_symbol.clone())
-                        .or_default()
-                        .insert(tu_file);
-
-                    let key = (edge.src_symbol, edge.dst_symbol);
-                    match raw_edges.get(&key) {
-                        Some(&DependencyKind::Complete) => {}
-                        _ => {
-                            raw_edges.insert(key, edge.kind);
-                        }
-                    }
+            if let Some(def) = sym.definition {
+                if entry.definition.is_none() {
+                    entry.definition = Some(def);
+                    entry.defining_file = Some(sym.owning_file.clone());
                 }
+            }
 
-                (symbols, raw_edges, tu_usage, file_symbols)
-            });
-            handles.push(handle);
+            tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
+            file_symbols
+                .entry(sym.owning_file)
+                .or_default()
+                .insert(sym.id);
         }
 
-        let mut final_symbols = BTreeMap::new();
-        let mut final_raw_edges = BTreeMap::new();
-        let mut final_tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>> = BTreeMap::new();
-        let mut final_file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
+        for (edge, tu_file) in input.edges {
+            tu_usage
+                .entry(edge.src_symbol.clone())
+                .or_default()
+                .insert(tu_file.clone());
+            tu_usage
+                .entry(edge.dst_symbol.clone())
+                .or_default()
+                .insert(tu_file);
+
+            let key = (edge.src_symbol, edge.dst_symbol);
+            match raw_edges.get(&key) {
+                Some(&DependencyKind::Complete) => {}
+                _ => {
+                    raw_edges.insert(key, edge.kind);
+                }
+            }
+        }
+
+        PartitionAggregate {
+            symbols,
+            raw_edges,
+            tu_usage,
+            file_symbols,
+        }
+    }
+
+    async fn merge_partition_aggregates(
+        handles: Vec<tokio::task::JoinHandle<PartitionAggregate>>,
+    ) -> PartitionAggregate {
+        let mut merged = PartitionAggregate {
+            symbols: BTreeMap::new(),
+            raw_edges: BTreeMap::new(),
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
 
         for handle in handles {
-            let (syms, edges, tu_u, file_s) = handle.await.unwrap();
-            final_symbols.extend(syms);
-            for (k, v) in edges {
-                match final_raw_edges.get(&k) {
+            let part = handle.await.unwrap();
+            merged.symbols.extend(part.symbols);
+            for (k, v) in part.raw_edges {
+                match merged.raw_edges.get(&k) {
                     Some(&DependencyKind::Complete) => {}
                     _ => {
-                        final_raw_edges.insert(k, v);
+                        merged.raw_edges.insert(k, v);
                     }
                 }
             }
-            for (k, v) in tu_u {
-                final_tu_usage.entry(k).or_default().extend(v);
+            for (k, v) in part.tu_usage {
+                merged.tu_usage.entry(k).or_default().extend(v);
             }
-            for (k, v) in file_s {
-                final_file_symbols.entry(k).or_default().extend(v);
+            for (k, v) in part.file_symbols {
+                merged.file_symbols.entry(k).or_default().extend(v);
             }
         }
 
-        let mut final_edges: Vec<ReducedSemanticEdge> = final_raw_edges
+        merged
+    }
+
+    pub async fn reduce(
+        &self,
+        repo_root: std::path::PathBuf,
+        analyses: &[ariadne_index::TuAnalysis],
+    ) -> ariadne_graph::ReducedSemanticModel {
+        let handles: Vec<tokio::task::JoinHandle<PartitionAggregate>> = self
+            .partition_analyses(analyses)
+            .into_iter()
+            .map(|input| tokio::spawn(Self::reduce_partition(input)))
+            .collect();
+
+        let merged = Self::merge_partition_aggregates(handles).await;
+
+        let mut final_edges: Vec<ReducedSemanticEdge> = merged
+            .raw_edges
             .into_iter()
             .map(|((src, dst), kind)| ReducedSemanticEdge {
                 src_symbol: src,
@@ -169,19 +195,21 @@ impl ShardedReducer {
                 .then_with(|| a.dst_symbol.cmp(&b.dst_symbol))
         });
 
-        let tu_usage: BTreeMap<SymbolId, Vec<FileId>> = final_tu_usage
+        let tu_usage: BTreeMap<SymbolId, Vec<FileId>> = merged
+            .tu_usage
             .into_iter()
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect();
 
-        let file_symbols: BTreeMap<FileId, Vec<SymbolId>> = final_file_symbols
+        let file_symbols: BTreeMap<FileId, Vec<SymbolId>> = merged
+            .file_symbols
             .into_iter()
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect();
 
         ReducedSemanticModel {
             repo_root,
-            symbols: final_symbols,
+            symbols: merged.symbols,
             edges: final_edges,
             tu_usage,
             file_symbols,
@@ -217,149 +245,161 @@ mod reduce_characterization {
         ids.into_iter().map(FileId).collect()
     }
 
-    fn char_input() -> Vec<TuAnalysis> {
+    fn char_tu_alpha() -> TuAnalysis {
         let hdr = ch_file("include/shard_char.h");
         let alpha = ch_file("src/shard_char_alpha.cpp");
         let beta = ch_file("src/shard_char_beta.cpp");
         let gamma = ch_file("src/shard_char_gamma.cpp");
-
         let shared = SymbolId::new("ChSymShared");
         let alpha_sym = SymbolId::new("ChSymAlpha");
         let beta_sym = SymbolId::new("ChSymBeta");
-        let gamma_sym = SymbolId::new("ChSymGamma");
         let edge_target = SymbolId::new("ChSymEdgeTarget");
 
-        vec![
-            TuAnalysis {
-                tu_file_id: alpha,
-                context_name: "char".into(),
-                symbols: vec![
-                    SymbolRecord {
-                        id: shared.clone(),
-                        name: "SharedRecord".into(),
-                        kind: SymbolKind::Function,
-                        owning_file: hdr,
-                        declarations: vec![DeclId::new("ch_decl_3"), DeclId::new("ch_decl_1")],
-                        definition: Some(DeclId::new("ch_def_shared_first")),
-                    },
-                    SymbolRecord {
-                        id: alpha_sym.clone(),
-                        name: "AlphaRec".into(),
-                        kind: SymbolKind::Class,
-                        owning_file: hdr,
-                        declarations: vec![DeclId::new("ch_decl_a1")],
-                        definition: None,
-                    },
-                    SymbolRecord {
-                        id: beta_sym.clone(),
-                        name: "BetaRec".into(),
-                        kind: SymbolKind::Function,
-                        owning_file: gamma,
-                        declarations: vec![],
-                        definition: Some(DeclId::new("ch_def_beta")),
-                    },
-                ],
-                declarations: vec![],
-                edges: vec![
-                    SemanticEdge {
-                        src_symbol: alpha_sym.clone(),
-                        dst_symbol: edge_target.clone(),
-                        kind: DependencyKind::Incomplete,
-                        src_file: alpha,
-                        dst_file: beta,
-                    },
-                    SemanticEdge {
-                        src_symbol: beta_sym.clone(),
-                        dst_symbol: edge_target.clone(),
-                        kind: DependencyKind::Complete,
-                        src_file: alpha,
-                        dst_file: beta,
-                    },
-                ],
-                references: vec![],
-                call_sites: vec![],
-            },
-            TuAnalysis {
-                tu_file_id: beta,
-                context_name: "char".into(),
-                symbols: vec![
-                    // Second record for the shared symbol: Class kind and a different
-                    // definition arrive AFTER the Function record from tu alpha.
-                    SymbolRecord {
-                        id: shared.clone(),
-                        name: "SharedRecordLate".into(),
-                        kind: SymbolKind::Class,
-                        owning_file: hdr,
-                        declarations: vec![DeclId::new("ch_decl_1"), DeclId::new("ch_decl_2")],
-                        definition: Some(DeclId::new("ch_def_shared_second")),
-                    },
-                    SymbolRecord {
-                        id: gamma_sym.clone(),
-                        name: "GammaRec".into(),
-                        kind: SymbolKind::Function,
-                        owning_file: beta,
-                        declarations: vec![DeclId::new("ch_decl_g1")],
-                        definition: None,
-                    },
-                ],
-                declarations: vec![],
-                edges: vec![
-                    SemanticEdge {
-                        src_symbol: alpha_sym.clone(),
-                        dst_symbol: edge_target.clone(),
-                        kind: DependencyKind::Complete,
-                        src_file: beta,
-                        dst_file: beta,
-                    },
-                    SemanticEdge {
-                        src_symbol: gamma_sym.clone(),
-                        dst_symbol: edge_target.clone(),
-                        kind: DependencyKind::Incomplete,
-                        src_file: beta,
-                        dst_file: beta,
-                    },
-                ],
-                references: vec![SymbolReference {
-                    symbol_id: SymbolId::new("ChSymReferenced"),
-                    file_id: beta,
-                    location: FileLocation {
-                        file_id: beta,
-                        line: 1,
-                        column: 1,
-                    },
-                    is_write: false,
-                }],
-                call_sites: vec![],
-            },
-            TuAnalysis {
-                tu_file_id: gamma,
-                context_name: "char".into(),
-                symbols: vec![],
-                declarations: vec![],
-                edges: vec![SemanticEdge {
-                    src_symbol: beta_sym.clone(),
+        TuAnalysis {
+            tu_file_id: alpha,
+            context_name: "char".into(),
+            symbols: vec![
+                SymbolRecord {
+                    id: shared.clone(),
+                    name: "SharedRecord".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: hdr,
+                    declarations: vec![DeclId::new("ch_decl_3"), DeclId::new("ch_decl_1")],
+                    definition: Some(DeclId::new("ch_def_shared_first")),
+                },
+                SymbolRecord {
+                    id: alpha_sym.clone(),
+                    name: "AlphaRec".into(),
+                    kind: SymbolKind::Class,
+                    owning_file: hdr,
+                    declarations: vec![DeclId::new("ch_decl_a1")],
+                    definition: None,
+                },
+                SymbolRecord {
+                    id: beta_sym.clone(),
+                    name: "BetaRec".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: gamma,
+                    declarations: vec![],
+                    definition: Some(DeclId::new("ch_def_beta")),
+                },
+            ],
+            declarations: vec![],
+            edges: vec![
+                SemanticEdge {
+                    src_symbol: alpha_sym,
                     dst_symbol: edge_target.clone(),
                     kind: DependencyKind::Incomplete,
-                    src_file: gamma,
+                    src_file: alpha,
                     dst_file: beta,
-                }],
-                references: vec![],
-                call_sites: vec![],
-            },
-        ]
+                },
+                SemanticEdge {
+                    src_symbol: beta_sym,
+                    dst_symbol: edge_target,
+                    kind: DependencyKind::Complete,
+                    src_file: alpha,
+                    dst_file: beta,
+                },
+            ],
+            references: vec![],
+            call_sites: vec![],
+        }
     }
 
-    fn char_expected() -> ReducedSemanticModel {
+    fn char_tu_beta() -> TuAnalysis {
         let hdr = ch_file("include/shard_char.h");
-        let alpha = ch_file("src/shard_char_alpha.cpp");
+        let beta = ch_file("src/shard_char_beta.cpp");
+        let shared = SymbolId::new("ChSymShared");
+        let alpha_sym = SymbolId::new("ChSymAlpha");
+        let gamma_sym = SymbolId::new("ChSymGamma");
+        let edge_target = SymbolId::new("ChSymEdgeTarget");
+
+        TuAnalysis {
+            tu_file_id: beta,
+            context_name: "char".into(),
+            symbols: vec![
+                // Second record for the shared symbol: Class kind and a different
+                // definition arrive AFTER the Function record from tu alpha.
+                SymbolRecord {
+                    id: shared.clone(),
+                    name: "SharedRecordLate".into(),
+                    kind: SymbolKind::Class,
+                    owning_file: hdr,
+                    declarations: vec![DeclId::new("ch_decl_1"), DeclId::new("ch_decl_2")],
+                    definition: Some(DeclId::new("ch_def_shared_second")),
+                },
+                SymbolRecord {
+                    id: gamma_sym.clone(),
+                    name: "GammaRec".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: beta,
+                    declarations: vec![DeclId::new("ch_decl_g1")],
+                    definition: None,
+                },
+            ],
+            declarations: vec![],
+            edges: vec![
+                SemanticEdge {
+                    src_symbol: alpha_sym,
+                    dst_symbol: edge_target.clone(),
+                    kind: DependencyKind::Complete,
+                    src_file: beta,
+                    dst_file: beta,
+                },
+                SemanticEdge {
+                    src_symbol: gamma_sym,
+                    dst_symbol: edge_target,
+                    kind: DependencyKind::Incomplete,
+                    src_file: beta,
+                    dst_file: beta,
+                },
+            ],
+            references: vec![SymbolReference {
+                symbol_id: SymbolId::new("ChSymReferenced"),
+                file_id: beta,
+                location: FileLocation {
+                    file_id: beta,
+                    line: 1,
+                    column: 1,
+                },
+                is_write: false,
+            }],
+            call_sites: vec![],
+        }
+    }
+
+    fn char_tu_gamma() -> TuAnalysis {
         let beta = ch_file("src/shard_char_beta.cpp");
         let gamma = ch_file("src/shard_char_gamma.cpp");
 
+        TuAnalysis {
+            tu_file_id: gamma,
+            context_name: "char".into(),
+            symbols: vec![],
+            declarations: vec![],
+            edges: vec![SemanticEdge {
+                src_symbol: SymbolId::new("ChSymBeta"),
+                dst_symbol: SymbolId::new("ChSymEdgeTarget"),
+                kind: DependencyKind::Incomplete,
+                src_file: gamma,
+                dst_file: beta,
+            }],
+            references: vec![],
+            call_sites: vec![],
+        }
+    }
+
+    fn char_input() -> Vec<TuAnalysis> {
+        vec![char_tu_alpha(), char_tu_beta(), char_tu_gamma()]
+    }
+
+    fn char_expected_symbols() -> BTreeMap<SymbolId, ReducedSymbolRecord> {
+        let hdr = ch_file("include/shard_char.h");
+        let gamma = ch_file("src/shard_char_gamma.cpp");
         let shared = SymbolId::new("ChSymShared");
         let alpha_sym = SymbolId::new("ChSymAlpha");
         let beta_sym = SymbolId::new("ChSymBeta");
         let gamma_sym = SymbolId::new("ChSymGamma");
-        let edge_target = SymbolId::new("ChSymEdgeTarget");
 
         let mut symbols = BTreeMap::new();
         symbols.insert(
@@ -387,7 +427,7 @@ mod reduce_characterization {
         symbols.insert(
             gamma_sym.clone(),
             ReducedSymbolRecord {
-                id: gamma_sym.clone(),
+                id: gamma_sym,
                 name: "GammaRec".into(),
                 kind: SymbolKind::Function,
                 defining_file: None,
@@ -400,7 +440,7 @@ mod reduce_characterization {
         symbols.insert(
             shared.clone(),
             ReducedSymbolRecord {
-                id: shared.clone(),
+                id: shared,
                 name: "SharedRecord".into(),
                 kind: SymbolKind::Function,
                 defining_file: Some(hdr),
@@ -412,47 +452,68 @@ mod reduce_characterization {
                 definition: Some(DeclId::new("ch_def_shared_first")),
             },
         );
+        symbols
+    }
+
+    fn char_expected_tu_usage() -> BTreeMap<SymbolId, Vec<FileId>> {
+        let alpha = ch_file("src/shard_char_alpha.cpp");
+        let beta = ch_file("src/shard_char_beta.cpp");
+        let gamma = ch_file("src/shard_char_gamma.cpp");
+        let shared = SymbolId::new("ChSymShared");
+        let alpha_sym = SymbolId::new("ChSymAlpha");
+        let beta_sym = SymbolId::new("ChSymBeta");
+        let gamma_sym = SymbolId::new("ChSymGamma");
+        let edge_target = SymbolId::new("ChSymEdgeTarget");
 
         let mut tu_usage = BTreeMap::new();
-        tu_usage.insert(alpha_sym.clone(), ch_sorted(vec![alpha.0, beta.0]));
-        tu_usage.insert(beta_sym.clone(), ch_sorted(vec![alpha.0, gamma.0]));
-        tu_usage.insert(gamma_sym.clone(), ch_sorted(vec![beta.0]));
+        tu_usage.insert(alpha_sym, ch_sorted(vec![alpha.0, beta.0]));
+        tu_usage.insert(beta_sym, ch_sorted(vec![alpha.0, gamma.0]));
+        tu_usage.insert(gamma_sym, ch_sorted(vec![beta.0]));
         // Edge target has no SymbolRecord anywhere, yet still accumulates usage
         // from every TU whose edges reference it as dst.
-        tu_usage.insert(
-            edge_target.clone(),
-            ch_sorted(vec![alpha.0, beta.0, gamma.0]),
-        );
-        tu_usage.insert(shared.clone(), ch_sorted(vec![alpha.0, beta.0]));
+        tu_usage.insert(edge_target, ch_sorted(vec![alpha.0, beta.0, gamma.0]));
+        tu_usage.insert(shared, ch_sorted(vec![alpha.0, beta.0]));
         // ChSymReferenced appears only in tu.references and is absent from
         // tu_usage: the sharded path ignores references.
+        tu_usage
+    }
+
+    fn char_expected() -> ReducedSemanticModel {
+        let hdr = ch_file("include/shard_char.h");
+        let beta = ch_file("src/shard_char_beta.cpp");
+        let gamma = ch_file("src/shard_char_gamma.cpp");
+        let shared = SymbolId::new("ChSymShared");
+        let alpha_sym = SymbolId::new("ChSymAlpha");
+        let beta_sym = SymbolId::new("ChSymBeta");
+        let gamma_sym = SymbolId::new("ChSymGamma");
+        let edge_target = SymbolId::new("ChSymEdgeTarget");
 
         let mut file_symbols = BTreeMap::new();
         file_symbols.insert(beta, vec![SymbolId::new("ChSymGamma")]);
         file_symbols.insert(gamma, vec![SymbolId::new("ChSymBeta")]);
-        file_symbols.insert(hdr, vec![alpha_sym.clone(), shared.clone()]);
+        file_symbols.insert(hdr, vec![alpha_sym.clone(), shared]);
 
         ReducedSemanticModel {
             repo_root: PathBuf::from("/char/repo"),
-            symbols,
+            symbols: char_expected_symbols(),
             edges: vec![
                 ReducedSemanticEdge {
-                    src_symbol: alpha_sym.clone(),
+                    src_symbol: alpha_sym,
                     dst_symbol: edge_target.clone(),
                     kind: DependencyKind::Complete,
                 },
                 ReducedSemanticEdge {
-                    src_symbol: beta_sym.clone(),
+                    src_symbol: beta_sym,
                     dst_symbol: edge_target.clone(),
                     kind: DependencyKind::Complete,
                 },
                 ReducedSemanticEdge {
-                    src_symbol: gamma_sym.clone(),
+                    src_symbol: gamma_sym,
                     dst_symbol: edge_target,
                     kind: DependencyKind::Incomplete,
                 },
             ],
-            tu_usage,
+            tu_usage: char_expected_tu_usage(),
             file_symbols,
         }
     }
