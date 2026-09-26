@@ -266,7 +266,7 @@ impl Pipeline {
         &mut self,
     ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
         self.ensure_include_graph()?;
-        Ok(self.include_cache.clone().unwrap())
+        self.cached_include_graph()
     }
 
     // ------------------------------------------------------------------
@@ -369,7 +369,7 @@ impl Pipeline {
 
     pub fn get_or_build_index(&mut self) -> Result<IndexResult> {
         self.ensure_index()?;
-        Ok(self.index_cache.clone().unwrap())
+        self.cached_index()
     }
 
     // ------------------------------------------------------------------
@@ -400,7 +400,7 @@ impl Pipeline {
 
     pub fn get_or_build_reduced(&mut self) -> Result<ReducedSemanticModel> {
         self.ensure_reduced()?;
-        Ok(self.reduced_cache.clone().unwrap())
+        self.cached_reduced()
     }
 
     // ------------------------------------------------------------------
@@ -438,7 +438,7 @@ impl Pipeline {
 
     pub fn get_or_build_callgraph(&mut self) -> Result<CallGraph> {
         self.ensure_callgraph()?;
-        Ok(self.callgraph_cache.clone().unwrap())
+        self.cached_callgraph()
     }
 
     // ------------------------------------------------------------------
@@ -502,6 +502,28 @@ impl Pipeline {
 
     pub fn get_or_build_load(&mut self) -> Result<LoadReport> {
         self.ensure_load()?;
+        self.cached_load()
+    }
+
+    fn cached_include_graph(
+        &self,
+    ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
+        Ok(self.include_cache.clone().unwrap())
+    }
+
+    fn cached_index(&self) -> Result<IndexResult> {
+        Ok(self.index_cache.clone().unwrap())
+    }
+
+    fn cached_reduced(&self) -> Result<ReducedSemanticModel> {
+        Ok(self.reduced_cache.clone().unwrap())
+    }
+
+    fn cached_callgraph(&self) -> Result<CallGraph> {
+        Ok(self.callgraph_cache.clone().unwrap())
+    }
+
+    fn cached_load(&self) -> Result<LoadReport> {
         Ok(self.load_cache.clone().unwrap())
     }
 }
@@ -733,6 +755,34 @@ mod tests {
             summary,
             "4 TUs reused, 1 reanalyzed; stages loaded: reduced, include-graph; rebuilt: index"
         );
+    }
+
+    fn assert_missing_cache_error<T>(result: Result<T>, expected: &str) {
+        match result {
+            Ok(_) => panic!("expected missing-cache error, got Ok"),
+            Err(err) => assert!(
+                err.to_string().contains(expected),
+                "error message {err} missing {expected:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_missing_stage_cache_returns_error_not_panic() {
+        let dir = setup_repo();
+        let pipeline = Pipeline::new(&dir.path().to_path_buf(), None).unwrap();
+
+        assert_missing_cache_error(
+            pipeline.cached_include_graph(),
+            "include stage cache must exist",
+        );
+        assert_missing_cache_error(pipeline.cached_index(), "index stage cache must exist");
+        assert_missing_cache_error(pipeline.cached_reduced(), "reduced stage cache must exist");
+        assert_missing_cache_error(
+            pipeline.cached_callgraph(),
+            "callgraph stage cache must exist",
+        );
+        assert_missing_cache_error(pipeline.cached_load(), "load stage cache must exist");
     }
 
     #[test]
