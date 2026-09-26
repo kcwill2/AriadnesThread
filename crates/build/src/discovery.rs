@@ -521,3 +521,11 @@ mod tests {
         assert_eq!(result.translation_units[0].source_path, file_path);
     }
 }
+
+/// Characterization suite: locks CURRENT behavior of `parse_args` and
+/// `parse_compile_commands_json` before the Pass 3 decomposition.
+/// Where a case encodes a quirk (dropped token, swallowed flag, empty-value
+/// record), the assertion documents today's behavior, not desired behavior.
+#[cfg(test)]
+#[path = "discovery_characterization_tests.rs"]
+mod characterization;
