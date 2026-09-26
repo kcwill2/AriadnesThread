@@ -816,3 +816,4 @@ mod tests {
         assert_eq!(c_edge.unwrap().kind, DependencyKind::Complete);
     }
 }
+#[cfg(test)] mod analyzer_characterization_tests;
