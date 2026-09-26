@@ -166,19 +166,8 @@ async fn wait_until_port_released(port: u16) -> bool {
     false
 }
 
-#[tokio::test]
-async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<()> {
-    let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
-    let port = reserve_free_port();
-    let base_url = format!("http://127.0.0.1:{port}");
-    let client = Client::new();
-    let server = LiveServer::spawn(repo_root, port);
-
-    // Collect every status snapshot until the pipeline finishes and reports ready.
-    let (trace, live_probe) = poll_until_ready(&client, &base_url, &server).await?;
-
-    // The status route always reports a valid shape while loading and once ready.
-    for snapshot in &trace {
+fn assert_status_snapshot_shape(trace: &[Value]) {
+    for snapshot in trace {
         let state = snapshot["progress"]["state"].as_str().unwrap_or_default();
         assert!(
             matches!(state, "loading" | "ready"),
@@ -193,49 +182,43 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
             "status.stages must be an array"
         );
     }
+}
 
-    // Best-effort live-during-load lock: while loading the index route already serves
-    // HTML (Cache-Control: no-store) yet the graph route stays gated until ready.
-    if let Some(probe) = &live_probe {
-        assert_eq!(
-            probe.index_status, 200,
-            "index route must serve while loading"
-        );
-        assert_eq!(
-            probe.index_cache_control.as_deref(),
-            Some("no-store"),
-            "index route must send Cache-Control: no-store"
-        );
-        assert_eq!(
-            probe.index_content_type.as_deref(),
-            Some("text/html; charset=utf-8"),
-            "index route should serve HTML while loading"
-        );
-        assert_eq!(
-            probe.graph_include_status, 503,
-            "graph route must stay gated until ready"
-        );
-    }
+fn assert_live_probe_serves_index_gating_graph(probe: &LiveProbe) {
+    assert_eq!(
+        probe.index_status, 200,
+        "index route must serve while loading"
+    );
+    assert_eq!(
+        probe.index_cache_control.as_deref(),
+        Some("no-store"),
+        "index route must send Cache-Control: no-store"
+    );
+    assert_eq!(
+        probe.index_content_type.as_deref(),
+        Some("text/html; charset=utf-8"),
+        "index route should serve HTML while loading"
+    );
+    assert_eq!(
+        probe.graph_include_status, 503,
+        "graph route must stay gated until ready"
+    );
+}
 
-    // Best-effort loading-window contract whenever a loading snapshot is observable.
-    if let Some(loading) = trace
-        .iter()
-        .find(|s| s["progress"]["state"].as_str() == Some("loading"))
-    {
-        let percent = loading["progress"]["percent"].as_u64().unwrap_or(100);
-        assert!(
-            percent < 100,
-            "loading snapshot must report percent below 100, got {percent}"
-        );
-        let phase = loading["progress"]["phase"].as_str().unwrap_or_default();
-        assert!(
-            phase == "Initializing" || (phase.starts_with('[') && phase.contains("/5]")),
-            "loading phase must be the init label or a [N/5] stage label, got {phase}"
-        );
-    }
+fn assert_loading_window_contract(loading: &Value) {
+    let percent = loading["progress"]["percent"].as_u64().unwrap_or(100);
+    assert!(
+        percent < 100,
+        "loading snapshot must report percent below 100, got {percent}"
+    );
+    let phase = loading["progress"]["phase"].as_str().unwrap_or_default();
+    assert!(
+        phase == "Initializing" || (phase.starts_with('[') && phase.contains("/5]")),
+        "loading phase must be the init label or a [N/5] stage label, got {phase}"
+    );
+}
 
-    // Lock the terminal ready state and the labels run_ui actually exposes.
-    let ready = trace.last().expect("trace ends on a ready snapshot");
+fn assert_ready_snapshot(ready: &Value) {
     assert_eq!(ready["progress"]["state"].as_str(), Some("ready"));
     assert_eq!(
         ready["progress"]["percent"].as_u64(),
@@ -270,13 +253,12 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
         ready["stats"]["total_files"].as_u64().unwrap_or(0) > 0,
         "ready stats report files"
     );
+}
 
-    // The index route serves HTML with Cache-Control: no-store (both while loading,
-    // if sampled, and once ready).
-    let (index_status, cache_control, content_type, body_len) =
-        fetch_index_page(&client, &base_url)
-            .await
-            .context("index route reachable after ready")?;
+async fn assert_index_serves_no_store_html(client: &Client, base_url: &str) -> Result<()> {
+    let (index_status, cache_control, content_type, body_len) = fetch_index_page(client, base_url)
+        .await
+        .context("index route reachable after ready")?;
     assert_eq!(
         index_status, 200,
         "index route should serve 200 after ready"
@@ -288,6 +270,44 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
     );
     assert_eq!(content_type.as_deref(), Some("text/html; charset=utf-8"));
     assert!(body_len > 0, "index HTML should be non-empty");
+    Ok(())
+}
+
+#[tokio::test]
+async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<()> {
+    let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
+    let port = reserve_free_port();
+    let base_url = format!("http://127.0.0.1:{port}");
+    let client = Client::new();
+    let server = LiveServer::spawn(repo_root, port);
+
+    // Collect every status snapshot until the pipeline finishes and reports ready.
+    let (trace, live_probe) = poll_until_ready(&client, &base_url, &server).await?;
+
+    // The status route always reports a valid shape while loading and once ready.
+    assert_status_snapshot_shape(&trace);
+
+    // Best-effort live-during-load lock: while loading the index route already serves
+    // HTML (Cache-Control: no-store) yet the graph route stays gated until ready.
+    if let Some(probe) = &live_probe {
+        assert_live_probe_serves_index_gating_graph(probe);
+    }
+
+    // Best-effort loading-window contract whenever a loading snapshot is observable.
+    if let Some(loading) = trace
+        .iter()
+        .find(|s| s["progress"]["state"].as_str() == Some("loading"))
+    {
+        assert_loading_window_contract(loading);
+    }
+
+    // Lock the terminal ready state and the labels run_ui actually exposes.
+    let ready = trace.last().expect("trace ends on a ready snapshot");
+    assert_ready_snapshot(ready);
+
+    // The index route serves HTML with Cache-Control: no-store (both while loading,
+    // if sampled, and once ready).
+    assert_index_serves_no_store_html(&client, &base_url).await?;
 
     // The graph API becomes reachable once the payload is swapped in at ready.
     assert_eq!(
