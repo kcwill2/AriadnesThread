@@ -1,15 +1,37 @@
 use crate::dto::GraphExportPayload;
-use crate::INDEX_HTML;
+use crate::{API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, STYLES_CSS};
+use std::borrow::Cow;
+
+/// Reassemble the split UI assets into the self-contained single-file page.
+/// A standalone export is opened via `file://`, where `/styles.css` and
+/// `/app/*.js` routes do not exist, so every asset must be inlined.
+fn standalone_template() -> String {
+    let mut html = INDEX_HTML.replace(
+        "<link rel=\"stylesheet\" href=\"/styles.css\">",
+        &format!("<style>\n{}\n</style>", STYLES_CSS.trim_end()),
+    );
+    for (name, js) in [
+        ("api.js", API_JS),
+        ("graph.js", GRAPH_JS),
+        ("file-view.js", FILE_VIEW_JS),
+        ("hotspots.js", HOTSPOTS_JS),
+        ("main.js", MAIN_JS),
+    ] {
+        let tag = format!("<script src=\"/app/{name}\"></script>");
+        html = html.replace(&tag, &format!("<script>\n{}\n</script>", js.trim_end()));
+    }
+    html
+}
 
 pub fn export_standalone_html(
     payload: &GraphExportPayload,
     template: &str,
     output_path: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let tpl = if template.is_empty() {
-        INDEX_HTML
+    let tpl: Cow<'_, str> = if template.is_empty() {
+        Cow::Owned(standalone_template())
     } else {
-        template
+        Cow::Borrowed(template)
     };
     let json_data = serde_json::to_string(payload)?;
     let script = format!("window.__ARIADNE_DATA__ = {};", json_data);

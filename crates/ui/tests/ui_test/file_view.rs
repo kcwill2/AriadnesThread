@@ -56,7 +56,7 @@ async fn test_source_route_returns_400_without_file_param() {
 
 #[tokio::test]
 async fn test_index_html_source_drawer_uses_source_route() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     assert!(
         html.contains("id=\"sourceDrawer\""),

@@ -1,6 +1,9 @@
+use crate::common;
+use axum::http::StatusCode;
+
 #[test]
 fn test_index_html_content() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
     assert!(html.contains("/*__ARIADNE_DATA__*/"));
     assert!(html.contains("Include Graph"));
     assert!(html.contains("Symbol Dependency Graph"));
@@ -17,7 +20,7 @@ fn test_index_html_content() {
 
 #[test]
 fn test_ui_layout_and_interactive_traversal() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // 1. Initial active button is hopAllCap (formerly hopAll)
     assert!(
@@ -38,7 +41,7 @@ fn test_ui_layout_and_interactive_traversal() {
 
 #[test]
 fn test_selected_node_edge_highlighting() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Check edge detection relative to selectedNodeId
     assert!(html.contains("e.target === selectedNodeId"));
@@ -60,7 +63,7 @@ fn test_selected_node_edge_highlighting() {
 
 #[test]
 fn test_ui_filter_and_degree_stepper_elements() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Degree stepper controls
     assert!(html.contains("id=\"degMinus\""));
@@ -91,7 +94,7 @@ fn test_ui_filter_and_degree_stepper_elements() {
 
 #[test]
 fn test_ui_subgraph_filter_and_expansion_engine() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Core engine functions
     assert!(html.contains("function compileMatcher"));
@@ -117,7 +120,7 @@ fn test_ui_subgraph_filter_and_expansion_engine() {
 
 #[test]
 fn test_ui_dependency_tree_direction_preserving() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Check dirSelect default is 'out' (Dependencies)
     assert!(html.contains("<option value=\"out\" selected>"));
@@ -132,7 +135,7 @@ fn test_ui_dependency_tree_direction_preserving() {
 
 #[test]
 fn test_ui_selected_node_focal_priority() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // selectedNodeId should take precedence over q when determining seeds
     assert!(html.contains("if (selectedNodeId) {"));
@@ -147,7 +150,7 @@ fn test_ui_selected_node_focal_priority() {
 
 #[test]
 fn test_ui_noticeable_fading_elements() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     assert!(html.contains(".node-group.faded") && html.contains("opacity: 0.12"));
     assert!(html.contains(".edge-path.faded") && html.contains("opacity: 0.06"));
@@ -162,7 +165,7 @@ fn test_ui_noticeable_fading_elements() {
 
 #[test]
 fn test_ui_heat_map_coloring() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Heat-critical CSS class for drop-shadow glow
     assert!(
@@ -206,7 +209,7 @@ fn test_ui_heat_map_coloring() {
 
 #[test]
 fn test_ui_live_mode_fetches_file_collateral() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Live server mode must fetch the full payload (incl. file_collateral) from /api/export;
     // regression guard: without it, heat map and Collateral Breakdown show 0 for every file.
@@ -222,7 +225,7 @@ fn test_ui_live_mode_fetches_file_collateral() {
 
 #[test]
 fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Inspector collateral breakdown list container
     assert!(
@@ -251,7 +254,7 @@ fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
 
 #[test]
 fn test_onboarding_and_help_content() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     assert!(html.contains("id=\"tourOverlay\""));
     assert!(html.contains("id=\"tourCard\""));
@@ -278,7 +281,7 @@ fn test_onboarding_and_help_content() {
 
 #[test]
 fn test_tour_overlay_dismissal_and_positioning() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Verify positionTourCard function exists and clamps
     assert!(html.contains("function positionTourCard("));
@@ -302,7 +305,7 @@ fn test_tour_overlay_dismissal_and_positioning() {
 
 #[test]
 fn test_ui_loading_overlay_and_progress() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     assert!(html.contains("id=\"loadingOverlay\""));
     assert!(html.contains("id=\"loadingProgress\""));
@@ -320,7 +323,7 @@ fn test_ui_loading_overlay_and_progress() {
 
 #[test]
 fn test_ui_hotspots_panel() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     // Panel, toggle button, and metric selector markup
     assert!(
@@ -431,7 +434,7 @@ fn test_ui_hotspots_panel() {
 
 #[test]
 fn test_breadcrumbs_render_in_thread_bar() {
-    let html = ariadne_ui::INDEX_HTML;
+    let html = common::page_content();
 
     assert!(
         html.contains("id=\"ariadneThread\""),
@@ -472,5 +475,188 @@ fn test_breadcrumbs_render_in_thread_bar() {
     assert!(
         html.matches("renderThreadBar()").count() >= 5,
         "selection-clear paths must refresh the breadcrumb bar"
+    );
+}
+
+#[test]
+fn test_index_markup_has_no_inline_style_or_script_bodies() {
+    let html = ariadne_ui::INDEX_HTML;
+    assert!(
+        !html.contains("<style"),
+        "markup must not inline CSS: it belongs in /styles.css"
+    );
+    assert!(
+        !html.contains("function "),
+        "no JS function bodies may remain inline in index markup"
+    );
+
+    // Inspect every <script> tag: src-tagged assets are fine; the only inline
+    // body allowed is the data placeholder comment consumed by the export.
+    let mut rest = html;
+    let mut inline_script_count = 0;
+    while let Some(open) = rest.find("<script") {
+        let after_open = &rest[open..];
+        let tag_end = after_open.find('>').expect("unterminated <script> tag");
+        let close = after_open
+            .find("</script>")
+            .expect("unterminated <script> body");
+        let tag = &after_open[..tag_end];
+        if tag.contains("src=") {
+            assert!(
+                tag_start_is_asset(tag),
+                "unexpected script tag with src: {tag}"
+            );
+        } else {
+            inline_script_count += 1;
+            let body = after_open[tag_end + 1..close].trim();
+            assert_eq!(
+                body, "/*__ARIADNE_DATA__*/",
+                "only the data placeholder may be an inline script body"
+            );
+        }
+        rest = &after_open[close + "</script>".len()..];
+    }
+    assert_eq!(inline_script_count, 1, "exactly one inline script body");
+    assert_eq!(
+        html.matches("<script src=").count(),
+        5,
+        "exactly five classic asset scripts"
+    );
+}
+
+fn tag_start_is_asset(tag: &str) -> bool {
+    [
+        "/app/api.js",
+        "/app/graph.js",
+        "/app/file-view.js",
+        "/app/hotspots.js",
+        "/app/main.js",
+    ]
+    .iter()
+    .any(|src| tag.contains(src))
+}
+
+#[test]
+fn test_script_tag_order_preserves_original_execution_order() {
+    let html = ariadne_ui::INDEX_HTML;
+    // Classic scripts share one global scope; this order locks the original
+    // top-level execution order of the pre-split inline script.
+    let order = [
+        "/app/api.js",
+        "/app/graph.js",
+        "/app/file-view.js",
+        "/app/hotspots.js",
+        "/app/main.js",
+    ];
+    let mut pos = 0usize;
+    for src in order {
+        let found = html[pos..]
+            .find(src)
+            .unwrap_or_else(|| panic!("missing <script src=\"{src}\"> in index markup"));
+        pos += found + src.len();
+    }
+
+    // The embedded-data placeholder defines window.__ARIADNE_DATA__ that
+    // init() (in main.js, loaded last) reads, so it must precede the assets.
+    let placeholder = html.find("/*__ARIADNE_DATA__*/").unwrap();
+    let first_asset = html.find("<script src=").unwrap();
+    assert!(placeholder < first_asset);
+}
+
+#[tokio::test]
+async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
+    let assets: [(&str, &str, &str); 6] = [
+        (
+            "/styles.css",
+            ariadne_ui::STYLES_CSS,
+            "text/css; charset=utf-8",
+        ),
+        (
+            "/app/api.js",
+            ariadne_ui::API_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        (
+            "/app/graph.js",
+            ariadne_ui::GRAPH_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        (
+            "/app/file-view.js",
+            ariadne_ui::FILE_VIEW_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        (
+            "/app/hotspots.js",
+            ariadne_ui::HOTSPOTS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        (
+            "/app/main.js",
+            ariadne_ui::MAIN_JS,
+            "text/javascript; charset=utf-8",
+        ),
+    ];
+    for (path, bundled, mime) in assets {
+        let app = ariadne_ui::build_router(common::loading_state());
+        let (status, headers, body) = common::request_raw_body(app, path).await;
+        assert_eq!(status, StatusCode::OK, "{path} must be served");
+        assert_eq!(
+            headers.get("Cache-Control").unwrap(),
+            "no-store",
+            "{path} must never be cached, same rule as the index route"
+        );
+        assert_eq!(headers.get("Content-Type").unwrap(), mime, "{path}");
+        assert!(!body.is_empty(), "{path} must serve a non-empty body");
+        assert_eq!(
+            body,
+            bundled.as_bytes(),
+            "{path} must serve the exact bundled asset"
+        );
+    }
+}
+
+#[test]
+fn test_standalone_export_inlines_all_split_assets() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let out_path = temp_dir.path().join("standalone.html");
+    ariadne_ui::export_standalone_html(&common::empty_export_payload(), "", &out_path).unwrap();
+
+    let content = std::fs::read_to_string(&out_path).unwrap();
+    assert!(
+        content.contains("window.__ARIADNE_DATA__"),
+        "export must still embed the data payload"
+    );
+    assert!(
+        content.contains("<style>"),
+        "export must inline the stylesheet: file:// has no /styles.css"
+    );
+    assert!(
+        content.contains("async function init()"),
+        "export must inline api.js"
+    );
+    assert!(
+        content.contains("function compileMatcher"),
+        "export must inline graph.js"
+    );
+    assert!(
+        content.contains("function openSourceDrawer"),
+        "export must inline file-view.js"
+    );
+    assert!(
+        content.contains("function getBurdenMaps"),
+        "export must inline hotspots.js"
+    );
+    assert!(
+        content.contains("function triggerFirstVisitExperience"),
+        "export must inline main.js"
+    );
+    assert!(
+        !content.contains("src=\"/app/"),
+        "export must not reference external JS asset routes"
+    );
+    assert!(
+        !content.contains("href=\"/styles.css\""),
+        "export must not reference the external CSS route"
     );
 }

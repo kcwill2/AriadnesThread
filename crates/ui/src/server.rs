@@ -70,6 +70,12 @@ impl UiState {
 pub fn build_router(state: Arc<UiState>) -> axum::Router {
     Router::new()
         .route("/", get(api_index))
+        .route("/styles.css", get(asset_styles_css))
+        .route("/app/api.js", get(asset_api_js))
+        .route("/app/graph.js", get(asset_graph_js))
+        .route("/app/file-view.js", get(asset_file_view_js))
+        .route("/app/hotspots.js", get(asset_hotspots_js))
+        .route("/app/main.js", get(asset_main_js))
         .route("/api/status", get(api_status))
         .route("/api/graph/include", get(api_graph_include))
         .route("/api/graph/symbol", get(api_graph_symbol))
@@ -94,6 +100,41 @@ async fn api_index() -> axum::response::Response {
         .header(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .body(axum::body::Body::from(crate::INDEX_HTML))
         .unwrap()
+}
+
+fn ui_asset(content: &'static str, content_type: &'static str) -> axum::response::Response {
+    // Same no-store rule as the index route: every UI asset is rebuilt into the
+    // binary, so a cached copy can never match the running server's build.
+    axum::response::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CACHE_CONTROL, "no-store")
+        .header(axum::http::header::CONTENT_TYPE, content_type)
+        .body(axum::body::Body::from(content))
+        .unwrap()
+}
+
+async fn asset_styles_css() -> axum::response::Response {
+    ui_asset(crate::STYLES_CSS, "text/css; charset=utf-8")
+}
+
+async fn asset_api_js() -> axum::response::Response {
+    ui_asset(crate::API_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_graph_js() -> axum::response::Response {
+    ui_asset(crate::GRAPH_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_file_view_js() -> axum::response::Response {
+    ui_asset(crate::FILE_VIEW_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_hotspots_js() -> axum::response::Response {
+    ui_asset(crate::HOTSPOTS_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_main_js() -> axum::response::Response {
+    ui_asset(crate::MAIN_JS, "text/javascript; charset=utf-8")
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

@@ -54,6 +54,24 @@ pub fn loading_state() -> Arc<UiState> {
     Arc::new(UiState::new_loading(std::path::PathBuf::from(".")))
 }
 
+/// Full page text: index markup plus every UI asset concatenated in load order.
+/// Characterization tests assert on the assembled page so the assertions survive
+/// the split of index.html into styles.css + feature JS files.
+pub fn page_content() -> String {
+    let mut page = String::from(ariadne_ui::INDEX_HTML);
+    for asset in [
+        ariadne_ui::STYLES_CSS,
+        ariadne_ui::API_JS,
+        ariadne_ui::GRAPH_JS,
+        ariadne_ui::FILE_VIEW_JS,
+        ariadne_ui::HOTSPOTS_JS,
+        ariadne_ui::MAIN_JS,
+    ] {
+        page.push_str(asset);
+    }
+    page
+}
+
 /// Include graph fixture: a.h(1) -> b.h(2) -> c.cc(3), plus isolated d.h(7).
 pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
     use ariadne_repo::FileId;
