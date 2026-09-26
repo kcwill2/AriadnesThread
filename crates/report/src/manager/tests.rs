@@ -1,5 +1,6 @@
 use super::*;
-use ariadne_build::{CompilationContext, CompileCommand, TranslationUnit};
+use crate::manifests::{LoadReport, MigrationManifest};
+use ariadne_build::{BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit};
 use ariadne_repo::FileId;
 use tempfile::tempdir;
 
