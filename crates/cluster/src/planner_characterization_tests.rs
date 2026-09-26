@@ -179,7 +179,10 @@ fn plan_skips_non_optimizable_target() {
             .defines(FileId(1), "A")
             .defines(FileId(2), "B")
             .plan();
-        assert!(plans.is_empty(), "target policy {policy:?} must yield no plan");
+        assert!(
+            plans.is_empty(),
+            "target policy {policy:?} must yield no plan"
+        );
     }
 }
 
@@ -261,7 +264,10 @@ fn plan_ids_follow_sorted_file_ids_and_skips_do_not_burn_numbers() {
         .iter()
         .map(|p| (p.id.0.clone(), p.target_file_id.0))
         .collect();
-    assert_eq!(ids, vec![("PLAN-001".to_string(), 2), ("PLAN-002".to_string(), 3)]);
+    assert_eq!(
+        ids,
+        vec![("PLAN-001".to_string(), 2), ("PLAN-002".to_string(), 3)]
+    );
 }
 
 #[test]
