@@ -7,6 +7,14 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// Renders a path's final component, falling back to the full path for names
+/// without one (e.g. `..`), mirroring `format_summary`'s file_name fallback.
+fn path_basename(path: &Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollateralSource {
     pub file_id: FileId,
@@ -138,6 +146,16 @@ impl<'a> LoadAnalyzer<'a> {
         None
     }
 
+    /// Renders the file name for a graph file id, falling back to the
+    /// `"unknown"` placeholder `compute_load` uses when the id is referenced
+    /// only by edges and never registered in `file_paths`.
+    fn file_basename(&self, id: FileId) -> String {
+        match self.include_graph.file_paths.get(&id) {
+            Some(path) => path_basename(path),
+            None => "unknown".to_string(),
+        }
+    }
+
     fn get_transitive_includes(&self, file_id: FileId) -> HashSet<FileId> {
         let mut guard = self.closures.borrow_mut();
         let closures = guard.get_or_insert_with(|| self.include_graph.compute_closures());
@@ -266,7 +284,11 @@ impl<'a> LoadAnalyzer<'a> {
             .find_symbol_id(symbol_name_or_id)
             .ok_or_else(|| anyhow!("Symbol not found: {}", symbol_name_or_id))?;
 
-        let record = self.model.symbols.get(&sym_id).unwrap();
+        let record = self
+            .model
+            .symbols
+            .get(&sym_id)
+            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_name_or_id))?;
         let def_file = record
             .defining_file
             .ok_or_else(|| anyhow!("No defining file for symbol"))?;
@@ -322,7 +344,12 @@ impl<'a> LoadAnalyzer<'a> {
         visited.insert(start);
 
         while let Some(path) = queue.pop_front() {
-            let current = *path.last().unwrap();
+            // Queue entries are seeded with `[start]` and grow one hop at a
+            // time, so `last()` is a defensive guard, not a reachable None.
+            let current = match path.last() {
+                Some(&id) => id,
+                None => continue,
+            };
             for dest in self.include_graph.direct_includes(current) {
                 if dest == end {
                     let mut new_path = path.clone();
@@ -360,12 +387,17 @@ impl<'a> LoadAnalyzer<'a> {
         let col_source =
             col_source.ok_or_else(|| anyhow!("No matching collateral source found"))?;
 
+        let sym_id = self
+            .find_symbol_id(symbol_name_or_id)
+            .ok_or_else(|| anyhow!("Symbol not found: {}", symbol_name_or_id))?;
         let record = self
             .model
             .symbols
-            .get(&self.find_symbol_id(symbol_name_or_id).unwrap())
-            .unwrap();
-        let target_file_id = record.defining_file.unwrap();
+            .get(&sym_id)
+            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_name_or_id))?;
+        let target_file_id = record
+            .defining_file
+            .ok_or_else(|| anyhow!("No defining file for symbol"))?;
 
         let path_ids = self
             .find_shortest_include_path(target_file_id, col_source.file_id)
@@ -374,8 +406,7 @@ impl<'a> LoadAnalyzer<'a> {
         let mut path_strs = Vec::new();
         path_strs.push(metric.target_name.clone());
         for id in &path_ids {
-            let p = self.include_graph.file_paths.get(id).unwrap();
-            path_strs.push(p.file_name().unwrap().to_string_lossy().to_string());
+            path_strs.push(self.file_basename(*id));
         }
 
         let parent_file_id = if path_ids.len() >= 2 {
@@ -383,21 +414,8 @@ impl<'a> LoadAnalyzer<'a> {
         } else {
             path_ids[0]
         };
-        let parent_name = self
-            .include_graph
-            .file_paths
-            .get(&parent_file_id)
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let col_name = col_source
-            .path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let parent_name = self.file_basename(parent_file_id);
+        let col_name = path_basename(&col_source.path);
 
         let reason = format!(
             "{} is included by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
@@ -406,7 +424,9 @@ impl<'a> LoadAnalyzer<'a> {
 
         Ok(LoadExplanation {
             target_name: metric.target_name,
-            target_file: metric.target_file.unwrap(),
+            target_file: metric
+                .target_file
+                .unwrap_or_else(|| PathBuf::from("unknown")),
             path: path_strs,
             collateral_source: col_name,
             collateral_symbols_count: col_source.symbol_count,
@@ -420,7 +440,10 @@ impl<'a> LoadAnalyzer<'a> {
         source_filter: Option<&str>,
     ) -> Result<LoadExplanation> {
         let metric = self.analyze_file_load(file_path_or_id)?;
-        let file_id = self.include_graph.find_file_id(file_path_or_id).unwrap();
+        let file_id = self
+            .include_graph
+            .find_file_id(file_path_or_id)
+            .ok_or_else(|| anyhow!("File not found in include graph"))?;
 
         let col_source = if let Some(filter) = source_filter {
             metric
@@ -441,8 +464,7 @@ impl<'a> LoadAnalyzer<'a> {
 
         let mut path_strs = Vec::new();
         for id in &path_ids {
-            let p = self.include_graph.file_paths.get(id).unwrap();
-            path_strs.push(p.file_name().unwrap().to_string_lossy().to_string());
+            path_strs.push(self.file_basename(*id));
         }
 
         let parent_file_id = if path_ids.len() >= 2 {
@@ -450,21 +472,8 @@ impl<'a> LoadAnalyzer<'a> {
         } else {
             path_ids[0]
         };
-        let parent_name = self
-            .include_graph
-            .file_paths
-            .get(&parent_file_id)
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let col_name = col_source
-            .path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let parent_name = self.file_basename(parent_file_id);
+        let col_name = path_basename(&col_source.path);
 
         let reason = format!(
             "{} is included by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
@@ -473,7 +482,9 @@ impl<'a> LoadAnalyzer<'a> {
 
         Ok(LoadExplanation {
             target_name: metric.target_name,
-            target_file: metric.target_file.unwrap(),
+            target_file: metric
+                .target_file
+                .unwrap_or_else(|| PathBuf::from("unknown")),
             path: path_strs,
             collateral_source: col_name,
             collateral_symbols_count: col_source.symbol_count,
@@ -832,5 +843,203 @@ mod tests {
             explanation.reason,
             "Self.h is included by Self.h.\nNo semantic dependency from Main reaches symbols owned by Self.h."
         );
+    }
+
+    #[test]
+    fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
+        // File ids referenced only by edges are absent from file_paths but the
+        // include BFS still traverses them. Rendering falls back to the
+        // "unknown" placeholder compute_load already uses for missing
+        // collateral paths, and LoadExplanation.target_file uses the same
+        // value when the target file has no registered path.
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(22), PathBuf::from("Root.h"));
+        ig.add_edge(IncludeEdge {
+            source: FileId(22),
+            destination: Some(FileId(20)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "edge.h".to_string(),
+            resolved_path: None,
+        });
+        ig.add_edge(IncludeEdge {
+            source: FileId(20),
+            destination: Some(FileId(21)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "edge.h".to_string(),
+            resolved_path: None,
+        });
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
+
+        let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+            let id = SymbolId::new(name);
+            model.symbols.insert(
+                id.clone(),
+                ReducedSymbolRecord {
+                    id: id.clone(),
+                    name: name.to_string(),
+                    kind: SymbolKind::Function,
+                    defining_file: Some(file),
+                    declarations: vec![],
+                    definition: None,
+                },
+            );
+            id
+        };
+        let solo = add_sym(&mut model, "Solo", FileId(20));
+        let bulk = add_sym(&mut model, "Bulk", FileId(21));
+        let bulk2 = add_sym(&mut model, "Bulk2", FileId(21));
+        let root = add_sym(&mut model, "Root", FileId(22));
+        model.file_symbols.insert(FileId(20), vec![solo]);
+        model.file_symbols.insert(FileId(21), vec![bulk, bulk2]);
+        model.file_symbols.insert(FileId(22), vec![root]);
+
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let metric = analyzer
+            .analyze_symbol_load("Solo")
+            .expect("analyze_symbol_load failed");
+        assert_eq!(metric.target_file, None);
+
+        let explanation = analyzer
+            .explain_symbol_load("Solo", None)
+            .expect("explain_symbol_load failed");
+        assert_eq!(explanation.target_file, PathBuf::from("unknown"));
+        assert_eq!(explanation.path, vec!["Solo", "unknown", "unknown"]);
+        assert_eq!(explanation.collateral_source, "unknown");
+        assert_eq!(
+            explanation.reason,
+            "unknown is included by unknown.\nNo semantic dependency from Solo reaches symbols owned by unknown."
+        );
+
+        let file_explanation = analyzer
+            .explain_file_load(std::path::Path::new("Root.h"), None)
+            .expect("explain_file_load failed");
+        assert_eq!(file_explanation.target_file, PathBuf::from("Root.h"));
+        assert_eq!(file_explanation.path, vec!["Root.h", "unknown", "unknown"]);
+        assert_eq!(file_explanation.collateral_source, "unknown");
+        assert_eq!(
+            file_explanation.reason,
+            "unknown is included by unknown.\nNo semantic dependency from Root.h reaches symbols owned by unknown."
+        );
+    }
+
+    #[test]
+    fn test_explain_paths_without_file_name_render_full_path() {
+        // A registered path can lack a final component (`..`); rendering falls
+        // back to the full path string instead of panicking on file_name().
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(40), PathBuf::from("Host.h"));
+        ig.register_file(FileId(41), PathBuf::from(".."));
+        ig.add_edge(IncludeEdge {
+            source: FileId(40),
+            destination: Some(FileId(41)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "..".to_string(),
+            resolved_path: None,
+        });
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
+
+        let host = SymbolId::new("Host");
+        model.symbols.insert(
+            host.clone(),
+            ReducedSymbolRecord {
+                id: host.clone(),
+                name: "Host".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(FileId(40)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        let odd = SymbolId::new("Odd");
+        model.symbols.insert(
+            odd.clone(),
+            ReducedSymbolRecord {
+                id: odd.clone(),
+                name: "Odd".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(FileId(41)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        model.file_symbols.insert(FileId(40), vec![host]);
+        model.file_symbols.insert(FileId(41), vec![odd]);
+
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let explanation = analyzer
+            .explain_symbol_load("Host", None)
+            .expect("explain_symbol_load failed");
+        assert_eq!(explanation.path, vec!["Host", "Host.h", ".."]);
+        assert_eq!(explanation.target_file, PathBuf::from("Host.h"));
+        assert_eq!(explanation.collateral_source, "..");
+        assert_eq!(
+            explanation.reason,
+            ".. is included by Host.h.\nNo semantic dependency from Host reaches symbols owned by ..."
+        );
+
+        let file_explanation = analyzer
+            .explain_file_load(std::path::Path::new("Host.h"), None)
+            .expect("explain_file_load failed");
+        assert_eq!(file_explanation.path, vec!["Host.h", ".."]);
+        assert_eq!(file_explanation.collateral_source, "..");
+        assert_eq!(
+            file_explanation.reason,
+            ".. is included by Host.h.\nNo semantic dependency from Host.h reaches symbols owned by ..."
+        );
+    }
+
+    #[test]
+    fn test_missing_defining_file_yields_err_not_panic() {
+        // Records with defining_file: None are legitimate; symbol analysis and
+        // explanation must surface Err instead of panicking.
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(50), PathBuf::from("Ghost.h"));
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
+        let ghost = SymbolId::new("Ghost");
+        model.symbols.insert(
+            ghost.clone(),
+            ReducedSymbolRecord {
+                id: ghost.clone(),
+                name: "Ghost".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: None,
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        model.file_symbols.insert(FileId(50), vec![ghost]);
+
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        assert!(analyzer.analyze_symbol_load("Ghost").is_err());
+        assert!(analyzer.explain_symbol_load("Ghost", None).is_err());
     }
 }
