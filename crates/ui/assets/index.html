@@ -856,21 +856,42 @@
       color: var(--cyan);
     }
 
-    /* BOTTOM SOURCE DRAWER */
+    /* RIGHT SOURCE PANEL (collapsible + resizable) */
     .drawer {
-      height: 0;
+      width: 0;
       background: #0d1117;
-      border-top: 1px solid var(--border-light);
+      border-left: 1px solid var(--border-light);
       display: flex;
       flex-direction: column;
-      transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       z-index: 30;
       flex-shrink: 0;
       overflow: hidden;
     }
 
     .drawer.open {
-      height: 220px;
+      width: var(--source-panel-w, 480px);
+    }
+
+    .drawer.resizing {
+      transition: none;
+    }
+
+    .resize-handle {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: col-resize;
+      z-index: 31;
+      background: transparent;
+    }
+
+    .resize-handle:hover,
+    .resize-handle.dragging {
+      background: var(--cyan-glow);
     }
 
     .drawer-header {
@@ -950,6 +971,14 @@
       color: var(--text-muted);
       font-size: 10px;
     }
+    .thread-item:hover {
+      border-color: var(--cyan);
+    }
+    .thread-empty {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-style: italic;
+    }
     .modal {
       display: none;
       position: fixed;
@@ -983,6 +1012,10 @@
       outline: 2px solid var(--cyan) !important;
       box-shadow: 0 0 25px rgba(56, 189, 248, 0.7) !important;
       border-radius: 6px;
+    }
+
+    .hotspot-panel.tour-highlighted-element {
+      position: absolute !important;
     }
   </style>
 </head>
@@ -1052,7 +1085,7 @@
         </button>
         <div id="quickOpenPanel" class="quick-open-panel" onclick="qoPanelClick(event)"></div>
       </div>
-      <button id="btnShowAllMatches" class="btn-secondary" style="display:none;font-size:10px;padding:2px 6px;" onclick="selectedNodeId = null; filterAndExpandSubgraph();">View All Matches</button>
+      <button id="btnShowAllMatches" class="btn-secondary" style="display:none;font-size:10px;padding:2px 6px;" onclick="selectedNodeId = null; renderThreadBar(); filterAndExpandSubgraph();">View All Matches</button>
 
       <span class="stat-badge" id="badgeNodes">0 Nodes</span>
       <span class="stat-badge" id="badgeEdges">0 Edges</span>
@@ -1079,7 +1112,7 @@
 
   
   <div class="thread-bar" id="ariadneThread">
-    <!-- Breadcrumbs go here -->
+    <span class="thread-empty">Select nodes to lay a thread &mdash; your path appears here.</span>
   </div>
   
   <div class="modal-overlay" id="modalOverlay" onclick="closeModals()"></div>
@@ -1283,19 +1316,20 @@
         </div>
       </div>
     </aside>
-  </div>
 
-  <!-- BOTTOM SOURCE CODE PREVIEW DRAWER -->
-  <div class="drawer" id="sourceDrawer">
-    <div class="drawer-header">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="color:var(--cyan);font-weight:600;" id="drawerTitle">Source Code</span>
-        <span style="color:var(--text-sub);" id="drawerLine">Line 1</span>
+    <!-- SOURCE CODE PANEL (right side, collapsible & resizable) -->
+    <div class="drawer" id="sourceDrawer">
+      <div class="resize-handle" title="Drag to resize" onpointerdown="startSourceResize(event)"></div>
+      <div class="drawer-header">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+          <span style="color:var(--cyan);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="drawerTitle">Source Code</span>
+          <span style="color:var(--text-sub);flex-shrink:0;" id="drawerLine">Viewing source</span>
+        </div>
+        <button title="Collapse panel" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;flex-shrink:0;padding:0 2px;" onclick="closeSourceDrawer()">✕</button>
       </div>
-      <button style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;" onclick="closeSourceDrawer()">✕</button>
-    </div>
-    <div class="drawer-body" id="drawerCodeContent">
-      <div style="color:var(--text-sub);padding:10px;">Select a file node and click "View Code" to load file contents...</div>
+      <div class="drawer-body" id="drawerCodeContent">
+        <div style="color:var(--text-sub);padding:10px;">Select a file node and click "View Code" to load file contents...</div>
+      </div>
     </div>
   </div>
 
@@ -1405,6 +1439,7 @@
     let currentDegree = 1;
     let isAllCapped = false;
     let selectedNodeId = null;
+    let threadHistory = [];
     let hopDepth = 0;
     let cyclesOnly = false;
 
@@ -1666,6 +1701,8 @@
       tabAllNodes = [];
       tabAllEdges = [];
       selectedNodeId = null;
+      threadHistory = [];
+      renderThreadBar();
       dirScope = null;
       updateDirChip();
       closeQuickOpen();
@@ -2003,10 +2040,11 @@
       return reachableDependencies;
     }
 
-    function selectNode(id, skipFilter = false) {
+    function selectNode(id, skipFilter = false, skipCrumb = false) {
       selectedNodeId = id;
       const node = activeNodes.find(n => n.id === id) || tabAllNodes.find(n => n.id === id);
-      if (!node) return;
+      if (!node) { renderThreadBar(); return; }
+      if (!skipCrumb) recordCrumb(id, node.label);
 
       // Update Inspector
       document.getElementById('inspLabel').textContent = node.label;
@@ -2119,6 +2157,39 @@
       renderHotspots();
     }
 
+    function recordCrumb(id, label) {
+      const existing = threadHistory.findIndex(c => c.id === id);
+      if (existing !== -1) {
+        threadHistory = threadHistory.slice(0, existing + 1);
+      } else {
+        threadHistory.push({ id, label: label || id });
+        if (threadHistory.length > 12) threadHistory.shift();
+      }
+      renderThreadBar();
+    }
+
+    function renderThreadBar() {
+      const bar = document.getElementById('ariadneThread');
+      if (!bar) return;
+      if (threadHistory.length === 0) {
+        bar.innerHTML = '<span class="thread-empty">Select nodes to lay a thread &mdash; your path appears here.</span>';
+        return;
+      }
+      bar.innerHTML = threadHistory.map((c, i) => {
+        const active = (i === threadHistory.length - 1 && selectedNodeId === c.id) ? ' active' : '';
+        const sep = i > 0 ? '<span class="thread-sep">&#8250;</span>' : '';
+        return `${sep}<span class="thread-item${active}" onclick="jumpToCrumb(${i})" title="${escapeHtml(c.id)}">${escapeHtml(c.label)}</span>`;
+      }).join('');
+      bar.scrollLeft = bar.scrollWidth;
+    }
+
+    function jumpToCrumb(i) {
+      const crumb = threadHistory[i];
+      if (!crumb) return;
+      if (i === threadHistory.length - 1 && selectedNodeId === crumb.id) return;
+      selectNode(crumb.id);
+    }
+
     function findIncludePath(fromId, toId) {
       if (fromId === toId) return [fromId];
       const queue = [[fromId]];
@@ -2204,6 +2275,7 @@
         if (e.target.closest('.hotspot-panel')) return;
         if (!e.target.closest('.node-group') && dragStartX === e.clientX - panX && dragStartY === e.clientY - panY) {
           selectedNodeId = null;
+          renderThreadBar();
           filterAndExpandSubgraph();
         }
       });
@@ -2267,6 +2339,7 @@
 
     function handleSearch(q) {
       selectedNodeId = null;
+      renderThreadBar();
       filterAndExpandSubgraph();
       if (currentTab === 'include') {
         if (qoOpen) renderQuickOpen();
@@ -2274,31 +2347,70 @@
       }
     }
 
-    // Source Code Drawer
+    // Source Code Panel (right side, collapsible & resizable)
+    let sourcePanelWidth = 480;
+
+    function startSourceResize(evt) {
+      evt.preventDefault();
+      const drawer = document.getElementById('sourceDrawer');
+      const handle = drawer.querySelector('.resize-handle');
+      drawer.classList.add('open');
+      drawer.classList.add('resizing');
+      if (handle) handle.classList.add('dragging');
+      const startX = evt.clientX;
+      const startW = drawer.getBoundingClientRect().width;
+      const onMove = (ev) => {
+        const maxW = Math.floor(window.innerWidth * 0.8);
+        // Panel is right-anchored: dragging left grows it.
+        sourcePanelWidth = Math.min(maxW, Math.max(280, startW + (startX - ev.clientX)));
+        drawer.style.setProperty('--source-panel-w', sourcePanelWidth + 'px');
+      };
+      const onUp = () => {
+        drawer.classList.remove('resizing');
+        if (handle) handle.classList.remove('dragging');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+
+    function sourceLoadError(message) {
+      document.getElementById('drawerLine').textContent = 'Error';
+      document.getElementById('drawerCodeContent').innerHTML =
+        `<div style="color:var(--red);padding:10px;">${escapeHtml(message)}</div>`;
+    }
+
     async function openSourceDrawer() {
       const drawer = document.getElementById('sourceDrawer');
       const node = activeNodes.find(n => n.id === selectedNodeId);
       if (!node) return;
 
+      drawer.style.setProperty('--source-panel-w', sourcePanelWidth + 'px');
       drawer.classList.add('open');
       document.getElementById('drawerTitle').textContent = node.path || node.label;
-      document.getElementById('drawerLine').textContent = 'Viewing source';
+      document.getElementById('drawerLine').textContent = 'Loading...';
 
       const codeContainer = document.getElementById('drawerCodeContent');
       codeContainer.innerHTML = '<div style="color:var(--text-sub);">Loading source...</div>';
 
-      try {
-        const res = await fetch(`/api/source?file=${encodeURIComponent(node.path)}`);
-        if (res.ok) {
-          const text = await res.text();
-          renderSourceCode(text);
-          return;
-        }
-      } catch (e) {
-        // Fallback preview
+      if (!node.path) {
+        sourceLoadError('This node has no file path (symbol/call-graph nodes are not backed by a single file).');
+        return;
       }
 
-      renderSourceCode(`// File: ${node.path}\n#pragma once\n\n// Source preview loaded from analysis\nclass ${node.label} {\npublic:\n    ${node.label}();\n};\n`);
+      try {
+        const res = await fetch(`/api/source?file=${encodeURIComponent(node.path)}`);
+        if (!res.ok) {
+          sourceLoadError(`Could not load source for ${node.path} (server returned HTTP ${res.status}).`);
+          return;
+        }
+        const text = await res.text();
+        const lineCount = renderSourceCode(text);
+        document.getElementById('drawerLine').textContent = `${lineCount} lines`;
+      } catch (e) {
+        sourceLoadError(`Could not load source for ${node.path}: ${e}`);
+      }
     }
 
     function closeSourceDrawer() {
@@ -2308,9 +2420,10 @@
     function renderSourceCode(code) {
       const container = document.getElementById('drawerCodeContent');
       const lines = code.split('\n');
+      if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
       container.innerHTML = lines.map((line, idx) => {
         const lineNum = idx + 1;
-        const isHighlight = lineNum === 1 || line.includes('#include') || line.includes('class');
+        const isHighlight = line.includes('#include') || /^\s*(class|struct|template)\b/.test(line);
         return `
           <div class="code-line ${isHighlight ? 'line-highlight' : ''}">
             <span class="line-num">${lineNum}</span>
@@ -2318,6 +2431,7 @@
           </div>
         `;
       }).join('');
+      return lines.length;
     }
 
     function escapeHtml(str) {
@@ -2345,6 +2459,7 @@
       } else if (e.key === 'Escape' && selectedNodeId) {
         selectedNodeId = null;
         renderSvg();
+        renderThreadBar();
         renderHotspots();
       } else if (e.key === 'Escape' && dirScope) {
         clearDirScope();
@@ -2561,7 +2676,7 @@
 
       if (selectedNodeId && activeNodes.find(n => n.id === selectedNodeId)) {
       } else if (activeNodes.length > 0) {
-        selectNode(activeNodes[0].id, true);
+        selectNode(activeNodes[0].id, true, true);
       } else {
         clearInspector();
       }
@@ -2906,9 +3021,20 @@
       { id: '.toolbar', title: 'Direction & Degree Navigation', text: 'Control Direction (Dependencies -> vs Consumers <-), step Degree (-/+), or use ALL-WITH-CAP to expand safely up to the node cap limit.' },
       { id: '#ariadneThread', title: 'Pathfinder & Breadcrumbs', text: 'Use Pathfinder for shortest paths and Ariadne\'s Thread to navigate your breadcrumb history.' },
       { id: '.inspector', title: 'Collateral Heat Map', text: 'Select a header to calculate collateral load. Dependencies are colored by heat tier (Cold to Red). Click a contributor to illuminate the include path.' },
+      { id: '#hotspotPanel', title: 'Hotspots Triage', text: 'Open 🔥 Hotspots to rank the worst-offender files by collateral burden, fan-in/out, closure, or cycle participation. Click a row to select the file and see its heat map live behind the list.',
+        enter() {
+          if (currentTab !== 'include') switchTab('include');
+          if (!hotspotOpen) tourOpenedHotspots = true;
+          openHotspots();
+        },
+        leave() {
+          if (tourOpenedHotspots) { closeHotspots(); tourOpenedHotspots = false; }
+        }
+      },
       { id: '#btnCycles', title: 'Search & Tools', text: 'Use wildcard/regex search to find files, press ↓ to browse folders in the directory navigator and scope the graph to one, and Highlight Cycle to detect circular dependencies.' }
     ];
     let currentTourStep = -1;
+    let tourOpenedHotspots = false;
 
     function startTour(stepIndex = 0) {
       if (document.getElementById('welcomeModal').style.display === 'block') {
@@ -2943,11 +3069,19 @@
         btnNext.textContent = 'Next';
       }
 
+      if (step.enter) step.enter();
+
       const targetEl = document.querySelector(step.id);
       if (targetEl) {
         targetEl.classList.add('tour-highlighted-element');
         positionTourCard(targetEl);
       }
+    }
+
+    function runCurrentTourStepLeave() {
+      if (currentTourStep < 0 || currentTourStep >= tourSteps.length) return;
+      const step = tourSteps[currentTourStep];
+      if (step.leave) step.leave();
     }
 
     function positionTourCard(targetEl) {
@@ -2967,6 +3101,9 @@
       } else if (targetEl.id === 'tabInclude' || targetEl.closest('.tabs')) {
         top = rect.bottom + 10;
         left = rect.left + (rect.width - cardWidth) / 2;
+      } else if (targetEl.id === 'hotspotPanel') {
+        top = rect.top + 40;
+        left = rect.right + margin;
       } else if (targetEl.classList.contains('inspector')) {
         left = rect.left - cardWidth - margin;
         top = Math.max(margin, rect.top + 40);
@@ -2990,6 +3127,7 @@
 
     function nextTourStep() {
       if (currentTourStep < tourSteps.length - 1) {
+        runCurrentTourStepLeave();
         currentTourStep++;
         renderTourStep();
       } else {
@@ -2999,12 +3137,14 @@
 
     function prevTourStep() {
       if (currentTourStep > 0) {
+        runCurrentTourStepLeave();
         currentTourStep--;
         renderTourStep();
       }
     }
 
     function endTour() {
+      runCurrentTourStepLeave();
       currentTourStep = -1;
       document.getElementById('tourOverlay').style.display = 'none';
       document.getElementById('tourCard').style.display = 'none';

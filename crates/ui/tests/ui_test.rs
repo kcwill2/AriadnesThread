@@ -812,6 +812,14 @@ fn test_ui_hotspots_panel() {
     assert!(html.contains("value=\"burden\" selected"), "collateral burden must be default metric");
 
     // Older exports without file_collateral degrade to Fan-in with an inline hint
+
+    // First-visit tour must demo the hotspot view and restore state on leave
+    assert!(html.contains("id: '#hotspotPanel'") && html.contains("Hotspots Triage"),
+        "guided tour must include a Hotspots step");
+    assert!(html.contains("tourOpenedHotspots"),
+        "tour must only close hotspots if the tour step opened them");
+    assert!(html.contains(".hotspot-panel.tour-highlighted-element"),
+        "tour highlight must keep the hotspot panel absolutely positioned");
     assert!(html.contains("showing Fan-in instead"), "missing Fan-in fallback hint");
 
     // Include-tab-only gating
@@ -828,4 +836,25 @@ fn test_ui_hotspots_panel() {
     // Wheel over the panel scrolls the list, falling through to the graph view at its edges
     assert!(html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
         "wheel over hotspot panel should scroll the list, then reach the graph view at the edges");
+}
+
+#[test]
+fn test_breadcrumbs_render_in_thread_bar() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    assert!(html.contains("id=\"ariadneThread\""), "thread bar container missing");
+    assert!(html.contains("let threadHistory = []"), "breadcrumb state missing");
+    assert!(html.contains("function recordCrumb"), "breadcrumb recording missing");
+    assert!(html.contains("function renderThreadBar"), "breadcrumb rendering missing");
+    assert!(html.contains("function jumpToCrumb"), "breadcrumb navigation missing");
+    assert!(html.contains("recordCrumb(id, node.label)"), "selectNode must record a crumb");
+    assert!(!html.contains("<!-- Breadcrumbs go here -->"), "breadcrumb bar must not be an empty placeholder");
+
+    // Auto-selected fallback nodes must not pollute the breadcrumb trail
+    assert!(html.contains("selectNode(activeNodes[0].id, true, true)"),
+        "filter fallback auto-select must skip crumb recording");
+
+    // Clearing the selection re-renders the bar (background click, Escape, search)
+    assert!(html.matches("renderThreadBar()").count() >= 5,
+        "selection-clear paths must refresh the breadcrumb bar");
 }
