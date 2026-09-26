@@ -247,6 +247,27 @@ fn tokenize_macro_call_keeps_macro_name_and_parens_as_separate_tokens() {
 }
 
 #[test]
+fn tokenize_bang_and_double_ampersand_split_into_single_char_puncts() {
+    expect_token_kinds(
+        "DCHECK(!x) && y != z;",
+        &[
+            "word:DCHECK",
+            "punct:(",
+            "punct:!",
+            "word:x",
+            "punct:)",
+            "punct:&",
+            "punct:&",
+            "word:y",
+            "punct:!",
+            "punct:=",
+            "word:z",
+            "punct:;",
+        ],
+    );
+}
+
+#[test]
 fn tokenize_preprocessor_include_lines_keep_angle_brackets_but_swallow_quoted_paths() {
     expect_token_kinds(
         "#include <vector>",
