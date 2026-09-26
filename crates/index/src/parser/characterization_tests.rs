@@ -331,6 +331,32 @@ fn handle_global_function_through_analyzer_drops_namespace_qualifiers() {
 }
 
 #[test]
+fn handle_global_function_name_at_end_of_token_stream_records_nothing() {
+    let outcome = analyze_global_function("int trailing", "trailing", None);
+    assert!(
+        outcome.symbols.is_empty() && outcome.declarations.is_empty(),
+        "quirk: a word with no following token never reaches the `(` check"
+    );
+    assert!(outcome.opened_function.is_none());
+}
+
+#[test]
+fn handle_global_function_dangling_open_paren_at_eof_still_records_declaration() {
+    let outcome = analyze_global_function("void open(", "open", None);
+    assert_eq!(outcome.symbols[0].id.0, "open");
+    assert_eq!(outcome.declarations.len(), 1);
+    assert!(
+        !outcome.declarations[0].is_definition,
+        "quirk: both forward scans see no tokens at all and still record a decl"
+    );
+    assert!(outcome.opened_function.is_none());
+    assert!(
+        outcome.edges.is_empty(),
+        "the only preceding word is void, which is excluded"
+    );
+}
+
+#[test]
 fn handle_global_function_return_edge_only_from_immediately_preceding_word() {
     let plain_void = analyze_global_function("static inline void v();", "v", None);
     assert!(
