@@ -27,6 +27,7 @@ ariadne-cluster = { path = "../cluster" }
 ariadne-transform = { path = "../transform" }
 ariadne-validate = { path = "../validate" }
 ariadne-scheduler = { path = "../scheduler" }
+ariadne-pipeline = { path = "../pipeline" }
 bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true

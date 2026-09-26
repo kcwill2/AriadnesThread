@@ -3,12 +3,27 @@ use std::collections::BinaryHeap;
 use std::path::Path;
 use ariadne_build::TranslationUnit;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::tu_store::SharedTuStoreContext;
+
+#[derive(Debug, Clone)]
 pub struct TuTask {
     pub task_id: usize,
     pub tu: TranslationUnit,
     pub estimated_cost: usize,
+    /// Shared store context (discovery + contexts) enabling closure-merge
+    /// analysis inside workers. `None` keeps body-only analysis.
+    pub context: Option<SharedTuStoreContext>,
 }
+
+impl PartialEq for TuTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.task_id == other.task_id
+            && self.estimated_cost == other.estimated_cost
+            && self.tu == other.tu
+    }
+}
+
+impl Eq for TuTask {}
 
 impl PartialOrd for TuTask {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -51,6 +66,14 @@ impl PrioritizedTuQueue {
     }
 
     pub fn from_translation_units(repo_root: &Path, tus: Vec<TranslationUnit>) -> Self {
+        Self::from_translation_units_with_context(repo_root, tus, None)
+    }
+
+    pub fn from_translation_units_with_context(
+        repo_root: &Path,
+        tus: Vec<TranslationUnit>,
+        context: Option<SharedTuStoreContext>,
+    ) -> Self {
         let tasks: Vec<TuTask> = tus
             .into_iter()
             .enumerate()
@@ -60,6 +83,7 @@ impl PrioritizedTuQueue {
                     task_id: idx + 1,
                     estimated_cost: cost,
                     tu,
+                    context: context.clone(),
                 }
             })
             .collect();
@@ -132,16 +156,19 @@ mod tests {
                 task_id: 1,
                 tu: make_tu("b.rs"),
                 estimated_cost: 10,
+                context: None,
             },
             TuTask {
                 task_id: 2,
                 tu: make_tu("a.rs"),
                 estimated_cost: 20,
+                context: None,
             },
             TuTask {
                 task_id: 3,
                 tu: make_tu("c.rs"),
                 estimated_cost: 10,
+                context: None,
             },
         ];
 
@@ -166,11 +193,13 @@ mod tests {
                 task_id: 1,
                 tu: make_tu("a.rs"),
                 estimated_cost: 10,
+                context: None,
             },
             TuTask {
                 task_id: 2,
                 tu: make_tu("b.rs"),
                 estimated_cost: 20,
+                context: None,
             },
         ];
         let mut queue = PrioritizedTuQueue::new(tasks);

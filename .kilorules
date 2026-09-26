@@ -1,0 +1,21 @@
+# Base Project Guardrails
+
+## 1. Strict Code Hygiene Mandates
+- **Function/Component Size:** Every function, method, and React component MUST be strictly under 100 lines.
+  - Nested JSX returns count toward this 100-line budget. Break down nested JSX trees into dedicated child components in separate files.
+  - Extract complex hooks, state logic, and event handlers into dedicated custom hooks or helper utilities.
+- **File Size:** Every source file MUST be strictly under 1000 lines. Break up larger files into cohesive modules or domain subfolders.
+- **Naming & Readability:**
+  - Use clear, intention-revealing names for all variables, functions, and components.
+  - Eliminate single-letter names, magic numbers, and cryptic acronyms.
+  - Flatten control flow using early returns and guard clauses instead of deep branching.
+
+## 2. Intent-Driven Development (IDD)
+- Always clarify and state the intended behavior and invariants before planning code changes.
+- Establish explicit acceptance criteria covering expected outcomes, boundary conditions, and error paths.
+
+## 3. Test-Driven Development (TDD)
+- All production code must be driven by tests:
+  1. Red: Write failing unit/integration tests asserting expected behavior.
+  2. Green: Implement the minimum code needed to turn tests green.
+  3. Refactor: Clean up structure without breaking passing tests.

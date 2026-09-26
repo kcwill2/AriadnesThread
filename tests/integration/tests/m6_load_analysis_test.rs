@@ -3,9 +3,26 @@ use std::fs;
 use anyhow::Result;
 use serde::Deserialize;
 
-use ariadne_cli::{build_include_graph, get_or_build_reduced_model, handle_analyze_load, handle_explain_load, handle_index};
+use ariadne_cli::{build_include_graph, get_or_build_reduced_model, handle_analyze_load, handle_index};
 use ariadne_graph::{LoadAnalyzer, ReducedSemanticModel};
 use ariadne_report::ArtifactManager;
+
+/// The real reduced-stage fingerprint, matching every other writer of this
+/// fixture's reduced artifact so shared-contents races stay harmless.
+fn reduced_fingerprint(repo_path: &std::path::Path) -> Result<String> {
+    let repo = ariadne_repo::Repository::locate(repo_path)?;
+    let discovery = repo.discover()?;
+    let build = ariadne_build::BuildDiscoverer::new(&repo.root)
+        .with_repo_discovery(&discovery)
+        .discover()?;
+    let fps = ariadne_index::StageFingerprints::from_inputs(
+        &repo.root,
+        &discovery,
+        &build.contexts,
+        &build.translation_units,
+    );
+    Ok(fps.reduced)
+}
 
 #[derive(Deserialize)]
 struct LoadManifest {
@@ -23,7 +40,8 @@ fn test_m6_symbol_load_and_collateral_quantification() -> Result<()> {
     let model = ReducedSemanticModel::reduce(&index_result);
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repo)?;
-    artifacts.save_reduced_artifacts(&model)?;
+    let reduced_fp = reduced_fingerprint(&repo_path)?;
+    artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
     
     let (_, graph, _closures, _report) = build_include_graph(&repo_path)?;
     let analyzer = LoadAnalyzer::new(&graph, &model);
@@ -87,6 +105,54 @@ fn test_m6_file_load_analysis() -> Result<()> {
     let largest = metric.largest_collateral_source.expect("Largest collateral source should be Some");
     assert_eq!(largest.path.file_name().unwrap().to_str().unwrap(), "heavy.h");
     
+    Ok(())
+}
+
+/// The real load-stage fingerprint, matching what Pipeline persists with.
+fn load_fingerprint(repo_path: &std::path::Path) -> Result<String> {
+    let repo = ariadne_repo::Repository::locate(repo_path)?;
+    let discovery = repo.discover()?;
+    let build = ariadne_build::BuildDiscoverer::new(&repo.root)
+        .with_repo_discovery(&discovery)
+        .discover()?;
+    let fps = ariadne_index::StageFingerprints::from_inputs(
+        &repo.root,
+        &discovery,
+        &build.contexts,
+        &build.translation_units,
+    );
+    Ok(fps.load)
+}
+
+#[test]
+fn test_m6_targeted_load_query_keeps_stage_full() -> Result<()> {
+    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
+
+    // Persist the authoritative full-stage report.
+    handle_analyze_load(&repo_path, None, None)?;
+
+    // Targeted single-metric queries must not overwrite it.
+    handle_analyze_load(&repo_path, Some("Thing"), None)?;
+    handle_analyze_load(&repo_path, None, Some(std::path::Path::new("include/thing.h")))?;
+
+    let repo = ariadne_repo::Repository::locate(&repo_path)?;
+    let manager = ArtifactManager::prepare_for_repo(&repo)?;
+    let fp = load_fingerprint(&repo_path)?;
+    let report = manager.load_load_checked(&fp)?;
+
+    assert!(
+        report.symbol_metrics.len() > 1,
+        "--symbol query must not shrink the persisted load stage to one metric"
+    );
+    assert!(
+        report.file_metrics.len() > 1,
+        "--file query must not shrink the persisted load stage to one metric"
+    );
+
+    let manifest_content = fs::read_to_string(repo_path.join("artifacts/load/manifest.json"))?;
+    let manifest: LoadManifest = serde_json::from_str(&manifest_content)?;
+    assert!(manifest.total_analyzed_symbols > 1);
+
     Ok(())
 }
 

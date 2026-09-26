@@ -1,33 +1,31 @@
-use ariadne_repo::{Repository, RepositoryDiscoveryResult, FileId};
-use ariadne_build::{BuildDiscoveryResult, CompilationContext};
-use ariadne_index::{IndexResult, IncrementalCache, IncrementalStats, TuCacheFingerprint, TuCacheEntry, CppSemanticAnalyzer};
-use ariadne_graph::IncludeResolver;
+use ariadne_repo::{Repository, RepositoryDiscoveryResult};
+use ariadne_build::BuildDiscoveryResult;
+use ariadne_index::{IndexResult, IncrementalStats, StageFingerprints, CURRENT_ANALYSIS_VERSION};
 use anyhow::Result;
+
+use crate::tu_store::{
+    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir,
+    SharedTuStoreContext, ShardCheckpoint, TuStoreContext,
+};
 
 pub struct IncrementalAnalysisResult {
     pub index_result: IndexResult,
-    pub cache: IncrementalCache,
     pub stats: IncrementalStats,
+    pub fingerprints: StageFingerprints,
+    store_ctx: SharedTuStoreContext,
 }
 
 impl IncrementalAnalysisResult {
     pub fn save_artifacts(&self, repo: &Repository) -> Result<()> {
         let manager = ariadne_report::ArtifactManager::prepare_for_repo(repo)?;
-        
-        let manifest = ariadne_report::CacheManifest {
-            repository_root: repo.root.clone(),
-            analysis_version: self.cache.analysis_version.clone(),
-            total_cached_tus: self.cache.len(),
-            reused_tus: self.stats.reused_tus,
-            reanalyzed_tus: self.stats.reanalyzed_tus,
-            hit_rate: self.stats.hit_rate,
-        };
-        manager.save_cache_artifacts(&self.cache, &manifest)?;
-        manager.save_index_artifacts(&self.index_result)?;
-        
+
+        manager.save_repository_artifacts(&self.store_ctx.discovery, &self.fingerprints.repository)?;
+
+        manager.save_index_artifacts(&self.index_result, &self.fingerprints.index, Some(&self.stats))?;
+
         let reduced_model = ariadne_graph::ReducedSemanticModel::reduce(&self.index_result);
-        manager.save_reduced_artifacts(&reduced_model)?;
-        
+        manager.save_reduced_artifacts(&reduced_model, &self.fingerprints.reduced)?;
+
         Ok(())
     }
 }
@@ -36,7 +34,6 @@ pub struct IncrementalAnalyzer<'a> {
     repo: &'a Repository,
     repo_discovery: &'a RepositoryDiscoveryResult,
     build_result: &'a BuildDiscoveryResult,
-    cache: IncrementalCache,
     analysis_version: String,
 }
 
@@ -46,24 +43,12 @@ impl<'a> IncrementalAnalyzer<'a> {
         repo_discovery: &'a RepositoryDiscoveryResult,
         build_result: &'a BuildDiscoveryResult,
     ) -> Self {
-        let cache = if let Ok(manager) = ariadne_report::ArtifactManager::prepare_for_repo(repo) {
-            manager.load_cache_artifacts().unwrap_or_else(|_| IncrementalCache::new(ariadne_index::CURRENT_ANALYSIS_VERSION))
-        } else {
-            IncrementalCache::new(ariadne_index::CURRENT_ANALYSIS_VERSION)
-        };
-
         Self {
             repo,
             repo_discovery,
             build_result,
-            cache,
-            analysis_version: ariadne_index::CURRENT_ANALYSIS_VERSION.to_string(),
+            analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
         }
-    }
-
-    pub fn with_cache(mut self, cache: IncrementalCache) -> Self {
-        self.cache = cache;
-        self
     }
 
     pub fn with_analysis_version(mut self, version: impl Into<String>) -> Self {
@@ -72,104 +57,57 @@ impl<'a> IncrementalAnalyzer<'a> {
     }
 
     pub fn analyze(&mut self) -> Result<IncrementalAnalysisResult> {
-        let mut reused = 0;
-        let mut reanalyzed = 0;
+        let mut reused = 0usize;
+        let mut reanalyzed = 0usize;
         let mut tu_analyses = Vec::new();
-        
-        let mut new_cache = IncrementalCache::new(self.analysis_version.clone());
-        let get_hash = |file_id: &FileId| -> String {
-            self.repo_discovery.files.iter()
-                .find(|f| &f.id == file_id)
-                .map(|f| f.content_hash.clone())
-                .unwrap_or_default()
-        };
-        
+
+        let store_ctx = TuStoreContext::new(self.repo_discovery, self.build_result.contexts.clone());
+        let store_dir = shard_dir(&self.repo.root);
+
         for tu in &self.build_result.translation_units {
-            let context = self.build_result.contexts.iter()
-                .find(|c| c.name == tu.context_name)
-                .cloned()
-                .unwrap_or_else(|| CompilationContext::new(&tu.context_name, "clang++"));
-                
-            let source_hash = get_hash(&tu.file_id);
-            
-            let content = std::fs::read_to_string(self.repo.root.join(&tu.source_path)).unwrap_or_default();
-            
-            let resolver = IncludeResolver::new(&self.repo.root)
-                .with_repo_discovery(self.repo_discovery)
-                .with_context(&context);
-                
-            let mut visited = std::collections::HashSet::new();
-            visited.insert(tu.file_id.clone());
-            
-            let mut queue = vec![(tu.file_id.clone(), tu.source_path.clone(), content.clone())];
-            let mut all_dest_ids = std::collections::HashSet::new();
-            
-            while let Some((curr_id, curr_path, curr_content)) = queue.pop() {
-                let edges = resolver.resolve_file_includes(curr_id.clone(), &curr_path, &curr_content);
-                for edge in edges {
-                    if let Some(dest_id) = edge.destination {
-                        if !visited.contains(&dest_id) {
-                            visited.insert(dest_id.clone());
-                            all_dest_ids.insert(dest_id.clone());
-                            
-                            // Load content for further resolution
-                            let dest_path = self.repo_discovery.files.iter()
-                                .find(|f| f.id == dest_id)
-                                .map(|f| f.path.clone());
-                                
-                            if let Some(path) = dest_path {
-                                if let Ok(dest_content) = std::fs::read_to_string(self.repo.root.join(&path)) {
-                                    queue.push((dest_id, path.clone(), dest_content));
-                                }
-                            }
-                        }
-                    }
+            let closure = compute_tu_closure(tu, &self.repo.root, &store_ctx, &self.analysis_version)?;
+
+            let analysis = if let Some(shard) = load_shard(&store_dir, tu.file_id) {
+                if shard.fingerprint == closure.fingerprint.combined_hash {
+                    reused += 1;
+                    shard.analysis
+                } else {
+                    reanalyzed += 1;
+                    let analysis = analyze_closure(tu, &closure);
+                    save_shard(&store_dir, &ShardCheckpoint {
+                        fingerprint: closure.fingerprint.combined_hash.clone(),
+                        analysis: analysis.clone(),
+                    })?;
+                    analysis
                 }
-            }
-                
-            let mut header_hashes = Vec::new();
-            for dest_id in all_dest_ids {
-                header_hashes.push((dest_id.clone(), get_hash(&dest_id)));
-            }
-            // Sort to ensure deterministic fingerprint
-            header_hashes.sort_by(|a, b| a.0.cmp(&b.0));
-            
-            let current_fingerprint = TuCacheFingerprint::compute(
-                &self.analysis_version,
-                &context,
-                &tu.file_id,
-                &source_hash,
-                &header_hashes,
-                None,
-            );
-            
-            let analysis = if let Some(cached_analysis) = self.cache.validate_and_get(&tu.file_id, &tu.context_name, &current_fingerprint) {
-                reused += 1;
-                cached_analysis.clone()
             } else {
                 reanalyzed += 1;
-                let analyzer = CppSemanticAnalyzer;
-                analyzer.analyze_tu(tu, &self.repo.root)?
+                let analysis = analyze_closure(tu, &closure);
+                save_shard(&store_dir, &ShardCheckpoint {
+                    fingerprint: closure.fingerprint.combined_hash.clone(),
+                    analysis: analysis.clone(),
+                })?;
+                analysis
             };
-            
-            tu_analyses.push(analysis.clone());
-            
-            new_cache.insert(TuCacheEntry {
-                tu_file_id: tu.file_id.clone(),
-                source_path: tu.source_path.clone(),
-                context_name: tu.context_name.clone(),
-                fingerprint: current_fingerprint,
-                analysis,
-            });
+
+            tu_analyses.push(analysis);
         }
-        
+
         let stats = IncrementalStats::calculate(reused, reanalyzed);
         let index_result = IndexResult::new(self.repo.root.clone(), tu_analyses);
-        
+
+        let fingerprints = StageFingerprints::from_inputs(
+            &self.repo.root,
+            self.repo_discovery,
+            &self.build_result.contexts,
+            &self.build_result.translation_units,
+        );
+
         Ok(IncrementalAnalysisResult {
             index_result,
-            cache: new_cache,
             stats,
+            fingerprints,
+            store_ctx,
         })
     }
 }
@@ -185,7 +123,7 @@ mod tests {
     fn setup_test_data() -> (Repository, RepositoryDiscoveryResult, BuildDiscoveryResult, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().canonicalize().unwrap();
-        
+
         let repo = Repository { root: root.clone() };
 
         // Create some files
@@ -199,7 +137,7 @@ mod tests {
             ownership_summary: HashMap::new(),
             policy_summary: HashMap::new(),
         };
-        
+
         let f_main = FileRecord {
             id: FileId::from_relative_path("main.cpp"),
             path: root.join("main.cpp"),
@@ -231,7 +169,7 @@ mod tests {
             optimization_policy: OptimizationPolicy::Optimizable,
         };
 
-        
+
         repo_discovery.files.push(f_main);
         repo_discovery.files.push(f_header);
         repo_discovery.files.push(f_utils);
@@ -241,7 +179,7 @@ mod tests {
             contexts: vec![],
             translation_units: vec![],
         };
-        
+
         let ctx = CompilationContext::new("test_ctx", "clang++");
         build_result.contexts.push(ctx.clone());
 
@@ -258,7 +196,7 @@ mod tests {
                 output: None,
             },
         };
-        
+
         let tu_utils = TranslationUnit {
             file_id: FileId::from_relative_path("utils.cpp"),
             source_path: root.join("utils.cpp"),
@@ -284,7 +222,7 @@ mod tests {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
         let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
         let result = analyzer.analyze().unwrap();
-        
+
         assert_eq!(result.stats.reused_tus, 0);
         assert_eq!(result.stats.reanalyzed_tus, 2);
         assert_eq!(result.stats.hit_rate, 0.0);
@@ -294,12 +232,11 @@ mod tests {
     fn test_warm_run() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
         let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
-        let result1 = analyzer1.analyze().unwrap();
+        analyzer1.analyze().unwrap();
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result)
-            .with_cache(result1.cache);
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
         let result2 = analyzer2.analyze().unwrap();
-        
+
         assert_eq!(result2.stats.reused_tus, 2);
         assert_eq!(result2.stats.reanalyzed_tus, 0);
         assert_eq!(result2.stats.hit_rate, 100.0);
@@ -307,36 +244,56 @@ mod tests {
 
     #[test]
     fn test_header_modification() {
-        let (repo, mut repo_discovery, build_result, _temp) = setup_test_data();
+        let (mut repo, mut repo_discovery, build_result, _temp) = setup_test_data();
         let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
-        let result1 = analyzer1.analyze().unwrap();
+        analyzer1.analyze().unwrap();
 
-        // modify header.h
+        // modify header.h on disk and update its recorded hash
+        std::fs::write(repo.root.join("header.h"), "void foo(); void bar();").unwrap();
         if let Some(f) = repo_discovery.files.iter_mut().find(|f| f.id == FileId::from_relative_path("header.h")) {
             f.content_hash = "hash_header2".to_string();
         }
+        repo = Repository { root: repo.root.clone() };
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result)
-            .with_cache(result1.cache);
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
         let result2 = analyzer2.analyze().unwrap();
-        
+
         // main.cpp should be reanalyzed (because it includes header.h), utils.cpp reused
         assert_eq!(result2.stats.reused_tus, 1);
         assert_eq!(result2.stats.reanalyzed_tus, 1);
     }
-    
+
     #[test]
     fn test_analysis_version_mismatch() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
         let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
-        let result1 = analyzer1.analyze().unwrap();
+        analyzer1.analyze().unwrap();
 
         let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result)
-            .with_cache(result1.cache)
             .with_analysis_version("new_version");
         let result2 = analyzer2.analyze().unwrap();
-        
+
         assert_eq!(result2.stats.reused_tus, 0);
         assert_eq!(result2.stats.reanalyzed_tus, 2);
+    }
+
+    #[test]
+    fn test_old_plain_shard_treated_stale() {
+        let (repo, repo_discovery, build_result, _temp) = setup_test_data();
+        let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let result = analyzer.analyze().unwrap();
+
+        // Overwrite one shard with the old plain TuAnalysis format.
+        let dir = shard_dir(&repo.root);
+        let tu_id = build_result.translation_units[0].file_id;
+        let analysis = result.index_result.tu_analyses.iter()
+            .find(|a| a.tu_file_id == tu_id).unwrap().clone();
+        std::fs::write(dir.join(format!("{}.json", tu_id.0)), serde_json::to_string(&analysis).unwrap()).unwrap();
+
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let result2 = analyzer2.analyze().unwrap();
+
+        assert_eq!(result2.stats.reused_tus, 1);
+        assert_eq!(result2.stats.reanalyzed_tus, 1);
     }
 }

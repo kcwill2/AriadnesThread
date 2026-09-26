@@ -5,8 +5,25 @@ use sha2::{Sha256, Digest};
 use anyhow::Result;
 use serde::Deserialize;
 
-use ariadne_cli::{get_or_build_reduced_model, handle_query_symbol, handle_query_deps, handle_query_users, handle_index};
+use ariadne_cli::{handle_query_symbol, handle_query_deps, handle_query_users, handle_index};
 use ariadne_graph::ReducedSemanticModel;
+
+/// The real reduced-stage fingerprint, so this fixture's reduced artifact
+/// carries byte-identical content no matter which test writes it last.
+fn reduced_fingerprint(repo_path: &std::path::Path) -> Result<String> {
+    let repo = ariadne_repo::Repository::locate(repo_path)?;
+    let discovery = repo.discover()?;
+    let build = ariadne_build::BuildDiscoverer::new(&repo.root)
+        .with_repo_discovery(&discovery)
+        .discover()?;
+    let fps = ariadne_index::StageFingerprints::from_inputs(
+        &repo.root,
+        &discovery,
+        &build.contexts,
+        &build.translation_units,
+    );
+    Ok(fps.reduced)
+}
 
 #[derive(Deserialize)]
 struct ReducedManifest {
@@ -35,7 +52,8 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
     let artifacts = ariadne_report::ArtifactManager::prepare_for_repo(&repo)?;
-    artifacts.save_reduced_artifacts(&model)?;
+    let reduced_fp = reduced_fingerprint(&repo_path)?;
+    artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
 
     // 1. Thing exists exactly once in the reduced model
     // Definition points to include/thing.h
@@ -97,7 +115,8 @@ fn test_m5_reduced_model_determinism() -> Result<()> {
         
         let repo = ariadne_repo::Repository::locate(&repo_path)?;
         let artifacts = ariadne_report::ArtifactManager::prepare_for_repo(&repo)?;
-        artifacts.save_reduced_artifacts(&model)?;
+    let reduced_fp = reduced_fingerprint(&repo_path)?;
+    artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
 
         let mut hashes = Vec::new();
         for file in &["symbols.bin", "edges.bin", "tu-usage.bin", "file-symbols.bin", "manifest.json"] {

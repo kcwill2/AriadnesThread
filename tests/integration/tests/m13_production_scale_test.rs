@@ -135,6 +135,7 @@ async fn test_m13_failure_recovery() {
             },
         },
         estimated_cost: 100,
+        context: None,
     };
 
     let mut queue = PrioritizedTuQueue::new(vec![t1]);
@@ -169,6 +170,7 @@ fn test_m13_straggler_scheduling() {
             },
         },
         estimated_cost: 50,
+        context: None,
     };
 
     let t_heavy = TuTask {
@@ -187,6 +189,7 @@ fn test_m13_straggler_scheduling() {
             },
         },
         estimated_cost: 10000,
+        context: None,
     };
 
     let mut queue = PrioritizedTuQueue::new(vec![t_light, t_heavy]);

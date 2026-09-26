@@ -236,6 +236,12 @@ pub enum Commands {
         /// Export standalone HTML report to path
         #[arg(long)]
         export: Option<PathBuf>,
+        /// Seconds between live-refresh re-hash checks of the repository
+        #[arg(long, default_value_t = 2)]
+        watch_interval: u64,
+        /// Disable the live-refresh watcher
+        #[arg(long, default_value_t = false)]
+        no_watch: bool,
     },
 }
 
@@ -333,9 +339,9 @@ pub fn run() -> Result<()> {
         Some(Commands::Optimize { repo }) => {
             handle_optimize(&repo)?;
         },
-        Some(Commands::Ui { repo, port, no_open, export }) => {
+        Some(Commands::Ui { repo, port, no_open, export, watch_interval, no_watch }) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(run_ui(repo, port, no_open, export))?;
+            rt.block_on(run_ui(repo, port, no_open, export, watch_interval, no_watch))?;
         },
     }
 

@@ -61,7 +61,7 @@ fn test_m1_repository_discovery_on_basic_fixture() {
     let temp_workspace = tempfile::tempdir().expect("Should create temp directory for artifact test");
     let artifact_mgr = ArtifactManager::init(temp_workspace.path()).expect("Should initialize artifact root");
     let artifact_dir = artifact_mgr
-        .save_repository_artifacts(&discovery)
+        .save_repository_artifacts(&discovery, "m1-test-fingerprint")
         .expect("Should save discovery artifacts");
 
     let files_json = artifact_dir.join("files.json");

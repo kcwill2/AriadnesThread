@@ -1020,6 +1020,7 @@
   </style>
 </head>
 <body>
+  <div id="refreshChip" style="display: none; position: fixed; top: 10px; right: 12px; z-index: 9998; padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--cyan); background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 0 8px var(--cyan-glow);">&#10227; refreshing&hellip;</div>
   <div id="loadingOverlay" style="display: none; position: fixed; inset: 0; background: var(--bg-surface); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; gap: 16px; transition: opacity 0.3s ease;">
     <div style="width: 300px; height: 6px; background: var(--bg-card); border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
       <div id="loadingProgress" style="width: 0%; height: 100%; background: var(--cyan); transition: width 0.3s ease; box-shadow: 0 0 8px var(--cyan-glow);"></div>
@@ -1594,6 +1595,8 @@
         const overlay = document.getElementById('loadingOverlay');
         if (overlay) overlay.style.display = 'flex';
 
+        let lastSeenRefresh = 0;
+
         const pollStatus = async () => {
           try {
             const statusRes = await fetch('/api/status');
@@ -1609,6 +1612,7 @@
               if (status.progress && status.progress.state === 'ready') {
                 graphData.repo_name = status.repo_name || 'Repository';
                 if (status.stats) graphData.stats = status.stats;
+                lastSeenRefresh = status.last_refresh || 0;
                 
                 updateProgress(90, 'Fetching graph endpoints...');
                 const [incRes, symRes, callRes, exportRes] = await Promise.all([
@@ -1629,6 +1633,7 @@
                 updateProgress(100, 'Rendering visualization... 100%');
                 applyLoadedData();
                 hideProgress();
+                startLiveRefresh();
                 return;
               }
               
@@ -1647,6 +1652,44 @@
         };
         pollStatus();
       }
+    }
+
+    function startLiveRefresh() {
+      const chip = document.getElementById('refreshChip');
+      const loop = async () => {
+        try {
+          const r = await fetch('/api/status');
+          if (r.ok) {
+            const s = await r.json();
+            if (chip) {
+              chip.style.display = s.rebuilding ? 'inline-block' : 'none';
+              if (s.stages && s.stages.length) {
+                chip.title = s.stages.map(st => st.stage + ': ' + st.reuse).join('\n');
+              }
+            }
+            if (s.last_refresh && s.last_refresh !== lastSeenRefresh) {
+              lastSeenRefresh = s.last_refresh;
+              if (s.stats) graphData.stats = s.stats;
+              const [incRes, symRes, callRes, exportRes] = await Promise.all([
+                fetch('/api/graph/include').catch(() => null),
+                fetch('/api/graph/symbol').catch(() => null),
+                fetch('/api/graph/call').catch(() => null),
+                fetch('/api/export').catch(() => null),
+              ]);
+              if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
+              if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
+              if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
+              if (exportRes && exportRes.ok) {
+                const p = await exportRes.json();
+                graphData.file_collateral = p.file_collateral || {};
+              }
+              applyLoadedData();
+            }
+          }
+        } catch (e) { /* transient fetch failure; retry on next tick */ }
+        setTimeout(loop, 2000);
+      };
+      setTimeout(loop, 2000);
     }
 
     function applyLoadedData() {

@@ -20,14 +20,26 @@ async fn test_e2e_ui_traversal_and_pathfinding() {
             port,
             true, // no open
             None,
+            2,
+            true, // no watch
         ).await;
         assert!(result.is_ok());
     });
     
-    // Give server time to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-    
     let base_url = format!("http://127.0.0.1:{}", port);
+    for _ in 0..120 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+        let Ok(resp) = reqwest::get(format!("{}/api/status", base_url)).await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let status: Value = resp.json().await.unwrap_or(Value::Null);
+        if status["progress"]["state"].as_str() == Some("ready") {
+            break;
+        }
+    }
     
     // 1. Get a valid node ID first
     let include_resp = reqwest::get(&format!("{}/api/graph/include", base_url))
@@ -105,6 +117,8 @@ async fn test_e2e_standalone_html_export_traversal() {
         0, // dummy port
         true,
         Some(export_file.clone()),
+        2,
+        true,
     ).await;
     
     assert!(result.is_ok(), "run_ui failed for export");

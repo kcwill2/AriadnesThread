@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -5,11 +6,14 @@ use anyhow::Result;
 
 use ariadne_build::BuildDiscoveryResult;
 use ariadne_graph::ReducedSemanticModel;
-use ariadne_index::{IndexResult, TuAnalysis};
+use ariadne_index::{IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::queue::PrioritizedTuQueue;
 use crate::shard::ShardedReducer;
+use crate::tu_store::{
+    compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint, TuStoreContext,
+};
 use crate::worker::{DefaultWorkerBackend, WorkerPool, WorkerPoolConfig};
 
 #[derive(Debug, Clone)]
@@ -21,6 +25,8 @@ pub struct ProductionAnalysisStats {
     pub total_semantic_edges: usize,
     pub peak_memory_bytes: u64,
     pub elapsed: Duration,
+    pub reused_tus: usize,
+    pub reanalyzed_tus: usize,
 }
 
 impl ProductionAnalysisStats {
@@ -112,31 +118,44 @@ impl<'a> ProductionAnalyzer<'a> {
         let total_tus = self.build_discovery.translation_units.len();
 
         let checkpoint_dir = self.checkpoint_dir.clone().unwrap_or_else(|| {
-            self.repo.root.join("artifacts").join("shards")
+            shard_dir(&self.repo.root)
         });
         fs::create_dir_all(&checkpoint_dir)?;
 
+        let store_ctx = TuStoreContext::new(self.repo_discovery, self.build_discovery.contexts.clone());
+
         let mut completed_analyses: Vec<TuAnalysis> = Vec::new();
         let mut remaining_tus = Vec::new();
+        let mut reused = 0usize;
+        let mut reanalyzed = 0usize;
+        // Fingerprints of queued TUs, used to envelope their results.
+        let mut pending_fingerprints: HashMap<u64, String> = HashMap::new();
 
-        // Check for existing checkpointed shards
+        // Check for existing checkpointed shards; a shard is reused only when
+        // its envelope fingerprint still matches the code on disk.
         for tu in &self.build_discovery.translation_units {
-            let shard_file = checkpoint_dir.join(format!("{}.json", tu.file_id.0));
-            if shard_file.exists() {
-                if let Ok(content) = fs::read_to_string(&shard_file) {
-                    if let Ok(analysis) = serde_json::from_str::<TuAnalysis>(&content) {
-                        completed_analyses.push(analysis);
-                        continue;
-                    }
+            let closure = compute_tu_closure(tu, &self.repo.root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
+            let fp = closure.fingerprint.combined_hash.clone();
+            if let Some(shard) = load_shard(&checkpoint_dir, tu.file_id) {
+                if shard.fingerprint == fp {
+                    completed_analyses.push(shard.analysis);
+                    reused += 1;
+                    continue;
                 }
             }
+            reanalyzed += 1;
+            pending_fingerprints.insert(tu.file_id.0, fp);
             remaining_tus.push(tu.clone());
         }
 
         let mut peak_mem: u64 = 0;
 
         if !remaining_tus.is_empty() {
-            let mut queue = PrioritizedTuQueue::from_translation_units(&self.repo.root, remaining_tus);
+            let mut queue = PrioritizedTuQueue::from_translation_units_with_context(
+                &self.repo.root,
+                remaining_tus,
+                Some(store_ctx.clone()),
+            );
             let pool = WorkerPool::new(
                 DefaultWorkerBackend,
                 WorkerPoolConfig {
@@ -150,10 +169,14 @@ impl<'a> ProductionAnalyzer<'a> {
             peak_mem = pool.peak_memory_bytes();
 
             for analysis in new_analyses {
-                let shard_file = checkpoint_dir.join(format!("{}.json", analysis.tu_file_id.0));
-                if let Ok(json) = serde_json::to_string_pretty(&analysis) {
-                    let _ = fs::write(&shard_file, json);
-                }
+                let fingerprint = pending_fingerprints
+                    .remove(&analysis.tu_file_id.0)
+                    .unwrap_or_default();
+                let checkpoint = ShardCheckpoint {
+                    fingerprint,
+                    analysis: analysis.clone(),
+                };
+                let _ = save_shard(&checkpoint_dir, &checkpoint);
                 completed_analyses.push(analysis);
             }
         }
@@ -176,6 +199,8 @@ impl<'a> ProductionAnalyzer<'a> {
             total_semantic_edges,
             peak_memory_bytes: peak_mem.max(1024 * 1024),
             elapsed,
+            reused_tus: reused,
+            reanalyzed_tus: reanalyzed,
         };
 
         Ok(ProductionAnalysisResult {
@@ -203,6 +228,8 @@ mod tests {
             total_semantic_edges: 12381442,
             peak_memory_bytes: 31 * 1024 * 1024 * 1024,
             elapsed: Duration::from_secs(522),
+            reused_tus: 0,
+            reanalyzed_tus: 8421,
         };
         let formatted = stats.format_m13_output();
         assert!(formatted.contains("Translation units: 8421"));
@@ -292,12 +319,15 @@ mod tests {
         // First run: cold run, creates checkpoints
         let res1 = analyzer.analyze().await.unwrap();
         assert_eq!(res1.stats.progress_completed, 2);
+        assert_eq!(res1.stats.reanalyzed_tus, 2);
         assert!(checkpoint_dir.join(format!("{}.json", f1_id.0)).exists());
         assert!(checkpoint_dir.join(format!("{}.json", f2_id.0)).exists());
 
         // Second run: should resume using checkpoints
         let res2 = analyzer.analyze().await.unwrap();
         assert_eq!(res2.stats.progress_completed, 2);
+        assert_eq!(res2.stats.reused_tus, 2);
+        assert_eq!(res2.stats.reanalyzed_tus, 0);
         assert_eq!(res1.reduced_model.symbols, res2.reduced_model.symbols);
     }
 }

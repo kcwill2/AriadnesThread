@@ -1,29 +1,23 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use ariadne_repo::Repository;
-use ariadne_build::BuildDiscoverer;
-use ariadne_graph::build_include_graph;
 use ariadne_report::ArtifactManager;
-use crate::commands::index::get_or_build_reduced_model;
+use ariadne_pipeline::Pipeline;
 
 pub fn handle_plan(repo_path: &PathBuf) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
-    let repository = Repository::locate(repo_path)?;
-    let discovery = repository.discover()?;
+    let mut pipeline = Pipeline::new(repo_path, None)?;
+    let (graph, _closures) = pipeline.get_or_build_include_graph()?;
+    let model = pipeline.get_or_build_reduced()?;
+    let tu_file_ids: Vec<_> = pipeline.build.translation_units.iter().map(|tu| tu.file_id).collect();
 
-    let build_discoverer = BuildDiscoverer::new(&repository.root).with_repo_discovery(&discovery);
-    let build_result = build_discoverer.discover()?;
-    let tu_file_ids: Vec<_> = build_result.translation_units.iter().map(|tu| tu.file_id).collect();
-
-    let (_repository, graph, _closures, _report) = build_include_graph(repo_path)?;
-    let (_, model) = get_or_build_reduced_model(repo_path)?;
-
-    let planner = ariadne_cluster::planner::OptimizationPlanner::new(&graph, &model, &discovery.files, &tu_file_ids);
+    let planner = ariadne_cluster::planner::OptimizationPlanner::new(&graph, &model, &pipeline.discovery.files, &tu_file_ids);
     let plans = planner.plan();
 
-    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-    artifacts.save_plan_artifacts(&repository.root, &plans)?;
+    pipeline.manager.save_plan_artifacts(&pipeline.repo.root, &plans, &pipeline.fps.plan)?;
 
     println!("Optimization plans: {}", plans.len());
+    println!();
+    println!("{}", pipeline.stats.format_summary());
     println!();
     for plan in &plans {
         println!("{}", plan.format_detail());

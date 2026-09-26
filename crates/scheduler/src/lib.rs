@@ -12,6 +12,9 @@ pub use worker::*;
 pub mod shard;
 pub use shard::*;
 
+pub mod tu_store;
+pub use tu_store::*;
+
 pub mod engine;
 pub use engine::*;
 

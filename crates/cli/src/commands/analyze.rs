@@ -4,8 +4,7 @@ use ariadne_repo::Repository;
 use ariadne_build::BuildDiscoverer;
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_graph::LoadAnalyzer;
-use ariadne_graph::build_include_graph;
-use crate::commands::index::get_or_build_reduced_model;
+use ariadne_pipeline::Pipeline;
 
 pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::IncrementalAnalysisResult> {
     let repo = Repository::locate(repo_path)?;
@@ -24,31 +23,45 @@ pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::Incremen
 }
 
 pub fn handle_production_analyze(repo_path: &PathBuf, workers: Option<usize>) -> Result<ariadne_scheduler::ProductionAnalysisResult> {
-    let repo = Repository::locate(repo_path)?;
-    let repo_discovery = repo.discover()?;
-    let build_discovery = BuildDiscoverer::new(&repo.root).with_repo_discovery(&repo_discovery).discover()?;
-
     let num_workers = workers.unwrap_or(4);
-    let analyzer = ariadne_scheduler::ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-        .with_workers(num_workers);
+    let mut pipeline = Pipeline::new(repo_path, Some(num_workers))?;
+    let index_result = pipeline.get_or_build_index()?;
+    let reduced_model = pipeline.get_or_build_reduced()?;
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    let result = rt.block_on(analyzer.analyze())?;
+    // When the index stage actually ran through the worker pool, report its
+    // real measured stats. When it was loaded/reused from artifacts, no work
+    // was measured: report honest zeros rather than invented numbers.
+    let stats = match pipeline.production_stats.clone() {
+        Some(stats) => stats,
+        None => ariadne_scheduler::ProductionAnalysisStats {
+            total_tus: index_result.tu_analyses.len(),
+            num_workers,
+            progress_completed: 0,
+            progress_total: index_result.tu_analyses.len(),
+            total_semantic_edges: reduced_model.edges.len(),
+            peak_memory_bytes: 0,
+            elapsed: std::time::Duration::ZERO,
+            reused_tus: pipeline.stats.reused_tus,
+            reanalyzed_tus: pipeline.stats.reanalyzed_tus,
+        },
+    };
 
-    let manager = ArtifactManager::prepare_for_repo(&repo)?;
-    manager.save_reduced_artifacts(&result.reduced_model)?;
-    manager.save_index_artifacts(&result.index_result)?;
+    println!("{}", stats.format_m13_output());
+    println!();
+    println!("{}", pipeline.stats.format_summary());
 
-    println!("{}", result.stats.format_m13_output());
-
-    Ok(result)
+    Ok(ariadne_scheduler::ProductionAnalysisResult {
+        reduced_model,
+        index_result,
+        stats,
+    })
 }
 
 pub fn handle_analyze_load(repo_path: &PathBuf, symbol: Option<&str>, file: Option<&Path>) -> Result<()> {
-    let (repository, graph, closures, _report) = build_include_graph(repo_path)?;
-    let (_, model) = get_or_build_reduced_model(repo_path)?;
+    let mut pipeline = Pipeline::new(repo_path, None)?;
+    let (graph, closures) = pipeline.get_or_build_include_graph()?;
+    let model = pipeline.get_or_build_reduced()?;
+    let repository = pipeline.repo.clone();
 
     let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
     let mut load_report = LoadReport {
@@ -56,6 +69,12 @@ pub fn handle_analyze_load(repo_path: &PathBuf, symbol: Option<&str>, file: Opti
         symbol_metrics: Vec::new(),
         file_metrics: Vec::new(),
     };
+
+    // Targeted queries produce a single-metric partial report. Persisting it
+    // under the full-stage fingerprint would poison the load stage that
+    // Pipeline::ensure_load loads as authoritative, silently degrading the
+    // UI collateral heatmap/hotspots. Only the full-report branch may save.
+    let targeted = symbol.is_some() || file.is_some();
 
     if let Some(sym_name) = symbol {
         let metric = analyzer.analyze_symbol_load(sym_name)?;
@@ -85,15 +104,21 @@ pub fn handle_analyze_load(repo_path: &PathBuf, symbol: Option<&str>, file: Opti
         println!("Analyzed {} files.", load_report.file_metrics.len());
     }
 
-    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-    artifacts.save_load_artifacts(&load_report)?;
+    if !targeted {
+        let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+        artifacts.save_load_artifacts(&load_report, &pipeline.fps.load)?;
+    }
+
+    println!();
+    println!("{}", pipeline.stats.format_summary());
 
     Ok(())
 }
 
 pub fn handle_explain_load(repo_path: &PathBuf, symbol: Option<&str>, file: Option<&Path>, source: Option<&str>) -> Result<()> {
-    let (_repository, graph, closures, _report) = build_include_graph(repo_path)?;
-    let (_, model) = get_or_build_reduced_model(repo_path)?;
+    let mut pipeline = Pipeline::new(repo_path, None)?;
+    let (graph, closures) = pipeline.get_or_build_include_graph()?;
+    let model = pipeline.get_or_build_reduced()?;
 
     let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
 

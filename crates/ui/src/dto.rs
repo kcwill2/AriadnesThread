@@ -253,3 +253,20 @@ pub fn build_call_elements(callgraph: &ariadne_graph::CallGraph) -> Vec<Cytoscap
     }
     elements
 }
+
+/// Per-stage persistence reuse reported by the artifact pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageInfo {
+    pub stage: String,
+    pub reuse: String,
+}
+
+/// Live persistence/watcher status surfaced through `/api/status`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StageStatus {
+    pub stages: Vec<StageInfo>,
+    pub last_refresh: Option<u64>,
+    pub rebuilding: bool,
+    pub reused_tus: usize,
+    pub reanalyzed_tus: usize,
+}

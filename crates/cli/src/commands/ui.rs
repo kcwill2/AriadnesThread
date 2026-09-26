@@ -1,186 +1,317 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
-use ariadne_graph::{build_include_graph, ReducedSemanticModel};
-use crate::commands::index::handle_index;
+use ariadne_index::StageFingerprints;
+use ariadne_pipeline::{Pipeline, ProgressEvent};
+use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 
-pub async fn run_ui(repo_opt: Option<PathBuf>, port: u16, no_open: bool, export_opt: Option<PathBuf>) -> Result<()> {
-    let repo_path = repo_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
-    
-    if let Some(path) = export_opt {
-        // Synchronous run
-        let (repository, include_graph, closures, report) = build_include_graph(&repo_path)?;
-        let index_result = handle_index(&repo_path)?;
-        let reduced_model = ReducedSemanticModel::reduce(&index_result);
-        
-        crate::commands::progress::print_progress(0, 1, "Building call graph", "phase");
-        let call_graph = ariadne_graph::CallGraph::build_from_index(&index_result, &reduced_model);
-        crate::commands::progress::print_progress(1, 1, "Building call graph", "phase");
-        
-        let cycles = include_graph.detect_cycles();
-        let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
-        
-        let analyzer = ariadne_graph::LoadAnalyzer::with_closures(&include_graph, &reduced_model, closures);
-        let mut file_collateral = std::collections::HashMap::new();
-        let total_files = include_graph.file_paths.len();
-        for (i, (file_id, path)) in include_graph.file_paths.iter().enumerate() {
-            crate::commands::progress::print_progress(i, total_files, "Analyzing collateral", "files");
-            if let Ok(metric) = analyzer.analyze_file_load(path) {
-                let mut collat = std::collections::HashMap::new();
-                for src in metric.collateral_sources {
-                    if src.symbol_count > 0 {
-                        collat.insert(src.file_id.0.to_string(), src.symbol_count);
-                    }
-                }
-                if !collat.is_empty() {
-                    file_collateral.insert(file_id.0.to_string(), collat);
-                }
+pub struct UiBuildResult {
+    pub include_graph: ariadne_graph::IncludeGraph,
+    pub reduced_model: ariadne_graph::ReducedSemanticModel,
+    pub call_graph: ariadne_graph::CallGraph,
+    pub payload: GraphExportPayload,
+    pub status: StageStatus,
+    pub fps: StageFingerprints,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn stage_status_from_pipeline(pipeline: &Pipeline) -> StageStatus {
+    StageStatus {
+        stages: pipeline
+            .stats
+            .stages
+            .iter()
+            .map(|s| StageInfo {
+                stage: s.stage.clone(),
+                reuse: s.reuse.as_str().to_string(),
+            })
+            .collect(),
+        last_refresh: Some(now_ms()),
+        rebuilding: false,
+        reused_tus: pipeline.stats.reused_tus,
+        reanalyzed_tus: pipeline.stats.reanalyzed_tus,
+    }
+}
+
+type ProgressFn = Arc<dyn Fn(usize, &str, &str) + Send + Sync>;
+
+/// Run every pipeline stage (loading artifact-backed stages when their input
+/// fingerprint is fresh) and assemble the UI payload from the results.
+fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
+    let cb_progress = progress.clone();
+    let progress_cb = move |event: &ProgressEvent| match event {
+        ProgressEvent::TuIndex { done, total } => {
+            let percent = 20 + if *total > 0 { 35 * done / total } else { 35 };
+            (cb_progress)(percent, "[2/5] Indexing translation units...", &format!("{}/{} TUs", done, total));
+        }
+        ProgressEvent::CollateralFile { done, total } => {
+            let percent = 80 + if *total > 0 { 15 * done / total } else { 15 };
+            (cb_progress)(percent, "[5/5] Analyzing collateral...", &format!("{}/{} files", done, total));
+        }
+    };
+    let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
+
+    progress(5, "[1/5] Loading artifacts...", "Hashing sources");
+    pipeline.ensure_include_graph()?;
+    progress(10, "[1/5] Include graph...", "Graph ready");
+
+    progress(20, "[2/5] Indexing translation units...", "Parsing sources");
+    pipeline.ensure_index()?;
+    progress(55, "[2/5] Indexing translation units...", "Index complete");
+
+    progress(60, "[3/5] Reducing semantic model...", "Deduplicating");
+    let reduced_model = pipeline.get_or_build_reduced()?;
+    progress(65, "[3/5] Reducing semantic model...", "Model reduced");
+
+    progress(70, "[4/5] Building call graph...", "Constructing");
+    pipeline.ensure_callgraph()?;
+
+    progress(80, "[5/5] Analyzing collateral...", "Load analysis");
+    pipeline.ensure_load()?;
+    progress(95, "[5/5] Analyzing collateral...", "Mapping collateral");
+
+    let graph = pipeline.get_or_build_include_graph()?;
+    let (include_graph, closures) = graph;
+    let call_graph = pipeline.get_or_build_callgraph()?;
+    let load_report = pipeline.get_or_build_load()?;
+
+    let report = include_graph.generate_report();
+    let cycles = include_graph.detect_cycles();
+    let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
+
+    let path_to_id: HashMap<PathBuf, u64> = include_graph
+        .file_paths
+        .iter()
+        .map(|(id, path)| (path.clone(), id.0))
+        .collect();
+    let mut file_collateral: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    for metric in &load_report.file_metrics {
+        let Some(path) = metric.target_file.as_ref().and_then(|p| path_to_id.get(p)) else {
+            continue;
+        };
+        let mut collat = HashMap::new();
+        for src in &metric.collateral_sources {
+            if src.symbol_count > 0 {
+                collat.insert(src.file_id.0.to_string(), src.symbol_count);
             }
         }
-        crate::commands::progress::print_progress(total_files, total_files, "Analyzing collateral", "files");
+        if !collat.is_empty() {
+            file_collateral.insert(path.to_string(), collat);
+        }
+    }
 
-        let payload = ariadne_ui::GraphExportPayload {
-            repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-            include_graph: include_elements,
-            symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
-            call_graph: ariadne_ui::build_call_elements(&call_graph),
-            stats: ariadne_ui::SummaryStats {
-                total_files: include_graph.file_paths.len(),
-                total_symbols: reduced_model.symbols.len(),
-                total_calls: call_graph.edges.len(),
-                cycle_count: report.cycle_count,
-            },
-            file_collateral,
-        };
-        
-        ariadne_ui::export_standalone_html(&payload, "", &path)?;
+    let payload = GraphExportPayload {
+        repo_name: pipeline
+            .repo
+            .root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        include_graph: include_elements,
+        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
+        call_graph: ariadne_ui::build_call_elements(&call_graph),
+        stats: ariadne_ui::SummaryStats {
+            total_files: include_graph.file_paths.len(),
+            total_symbols: reduced_model.symbols.len(),
+            total_calls: call_graph.edges.len(),
+            cycle_count: report.cycle_count,
+        },
+        file_collateral,
+    };
+
+    let status = stage_status_from_pipeline(&pipeline);
+    Ok(UiBuildResult {
+        include_graph,
+        reduced_model,
+        call_graph,
+        payload,
+        status,
+        fps: pipeline.fps.clone(),
+    })
+}
+
+/// Swap a freshly built snapshot into live UI state. The stale payload keeps
+/// serving every request until each slot is replaced.
+fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
+    let fps = out.fps.clone();
+    *state.include_graph.write().unwrap() = Some(out.include_graph);
+    *state.reduced_model.write().unwrap() = Some(out.reduced_model);
+    *state.call_graph.write().unwrap() = Some(out.call_graph);
+    *state.payload.write().unwrap() = Some(out.payload);
+    *state.stage_status.write().unwrap() = out.status;
+    let mut p = state.progress.write().unwrap();
+    p.state = "ready".to_string();
+    p.phase = "Complete".to_string();
+    p.message = "Ready".to_string();
+    p.percent = 100;
+    fps
+}
+
+/// Polling re-hash watcher: cheaply re-derives stage fingerprints on an
+/// interval; on any change it rebuilds stale stages in the background and
+/// atomically swaps the UI payload. Queued detections collapse into one pass.
+fn spawn_watcher(
+    state: Arc<UiState>,
+    repo_path: PathBuf,
+    interval: Duration,
+    initial_fps: StageFingerprints,
+) {
+    let rebuilding = Arc::new(AtomicBool::new(false));
+    let current_fps = Arc::new(RwLock::new(initial_fps));
+
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            if rebuilding.swap(true, Ordering::SeqCst) {
+                continue;
+            }
+            let state = state.clone();
+            let repo = repo_path.clone();
+            let fps_lock = current_fps.clone();
+            let rebuilding = rebuilding.clone();
+            let _handle = tokio::task::spawn_blocking(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // Pure, artifact-free freshness check: re-hash inputs only.
+                    let fresh_fps = match Pipeline::rehash_inputs(&repo) {
+                        Ok(fps) => fps,
+                        Err(e) => {
+                            tracing::warn!("UI freshness check failed: {e}");
+                            return;
+                        }
+                    };
+                    if fresh_fps == *fps_lock.read().unwrap() {
+                        return;
+                    }
+                    state.stage_status.write().unwrap().rebuilding = true;
+                    // Exactly one pipeline build serves the new fingerprints
+                    // and the payload; its own fps replace the rehashed ones.
+                    let quiet: ProgressFn = Arc::new(|_percent, _phase, _message| ());
+                    match build_ui_payload(&repo, quiet) {
+                        Ok(out) => {
+                            let new_fps = swap_into_state(&state, out);
+                            *fps_lock.write().unwrap() = new_fps;
+                        }
+                        Err(e) => {
+                            tracing::warn!("UI live refresh failed: {e}");
+                        }
+                    }
+                    state.stage_status.write().unwrap().rebuilding = false;
+                }));
+                let _ = outcome;
+                rebuilding.store(false, Ordering::SeqCst);
+            });
+        }
+    });
+}
+
+pub async fn run_ui(
+    repo_opt: Option<PathBuf>,
+    port: u16,
+    no_open: bool,
+    export_opt: Option<PathBuf>,
+    watch_interval: u64,
+    no_watch: bool,
+) -> Result<()> {
+    let repo_path = repo_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    if let Some(path) = export_opt {
+        let export_progress: ProgressFn = Arc::new(|percent, phase, message| {
+            println!("[{:>3}%] {} {}", percent, phase, message);
+        });
+        let out = build_ui_payload(&repo_path, export_progress)?;
+        println!(
+            "{} TUs reused, {} reanalyzed; stages: {}",
+            out.status.reused_tus,
+            out.status.reanalyzed_tus,
+            out.status
+                .stages
+                .iter()
+                .map(|s| format!("{}:{}", s.stage, s.reuse))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        ariadne_ui::export_standalone_html(&out.payload, "", &path)?;
         println!("Report exported successfully to {}", path.display());
     } else {
-        // Async run
-        let state = std::sync::Arc::new(ariadne_ui::UiState::new_loading(repo_path.clone()));
-        
+        let state = Arc::new(UiState::new_loading(repo_path.clone()));
+
         let app = ariadne_ui::build_router(state.clone());
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-        
+
         println!("AriadnesThread Visualizer loading at http://localhost:{}", port);
         if !no_open {
             let _ = open::that(format!("http://localhost:{}", port));
         }
 
-        let state_clone = state.clone();
-        let repo_path_clone = repo_path.clone();
-        
-        tokio::spawn(async move {
-            let update_progress = |phase: &str, msg: &str, percent: usize| {
-                let mut p = state_clone.progress.write().unwrap();
+        let boot_state = state.clone();
+        let boot_repo = repo_path.clone();
+        let (fps_tx, fps_rx) = tokio::sync::oneshot::channel();
+
+        let boot_progress: ProgressFn = {
+            let st = boot_state.clone();
+            Arc::new(move |percent, phase, message| {
+                let mut p = st.progress.write().unwrap();
+                p.state = "loading".to_string();
                 p.phase = phase.to_string();
-                p.message = msg.to_string();
+                p.message = message.to_string();
                 p.percent = percent;
-            };
+            })
+        };
 
-            update_progress("[1/4] Discovering include graph...", "Parsing includes", 10);
-            let (repository, include_graph, closures, report) = match build_include_graph(&repo_path_clone) {
-                Ok(res) => res,
+        tokio::task::spawn_blocking(move || {
+            match build_ui_payload(&boot_repo, boot_progress) {
+                Ok(out) => {
+                    let fps = swap_into_state(&boot_state, out);
+                    let _ = fps_tx.send(Some(fps));
+                }
                 Err(e) => {
-                    let mut p = state_clone.progress.write().unwrap();
+                    let mut p = boot_state.progress.write().unwrap();
                     p.state = "error".to_string();
                     p.message = e.to_string();
-                    return;
+                    let _ = fps_tx.send(None);
                 }
-            };
-            
-            update_progress("[2/4] Indexing translation units...", "Building index", 20);
-            let index_result = match handle_index(&repo_path_clone) {
-                Ok(res) => res,
-                Err(e) => {
-                    let mut p = state_clone.progress.write().unwrap();
-                    p.state = "error".to_string();
-                    p.message = e.to_string();
-                    return;
-                }
-            };
-            
-            update_progress("[2/4] Indexing translation units...", "Reducing semantic model", 60);
-            let reduced_model = ReducedSemanticModel::reduce(&index_result);
-            
-            update_progress("[3/4] Building call graph...", "Constructing call graph", 70);
-            let total_tus = index_result.tu_analyses.len();
-            crate::commands::progress::print_progress(0, total_tus, "Building call graph", "TUs");
-            let call_graph = ariadne_graph::CallGraph::build_from_index(&index_result, &reduced_model);
-            crate::commands::progress::print_progress(total_tus, total_tus, "Building call graph", "TUs");
-            update_progress("[3/4] Building call graph...", "Done constructing call graph", 80);
-            
-            update_progress("[4/4] Analyzing collateral...", "Detecting cycles", 85);
-            let cycles = include_graph.detect_cycles();
-            let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
-            
-            let analyzer = ariadne_graph::LoadAnalyzer::with_closures(&include_graph, &reduced_model, closures);
-            let mut file_collateral = std::collections::HashMap::new();
-            let total_files = include_graph.file_paths.len();
-            for (i, (file_id, path)) in include_graph.file_paths.iter().enumerate() {
-                if i % 10 == 0 {
-                    let percent = 85 + (10 * i / total_files.max(1));
-                    update_progress("[4/4] Analyzing collateral...", &format!("File {}/{}", i, total_files), percent);
-                }
-                crate::commands::progress::print_progress(i, total_files, "Analyzing collateral", "files");
-                if let Ok(metric) = analyzer.analyze_file_load(path) {
-                    let mut collat = std::collections::HashMap::new();
-                    for src in metric.collateral_sources {
-                        if src.symbol_count > 0 {
-                            collat.insert(src.file_id.0.to_string(), src.symbol_count);
-                        }
-                    }
-                    if !collat.is_empty() {
-                        file_collateral.insert(file_id.0.to_string(), collat);
-                    }
-                }
-            }
-            crate::commands::progress::print_progress(total_files, total_files, "Analyzing collateral", "files");
-            update_progress("[4/4] Analyzing collateral...", "Done analyzing", 95);
-
-            let payload = ariadne_ui::GraphExportPayload {
-                repo_name: repository.root.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                include_graph: include_elements,
-                symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
-                call_graph: ariadne_ui::build_call_elements(&call_graph),
-                stats: ariadne_ui::SummaryStats {
-                    total_files: include_graph.file_paths.len(),
-                    total_symbols: reduced_model.symbols.len(),
-                    total_calls: call_graph.edges.len(),
-                    cycle_count: report.cycle_count,
-                },
-                file_collateral,
-            };
-            
-            {
-                *state_clone.include_graph.write().unwrap() = Some(include_graph);
-                *state_clone.reduced_model.write().unwrap() = Some(reduced_model);
-                *state_clone.call_graph.write().unwrap() = Some(call_graph);
-                *state_clone.payload.write().unwrap() = Some(payload);
-                let mut p = state_clone.progress.write().unwrap();
-                p.state = "ready".to_string();
-                p.phase = "Complete".to_string();
-                p.message = "Ready".to_string();
-                p.percent = 100;
             }
         });
 
+        if !no_watch {
+            tokio::spawn(async move {
+                if let Ok(Some(fps)) = fps_rx.await {
+                    spawn_watcher(state, repo_path, Duration::from_secs(watch_interval.max(1)), fps);
+                }
+            });
+        }
+
         axum::serve(listener, app).await?;
     }
-    
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_progress_calls_present() {
+    fn test_ui_is_artifact_first() {
         let ui_code = include_str!("ui.rs");
-        assert!(ui_code.contains("print_progress(0, total_tus, \"Building call graph\", \"TUs\")"));
-        assert!(ui_code.contains("print_progress(total_tus, total_tus, \"Building call graph\", \"TUs\")"));
-        assert!(ui_code.contains("print_progress(i, total_files, \"Analyzing collateral\", \"files\")"));
-        assert!(ui_code.contains("print_progress(total_files, total_files, \"Analyzing collateral\", \"files\")"));
-        
+        assert!(ui_code.contains("Pipeline::new"));
+        assert!(ui_code.contains("ensure_include_graph"));
+        assert!(ui_code.contains("get_or_build_callgraph"));
+        assert!(ui_code.contains("get_or_build_load"));
+        assert!(ui_code.contains("spawn_watcher"));
+
         let index_code = include_str!("index.rs");
-        assert!(index_code.contains("print_progress(i, total_tus, \"Indexing translation units\", \"TUs\")"));
+        assert!(index_code.contains("ProgressEvent::TuIndex"));
+        assert!(index_code.contains("print_progress"));
     }
 }

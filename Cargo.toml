@@ -11,6 +11,7 @@ members = [
     "crates/transform",
     "crates/validate",
     "crates/report",
+    "crates/pipeline",
     "tools/clang-worker",
     "tests/integration",
     "crates/ui",

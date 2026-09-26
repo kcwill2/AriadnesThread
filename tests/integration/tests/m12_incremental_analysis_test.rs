@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 use ariadne_cli::handle_analyze;
@@ -55,11 +54,24 @@ fn test_m12_incremental_analysis_cold_run() {
     assert_eq!(result.stats.reanalyzed_tus, 2);
     assert_eq!(result.stats.hit_rate, 0.0);
     
-    // Check artifacts
-    let cache_dir = root.join("artifacts").join("cache");
-    assert!(cache_dir.join("manifest.json").exists());
-    assert!(cache_dir.join("cache.bin").exists());
-    assert!(cache_dir.join("cache.json").exists());
+    // Check artifacts: unified shard store holds one fingerprinted envelope per TU
+    let shards_dir = root.join("artifacts").join("shards");
+    let shard_count = fs::read_dir(&shards_dir)
+        .expect("shard store directory should exist")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+        .count();
+    assert_eq!(shard_count, 2, "one shard per translation unit");
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("artifacts").join("index").join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !manifest["input_fingerprint"].as_str().unwrap_or_default().is_empty(),
+        "index manifest must carry an input fingerprint"
+    );
+    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "1.0.0");
 }
 
 #[test]

@@ -57,7 +57,7 @@ fn test_m2_build_discovery_determinism_and_contexts() {
 
     // Test artifact generation
     let artifact_mgr = ArtifactManager::init(root).expect("ArtifactManager init failed");
-    let ctx_dir = artifact_mgr.save_build_context_artifacts(&res1).expect("save_build_context_artifacts failed");
+    let ctx_dir = artifact_mgr.save_build_context_artifacts(&res1, "m2-test-fingerprint").expect("save_build_context_artifacts failed");
 
     assert!(ctx_dir.join("contexts.json").exists(), "contexts.json must exist");
     assert!(ctx_dir.join("commands.json").exists(), "commands.json must exist");

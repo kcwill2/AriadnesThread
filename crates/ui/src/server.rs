@@ -22,6 +22,7 @@ pub struct UiState {
     pub call_graph: std::sync::RwLock<Option<ariadne_graph::CallGraph>>,
     pub payload: std::sync::RwLock<Option<GraphExportPayload>>,
     pub progress: std::sync::RwLock<crate::dto::ServerProgress>,
+    pub stage_status: std::sync::RwLock<crate::dto::StageStatus>,
 }
 
 impl UiState {
@@ -38,6 +39,7 @@ impl UiState {
                 percent: 0,
                 message: "Server started".to_string(),
             }),
+            stage_status: std::sync::RwLock::new(crate::dto::StageStatus::default()),
         }
     }
 
@@ -60,6 +62,7 @@ impl UiState {
                 percent: 100,
                 message: "Ready".to_string(),
             }),
+            stage_status: std::sync::RwLock::new(crate::dto::StageStatus::default()),
         }
     }
 }
@@ -98,16 +101,27 @@ pub struct StatusResponse {
     pub repo_name: Option<String>,
     pub stats: Option<crate::dto::SummaryStats>,
     pub progress: crate::dto::ServerProgress,
+    pub stages: Vec<crate::dto::StageInfo>,
+    pub last_refresh: Option<u64>,
+    pub rebuilding: bool,
+    pub reused_tus: usize,
+    pub reanalyzed_tus: usize,
 }
 
 async fn api_status(State(state): State<Arc<UiState>>) -> Json<StatusResponse> {
     let payload = state.payload.read().unwrap();
     let progress = state.progress.read().unwrap().clone();
-    
+    let stage_status = state.stage_status.read().unwrap().clone();
+
     Json(StatusResponse {
         repo_name: payload.as_ref().map(|p| p.repo_name.clone()),
         stats: payload.as_ref().map(|p| p.stats.clone()),
         progress,
+        stages: stage_status.stages,
+        last_refresh: stage_status.last_refresh,
+        rebuilding: stage_status.rebuilding,
+        reused_tus: stage_status.reused_tus,
+        reanalyzed_tus: stage_status.reanalyzed_tus,
     })
 }
 

@@ -1,4 +1,0 @@
-{
-  "name": "tdd-workflow",
-  "description": "TDD workflow plugin containing orchestrator, implementer, and tool-runner sub-agents"
-}

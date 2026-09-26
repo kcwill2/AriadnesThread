@@ -94,13 +94,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use anyhow::Result;
 
-use ariadne_build::{BuildDiscoverer, BuildMeasurer};
+use ariadne_build::BuildMeasurer;
 use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_cluster::plan::RiskLevel;
 use ariadne_graph::LoadAnalyzer;
-use ariadne_repo::Repository;
-use ariadne_report::ArtifactManager;
-use ariadne_scheduler::ProductionAnalyzer;
+use ariadne_pipeline::Pipeline;
 use ariadne_transform::{HeaderExtractor, IncludeRewriter};
 use ariadne_validate::{TierValidator, TransactionApplier, ValidationStatus};
 
@@ -116,10 +114,10 @@ impl EndToEndOptimizer {
     }
 
     pub fn optimize(&self) -> Result<OptimizationReport> {
-        let repo = Repository::locate(&self.repo_path)?;
-        let repo_discovery = repo.discover()?;
-        let build_discoverer = BuildDiscoverer::new(&repo.root).with_repo_discovery(&repo_discovery);
-        let build_discovery = build_discoverer.discover()?;
+        let mut pipeline = Pipeline::new(&self.repo_path, Some(4))?;
+        let repo = pipeline.repo.clone();
+        let repo_discovery = pipeline.discovery.clone();
+        let build_discovery = pipeline.build.clone();
 
         let total_files = repo_discovery.files.len();
         let total_tus = build_discovery.translation_units.len();
@@ -128,15 +126,11 @@ impl EndToEndOptimizer {
         let measurer = BuildMeasurer::new(repo.root.clone());
         let before_measurement = measurer.measure_all(&build_discovery.translation_units)?;
 
-        // 2. Include analysis
-        let (_repo_copy, graph, closures, _report) = crate::build_include_graph(&self.repo_path)?;
+        // 2. Include analysis (fingerprint-checked, loaded when fresh)
+        let (graph, closures) = pipeline.get_or_build_include_graph()?;
 
-        // 3. Semantic analysis & reduction
-        let prod_analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-            .with_workers(4);
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-        let prod_result = rt.block_on(prod_analyzer.analyze())?;
-        let model = prod_result.reduced_model;
+        // 3. Semantic analysis & reduction (fingerprint-checked, TU-level reuse)
+        let model = pipeline.get_or_build_reduced()?;
 
         let total_symbols = model.symbols.len();
         let total_semantic_edges = model.edges.len();
@@ -277,12 +271,13 @@ impl EndToEndOptimizer {
         };
 
         // Save optimization artifacts
-        let _artifacts = ArtifactManager::prepare_for_repo(&repo)?;
         let opt_dir = repo.root.join("artifacts").join("optimize");
         fs::create_dir_all(&opt_dir)?;
         if let Ok(json) = serde_json::to_string_pretty(&report) {
             let _ = fs::write(opt_dir.join("report.json"), json);
         }
+
+        println!("{}", pipeline.stats.format_summary());
 
         Ok(report)
     }

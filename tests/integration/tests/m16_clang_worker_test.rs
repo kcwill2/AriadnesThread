@@ -40,7 +40,7 @@ fn fixture_root() -> PathBuf {
 async fn test_clang_worker_backend_fallback_succeeds() {
     let root = fixture_root();
     let tasks = vec![
-        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10 },
+        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None },
     ];
     let mut queue = PrioritizedTuQueue::new(tasks);
     let pool = WorkerPool::new(
@@ -58,12 +58,12 @@ async fn test_clang_worker_backend_fallback_succeeds() {
 async fn test_clang_and_default_backends_produce_consistent_results() {
     let root = fixture_root();
 
-    let tasks_clang = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10 }];
+    let tasks_clang = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None }];
     let mut queue_clang = PrioritizedTuQueue::new(tasks_clang);
     let pool_clang = WorkerPool::new(ClangWorkerBackend, WorkerPoolConfig::default());
     let clang_results = pool_clang.run(&root, &mut queue_clang).await.unwrap();
 
-    let tasks_default = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10 }];
+    let tasks_default = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None }];
     let mut queue_default = PrioritizedTuQueue::new(tasks_default);
     let pool_default = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
     let default_results = pool_default.run(&root, &mut queue_default).await.unwrap();
@@ -85,8 +85,8 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
 async fn test_clang_worker_processes_multiple_translation_units() {
     let root = fixture_root();
     let tasks = vec![
-        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10 },
-        TuTask { task_id: 2, tu: make_tu("tests/consumer.cpp"), estimated_cost: 20 },
+        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None },
+        TuTask { task_id: 2, tu: make_tu("tests/consumer.cpp"), estimated_cost: 20, context: None },
     ];
     let mut queue = PrioritizedTuQueue::new(tasks);
     let pool = WorkerPool::new(

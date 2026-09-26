@@ -23,6 +23,12 @@ pub struct DefaultWorkerBackend;
 
 impl WorkerBackend for DefaultWorkerBackend {
     fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+        if let Some(ctx) = &task.context {
+            // Canonical closure-merge analysis: identical content to the
+            // single-threaded index path so all shard store entries agree.
+            let (analysis, _fingerprint) = crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
+            return Ok(analysis);
+        }
         let full_path = repo_root.join(&task.tu.source_path);
         let source_code = std::fs::read_to_string(&full_path).unwrap_or_default();
         let analysis = CppSemanticAnalyzer::analyze_source(
@@ -334,9 +340,9 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_success() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10 },
-            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20 },
-            TuTask { task_id: 3, tu: make_tu("c.cpp"), estimated_cost: 15 },
+            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
+            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20, context: None },
+            TuTask { task_id: 3, tu: make_tu("c.cpp"), estimated_cost: 15, context: None },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig { num_workers: 2, ..Default::default() });
@@ -348,8 +354,8 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_failure_recovery() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10 },
-            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20 },
+            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
+            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20, context: None },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(FlakyBackend { attempts: AtomicUsize::new(0) }, WorkerPoolConfig { num_workers: 2, max_retries: 2, ..Default::default() });
@@ -361,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_max_retries_exceeded() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10 },
+            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(FailingBackend, WorkerPoolConfig { num_workers: 1, max_retries: 2, ..Default::default() });
@@ -373,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_memory_tracking() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10 },
+            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());

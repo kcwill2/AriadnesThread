@@ -13,6 +13,8 @@ async fn test_m17_dir_nav_markers_in_export() {
         0,
         true,
         Some(export_file.clone()),
+        2,
+        true,
     )
     .await;
 

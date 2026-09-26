@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
 use ariadne_build::BuildDiscoverer;
+use ariadne_index::{contexts_fingerprint, contexts_material, Fingerprint};
 use ariadne_report::ArtifactManager;
 
 pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
@@ -49,7 +50,9 @@ pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
     );
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-    artifacts.save_repository_artifacts(&discovery)?;
+    let hashes: Vec<_> = discovery.files.iter().map(|f| (f.id, f.content_hash.clone())).collect();
+    let repo_fp = Fingerprint::inputs(&repository.root, &hashes);
+    artifacts.save_repository_artifacts(&discovery, &repo_fp)?;
 
     Ok(())
 }
@@ -83,7 +86,16 @@ pub fn handle_build_discover(repo_path: &PathBuf) -> Result<()> {
     println!("Translation units: {}", build_result.translation_units.len());
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-    artifacts.save_build_context_artifacts(&build_result)?;
+    let hashes: Vec<_> = repo_discovery
+        .as_ref()
+        .map(|d| d.files.iter().map(|f| (f.id, f.content_hash.clone())).collect())
+        .unwrap_or_default();
+    let repo_fp = Fingerprint::inputs(&repository.root, &hashes);
+    let contexts_fp = contexts_fingerprint(
+        &repo_fp,
+        &contexts_material(&build_result.contexts, &build_result.translation_units),
+    );
+    artifacts.save_build_context_artifacts(&build_result, &contexts_fp)?;
 
     Ok(())
 }

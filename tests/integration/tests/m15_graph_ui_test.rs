@@ -15,6 +15,8 @@ async fn test_m15_graph_ui_command() {
         0, // dummy port
         true,
         Some(export_file.clone()),
+        2,
+        true,
     ).await;
     
     assert!(result.is_ok(), "run_ui failed for export");
@@ -37,15 +39,35 @@ async fn test_m15_graph_ui_command() {
             port,
             true, // no open
             None,
+            2,
+            true, // no watch: keep the test deterministic
         ).await;
         assert!(result.is_ok());
     });
     
-    // Give server time to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
-    // Make requests to test endpoints
+    // Give server time to start and poll until the artifact-first boot is ready
     let base_url = format!("http://127.0.0.1:{}", port);
+    let mut status_json = serde_json::Value::Null;
+    for _ in 0..120 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+        let resp = match reqwest::get(&format!("{}/api/status", base_url)).await {
+            Ok(r) if r.status().is_success() => r,
+            _ => continue,
+        };
+        status_json = resp.json().await.unwrap_or(serde_json::Value::Null);
+        if status_json["progress"]["state"].as_str() == Some("ready") {
+            break;
+        }
+    }
+    assert_eq!(
+        status_json["progress"]["state"].as_str(),
+        Some("ready"),
+        "UI should report ready after artifact-first startup"
+    );
+    assert!(
+        status_json["last_refresh"].as_u64().unwrap_or(0) > 0,
+        "ready status should carry last_refresh"
+    );
     
     // Test status endpoint
     let status_resp = reqwest::get(&format!("{}/api/status", base_url))

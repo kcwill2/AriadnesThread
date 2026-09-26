@@ -94,7 +94,7 @@ impl<'a> OptimizationPlanner<'a> {
             for scc in &sccs {
                 for sym_id in &scc.symbols {
                     if let Some(record) = self.model.symbols.get(sym_id) {
-                        let new_header_path = path.with_file_name(format!("{}_extracted.h", record.name));
+                        let new_header_path = path.with_file_name(format!("{}_extracted.h", sanitize_header_stem(&record.name)));
                         if checker.validate_extraction(sym_id, &new_header_path, scc.symbols.len() > 1, false, None).is_ok() {
                             proposed_extractions.push(ProposedExtraction {
                                 symbol_name: record.name.clone(),
@@ -161,6 +161,31 @@ impl<'a> OptimizationPlanner<'a> {
     ) -> Result<(), PlanRejection> {
         let checker = ConstraintChecker::new(file_policies, HashSet::new());
         checker.validate_extraction(symbol, target_file, splits_scc, creates_include_cycle, unresolved_dep)
+    }
+}
+
+/// Turn a symbol name into a filesystem-safe header stem. Closure-merged
+/// models surface qualified/template names (`std::vector`, `Thing<T>`) that
+/// are invalid in file names on Windows.
+fn sanitize_header_stem(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut pending_underscore = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            if pending_underscore {
+                out.push('_');
+                pending_underscore = false;
+            }
+            out.push(ch);
+        } else {
+            pending_underscore = true;
+        }
+    }
+    let stem = out.trim_matches('_').to_string();
+    if stem.is_empty() {
+        "symbol".to_string()
+    } else {
+        stem
     }
 }
 
