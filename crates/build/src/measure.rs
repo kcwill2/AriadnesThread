@@ -92,19 +92,18 @@ impl MeasurementComparison {
                 }
                 s.chars().rev().collect()
             }
-            writeln!(
+            let _ = writeln!(
                 &mut report,
                 "Collateral load:\n    {} → {}",
                 format_num(b),
                 format_num(a)
-            )
-            .unwrap();
-            writeln!(&mut report).unwrap();
+            );
+            let _ = writeln!(&mut report);
         }
 
         if let Some(affected) = self.affected_tus {
-            writeln!(&mut report, "Affected TUs:\n    {}", affected).unwrap();
-            writeln!(&mut report).unwrap();
+            let _ = writeln!(&mut report, "Affected TUs:\n    {}", affected);
+            let _ = writeln!(&mut report);
         }
 
         let format_duration = |d: Duration| -> String {
@@ -112,13 +111,12 @@ impl MeasurementComparison {
             format!("{:.1}s", secs)
         };
 
-        writeln!(
+        let _ = writeln!(
             &mut report,
             "Measured front-end CPU:\n    {} → {}",
             format_duration(self.frontend_cpu_delta.0),
             format_duration(self.frontend_cpu_delta.1)
-        )
-        .unwrap();
+        );
 
         report
     }
