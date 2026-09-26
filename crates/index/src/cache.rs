@@ -1,10 +1,10 @@
+use crate::TuAnalysis;
+use ariadne_build::CompilationContext;
+use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
-use ariadne_repo::FileId;
-use ariadne_build::CompilationContext;
-use crate::TuAnalysis;
 
 pub const CURRENT_ANALYSIS_VERSION: &str = "1.0.0";
 
@@ -30,12 +30,14 @@ impl TuCacheFingerprint {
         // Serialize context for context_hash
         let context_str = bincode::serialize(context).unwrap_or_default();
         let context_hash = format!("{:x}", Sha256::digest(&context_str));
-        
+
         let mut sorted_headers = headers.to_vec();
         sorted_headers.sort_by(|a, b| a.0.cmp(&b.0));
-        
-        let config_hash = config_str.map(|s| format!("{:x}", Sha256::digest(s.as_bytes()))).unwrap_or_default();
-        
+
+        let config_hash = config_str
+            .map(|s| format!("{:x}", Sha256::digest(s.as_bytes())))
+            .unwrap_or_default();
+
         // Combined hash
         let mut hasher = Sha256::new();
         hasher.update(analysis_version.as_bytes());
@@ -52,7 +54,7 @@ impl TuCacheFingerprint {
         }
         hasher.update(b"|");
         hasher.update(config_hash.as_bytes());
-        
+
         let combined_hash = format!("{:x}", hasher.finalize());
 
         Self {
@@ -100,10 +102,16 @@ impl IncrementalCache {
     }
 
     pub fn insert(&mut self, entry: TuCacheEntry) {
-        self.entries.insert((entry.tu_file_id, entry.context_name.clone()), entry);
+        self.entries
+            .insert((entry.tu_file_id, entry.context_name.clone()), entry);
     }
 
-    pub fn validate_and_get(&self, tu_file_id: &FileId, context_name: &str, current_fingerprint: &TuCacheFingerprint) -> Option<&TuAnalysis> {
+    pub fn validate_and_get(
+        &self,
+        tu_file_id: &FileId,
+        context_name: &str,
+        current_fingerprint: &TuCacheFingerprint,
+    ) -> Option<&TuAnalysis> {
         if let Some(entry) = self.get(tu_file_id, context_name) {
             if entry.is_valid(current_fingerprint) {
                 return Some(&entry.analysis);
@@ -173,10 +181,20 @@ mod tests {
             (FileId::from_relative_path("src/a.h"), "hash_a".into()),
         ];
         let fp1 = TuCacheFingerprint::compute(
-            CURRENT_ANALYSIS_VERSION, &ctx, &src_id, "src_hash", &hdrs, Some("cfg")
+            CURRENT_ANALYSIS_VERSION,
+            &ctx,
+            &src_id,
+            "src_hash",
+            &hdrs,
+            Some("cfg"),
         );
         let fp2 = TuCacheFingerprint::compute(
-            CURRENT_ANALYSIS_VERSION, &ctx, &src_id, "src_hash", &hdrs, Some("cfg")
+            CURRENT_ANALYSIS_VERSION,
+            &ctx,
+            &src_id,
+            "src_hash",
+            &hdrs,
+            Some("cfg"),
         );
         assert_eq!(fp1, fp2);
         // They are ordered by FileId, which is an opaque hash, so we just check it sorted them.
@@ -188,13 +206,23 @@ mod tests {
         let ctx = create_test_context();
         let src_id = FileId::from_relative_path("src/main.cpp");
         let fp1 = TuCacheFingerprint::compute(
-            CURRENT_ANALYSIS_VERSION, &ctx, &src_id, "src_hash", &[], None
+            CURRENT_ANALYSIS_VERSION,
+            &ctx,
+            &src_id,
+            "src_hash",
+            &[],
+            None,
         );
-        
+
         let fp2 = TuCacheFingerprint::compute(
-            CURRENT_ANALYSIS_VERSION, &ctx, &src_id, "different", &[], None
+            CURRENT_ANALYSIS_VERSION,
+            &ctx,
+            &src_id,
+            "different",
+            &[],
+            None,
         );
-        
+
         assert!(TuCacheEntry {
             tu_file_id: src_id.clone(),
             source_path: PathBuf::from("src/main.cpp"),
@@ -209,7 +237,8 @@ mod tests {
                 references: vec![],
                 call_sites: vec![],
             },
-        }.is_valid(&fp1));
+        }
+        .is_valid(&fp1));
 
         assert!(!TuCacheEntry {
             tu_file_id: src_id.clone(),
@@ -225,7 +254,8 @@ mod tests {
                 references: vec![],
                 call_sites: vec![],
             },
-        }.is_valid(&fp2));
+        }
+        .is_valid(&fp2));
     }
 
     #[test]
@@ -235,7 +265,7 @@ mod tests {
         assert_eq!(stats.reused_tus, 8);
         assert_eq!(stats.reanalyzed_tus, 2);
         assert_eq!(stats.hit_rate, 80.0);
-        
+
         let stats_zero = IncrementalStats::calculate(0, 0);
         assert_eq!(stats_zero.total_tus, 0);
         assert_eq!(stats_zero.hit_rate, 0.0);

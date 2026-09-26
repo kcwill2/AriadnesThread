@@ -35,7 +35,10 @@ impl ConstraintChecker {
                     return Err(PlanRejection {
                         target_file: target_file.to_path_buf(),
                         reason: RejectionReason::FrozenFile(target_file.to_path_buf()),
-                        explanation: format!("File {} is frozen and cannot be modified.", target_file.display()),
+                        explanation: format!(
+                            "File {} is frozen and cannot be modified.",
+                            target_file.display()
+                        ),
                     });
                 }
                 OptimizationPolicy::Contract => {
@@ -123,7 +126,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::CycleCreation(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::CycleCreation(_),
+                ..
+            })
         ));
     }
 
@@ -139,7 +145,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::CycleCreation(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::CycleCreation(_),
+                ..
+            })
         ));
     }
 
@@ -155,7 +164,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::FrozenFile(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::FrozenFile(_),
+                ..
+            })
         ));
     }
 
@@ -171,7 +183,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::ContractViolation(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::ContractViolation(_),
+                ..
+            })
         ));
     }
 
@@ -187,7 +202,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::NonMovableDeclaration(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::NonMovableDeclaration(_),
+                ..
+            })
         ));
     }
 
@@ -203,7 +221,10 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(PlanRejection { reason: RejectionReason::UnresolvedSemanticDependency(_), .. })
+            Err(PlanRejection {
+                reason: RejectionReason::UnresolvedSemanticDependency(_),
+                ..
+            })
         ));
     }
 }

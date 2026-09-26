@@ -1,5 +1,5 @@
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollateralOpportunity {
@@ -39,7 +39,7 @@ impl OptimizationReport {
         let opp_trimmed = opportunities_str.trim_end();
 
         format!(
-r#"Repository:
+            r#"Repository:
     {} files
     {} translation units
 
@@ -89,14 +89,14 @@ Residual collateral load:
     }
 }
 
+use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::Result;
 
 use ariadne_build::BuildMeasurer;
-use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_cluster::plan::RiskLevel;
+use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_graph::LoadAnalyzer;
 use ariadne_pipeline::Pipeline;
 use ariadne_transform::{HeaderExtractor, IncludeRewriter};
@@ -142,8 +142,17 @@ impl EndToEndOptimizer {
         for sym in model.symbols.values() {
             let lm = load_analyzer.analyze_symbol_load(&sym.name).unwrap();
             for src in &lm.collateral_sources {
-                if let Some(f) = repo_discovery.files.iter().find(|rf| &rf.id == &src.file_id) {
-                    let name = f.path.file_name().and_then(|s: &std::ffi::OsStr| s.to_str()).unwrap_or("unknown").to_string();
+                if let Some(f) = repo_discovery
+                    .files
+                    .iter()
+                    .find(|rf| &rf.id == &src.file_id)
+                {
+                    let name = f
+                        .path
+                        .file_name()
+                        .and_then(|s: &std::ffi::OsStr| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
                     *header_collateral_map.entry(name).or_insert(0) += src.symbol_count;
                 }
             }
@@ -156,10 +165,18 @@ impl EndToEndOptimizer {
                 collateral_symbols,
             })
             .collect();
-        collateral_opportunities.sort_by(|a, b| b.collateral_symbols.cmp(&a.collateral_symbols).then_with(|| a.header_name.cmp(&b.header_name)));
+        collateral_opportunities.sort_by(|a, b| {
+            b.collateral_symbols
+                .cmp(&a.collateral_symbols)
+                .then_with(|| a.header_name.cmp(&b.header_name))
+        });
 
         // 5. Optimization planning
-        let tu_file_ids: Vec<_> = build_discovery.translation_units.iter().map(|tu| tu.file_id).collect();
+        let tu_file_ids: Vec<_> = build_discovery
+            .translation_units
+            .iter()
+            .map(|tu| tu.file_id)
+            .collect();
         let planner = OptimizationPlanner::new(&graph, &model, &repo_discovery.files, &tu_file_ids);
         let plans = planner.plan();
 
@@ -190,15 +207,27 @@ impl EndToEndOptimizer {
                 let hpath = PathBuf::from("generated").join(&header.filename);
                 let mut new_header = header.clone();
                 new_header.filename = hpath.clone();
-                new_header.required_includes = header.required_includes.iter().map(|p| PathBuf::from("generated").join(p)).collect();
+                new_header.required_includes = header
+                    .required_includes
+                    .iter()
+                    .map(|p| PathBuf::from("generated").join(p))
+                    .collect();
                 generated_headers.push(new_header);
                 for sym in &header.symbols {
                     symbol_name_to_header.insert(sym.name.clone(), hpath.clone());
                 }
             }
 
-            let target_include = plan.target_file.file_name().and_then(|n: &std::ffi::OsStr| n.to_str()).unwrap_or("");
-            let all_symbol_names: Vec<String> = plan.proposed_extractions.iter().map(|e| e.symbol_name.clone()).collect();
+            let target_include = plan
+                .target_file
+                .file_name()
+                .and_then(|n: &std::ffi::OsStr| n.to_str())
+                .unwrap_or("");
+            let all_symbol_names: Vec<String> = plan
+                .proposed_extractions
+                .iter()
+                .map(|e| e.symbol_name.clone())
+                .collect();
 
             let mut consumers = Vec::new();
             for tu in &build_discovery.translation_units {
@@ -222,7 +251,8 @@ impl EndToEndOptimizer {
 
             validation_total_tus += consumers.len();
 
-            let (snapshot, new_paths) = TransactionApplier::apply(&repo.root, &extraction, &migration)?;
+            let (snapshot, new_paths) =
+                TransactionApplier::apply(&repo.root, &extraction, &migration)?;
 
             let t1 = TierValidator::validate_structural(&extraction);
             let header_output_dir = repo.root.join("generated");
@@ -245,11 +275,17 @@ impl EndToEndOptimizer {
         let after_measurement = measurer.measure_all(&build_discovery.translation_units)?;
 
         // Residual collateral load
-        let initial_collateral_sum: usize = collateral_opportunities.iter().map(|o| o.collateral_symbols).sum();
+        let initial_collateral_sum: usize = collateral_opportunities
+            .iter()
+            .map(|o| o.collateral_symbols)
+            .sum();
         let reduced_collateral: usize = safe_plans
             .iter()
             .take(committed_transformations)
-            .map(|p| p.collateral_load_before.saturating_sub(p.collateral_load_after))
+            .map(|p| {
+                p.collateral_load_before
+                    .saturating_sub(p.collateral_load_after)
+            })
             .sum();
         let residual_collateral_load = initial_collateral_sum.saturating_sub(reduced_collateral);
 

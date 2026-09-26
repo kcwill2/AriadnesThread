@@ -34,13 +34,13 @@ fn setup_temp_repo(fixture_name: &str) -> Result<(tempfile::TempDir, PathBuf)> {
 
     let repo_path = temp_dir.path().join(fixture_name);
     copy_dir_all(&src_repo, &repo_path)?;
-    
+
     Ok((temp_dir, repo_path))
 }
 
 fn hash_dir(path: &Path) -> Result<String> {
     use sha2::{Digest, Sha256};
-    
+
     let mut entries = Vec::new();
     let mut walk_dir = vec![path.to_path_buf()];
     while let Some(dir) = walk_dir.pop() {
@@ -59,7 +59,7 @@ fn hash_dir(path: &Path) -> Result<String> {
         }
     }
     entries.sort();
-    
+
     let mut hasher = Sha256::new();
     for p in entries {
         hasher.update(p.to_string_lossy().as_bytes());
@@ -67,21 +67,21 @@ fn hash_dir(path: &Path) -> Result<String> {
             hasher.update(&content);
         }
     }
-    
+
     Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[test]
 fn test_m14_end_to_end_optimization_flow() -> Result<()> {
     let (_temp, repo_path) = setup_temp_repo("basic")?;
-    
+
     let optimizer = EndToEndOptimizer::new(&repo_path);
     let report = optimizer.optimize()?;
-    
+
     assert!(report.total_files > 0);
     assert!(report.total_tus > 0);
     assert!(report.total_symbols > 0);
-    
+
     let output = report.format_m14_output();
     assert!(output.contains("Repository:"));
     assert!(output.contains("Analysis:"));
@@ -92,10 +92,10 @@ fn test_m14_end_to_end_optimization_flow() -> Result<()> {
     assert!(output.contains("Measurement:"));
     assert!(output.contains("Committed:"));
     assert!(output.contains("Residual collateral load:"));
-    
+
     let report_path = repo_path.join("artifacts/optimize/report.json");
     assert!(report_path.exists());
-    
+
     Ok(())
 }
 
@@ -103,13 +103,13 @@ fn test_m14_end_to_end_optimization_flow() -> Result<()> {
 fn test_m14_rollback_on_failed_validation() -> Result<()> {
     let (_temp, repo_path) = setup_temp_repo("basic")?;
     let initial_hash = hash_dir(&repo_path)?;
-    
+
     // Test rollback identity manually via TransactionApplier to simulate rollback
-    use ariadne_validate::TransactionApplier;
     use ariadne_transform::{ExtractionResult, MigrationPreview};
-    
+    use ariadne_validate::TransactionApplier;
+
     let repo = Repository::locate(&repo_path)?;
-    
+
     // Dummy extraction
     let mut extraction = ExtractionResult {
         plan_id: "test_plan".into(),
@@ -117,29 +117,29 @@ fn test_m14_rollback_on_failed_validation() -> Result<()> {
         errors: vec![],
     };
     extraction.errors.push("Simulated error".to_string());
-    
+
     let migration = MigrationPreview {
         plan_id: "test_plan".into(),
         rewrites: vec![],
     };
-    
+
     let (snapshot, new_paths) = TransactionApplier::apply(&repo.root, &extraction, &migration)?;
-    
+
     // Rollback
     TransactionApplier::rollback(&snapshot, &new_paths)?;
-    
+
     let final_hash = hash_dir(&repo_path)?;
     assert_eq!(initial_hash, final_hash);
-    
+
     Ok(())
 }
 
 #[test]
 fn test_m14_cli_optimize_output() -> Result<()> {
     let (_temp, repo_path) = setup_temp_repo("basic")?;
-    
+
     let result = handle_optimize(&repo_path);
     assert!(result.is_ok());
-    
+
     Ok(())
 }

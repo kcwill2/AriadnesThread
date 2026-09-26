@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
+use ariadne_index::types::{DeclId, DependencyKind, IndexResult, SymbolId, SymbolKind};
 use ariadne_repo::FileId;
-use ariadne_index::types::{SymbolId, DeclId, SymbolKind, DependencyKind, IndexResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReducedSymbolRecord {
@@ -56,14 +56,16 @@ impl ReducedSemanticModel {
 
             // Symbols
             for sym in &tu.symbols {
-                let entry = symbols.entry(sym.id.clone()).or_insert_with(|| ReducedSymbolRecord {
-                    id: sym.id.clone(),
-                    name: sym.name.clone(),
-                    kind: sym.kind,
-                    defining_file: None,
-                    declarations: Vec::new(),
-                    definition: None,
-                });
+                let entry = symbols
+                    .entry(sym.id.clone())
+                    .or_insert_with(|| ReducedSymbolRecord {
+                        id: sym.id.clone(),
+                        name: sym.name.clone(),
+                        kind: sym.kind,
+                        defining_file: None,
+                        declarations: Vec::new(),
+                        definition: None,
+                    });
 
                 for decl in &sym.declarations {
                     if !entry.declarations.contains(decl) {
@@ -77,7 +79,10 @@ impl ReducedSemanticModel {
                     if entry.definition.is_none() {
                         entry.definition = Some(def.clone());
                         entry.defining_file = Some(sym.owning_file); // Owning file is the defining file usually
-                    } else if entry.kind != SymbolKind::Class && entry.kind != SymbolKind::Struct && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct) {
+                    } else if entry.kind != SymbolKind::Class
+                        && entry.kind != SymbolKind::Struct
+                        && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct)
+                    {
                         // Class/Struct definitions take precedence over function definitions (like constructors)
                         entry.definition = Some(def.clone());
                         entry.defining_file = Some(sym.owning_file);
@@ -86,13 +91,22 @@ impl ReducedSemanticModel {
                 }
 
                 tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
-                file_symbols.entry(sym.owning_file).or_default().insert(sym.id.clone());
+                file_symbols
+                    .entry(sym.owning_file)
+                    .or_default()
+                    .insert(sym.id.clone());
             }
 
             // Edges
             for edge in &tu.edges {
-                tu_usage.entry(edge.src_symbol.clone()).or_default().insert(tu_file);
-                tu_usage.entry(edge.dst_symbol.clone()).or_default().insert(tu_file);
+                tu_usage
+                    .entry(edge.src_symbol.clone())
+                    .or_default()
+                    .insert(tu_file);
+                tu_usage
+                    .entry(edge.dst_symbol.clone())
+                    .or_default()
+                    .insert(tu_file);
 
                 let key = (edge.src_symbol.clone(), edge.dst_symbol.clone());
                 match raw_edges.get(&key) {
@@ -107,7 +121,10 @@ impl ReducedSemanticModel {
 
             // References
             for ref_item in &tu.references {
-                tu_usage.entry(ref_item.symbol_id.clone()).or_default().insert(tu_file);
+                tu_usage
+                    .entry(ref_item.symbol_id.clone())
+                    .or_default()
+                    .insert(tu_file);
             }
         }
 
@@ -119,7 +136,7 @@ impl ReducedSemanticModel {
                 kind,
             });
         }
-        
+
         let mut tu_usage_vec = BTreeMap::new();
         for (sym, files) in tu_usage {
             let mut file_vec: Vec<FileId> = files.into_iter().collect();
@@ -147,11 +164,16 @@ impl ReducedSemanticModel {
         if let Some(record) = self.symbols.get(&SymbolId::new(name_or_id)) {
             return Some(record);
         }
-        self.symbols.values().find(|record| record.name == name_or_id || record.id.0 == name_or_id)
+        self.symbols
+            .values()
+            .find(|record| record.name == name_or_id || record.id.0 == name_or_id)
     }
 
     pub fn get_dependencies(&self, sym_id: &SymbolId) -> Vec<&ReducedSemanticEdge> {
-        self.edges.iter().filter(|edge| edge.src_symbol == *sym_id).collect()
+        self.edges
+            .iter()
+            .filter(|edge| edge.src_symbol == *sym_id)
+            .collect()
     }
 
     pub fn get_users(&self, sym_id: &SymbolId) -> Vec<FileId> {
@@ -162,7 +184,9 @@ impl ReducedSemanticModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_index::types::{FileLocation, TuAnalysis, SymbolRecord, SemanticEdge, SymbolReference};
+    use ariadne_index::types::{
+        FileLocation, SemanticEdge, SymbolRecord, SymbolReference, TuAnalysis,
+    };
 
     fn create_dummy_index() -> IndexResult {
         let f1 = FileId::from_relative_path("a.cpp");
@@ -195,18 +219,16 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: Some(DeclId::new("decl_c")),
-                }
+                },
             ],
             declarations: vec![],
-            edges: vec![
-                SemanticEdge {
-                    src_symbol: sym_a.clone(),
-                    dst_symbol: sym_b.clone(),
-                    kind: DependencyKind::Incomplete,
-                    src_file: f1.clone(),
-                    dst_file: f3.clone(),
-                }
-            ],
+            edges: vec![SemanticEdge {
+                src_symbol: sym_a.clone(),
+                dst_symbol: sym_b.clone(),
+                kind: DependencyKind::Incomplete,
+                src_file: f1.clone(),
+                dst_file: f3.clone(),
+            }],
             references: vec![],
             call_sites: vec![],
         };
@@ -214,34 +236,32 @@ mod tests {
         let tu2 = TuAnalysis {
             tu_file_id: f2.clone(),
             context_name: "test".into(),
-            symbols: vec![
-                SymbolRecord {
-                    id: sym_a.clone(),
-                    name: "A".into(),
-                    kind: SymbolKind::Class,
-                    owning_file: f3.clone(),
-                    declarations: vec![decl_a2.clone()],
-                    definition: Some(decl_a2.clone()),
-                }
-            ],
+            symbols: vec![SymbolRecord {
+                id: sym_a.clone(),
+                name: "A".into(),
+                kind: SymbolKind::Class,
+                owning_file: f3.clone(),
+                declarations: vec![decl_a2.clone()],
+                definition: Some(decl_a2.clone()),
+            }],
             declarations: vec![],
-            edges: vec![
-                SemanticEdge {
-                    src_symbol: sym_a.clone(),
-                    dst_symbol: sym_b.clone(),
-                    kind: DependencyKind::Complete,
-                    src_file: f2.clone(),
-                    dst_file: f3.clone(),
-                }
-            ],
-            references: vec![
-                SymbolReference {
-                    symbol_id: sym_c.clone(),
+            edges: vec![SemanticEdge {
+                src_symbol: sym_a.clone(),
+                dst_symbol: sym_b.clone(),
+                kind: DependencyKind::Complete,
+                src_file: f2.clone(),
+                dst_file: f3.clone(),
+            }],
+            references: vec![SymbolReference {
+                symbol_id: sym_c.clone(),
+                file_id: f2.clone(),
+                location: FileLocation {
                     file_id: f2.clone(),
-                    location: FileLocation { file_id: f2.clone(), line: 1, column: 1 },
-                    is_write: false,
-                }
-            ],
+                    line: 1,
+                    column: 1,
+                },
+                is_write: false,
+            }],
             call_sites: vec![],
         };
 
@@ -262,7 +282,10 @@ mod tests {
 
         let sym_c = reduced.symbols.get(&SymbolId::new("C")).unwrap();
         assert_eq!(sym_c.definition, Some(DeclId::new("decl_c")));
-        assert_eq!(sym_c.defining_file, Some(FileId::from_relative_path("a.cpp")));
+        assert_eq!(
+            sym_c.defining_file,
+            Some(FileId::from_relative_path("a.cpp"))
+        );
     }
 
     #[test]
@@ -313,7 +336,7 @@ mod tests {
 
         let sym_a = reduced.find_symbol("A").unwrap();
         assert_eq!(sym_a.name, "A");
-        
+
         let sym_c_by_name = reduced.find_symbol("C").unwrap();
         assert_eq!(sym_c_by_name.name, "C");
 

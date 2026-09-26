@@ -98,7 +98,12 @@ fn check_flag_case(case: &FlagCase) {
 
     assert_eq!(compiler, case.compiler, "[{}]", case.label);
     assert_eq!(defines, case.defines, "[{}]", case.label);
-    assert_eq!(include_dirs, paths_of(case.include_dirs), "[{}]", case.label);
+    assert_eq!(
+        include_dirs,
+        paths_of(case.include_dirs),
+        "[{}]",
+        case.label
+    );
     assert_eq!(
         system_include_dirs,
         paths_of(case.system_include_dirs),
@@ -174,12 +179,13 @@ fn parse_args_include_flags_lock_current_behavior() {
         // QUIRK: the space-separated MSVC /external:I form is not supported:
         // the flag contributes nothing AND the following path token is
         // silently dropped (never even reaching raw_flags).
-        flag_case("/external:I space form drops both", &["cc", "/external:I", "ext"])
-            .with_compiler("cc"),
-        flag_case("joined -FIprefix.h", &["cl.exe", "-FIprefix.h"])
-            .with_forced(&["prefix.h"]),
-        flag_case("spaced /FI stdafx.h", &["cl.exe", "/FI", "stdafx.h"])
-            .with_forced(&["stdafx.h"]),
+        flag_case(
+            "/external:I space form drops both",
+            &["cc", "/external:I", "ext"],
+        )
+        .with_compiler("cc"),
+        flag_case("joined -FIprefix.h", &["cl.exe", "-FIprefix.h"]).with_forced(&["prefix.h"]),
+        flag_case("spaced /FI stdafx.h", &["cl.exe", "/FI", "stdafx.h"]).with_forced(&["stdafx.h"]),
         // QUIRK: trailing standalone -FI yields empty value, silently dropped.
         flag_case("trailing -FI drops", &["cl.exe", "-FI"]),
     ];
@@ -194,20 +200,25 @@ fn parse_args_standard_and_arch_lock_current_behavior() {
         flag_case("-std=c++17", &["cc", "-std=c++17"])
             .with_compiler("cc")
             .with_lang_std("c++17"),
-        flag_case("/std:c++latest", &["cl.exe", "/std:c++latest"])
-            .with_lang_std("c++latest"),
+        flag_case("/std:c++latest", &["cl.exe", "/std:c++latest"]).with_lang_std("c++latest"),
         // QUIRK: -std= with empty value records Some("").
         flag_case("-std= empty records empty", &["cc", "-std="])
             .with_compiler("cc")
             .with_lang_std(""),
         // QUIRK: later -std wins within one entry (overwrite, not append).
-        flag_case("duplicate -std last wins", &["cc", "-std=c++11", "-std=c++20"])
-            .with_compiler("cc")
-            .with_lang_std("c++20"),
+        flag_case(
+            "duplicate -std last wins",
+            &["cc", "-std=c++11", "-std=c++20"],
+        )
+        .with_compiler("cc")
+        .with_lang_std("c++20"),
         // QUIRK: /std= (wrong separator for MSVC) is unrecognized and lands
         // in raw_flags instead of setting the standard.
-        flag_case("/std= unrecognized falls through", &["cl.exe", "/std=c++17"])
-            .with_raw_flags(&["/std=c++17"]),
+        flag_case(
+            "/std= unrecognized falls through",
+            &["cl.exe", "/std=c++17"],
+        )
+        .with_raw_flags(&["/std=c++17"]),
         flag_case("/arch:AVX2", &["cl.exe", "/arch:AVX2"]).with_arch("AVX2"),
         // QUIRK: /arch: with empty value records Some("").
         flag_case("/arch: empty records empty", &["cl.exe", "/arch:"]).with_arch(""),
@@ -225,22 +236,26 @@ fn parse_args_standard_and_arch_lock_current_behavior() {
 fn parse_args_unknown_and_dropped_lock_current_behavior() {
     let cases = vec![
         flag_case("empty arg list keeps defaults", &[]),
-        flag_case("unknown flags accumulate in raw_flags", &["cl.exe", "/c", "/O2"])
-            .with_raw_flags(&["/c", "/O2"]),
+        flag_case(
+            "unknown flags accumulate in raw_flags",
+            &["cl.exe", "/c", "/O2"],
+        )
+        .with_raw_flags(&["/c", "/O2"]),
         // QUIRK: non-flag positional tokens (e.g. source files) are
         // silently dropped, never recorded anywhere.
-        flag_case("source file dropped", &["cl.exe", "/c", "main.cpp"])
-            .with_raw_flags(&["/c"]),
+        flag_case("source file dropped", &["cl.exe", "/c", "main.cpp"]).with_raw_flags(&["/c"]),
         // QUIRK: a leading flag is not consumed as the compiler, so the
         // default "cl.exe" is kept even for a gcc-style invocation whose
         // first token is a flag.
-        flag_case("leading flag keeps default compiler", &["-Werror", "main.c"])
-            .with_raw_flags(&["-Werror"]),
+        flag_case(
+            "leading flag keeps default compiler",
+            &["-Werror", "main.c"],
+        )
+        .with_raw_flags(&["-Werror"]),
         // QUIRK: a mid-list unix-style path is not considered a flag (the
         // is_flag heuristic excludes "usr"/"bin" to protect unix compilers
         // as first arg), so it is silently dropped mid-list.
-        flag_case("mid-list /usr path dropped", &["cc", "/usr/include/x"])
-            .with_compiler("cc"),
+        flag_case("mid-list /usr path dropped", &["cc", "/usr/include/x"]).with_compiler("cc"),
         // QUIRK: when both command and arguments are present, the command
         // string is ignored entirely by arg parsing.
         flag_case("arguments beat command string", &["clang", "-DBAR"])
@@ -262,8 +277,7 @@ fn parse_args_response_files_lock_current_behavior() {
         flag_case("@rsp mid-list dropped", &["cl.exe", "@rsp.rsp", "main.c"]),
         // QUIRK: an @response token as the FIRST arg is consumed as the
         // compiler name.
-        flag_case("@rsp as first arg becomes compiler", &["@rsp.rsp"])
-            .with_compiler("@rsp.rsp"),
+        flag_case("@rsp as first arg becomes compiler", &["@rsp.rsp"]).with_compiler("@rsp.rsp"),
         // QUIRK: same drop behavior via the command-string path.
         flag_case("@rsp in command string dropped", &[])
             .with_command("cl.exe @rsp.rsp /c")
@@ -336,7 +350,10 @@ fn parse_compile_commands_json_command_form_lock_current_behavior() {
         result.translation_units[0].compile_command.arguments,
         vec!["cl.exe", "-I", "\"C:/My", "Dir/inc\"", "/DFOO", "src/a.cpp"]
     );
-    assert_eq!(result.translation_units[0].file_id, ariadne_repo::FileId::from_relative_path("src/a.cpp"));
+    assert_eq!(
+        result.translation_units[0].file_id,
+        ariadne_repo::FileId::from_relative_path("src/a.cpp")
+    );
 }
 
 #[test]
@@ -357,7 +374,10 @@ fn parse_compile_commands_json_path_resolution_lock_current_behavior() {
     let tu = &result.translation_units[0];
     assert_eq!(tu.source_path, PathBuf::from("build").join("src/a.cpp"));
     assert_eq!(tu.compile_command.directory, PathBuf::from("build"));
-    assert_eq!(tu.file_id, ariadne_repo::FileId::from_relative_path("src/a.cpp"));
+    assert_eq!(
+        tu.file_id,
+        ariadne_repo::FileId::from_relative_path("src/a.cpp")
+    );
 
     // Absolute file under the repo root maps back to a relative FileId
     // (exercising the strip_prefix / verbatim-path fallback branch).
@@ -373,7 +393,10 @@ fn parse_compile_commands_json_path_resolution_lock_current_behavior() {
     let result = BuildDiscoverer::new(root).discover().unwrap();
     let tu = &result.translation_units[0];
     assert_eq!(tu.source_path, absolute_file);
-    assert_eq!(tu.file_id, ariadne_repo::FileId::from_relative_path("src/a.cpp"));
+    assert_eq!(
+        tu.file_id,
+        ariadne_repo::FileId::from_relative_path("src/a.cpp")
+    );
 }
 
 #[test]
@@ -475,5 +498,8 @@ fn parse_compile_commands_json_context_merge_lock_current_behavior() {
     assert_eq!(context.include_dirs, paths_of(&["a", "b"]));
     assert_eq!(context.raw_flags, vec!["/c"]);
     assert_eq!(result.translation_units.len(), 2);
-    assert!(result.translation_units.iter().all(|unit| unit.context_name == "Debug|x64"));
+    assert!(result
+        .translation_units
+        .iter()
+        .all(|unit| unit.context_name == "Debug|x64"));
 }

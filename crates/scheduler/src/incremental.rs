@@ -1,11 +1,11 @@
-use ariadne_repo::{Repository, RepositoryDiscoveryResult};
-use ariadne_build::BuildDiscoveryResult;
-use ariadne_index::{IndexResult, IncrementalStats, StageFingerprints, CURRENT_ANALYSIS_VERSION};
 use anyhow::Result;
+use ariadne_build::BuildDiscoveryResult;
+use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
+use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::tu_store::{
-    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir,
-    SharedTuStoreContext, ShardCheckpoint, TuStoreContext,
+    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint,
+    SharedTuStoreContext, TuStoreContext,
 };
 
 pub struct IncrementalAnalysisResult {
@@ -19,9 +19,14 @@ impl IncrementalAnalysisResult {
     pub fn save_artifacts(&self, repo: &Repository) -> Result<()> {
         let manager = ariadne_report::ArtifactManager::prepare_for_repo(repo)?;
 
-        manager.save_repository_artifacts(&self.store_ctx.discovery, &self.fingerprints.repository)?;
+        manager
+            .save_repository_artifacts(&self.store_ctx.discovery, &self.fingerprints.repository)?;
 
-        manager.save_index_artifacts(&self.index_result, &self.fingerprints.index, Some(&self.stats))?;
+        manager.save_index_artifacts(
+            &self.index_result,
+            &self.fingerprints.index,
+            Some(&self.stats),
+        )?;
 
         let reduced_model = ariadne_graph::ReducedSemanticModel::reduce(&self.index_result);
         manager.save_reduced_artifacts(&reduced_model, &self.fingerprints.reduced)?;
@@ -61,11 +66,13 @@ impl<'a> IncrementalAnalyzer<'a> {
         let mut reanalyzed = 0usize;
         let mut tu_analyses = Vec::new();
 
-        let store_ctx = TuStoreContext::new(self.repo_discovery, self.build_result.contexts.clone());
+        let store_ctx =
+            TuStoreContext::new(self.repo_discovery, self.build_result.contexts.clone());
         let store_dir = shard_dir(&self.repo.root);
 
         for tu in &self.build_result.translation_units {
-            let closure = compute_tu_closure(tu, &self.repo.root, &store_ctx, &self.analysis_version)?;
+            let closure =
+                compute_tu_closure(tu, &self.repo.root, &store_ctx, &self.analysis_version)?;
 
             let analysis = if let Some(shard) = load_shard(&store_dir, tu.file_id) {
                 if shard.fingerprint == closure.fingerprint.combined_hash {
@@ -74,19 +81,25 @@ impl<'a> IncrementalAnalyzer<'a> {
                 } else {
                     reanalyzed += 1;
                     let analysis = analyze_closure(tu, &closure);
-                    save_shard(&store_dir, &ShardCheckpoint {
-                        fingerprint: closure.fingerprint.combined_hash.clone(),
-                        analysis: analysis.clone(),
-                    })?;
+                    save_shard(
+                        &store_dir,
+                        &ShardCheckpoint {
+                            fingerprint: closure.fingerprint.combined_hash.clone(),
+                            analysis: analysis.clone(),
+                        },
+                    )?;
                     analysis
                 }
             } else {
                 reanalyzed += 1;
                 let analysis = analyze_closure(tu, &closure);
-                save_shard(&store_dir, &ShardCheckpoint {
-                    fingerprint: closure.fingerprint.combined_hash.clone(),
-                    analysis: analysis.clone(),
-                })?;
+                save_shard(
+                    &store_dir,
+                    &ShardCheckpoint {
+                        fingerprint: closure.fingerprint.combined_hash.clone(),
+                        analysis: analysis.clone(),
+                    },
+                )?;
                 analysis
             };
 
@@ -115,19 +128,33 @@ impl<'a> IncrementalAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_repo::{Repository, RepositoryDiscoveryResult, FileId, FileRecord, FileKind, FileOwnership, OptimizationPolicy};
-    use ariadne_build::{BuildDiscoveryResult, CompilationContext, TranslationUnit, CompileCommand};
-    use tempfile::TempDir;
+    use ariadne_build::{
+        BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit,
+    };
+    use ariadne_repo::{
+        FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, Repository,
+        RepositoryDiscoveryResult,
+    };
     use std::collections::HashMap;
+    use tempfile::TempDir;
 
-    fn setup_test_data() -> (Repository, RepositoryDiscoveryResult, BuildDiscoveryResult, TempDir) {
+    fn setup_test_data() -> (
+        Repository,
+        RepositoryDiscoveryResult,
+        BuildDiscoveryResult,
+        TempDir,
+    ) {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().canonicalize().unwrap();
 
         let repo = Repository { root: root.clone() };
 
         // Create some files
-        std::fs::write(root.join("main.cpp"), "#include \"header.h\"\nint main() { return 0; }").unwrap();
+        std::fs::write(
+            root.join("main.cpp"),
+            "#include \"header.h\"\nint main() { return 0; }",
+        )
+        .unwrap();
         std::fs::write(root.join("header.h"), "void foo();").unwrap();
         std::fs::write(root.join("utils.cpp"), "void bar() {}").unwrap();
 
@@ -169,7 +196,6 @@ mod tests {
             optimization_policy: OptimizationPolicy::Optimizable,
         };
 
-
         repo_discovery.files.push(f_main);
         repo_discovery.files.push(f_header);
         repo_discovery.files.push(f_utils);
@@ -191,7 +217,11 @@ mod tests {
                 directory: root.clone(),
                 file: root.join("main.cpp"),
                 command: Some("clang++ -c main.cpp".to_string()),
-                arguments: vec!["clang++".to_string(), "-c".to_string(), "main.cpp".to_string()],
+                arguments: vec![
+                    "clang++".to_string(),
+                    "-c".to_string(),
+                    "main.cpp".to_string(),
+                ],
                 context_name: ctx.name.clone(),
                 output: None,
             },
@@ -205,7 +235,11 @@ mod tests {
                 directory: root.clone(),
                 file: root.join("utils.cpp"),
                 command: Some("clang++ -c utils.cpp".to_string()),
-                arguments: vec!["clang++".to_string(), "-c".to_string(), "utils.cpp".to_string()],
+                arguments: vec![
+                    "clang++".to_string(),
+                    "-c".to_string(),
+                    "utils.cpp".to_string(),
+                ],
                 context_name: ctx.name.clone(),
                 output: None,
             },
@@ -250,10 +284,16 @@ mod tests {
 
         // modify header.h on disk and update its recorded hash
         std::fs::write(repo.root.join("header.h"), "void foo(); void bar();").unwrap();
-        if let Some(f) = repo_discovery.files.iter_mut().find(|f| f.id == FileId::from_relative_path("header.h")) {
+        if let Some(f) = repo_discovery
+            .files
+            .iter_mut()
+            .find(|f| f.id == FileId::from_relative_path("header.h"))
+        {
             f.content_hash = "hash_header2".to_string();
         }
-        repo = Repository { root: repo.root.clone() };
+        repo = Repository {
+            root: repo.root.clone(),
+        };
 
         let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
         let result2 = analyzer2.analyze().unwrap();
@@ -286,9 +326,18 @@ mod tests {
         // Overwrite one shard with the old plain TuAnalysis format.
         let dir = shard_dir(&repo.root);
         let tu_id = build_result.translation_units[0].file_id;
-        let analysis = result.index_result.tu_analyses.iter()
-            .find(|a| a.tu_file_id == tu_id).unwrap().clone();
-        std::fs::write(dir.join(format!("{}.json", tu_id.0)), serde_json::to_string(&analysis).unwrap()).unwrap();
+        let analysis = result
+            .index_result
+            .tu_analyses
+            .iter()
+            .find(|a| a.tu_file_id == tu_id)
+            .unwrap()
+            .clone();
+        std::fs::write(
+            dir.join(format!("{}.json", tu_id.0)),
+            serde_json::to_string(&analysis).unwrap(),
+        )
+        .unwrap();
 
         let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
         let result2 = analyzer2.analyze().unwrap();

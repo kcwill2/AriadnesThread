@@ -5,7 +5,7 @@ fn test_index_html_content() {
     assert!(html.contains("Include Graph"));
     assert!(html.contains("Symbol Dependency Graph"));
     assert!(html.contains("Call Graph"));
-    
+
     // M16 Unit 3: Interactive Frontend Traversal elements
     assert!(html.contains("id=\"ariadneThread\"") || html.contains("class=\"thread-bar\""));
     assert!(html.contains("id=\"entrypointsModal\"") || html.contains("id=\"entrypointsPanel\""));
@@ -18,15 +18,19 @@ fn test_index_html_content() {
 #[test]
 fn test_ui_layout_and_interactive_traversal() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // 1. Initial active button is hopAllCap (formerly hopAll)
-    assert!(html.contains("id=\"hopAllCap\" class=\"active\"") || html.contains("class=\"active\" id=\"hopAllCap\"") || html.contains("id=\"hopAllCap\" class=\"active\""));
+    assert!(
+        html.contains("id=\"hopAllCap\" class=\"active\"")
+            || html.contains("class=\"active\" id=\"hopAllCap\"")
+            || html.contains("id=\"hopAllCap\" class=\"active\"")
+    );
     assert!(!html.contains("id=\"degMinus\" class=\"active\""));
-    
+
     // 2. Layout wrapping logic
     assert!(html.contains("maxRowsPerCol"));
     assert!(html.contains("numSubCols"));
-    
+
     // 3. findPath and showEntrypoints have non-empty implementations
     assert!(html.contains("fetch(`/api/graph/path"));
     assert!(html.contains("fetch(`/api/graph/entrypoints"));
@@ -35,21 +39,21 @@ fn test_ui_layout_and_interactive_traversal() {
 #[test]
 fn test_selected_node_edge_highlighting() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // Check edge detection relative to selectedNodeId
     assert!(html.contains("e.target === selectedNodeId"));
     assert!(html.contains("e.source === selectedNodeId"));
-    
+
     // Check highlighted classes
     assert!(html.contains("highlighted"));
     assert!(html.contains("entering") || html.contains("edge-entering"));
     assert!(html.contains("leaving") || html.contains("edge-leaving"));
-    
+
     // Check marker assignment
     assert!(html.contains("url(#arrow-selected)"));
     assert!(html.contains("url(#arrow-entering)"));
     assert!(html.contains("url(#arrow-leaving)"));
-    
+
     // Check CSS rules
     assert!(html.contains(".edge-path.highlighted"));
 }
@@ -57,15 +61,15 @@ fn test_selected_node_edge_highlighting() {
 #[test]
 fn test_ui_filter_and_degree_stepper_elements() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // Degree stepper controls
     assert!(html.contains("id=\"degMinus\""));
     assert!(html.contains("id=\"degPlus\""));
     assert!(html.contains("id=\"degValue\""));
-    
+
     // ALL-WITH-CAP toggle
     assert!(html.contains("id=\"hopAllCap\""));
-    
+
     // Node Cap selector
     assert!(html.contains("id=\"nodeCapSelect\""));
     assert!(html.contains("value=\"25\""));
@@ -73,14 +77,14 @@ fn test_ui_filter_and_degree_stepper_elements() {
     assert!(html.contains("value=\"100\""));
     assert!(html.contains("value=\"200\""));
     assert!(html.contains("value=\"500\""));
-    
+
     // Search bar enhancements
     assert!(html.contains("id=\"searchClearBtn\""));
     assert!(html.contains("id=\"searchMatchCount\""));
-    
+
     // Cap warning badge/indicator
     assert!(html.contains("id=\"capWarningBadge\""));
-    
+
     // Clear filter button
     assert!(html.contains("id=\"btnClearFilter\""));
 }
@@ -88,24 +92,24 @@ fn test_ui_filter_and_degree_stepper_elements() {
 #[test]
 fn test_ui_subgraph_filter_and_expansion_engine() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // Core engine functions
     assert!(html.contains("function compileMatcher"));
     assert!(html.contains("function matchesFilter"));
     assert!(html.contains("function filterAndExpandSubgraph"));
-    
+
     // Degree stepper logic implementations
     assert!(html.contains("currentDegree = Math.max"));
     assert!(html.contains("textContent = currentDegree"));
     assert!(html.contains("isAllCapped = "));
     assert!(html.contains("nodeCap = cap"));
-    
+
     // BFS checks
     assert!(html.contains("dirSelect"));
     assert!(html.contains("activeNodes"));
     assert!(html.contains("activeEdges"));
     assert!(html.contains("capWarningBadge').style.display"));
-    
+
     // Matcher logic check
     assert!(html.contains("path:"));
     assert!(html.contains("kind:"));
@@ -114,10 +118,10 @@ fn test_ui_subgraph_filter_and_expansion_engine() {
 #[test]
 fn test_ui_dependency_tree_direction_preserving() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // Check dirSelect default is 'out' (Dependencies)
     assert!(html.contains("<option value=\"out\" selected>"));
-    
+
     // Check BFS uses branchDir logic
     assert!(html.contains("let branchDir = 'both'"));
     assert!(html.contains("branchDir: nextDir"));
@@ -129,14 +133,14 @@ fn test_ui_dependency_tree_direction_preserving() {
 #[test]
 fn test_ui_selected_node_focal_priority() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // selectedNodeId should take precedence over q when determining seeds
     assert!(html.contains("if (selectedNodeId) {"));
     assert!(html.contains("} else if (q) {"));
-    
+
     // selectNode should trigger filterAndExpandSubgraph regardless of search input
     assert!(html.contains("if (!skipFilter) {"));
-    
+
     // btnShowAllMatches should exist
     assert!(html.contains("id=\"btnShowAllMatches\""));
 }
@@ -144,12 +148,12 @@ fn test_ui_selected_node_focal_priority() {
 #[test]
 fn test_ui_noticeable_fading_elements() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     assert!(html.contains(".node-group.faded") && html.contains("opacity: 0.12"));
     assert!(html.contains(".edge-path.faded") && html.contains("opacity: 0.06"));
     assert!(html.contains(".node-group.heat-root"));
-    
-    // Assert INDEX_HTML contains logic applying faded to non-dependencies when a node is selected in the include graph, 
+
+    // Assert INDEX_HTML contains logic applying faded to non-dependencies when a node is selected in the include graph,
     // and clearing faded on canvas click or Esc.
     assert!(html.contains("currentTab === 'include'") && html.contains("selectedNodeId"));
     assert!(html.contains("reachableDependencies.add") || html.contains("reachableDependencies"));
@@ -161,25 +165,43 @@ fn test_ui_heat_map_coloring() {
     let html = ariadne_ui::INDEX_HTML;
 
     // Heat-critical CSS class for drop-shadow glow
-    assert!(html.contains(".node-group.heat-critical"), "missing .node-group.heat-critical CSS");
+    assert!(
+        html.contains(".node-group.heat-critical"),
+        "missing .node-group.heat-critical CSS"
+    );
 
     // getHeatColor function must exist and derive color from collateral ratio
-    assert!(html.contains("getHeatColor"), "missing getHeatColor function");
+    assert!(
+        html.contains("getHeatColor"),
+        "missing getHeatColor function"
+    );
 
     // Heat tier thresholds: 5-tier (0, 0.15, 0.35, 0.60, 0.85)
-    assert!(html.contains("0.15") && html.contains("0.35") && html.contains("0.60") && html.contains("0.85"),
-        "missing heat tier thresholds");
+    assert!(
+        html.contains("0.15")
+            && html.contains("0.35")
+            && html.contains("0.60")
+            && html.contains("0.85"),
+        "missing heat tier thresholds"
+    );
 
     // graphData.file_collateral used to retrieve collateral counts
-    assert!(html.contains("file_collateral"), "missing file_collateral lookup");
+    assert!(
+        html.contains("file_collateral"),
+        "missing file_collateral lookup"
+    );
 
     // Dynamic legend switch to heat mode when selectedNodeId is active in include graph
-    assert!(html.contains("updateHeatLegend") || html.contains("Heat Map"),
-        "missing dynamic legend heat mode");
+    assert!(
+        html.contains("updateHeatLegend") || html.contains("Heat Map"),
+        "missing dynamic legend heat mode"
+    );
 
     // Heat badges on node cards ([ROOT] pill and +XX col badge)
-    assert!(html.contains("[ROOT]") && html.contains("col") && html.contains("heat-badge"),
-        "missing heat badges on node cards");
+    assert!(
+        html.contains("[ROOT]") && html.contains("col") && html.contains("heat-badge"),
+        "missing heat badges on node cards"
+    );
 }
 
 #[test]
@@ -188,8 +210,14 @@ fn test_ui_live_mode_fetches_file_collateral() {
 
     // Live server mode must fetch the full payload (incl. file_collateral) from /api/export;
     // regression guard: without it, heat map and Collateral Breakdown show 0 for every file.
-    assert!(html.contains("fetch('/api/export')"), "live mode must fetch /api/export for file_collateral");
-    assert!(html.contains("graphData.file_collateral ="), "live mode must assign graphData.file_collateral");
+    assert!(
+        html.contains("fetch('/api/export')"),
+        "live mode must fetch /api/export for file_collateral"
+    );
+    assert!(
+        html.contains("graphData.file_collateral ="),
+        "live mode must assign graphData.file_collateral"
+    );
 }
 
 #[test]
@@ -197,19 +225,28 @@ fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
     let html = ariadne_ui::INDEX_HTML;
 
     // Inspector collateral breakdown list container
-    assert!(html.contains("inspCollateralList"), "missing inspCollateralList container in HTML");
+    assert!(
+        html.contains("inspCollateralList"),
+        "missing inspCollateralList container in HTML"
+    );
 
     // Sorting by highest collateral first
-    assert!(html.contains(".col - a.col") || html.contains("b.col - a.col"),
-        "missing descending collateral sort in inspector");
+    assert!(
+        html.contains(".col - a.col") || html.contains("b.col - a.col"),
+        "missing descending collateral sort in inspector"
+    );
 
     // Collateral summary update in inspector insight
-    assert!(html.contains("Total Collateral:") || html.contains("Top contributor:"),
-        "missing collateral summary in inspector insight");
+    assert!(
+        html.contains("Total Collateral:") || html.contains("Top contributor:"),
+        "missing collateral summary in inspector insight"
+    );
 
     // Path illumination helper to trace path from selected root to dependency
-    assert!(html.contains("illuminatePath") || html.contains("findIncludePath"),
-        "missing path illumination logic");
+    assert!(
+        html.contains("illuminatePath") || html.contains("findIncludePath"),
+        "missing path illumination logic"
+    );
 }
 
 #[test]
@@ -221,7 +258,7 @@ fn test_onboarding_and_help_content() {
     assert!(html.contains("id=\"welcomeModal\""));
     assert!(html.contains("id=\"helpCenterModal\""));
     assert!(html.contains("id=\"btnHelp\""));
-    
+
     // Check for tour/help center content covering required features
     assert!(html.contains("Collateral Heat Map"));
     assert!(html.contains("Path Illumination"));
@@ -242,13 +279,13 @@ fn test_onboarding_and_help_content() {
 #[test]
 fn test_tour_overlay_dismissal_and_positioning() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     // Verify positionTourCard function exists and clamps
     assert!(html.contains("function positionTourCard("));
     assert!(html.contains("Math.max("));
     assert!(html.contains("Math.min(winH"));
     assert!(html.contains("Math.min(winW"));
-    
+
     // Verify tourOverlay has an onclick dismissal
     assert!(html.contains("onclick=\"endTour()\"") && html.contains("id=\"tourOverlay\""));
 
@@ -266,15 +303,15 @@ fn test_tour_overlay_dismissal_and_positioning() {
 #[test]
 fn test_ui_loading_overlay_and_progress() {
     let html = ariadne_ui::INDEX_HTML;
-    
+
     assert!(html.contains("id=\"loadingOverlay\""));
     assert!(html.contains("id=\"loadingProgress\""));
     assert!(html.contains("id=\"loadingText\""));
-    
+
     assert!(html.contains("function showProgress"));
     assert!(html.contains("function updateProgress"));
     assert!(html.contains("function hideProgress"));
-    
+
     // Check integration in init()
     assert!(html.contains("pollStatus"));
     assert!(html.contains("status.progress.state === 'loading'"));
@@ -286,75 +323,154 @@ fn test_ui_hotspots_panel() {
     let html = ariadne_ui::INDEX_HTML;
 
     // Panel, toggle button, and metric selector markup
-    assert!(html.contains("id=\"hotspotPanel\""), "missing hotspotPanel container");
-    assert!(html.contains("id=\"btnHotspots\""), "missing btnHotspots toggle button");
-    assert!(html.contains("id=\"hotspotMetric\""), "missing hotspotMetric selector");
-    assert!(html.contains("toggleHotspots"), "missing toggleHotspots handler");
+    assert!(
+        html.contains("id=\"hotspotPanel\""),
+        "missing hotspotPanel container"
+    );
+    assert!(
+        html.contains("id=\"btnHotspots\""),
+        "missing btnHotspots toggle button"
+    );
+    assert!(
+        html.contains("id=\"hotspotMetric\""),
+        "missing hotspotMetric selector"
+    );
+    assert!(
+        html.contains("toggleHotspots"),
+        "missing toggleHotspots handler"
+    );
 
     // Ranking + rendering logic
-    assert!(html.contains("function computeHotspots"), "missing computeHotspots ranking");
-    assert!(html.contains("function renderHotspots"), "missing renderHotspots renderer");
+    assert!(
+        html.contains("function computeHotspots"),
+        "missing computeHotspots ranking"
+    );
+    assert!(
+        html.contains("function renderHotspots"),
+        "missing renderHotspots renderer"
+    );
 
     // Collateral burden aggregation must read the full file_collateral map and cache it
-    assert!(html.contains("function getBurdenMaps"), "missing collateral burden aggregation");
-    assert!(html.contains("graphData.file_collateral") && html.contains("hotspotBurdenSource"),
-        "burden aggregation must read graphData.file_collateral with cache invalidation");
+    assert!(
+        html.contains("function getBurdenMaps"),
+        "missing collateral burden aggregation"
+    );
+    assert!(
+        html.contains("graphData.file_collateral") && html.contains("hotspotBurdenSource"),
+        "burden aggregation must read graphData.file_collateral with cache invalidation"
+    );
 
     // List capped at top 25 rows; rows flow through selectNode so heat/fade/inspector apply
-    assert!(html.contains("slice(0, 25)"), "hotspot list must cap at 25 rows");
-    assert!(html.contains("selectHotspotRow") && html.contains("selectNode(id)"),
-        "hotspot row click must route through selectNode");
+    assert!(
+        html.contains("slice(0, 25)"),
+        "hotspot list must cap at 25 rows"
+    );
+    assert!(
+        html.contains("selectHotspotRow") && html.contains("selectNode(id)"),
+        "hotspot row click must route through selectNode"
+    );
 
     // All 5 metrics present, collateral burden is default
-    assert!(html.contains(">Collateral burden<") && html.contains(">Fan-in<")
-        && html.contains(">Fan-out<") && html.contains(">Closure burden<")
-        && html.contains(">Cycle participation<"), "missing hotspot metrics");
-    assert!(html.contains("value=\"burden\" selected"), "collateral burden must be default metric");
+    assert!(
+        html.contains(">Collateral burden<")
+            && html.contains(">Fan-in<")
+            && html.contains(">Fan-out<")
+            && html.contains(">Closure burden<")
+            && html.contains(">Cycle participation<"),
+        "missing hotspot metrics"
+    );
+    assert!(
+        html.contains("value=\"burden\" selected"),
+        "collateral burden must be default metric"
+    );
 
     // Older exports without file_collateral degrade to Fan-in with an inline hint
 
     // First-visit tour must demo the hotspot view and restore state on leave
-    assert!(html.contains("id: '#hotspotPanel'") && html.contains("Hotspots Triage"),
-        "guided tour must include a Hotspots step");
-    assert!(html.contains("tourOpenedHotspots"),
-        "tour must only close hotspots if the tour step opened them");
-    assert!(html.contains(".hotspot-panel.tour-highlighted-element"),
-        "tour highlight must keep the hotspot panel absolutely positioned");
-    assert!(html.contains("showing Fan-in instead"), "missing Fan-in fallback hint");
+    assert!(
+        html.contains("id: '#hotspotPanel'") && html.contains("Hotspots Triage"),
+        "guided tour must include a Hotspots step"
+    );
+    assert!(
+        html.contains("tourOpenedHotspots"),
+        "tour must only close hotspots if the tour step opened them"
+    );
+    assert!(
+        html.contains(".hotspot-panel.tour-highlighted-element"),
+        "tour highlight must keep the hotspot panel absolutely positioned"
+    );
+    assert!(
+        html.contains("showing Fan-in instead"),
+        "missing Fan-in fallback hint"
+    );
 
     // Include-tab-only gating
-    assert!(html.contains("currentTab !== 'include'"), "hotspots must gate on the include tab");
+    assert!(
+        html.contains("currentTab !== 'include'"),
+        "hotspots must gate on the include tab"
+    );
 
     // Bar normalized to top score
-    assert!(html.contains("hotspot-bar-fill") && html.contains("e.value / top"),
-        "missing normalized hotspot bar");
+    assert!(
+        html.contains("hotspot-bar-fill") && html.contains("e.value / top"),
+        "missing normalized hotspot bar"
+    );
 
     // Panel clicks/scrolls must not reach canvas handlers (deselect-on-click, pan, zoom)
-    assert!(html.matches("closest('.hotspot-panel')").count() >= 3,
-        "canvas mousedown/click/wheel handlers must ignore events inside the hotspot panel");
+    assert!(
+        html.matches("closest('.hotspot-panel')").count() >= 3,
+        "canvas mousedown/click/wheel handlers must ignore events inside the hotspot panel"
+    );
 
     // Wheel over the panel scrolls the list, falling through to the graph view at its edges
-    assert!(html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
-        "wheel over hotspot panel should scroll the list, then reach the graph view at the edges");
+    assert!(
+        html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
+        "wheel over hotspot panel should scroll the list, then reach the graph view at the edges"
+    );
 }
 
 #[test]
 fn test_breadcrumbs_render_in_thread_bar() {
     let html = ariadne_ui::INDEX_HTML;
 
-    assert!(html.contains("id=\"ariadneThread\""), "thread bar container missing");
-    assert!(html.contains("let threadHistory = []"), "breadcrumb state missing");
-    assert!(html.contains("function recordCrumb"), "breadcrumb recording missing");
-    assert!(html.contains("function renderThreadBar"), "breadcrumb rendering missing");
-    assert!(html.contains("function jumpToCrumb"), "breadcrumb navigation missing");
-    assert!(html.contains("recordCrumb(id, node.label)"), "selectNode must record a crumb");
-    assert!(!html.contains("<!-- Breadcrumbs go here -->"), "breadcrumb bar must not be an empty placeholder");
+    assert!(
+        html.contains("id=\"ariadneThread\""),
+        "thread bar container missing"
+    );
+    assert!(
+        html.contains("let threadHistory = []"),
+        "breadcrumb state missing"
+    );
+    assert!(
+        html.contains("function recordCrumb"),
+        "breadcrumb recording missing"
+    );
+    assert!(
+        html.contains("function renderThreadBar"),
+        "breadcrumb rendering missing"
+    );
+    assert!(
+        html.contains("function jumpToCrumb"),
+        "breadcrumb navigation missing"
+    );
+    assert!(
+        html.contains("recordCrumb(id, node.label)"),
+        "selectNode must record a crumb"
+    );
+    assert!(
+        !html.contains("<!-- Breadcrumbs go here -->"),
+        "breadcrumb bar must not be an empty placeholder"
+    );
 
     // Auto-selected fallback nodes must not pollute the breadcrumb trail
-    assert!(html.contains("selectNode(activeNodes[0].id, true, true)"),
-        "filter fallback auto-select must skip crumb recording");
+    assert!(
+        html.contains("selectNode(activeNodes[0].id, true, true)"),
+        "filter fallback auto-select must skip crumb recording"
+    );
 
     // Clearing the selection re-renders the bar (background click, Escape, search)
-    assert!(html.matches("renderThreadBar()").count() >= 5,
-        "selection-clear paths must refresh the breadcrumb bar");
+    assert!(
+        html.matches("renderThreadBar()").count() >= 5,
+        "selection-clear paths must refresh the breadcrumb bar"
+    );
 }

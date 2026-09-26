@@ -83,7 +83,11 @@ mod tests {
 
         assert_eq!(res.files.len(), 3);
 
-        let gen_file = res.files.iter().find(|f| f.path.to_string_lossy().contains("gen_code")).unwrap();
+        let gen_file = res
+            .files
+            .iter()
+            .find(|f| f.path.to_string_lossy().contains("gen_code"))
+            .unwrap();
         assert_eq!(gen_file.ownership, FileOwnership::Generated);
         assert_eq!(gen_file.optimization_policy, OptimizationPolicy::Frozen);
     }

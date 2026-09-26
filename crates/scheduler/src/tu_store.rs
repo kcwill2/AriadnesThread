@@ -6,12 +6,12 @@
 //! the combined `TuCacheFingerprint` hash, so edits invalidate exactly the
 //! translation units whose closure changed.
 
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 use ariadne_build::{CompilationContext, TranslationUnit};
 use ariadne_graph::IncludeResolver;
@@ -188,7 +188,11 @@ pub fn compute_tu_closure(
                             dest_id,
                             record_hash(ctx, repo_root, &dest_id, Some(&dest_path)),
                         ));
-                        queue.extend(resolver.resolve_file_includes(dest_id, &dest_path, &header_content));
+                        queue.extend(resolver.resolve_file_includes(
+                            dest_id,
+                            &dest_path,
+                            &header_content,
+                        ));
                     }
                     Err(_) => {
                         header_hashes.push((dest_id, unreadable_hash(dest_id)));
@@ -219,11 +223,8 @@ pub fn analyze_closure(tu: &TranslationUnit, closure: &TuClosure) -> TuAnalysis 
     let mut combined_references = Vec::new();
 
     for (file_id, _, file_content) in &closure.files {
-        let mut file_analysis = CppSemanticAnalyzer::analyze_source(
-            *file_id,
-            file_content,
-            &tu.context_name,
-        );
+        let mut file_analysis =
+            CppSemanticAnalyzer::analyze_source(*file_id, file_content, &tu.context_name);
         combined_symbols.append(&mut file_analysis.symbols);
         combined_declarations.append(&mut file_analysis.declarations);
         combined_edges.append(&mut file_analysis.edges);
@@ -317,7 +318,11 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root.join("include")).unwrap();
         fs::write(root.join("include/common.h"), "struct Common {};").unwrap();
-        fs::write(root.join("a.cpp"), "#include \"include/common.h\"\nvoid use(Common) {}").unwrap();
+        fs::write(
+            root.join("a.cpp"),
+            "#include \"include/common.h\"\nvoid use(Common) {}",
+        )
+        .unwrap();
 
         let ctx = make_ctx(root);
         let tu = tu_for(root, "a.cpp");
@@ -344,13 +349,19 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root.join("include")).unwrap();
         fs::write(root.join("include/common.h"), "struct Common {};").unwrap();
-        fs::write(root.join("a.cpp"), "#include \"include/common.h\"\nvoid use(Common) {}").unwrap();
+        fs::write(
+            root.join("a.cpp"),
+            "#include \"include/common.h\"\nvoid use(Common) {}",
+        )
+        .unwrap();
 
         let ctx = make_ctx(root);
         let tu = tu_for(root, "a.cpp");
         let (analysis, _fp) = analyze_tu_full(&tu, root, &ctx).unwrap();
-        assert!(analysis.symbols.iter().any(|s| s.name == "Common"),
-            "closure merge must include symbols from headers");
+        assert!(
+            analysis.symbols.iter().any(|s| s.name == "Common"),
+            "closure merge must include symbols from headers"
+        );
     }
 
     #[test]

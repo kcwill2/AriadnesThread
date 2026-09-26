@@ -1,16 +1,15 @@
+use ariadne_build::{CompileCommand, TranslationUnit};
+use ariadne_repo::FileId;
+use ariadne_scheduler::{
+    ClangWorkerBackend, DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerPool,
+    WorkerPoolConfig,
+};
 /// m16 — ClangWorkerBackend Integration Test
 ///
 /// Verifies that ClangWorkerBackend gracefully degrades to the built-in
 /// CppSemanticAnalyzer when the `clang-worker` binary / Clang is not available,
 /// and that WorkerPool still produces valid TuAnalysis results.
-
 use std::path::PathBuf;
-use ariadne_build::{CompileCommand, TranslationUnit};
-use ariadne_repo::FileId;
-use ariadne_scheduler::{
-    ClangWorkerBackend, DefaultWorkerBackend, WorkerPool, WorkerPoolConfig, PrioritizedTuQueue,
-    TuTask,
-};
 
 fn make_tu(path: &str) -> TranslationUnit {
     TranslationUnit {
@@ -39,16 +38,27 @@ fn fixture_root() -> PathBuf {
 #[tokio::test]
 async fn test_clang_worker_backend_fallback_succeeds() {
     let root = fixture_root();
-    let tasks = vec![
-        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None },
-    ];
+    let tasks = vec![TuTask {
+        task_id: 1,
+        tu: make_tu("src/thing.cpp"),
+        estimated_cost: 10,
+        context: None,
+    }];
     let mut queue = PrioritizedTuQueue::new(tasks);
     let pool = WorkerPool::new(
         ClangWorkerBackend,
-        WorkerPoolConfig { num_workers: 1, max_retries: 0, ..Default::default() },
+        WorkerPoolConfig {
+            num_workers: 1,
+            max_retries: 0,
+            ..Default::default()
+        },
     );
     let results = pool.run(&root, &mut queue).await;
-    assert!(results.is_ok(), "Pool with ClangWorkerBackend must not error: {:?}", results);
+    assert!(
+        results.is_ok(),
+        "Pool with ClangWorkerBackend must not error: {:?}",
+        results
+    );
     let analyses = results.unwrap();
     assert_eq!(analyses.len(), 1, "Expected exactly one analysis result");
 }
@@ -58,12 +68,22 @@ async fn test_clang_worker_backend_fallback_succeeds() {
 async fn test_clang_and_default_backends_produce_consistent_results() {
     let root = fixture_root();
 
-    let tasks_clang = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None }];
+    let tasks_clang = vec![TuTask {
+        task_id: 1,
+        tu: make_tu("src/thing.cpp"),
+        estimated_cost: 10,
+        context: None,
+    }];
     let mut queue_clang = PrioritizedTuQueue::new(tasks_clang);
     let pool_clang = WorkerPool::new(ClangWorkerBackend, WorkerPoolConfig::default());
     let clang_results = pool_clang.run(&root, &mut queue_clang).await.unwrap();
 
-    let tasks_default = vec![TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None }];
+    let tasks_default = vec![TuTask {
+        task_id: 1,
+        tu: make_tu("src/thing.cpp"),
+        estimated_cost: 10,
+        context: None,
+    }];
     let mut queue_default = PrioritizedTuQueue::new(tasks_default);
     let pool_default = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
     let default_results = pool_default.run(&root, &mut queue_default).await.unwrap();
@@ -73,8 +93,7 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
 
     // Both must reference the same file
     assert_eq!(
-        clang_results[0].tu_file_id,
-        default_results[0].tu_file_id,
+        clang_results[0].tu_file_id, default_results[0].tu_file_id,
         "Both backends must analyze the same file"
     );
 }
@@ -85,13 +104,27 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
 async fn test_clang_worker_processes_multiple_translation_units() {
     let root = fixture_root();
     let tasks = vec![
-        TuTask { task_id: 1, tu: make_tu("src/thing.cpp"), estimated_cost: 10, context: None },
-        TuTask { task_id: 2, tu: make_tu("tests/consumer.cpp"), estimated_cost: 20, context: None },
+        TuTask {
+            task_id: 1,
+            tu: make_tu("src/thing.cpp"),
+            estimated_cost: 10,
+            context: None,
+        },
+        TuTask {
+            task_id: 2,
+            tu: make_tu("tests/consumer.cpp"),
+            estimated_cost: 20,
+            context: None,
+        },
     ];
     let mut queue = PrioritizedTuQueue::new(tasks);
     let pool = WorkerPool::new(
         ClangWorkerBackend,
-        WorkerPoolConfig { num_workers: 2, max_retries: 0, ..Default::default() },
+        WorkerPoolConfig {
+            num_workers: 2,
+            max_retries: 0,
+            ..Default::default()
+        },
     );
     let results = pool.run(&root, &mut queue).await.unwrap();
     assert_eq!(results.len(), 2, "All TUs must be processed");

@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use anyhow::{bail, Result};
-use ariadne_repo::FileId;
 use ariadne_pipeline::Pipeline;
+use ariadne_repo::FileId;
+use std::path::PathBuf;
 
 pub fn handle_includes(repo_path: &PathBuf) -> Result<()> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
@@ -15,14 +15,22 @@ pub fn handle_includes(repo_path: &PathBuf) -> Result<()> {
     println!("  Local Headers: {}", report.local_headers_count);
     println!("  System Headers: {}", report.system_headers_count);
     println!("  External Headers: {}", report.external_headers_count);
-    println!("  Unresolved Includes: {}", report.unresolved_includes_count);
+    println!(
+        "  Unresolved Includes: {}",
+        report.unresolved_includes_count
+    );
     println!("  Cycles Detected: {}", report.cycle_count);
     println!();
     println!("{}", pipeline.stats.format_summary());
     println!();
     println!("Top Headers by Transitive Include Closure:");
     for (idx, (_id, path, closure_size)) in report.top_headers_by_closure.iter().enumerate() {
-        println!("  {}. {} (closure size: {})", idx + 1, path.display(), closure_size);
+        println!(
+            "  {}. {} (closure size: {})",
+            idx + 1,
+            path.display(),
+            closure_size
+        );
     }
 
     Ok(())

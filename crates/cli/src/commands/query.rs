@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use crate::commands::index::get_or_build_reduced_model;
 use anyhow::Result;
 use ariadne_report::ArtifactManager;
-use crate::commands::index::get_or_build_reduced_model;
+use std::path::PathBuf;
 
 pub fn handle_query_symbol(repo_path: &PathBuf, name: &str) -> Result<()> {
     let (_, model) = get_or_build_reduced_model(repo_path)?;

@@ -1,10 +1,10 @@
-use std::fs;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
-use ariadne_repo::{Repository, RepositoryDiscoveryResult, FileRecord, build_discovery_result};
 use ariadne_build::BuildDiscoveryResult;
-use ariadne_index::{CURRENT_ANALYSIS_VERSION, IncrementalStats};
+use ariadne_index::{IncrementalStats, CURRENT_ANALYSIS_VERSION};
+use ariadne_repo::{build_discovery_result, FileRecord, Repository, RepositoryDiscoveryResult};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::manifests::*;
 
@@ -19,7 +19,11 @@ pub struct StaleArtifact {
 
 impl std::fmt::Display for StaleArtifact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stale artifact for stage '{}': {}", self.stage, self.reason)
+        write!(
+            f,
+            "stale artifact for stage '{}': {}",
+            self.stage, self.reason
+        )
     }
 }
 
@@ -34,7 +38,10 @@ pub struct ArtifactManager {
 }
 
 fn stale(stage: &str, reason: impl Into<String>) -> anyhow::Error {
-    anyhow::Error::from(StaleArtifact { stage: stage.to_string(), reason: reason.into() })
+    anyhow::Error::from(StaleArtifact {
+        stage: stage.to_string(),
+        reason: reason.into(),
+    })
 }
 
 /// Process-unique temp name so concurrent writers of the same artifact never
@@ -44,7 +51,9 @@ fn unique_tmp(path: &Path) -> PathBuf {
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     path.with_file_name(format!(
         ".{}.{}.{}.tmp",
-        path.file_name().and_then(|s| s.to_str()).unwrap_or("artifact"),
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("artifact"),
         std::process::id(),
         id
     ))
@@ -55,10 +64,8 @@ fn unique_tmp(path: &Path) -> PathBuf {
 /// previous artifact intact.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = unique_tmp(path);
-    fs::write(&tmp, bytes)
-        .with_context(|| format!("Failed to write temp file at {:?}", tmp))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("Failed to rename {:?} to {:?}", tmp, path))?;
+    fs::write(&tmp, bytes).with_context(|| format!("Failed to write temp file at {:?}", tmp))?;
+    fs::rename(&tmp, path).with_context(|| format!("Failed to rename {:?} to {:?}", tmp, path))?;
     Ok(())
 }
 
@@ -90,8 +97,9 @@ fn same_path(a: &Path, b: &Path) -> bool {
 impl ArtifactManager {
     pub fn init<P: AsRef<Path>>(root: P) -> Result<Self> {
         let artifact_root = root.as_ref().join("artifacts");
-        fs::create_dir_all(&artifact_root)
-            .with_context(|| format!("Failed to create artifact directory at {:?}", artifact_root))?;
+        fs::create_dir_all(&artifact_root).with_context(|| {
+            format!("Failed to create artifact directory at {:?}", artifact_root)
+        })?;
         Ok(Self { artifact_root })
     }
 
@@ -137,19 +145,25 @@ impl ArtifactManager {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         if stored_version != CURRENT_ANALYSIS_VERSION {
-            return Err(stale(stage, format!(
-                "analysis version mismatch: {} != {}",
-                stored_version, CURRENT_ANALYSIS_VERSION
-            )));
+            return Err(stale(
+                stage,
+                format!(
+                    "analysis version mismatch: {} != {}",
+                    stored_version, CURRENT_ANALYSIS_VERSION
+                ),
+            ));
         }
 
         if let Some(root) = value.get("repository_root").and_then(|v| v.as_str()) {
             if !same_path(Path::new(root), &self.repo_root()) {
-                return Err(stale(stage, format!(
-                    "repository root mismatch: {} != {}",
-                    root,
-                    self.repo_root().display()
-                )));
+                return Err(stale(
+                    stage,
+                    format!(
+                        "repository root mismatch: {} != {}",
+                        root,
+                        self.repo_root().display()
+                    ),
+                ));
             }
         }
 
@@ -157,10 +171,18 @@ impl ArtifactManager {
     }
 
     /// Saves files.json, files.bin, and manifest.json into artifacts/repository/
-    pub fn save_repository_artifacts(&self, discovery: &RepositoryDiscoveryResult, input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_repository_artifacts(
+        &self,
+        discovery: &RepositoryDiscoveryResult,
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let repo_artifact_dir = self.artifact_root.join("repository");
-        fs::create_dir_all(&repo_artifact_dir)
-            .with_context(|| format!("Failed to create repository artifact directory at {:?}", repo_artifact_dir))?;
+        fs::create_dir_all(&repo_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create repository artifact directory at {:?}",
+                repo_artifact_dir
+            )
+        })?;
 
         // 1. files.json
         let json_path = repo_artifact_dir.join("files.json");
@@ -192,22 +214,33 @@ impl ArtifactManager {
         let bin_path = self.artifact_root.join("repository").join("files.bin");
         let content = fs::read(&bin_path)
             .with_context(|| format!("Failed to read files.bin at {:?}", bin_path))?;
-        let records = bincode::deserialize(&content)
-            .context("Failed to deserialize file records")?;
+        let records =
+            bincode::deserialize(&content).context("Failed to deserialize file records")?;
         Ok(records)
     }
 
-    pub fn load_repository_checked(&self, input_fingerprint: &str) -> Result<RepositoryDiscoveryResult> {
+    pub fn load_repository_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<RepositoryDiscoveryResult> {
         self.check_manifest("repository", input_fingerprint)?;
         let files = self.load_repository_artifacts()?;
         Ok(build_discovery_result(self.repo_root(), files))
     }
 
     /// Saves contexts.json, commands.json, translation-units.bin, and manifest.json into artifacts/contexts/
-    pub fn save_build_context_artifacts(&self, build_result: &BuildDiscoveryResult, input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_build_context_artifacts(
+        &self,
+        build_result: &BuildDiscoveryResult,
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let contexts_artifact_dir = self.artifact_root.join("contexts");
-        fs::create_dir_all(&contexts_artifact_dir)
-            .with_context(|| format!("Failed to create contexts artifact directory at {:?}", contexts_artifact_dir))?;
+        fs::create_dir_all(&contexts_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create contexts artifact directory at {:?}",
+                contexts_artifact_dir
+            )
+        })?;
 
         // 1. contexts.json
         let contexts_path = contexts_artifact_dir.join("contexts.json");
@@ -251,7 +284,10 @@ impl ArtifactManager {
         Ok(contexts_artifact_dir)
     }
 
-    pub fn load_build_context_checked(&self, input_fingerprint: &str) -> Result<BuildDiscoveryResult> {
+    pub fn load_build_context_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<BuildDiscoveryResult> {
         self.check_manifest("contexts", input_fingerprint)?;
         let contexts_path = self.artifact_root.join("contexts").join("contexts.json");
         let contexts_json = fs::read_to_string(&contexts_path)
@@ -259,11 +295,14 @@ impl ArtifactManager {
         let contexts = serde_json::from_str(&contexts_json)
             .context("Failed to deserialize compilation contexts")?;
 
-        let tus_path = self.artifact_root.join("contexts").join("translation-units.bin");
+        let tus_path = self
+            .artifact_root
+            .join("contexts")
+            .join("translation-units.bin");
         let tus_bin = fs::read(&tus_path)
             .with_context(|| format!("Failed to read translation-units.bin at {:?}", tus_path))?;
-        let translation_units = bincode::deserialize(&tus_bin)
-            .context("Failed to deserialize translation units")?;
+        let translation_units =
+            bincode::deserialize(&tus_bin).context("Failed to deserialize translation units")?;
 
         Ok(BuildDiscoveryResult {
             repo_root: self.repo_root(),
@@ -281,8 +320,12 @@ impl ArtifactManager {
         input_fingerprint: &str,
     ) -> Result<PathBuf> {
         let includes_artifact_dir = self.artifact_root.join("includes");
-        fs::create_dir_all(&includes_artifact_dir)
-            .with_context(|| format!("Failed to create includes artifact directory at {:?}", includes_artifact_dir))?;
+        fs::create_dir_all(&includes_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create includes artifact directory at {:?}",
+                includes_artifact_dir
+            )
+        })?;
 
         // 1. edges.bin
         let edges_path = includes_artifact_dir.join("edges.bin");
@@ -326,15 +369,18 @@ impl ArtifactManager {
         &self,
         input_fingerprint: &str,
         discovery: &RepositoryDiscoveryResult,
-    ) -> Result<(ariadne_graph::IncludeGraph, HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>)> {
+    ) -> Result<(
+        ariadne_graph::IncludeGraph,
+        HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+    )> {
         self.check_manifest("includes", input_fingerprint)?;
         let includes_artifact_dir = self.artifact_root.join("includes");
 
         let edges_path = includes_artifact_dir.join("edges.bin");
         let edges_bin = fs::read(&edges_path)
             .with_context(|| format!("Failed to read edges.bin at {:?}", edges_path))?;
-        let edges: Vec<ariadne_graph::IncludeEdge> = bincode::deserialize(&edges_bin)
-            .context("Failed to deserialize include edges")?;
+        let edges: Vec<ariadne_graph::IncludeEdge> =
+            bincode::deserialize(&edges_bin).context("Failed to deserialize include edges")?;
 
         let closures_path = includes_artifact_dir.join("closures.bin");
         let closures_bin = fs::read(&closures_path)
@@ -361,8 +407,12 @@ impl ArtifactManager {
         reuse: Option<&IncrementalStats>,
     ) -> Result<PathBuf> {
         let index_artifact_dir = self.artifact_root.join("index");
-        fs::create_dir_all(&index_artifact_dir)
-            .with_context(|| format!("Failed to create index artifact directory at {:?}", index_artifact_dir))?;
+        fs::create_dir_all(&index_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create index artifact directory at {:?}",
+                index_artifact_dir
+            )
+        })?;
 
         // 1. tu_analyses.bin
         let tu_analyses_path = index_artifact_dir.join("tu_analyses.bin");
@@ -396,32 +446,46 @@ impl ArtifactManager {
         Ok(index_artifact_dir)
     }
 
-    pub fn load_index_checked(&self, input_fingerprint: &str) -> Result<ariadne_index::IndexResult> {
+    pub fn load_index_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<ariadne_index::IndexResult> {
         self.check_manifest("index", input_fingerprint)?;
         let tu_analyses_path = self.artifact_root.join("index").join("tu_analyses.bin");
         let tu_analyses_bin = fs::read(&tu_analyses_path)
             .with_context(|| format!("Failed to read tu_analyses.bin at {:?}", tu_analyses_path))?;
-        let tu_analyses: Vec<ariadne_index::TuAnalysis> = bincode::deserialize(&tu_analyses_bin)
-            .context("Failed to deserialize tu analyses")?;
-        Ok(ariadne_index::IndexResult::new(self.repo_root(), tu_analyses))
+        let tu_analyses: Vec<ariadne_index::TuAnalysis> =
+            bincode::deserialize(&tu_analyses_bin).context("Failed to deserialize tu analyses")?;
+        Ok(ariadne_index::IndexResult::new(
+            self.repo_root(),
+            tu_analyses,
+        ))
     }
 
     /// Saves symbols.bin, edges.bin, tu-usage.bin, file-symbols.bin, and manifest.json into artifacts/reduced/
-    pub fn save_reduced_artifacts(&self, model: &ariadne_graph::ReducedSemanticModel, input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_reduced_artifacts(
+        &self,
+        model: &ariadne_graph::ReducedSemanticModel,
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let reduced_artifact_dir = self.artifact_root.join("reduced");
-        fs::create_dir_all(&reduced_artifact_dir)
-            .with_context(|| format!("Failed to create reduced artifact directory at {:?}", reduced_artifact_dir))?;
+        fs::create_dir_all(&reduced_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create reduced artifact directory at {:?}",
+                reduced_artifact_dir
+            )
+        })?;
 
         // 1. symbols.bin
         let symbols_path = reduced_artifact_dir.join("symbols.bin");
-        let symbols_bin = bincode::serialize(&model.symbols)
-            .context("Failed to serialize symbols to binary")?;
+        let symbols_bin =
+            bincode::serialize(&model.symbols).context("Failed to serialize symbols to binary")?;
         write_atomic(&symbols_path, &symbols_bin)?;
 
         // 2. edges.bin
         let edges_path = reduced_artifact_dir.join("edges.bin");
-        let edges_bin = bincode::serialize(&model.edges)
-            .context("Failed to serialize edges to binary")?;
+        let edges_bin =
+            bincode::serialize(&model.edges).context("Failed to serialize edges to binary")?;
         write_atomic(&edges_path, &edges_bin)?;
 
         // 3. tu-usage.bin
@@ -463,24 +527,24 @@ impl ArtifactManager {
         let symbols_path = reduced_artifact_dir.join("symbols.bin");
         let symbols_bin = fs::read(&symbols_path)
             .with_context(|| format!("Failed to read symbols.bin at {:?}", symbols_path))?;
-        let symbols = bincode::deserialize(&symbols_bin)
-            .context("Failed to deserialize symbols")?;
+        let symbols =
+            bincode::deserialize(&symbols_bin).context("Failed to deserialize symbols")?;
 
         let edges_path = reduced_artifact_dir.join("edges.bin");
         let edges_bin = fs::read(&edges_path)
             .with_context(|| format!("Failed to read edges.bin at {:?}", edges_path))?;
-        let edges = bincode::deserialize(&edges_bin)
-            .context("Failed to deserialize edges")?;
+        let edges = bincode::deserialize(&edges_bin).context("Failed to deserialize edges")?;
 
         let tu_usage_path = reduced_artifact_dir.join("tu-usage.bin");
         let tu_usage_bin = fs::read(&tu_usage_path)
             .with_context(|| format!("Failed to read tu-usage.bin at {:?}", tu_usage_path))?;
-        let tu_usage = bincode::deserialize(&tu_usage_bin)
-            .context("Failed to deserialize tu usage")?;
+        let tu_usage =
+            bincode::deserialize(&tu_usage_bin).context("Failed to deserialize tu usage")?;
 
         let file_symbols_path = reduced_artifact_dir.join("file-symbols.bin");
-        let file_symbols_bin = fs::read(&file_symbols_path)
-            .with_context(|| format!("Failed to read file-symbols.bin at {:?}", file_symbols_path))?;
+        let file_symbols_bin = fs::read(&file_symbols_path).with_context(|| {
+            format!("Failed to read file-symbols.bin at {:?}", file_symbols_path)
+        })?;
         let file_symbols = bincode::deserialize(&file_symbols_bin)
             .context("Failed to deserialize file symbols")?;
 
@@ -493,18 +557,32 @@ impl ArtifactManager {
         })
     }
 
-    pub fn load_reduced_checked(&self, input_fingerprint: &str) -> Result<ariadne_graph::ReducedSemanticModel> {
+    pub fn load_reduced_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<ariadne_graph::ReducedSemanticModel> {
         self.check_manifest("reduced", input_fingerprint)?;
         self.load_reduced_artifacts()
     }
 
-    pub fn save_callgraph_artifacts(&self, callgraph: &ariadne_graph::CallGraph, input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_callgraph_artifacts(
+        &self,
+        callgraph: &ariadne_graph::CallGraph,
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let callgraph_dir = self.artifact_root.join("callgraph");
-        fs::create_dir_all(&callgraph_dir)
-            .with_context(|| format!("Failed to create callgraph artifact directory at {:?}", callgraph_dir))?;
+        fs::create_dir_all(&callgraph_dir).with_context(|| {
+            format!(
+                "Failed to create callgraph artifact directory at {:?}",
+                callgraph_dir
+            )
+        })?;
 
         write_json_atomic(&callgraph_dir.join("callgraph.json"), callgraph)?;
-        write_atomic(&callgraph_dir.join("callgraph.bin"), &bincode::serialize(callgraph)?)?;
+        write_atomic(
+            &callgraph_dir.join("callgraph.bin"),
+            &bincode::serialize(callgraph)?,
+        )?;
 
         let cycles = callgraph.detect_recursion_cycles().len();
         let manifest = CallGraphManifest {
@@ -526,27 +604,46 @@ impl ArtifactManager {
         Ok(bincode::deserialize(&data)?)
     }
 
-    pub fn load_callgraph_checked(&self, input_fingerprint: &str) -> Result<ariadne_graph::CallGraph> {
+    pub fn load_callgraph_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<ariadne_graph::CallGraph> {
         self.check_manifest("callgraph", input_fingerprint)?;
         self.load_callgraph_artifacts()
     }
 
-    pub fn save_load_artifacts(&self, report: &LoadReport, input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_load_artifacts(
+        &self,
+        report: &LoadReport,
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let load_artifact_dir = self.artifact_root.join("load");
-        fs::create_dir_all(&load_artifact_dir)
-            .with_context(|| format!("Failed to create load artifact directory at {:?}", load_artifact_dir))?;
+        fs::create_dir_all(&load_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create load artifact directory at {:?}",
+                load_artifact_dir
+            )
+        })?;
 
         // 1. report.json
         write_json_atomic(&load_artifact_dir.join("report.json"), report)?;
 
         // 2. report.bin
-        let report_bin = bincode::serialize(report)
-            .context("Failed to serialize load report to binary")?;
+        let report_bin =
+            bincode::serialize(report).context("Failed to serialize load report to binary")?;
         write_atomic(&load_artifact_dir.join("report.bin"), &report_bin)?;
 
         // 3. manifest.json
-        let total_collateral_load: usize = report.symbol_metrics.iter().map(|m| m.collateral_load).sum::<usize>()
-            + report.file_metrics.iter().map(|m| m.collateral_load).sum::<usize>();
+        let total_collateral_load: usize = report
+            .symbol_metrics
+            .iter()
+            .map(|m| m.collateral_load)
+            .sum::<usize>()
+            + report
+                .file_metrics
+                .iter()
+                .map(|m| m.collateral_load)
+                .sum::<usize>();
 
         let manifest = LoadManifest {
             repository_root: report.repository_root.clone(),
@@ -565,8 +662,8 @@ impl ArtifactManager {
         let report_bin_path = self.artifact_root.join("load").join("report.bin");
         let report_bin = fs::read(&report_bin_path)
             .with_context(|| format!("Failed to read report.bin at {:?}", report_bin_path))?;
-        let report: LoadReport = bincode::deserialize(&report_bin)
-            .context("Failed to deserialize load report")?;
+        let report: LoadReport =
+            bincode::deserialize(&report_bin).context("Failed to deserialize load report")?;
         Ok(report)
     }
 
@@ -575,17 +672,35 @@ impl ArtifactManager {
         self.load_load_artifacts()
     }
 
-    pub fn save_plan_artifacts(&self, repository_root: &Path, plans: &[ariadne_cluster::plan::OptimizationPlan], input_fingerprint: &str) -> Result<PathBuf> {
+    pub fn save_plan_artifacts(
+        &self,
+        repository_root: &Path,
+        plans: &[ariadne_cluster::plan::OptimizationPlan],
+        input_fingerprint: &str,
+    ) -> Result<PathBuf> {
         let plan_artifact_dir = self.artifact_root.join("plans");
-        fs::create_dir_all(&plan_artifact_dir)
-            .with_context(|| format!("Failed to create plans artifact directory at {:?}", plan_artifact_dir))?;
+        fs::create_dir_all(&plan_artifact_dir).with_context(|| {
+            format!(
+                "Failed to create plans artifact directory at {:?}",
+                plan_artifact_dir
+            )
+        })?;
 
         write_json_atomic(&plan_artifact_dir.join("plans.json"), plans)?;
-        write_atomic(&plan_artifact_dir.join("plans.bin"), &bincode::serialize(plans)?)?;
+        write_atomic(
+            &plan_artifact_dir.join("plans.bin"),
+            &bincode::serialize(plans)?,
+        )?;
 
         let total_plans = plans.len();
         let total_targets = plans.len();
-        let total_collateral_reduced = plans.iter().map(|p| p.collateral_load_before.saturating_sub(p.collateral_load_after)).sum();
+        let total_collateral_reduced = plans
+            .iter()
+            .map(|p| {
+                p.collateral_load_before
+                    .saturating_sub(p.collateral_load_after)
+            })
+            .sum();
 
         let manifest = PlanManifest {
             repository_root: repository_root.to_path_buf(),
@@ -604,12 +719,15 @@ impl ArtifactManager {
         let bin_path = self.artifact_root.join("plans").join("plans.bin");
         let bin_content = fs::read(&bin_path)
             .with_context(|| format!("Failed to read plans.bin at {:?}", bin_path))?;
-        let plans: Vec<ariadne_cluster::plan::OptimizationPlan> = bincode::deserialize(&bin_content)
-            .context("Failed to deserialize plans")?;
+        let plans: Vec<ariadne_cluster::plan::OptimizationPlan> =
+            bincode::deserialize(&bin_content).context("Failed to deserialize plans")?;
         Ok(plans)
     }
 
-    pub fn load_plan_checked(&self, input_fingerprint: &str) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
+    pub fn load_plan_checked(
+        &self,
+        input_fingerprint: &str,
+    ) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
         self.check_manifest("plans", input_fingerprint)?;
         self.load_plan_artifacts()
     }
@@ -619,8 +737,12 @@ impl ArtifactManager {
         result: &ariadne_transform::ExtractionResult,
         output_dir: &Path,
     ) -> Result<PathBuf> {
-        fs::create_dir_all(output_dir)
-            .with_context(|| format!("Failed to create extraction artifact directory at {:?}", output_dir))?;
+        fs::create_dir_all(output_dir).with_context(|| {
+            format!(
+                "Failed to create extraction artifact directory at {:?}",
+                output_dir
+            )
+        })?;
 
         let manifest = ExtractionManifest {
             plan_id: result.plan_id.clone(),
@@ -633,7 +755,8 @@ impl ArtifactManager {
         write_json_atomic(&output_dir.join("manifest.json"), &manifest)?;
 
         let headers_dir = output_dir.join("headers");
-        result.write_to_disk(&headers_dir)
+        result
+            .write_to_disk(&headers_dir)
             .context("Failed to write extracted headers to disk")?;
 
         Ok(output_dir.to_path_buf())
@@ -645,11 +768,18 @@ impl ArtifactManager {
         preview: &ariadne_transform::MigrationPreview,
     ) -> Result<PathBuf> {
         let migration_dir = self.artifact_root.join("migration");
-        fs::create_dir_all(&migration_dir)
-            .with_context(|| format!("Failed to create migration artifact directory at {:?}", migration_dir))?;
+        fs::create_dir_all(&migration_dir).with_context(|| {
+            format!(
+                "Failed to create migration artifact directory at {:?}",
+                migration_dir
+            )
+        })?;
 
         // 1. preview.bin
-        write_atomic(&migration_dir.join("preview.bin"), &bincode::serialize(preview)?)?;
+        write_atomic(
+            &migration_dir.join("preview.bin"),
+            &bincode::serialize(preview)?,
+        )?;
 
         // 2. preview.json
         write_json_atomic(&migration_dir.join("preview.json"), preview)?;
@@ -689,9 +819,10 @@ impl ArtifactManager {
             ariadne_validate::ApplyOutcome::Committed { tiers_passed } => {
                 ("Committed", tiers_passed.len(), tiers_passed.len())
             }
-            ariadne_validate::ApplyOutcome::RolledBack { failed_tier: _, tiers_passed } => {
-                ("RolledBack", tiers_passed.len() + 1, tiers_passed.len())
-            }
+            ariadne_validate::ApplyOutcome::RolledBack {
+                failed_tier: _,
+                tiers_passed,
+            } => ("RolledBack", tiers_passed.len() + 1, tiers_passed.len()),
         };
 
         let manifest = TransactionManifest {
@@ -709,7 +840,10 @@ impl ArtifactManager {
         Ok(transaction_dir)
     }
 
-    pub fn save_measurement_artifacts(&self, measurement: &ariadne_build::BuildMeasurement) -> Result<PathBuf> {
+    pub fn save_measurement_artifacts(
+        &self,
+        measurement: &ariadne_build::BuildMeasurement,
+    ) -> Result<PathBuf> {
         let measure_dir = self.artifact_root.join("measure");
         fs::create_dir_all(&measure_dir)?;
 
@@ -725,7 +859,10 @@ impl ArtifactManager {
 
         write_json_atomic(&measure_dir.join("manifest.json"), &manifest)?;
         write_json_atomic(&measure_dir.join("measurements.json"), measurement)?;
-        write_atomic(&measure_dir.join("measurements.bin"), &bincode::serialize(measurement)?)?;
+        write_atomic(
+            &measure_dir.join("measurements.bin"),
+            &bincode::serialize(measurement)?,
+        )?;
 
         Ok(measure_dir)
     }
@@ -735,11 +872,21 @@ impl ArtifactManager {
         Self::load_measurement_from_path(&measure_dir)
     }
 
-    pub fn load_measurement_from_path<P: AsRef<Path>>(path: P) -> Result<ariadne_build::BuildMeasurement> {
+    pub fn load_measurement_from_path<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<ariadne_build::BuildMeasurement> {
         let path = path.as_ref();
 
-        let bin_path = if path.is_dir() { path.join("measurements.bin") } else { path.to_path_buf() };
-        let json_path = if path.is_dir() { path.join("measurements.json") } else { path.to_path_buf() };
+        let bin_path = if path.is_dir() {
+            path.join("measurements.bin")
+        } else {
+            path.to_path_buf()
+        };
+        let json_path = if path.is_dir() {
+            path.join("measurements.json")
+        } else {
+            path.to_path_buf()
+        };
 
         if bin_path.exists() && bin_path.extension().and_then(|s| s.to_str()) == Some("bin") {
             let data = fs::read(&bin_path)?;
@@ -748,7 +895,9 @@ impl ArtifactManager {
             }
         }
 
-        if json_path.exists() && (json_path.extension().and_then(|s| s.to_str()) == Some("json") || path.is_dir()) {
+        if json_path.exists()
+            && (json_path.extension().and_then(|s| s.to_str()) == Some("json") || path.is_dir())
+        {
             if let Ok(data) = fs::read_to_string(&json_path) {
                 if let Ok(m) = serde_json::from_str(&data) {
                     return Ok(m);
@@ -759,24 +908,29 @@ impl ArtifactManager {
         anyhow::bail!("Could not load measurement artifacts from path {:?}", path);
     }
 
-    pub fn save_comparison_artifacts(&self, comparison: &ariadne_build::MeasurementComparison) -> Result<PathBuf> {
+    pub fn save_comparison_artifacts(
+        &self,
+        comparison: &ariadne_build::MeasurementComparison,
+    ) -> Result<PathBuf> {
         let measure_dir = self.artifact_root.join("measure");
         fs::create_dir_all(&measure_dir)?;
 
         write_json_atomic(&measure_dir.join("comparison.json"), comparison)?;
-        write_atomic(&measure_dir.join("report.txt"), comparison.format_report().as_bytes())?;
+        write_atomic(
+            &measure_dir.join("report.txt"),
+            comparison.format_report().as_bytes(),
+        )?;
 
         Ok(measure_dir)
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use ariadne_build::{CompilationContext, CompileCommand, TranslationUnit};
     use ariadne_repo::FileId;
+    use tempfile::tempdir;
 
     const FP: &str = "test-fingerprint";
 
@@ -830,8 +984,14 @@ mod tests {
         let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
         mgr.save_repository_artifacts(&discovery, FP).unwrap();
 
-        let err = mgr.load_repository_checked("other-fingerprint").unwrap_err();
-        assert!(is_stale(&err), "fingerprint mismatch must report StaleArtifact: {}", err);
+        let err = mgr
+            .load_repository_checked("other-fingerprint")
+            .unwrap_err();
+        assert!(
+            is_stale(&err),
+            "fingerprint mismatch must report StaleArtifact: {}",
+            err
+        );
     }
 
     #[test]
@@ -848,7 +1008,12 @@ mod tests {
             directory: root.to_path_buf(),
             file: root.join("src/main.cpp"),
             command: Some("cl.exe /c /DDEBUG src/main.cpp".into()),
-            arguments: vec!["cl.exe".into(), "/c".into(), "/DDEBUG".into(), "src/main.cpp".into()],
+            arguments: vec![
+                "cl.exe".into(),
+                "/c".into(),
+                "/DDEBUG".into(),
+                "src/main.cpp".into(),
+            ],
             context_name: "Debug|x64".into(),
             output: None,
         };
@@ -874,7 +1039,10 @@ mod tests {
         let loaded = mgr.load_build_context_checked(FP).unwrap();
         assert_eq!(loaded.contexts.len(), 1);
         assert_eq!(loaded.translation_units.len(), 1);
-        assert_eq!(loaded.translation_units[0].source_path, root.join("src/main.cpp"));
+        assert_eq!(
+            loaded.translation_units[0].source_path,
+            root.join("src/main.cpp")
+        );
     }
 
     #[test]
@@ -888,7 +1056,9 @@ mod tests {
         let closures = graph.compute_closures();
         let report = graph.generate_report();
 
-        let inc_dir = mgr.save_include_artifacts(&graph, &closures, &report, FP).unwrap();
+        let inc_dir = mgr
+            .save_include_artifacts(&graph, &closures, &report, FP)
+            .unwrap();
         assert!(inc_dir.join("edges.bin").exists());
         assert!(inc_dir.join("closures.bin").exists());
         assert!(inc_dir.join("report.json").exists());
@@ -995,20 +1165,18 @@ mod tests {
 
         let report = LoadReport {
             repository_root: repo.root.clone(),
-            symbol_metrics: vec![
-                ariadne_graph::LoadMetric {
-                    target_name: "TestSymbol".to_string(),
-                    target_file: Some(PathBuf::from("test.cpp")),
-                    semantic_load: 10,
-                    include_load: 20,
-                    collateral_load: 10,
-                    total_load: 20,
-                    semantic_symbols: vec![],
-                    collateral_symbols: vec![],
-                    collateral_sources: vec![],
-                    largest_collateral_source: None,
-                }
-            ],
+            symbol_metrics: vec![ariadne_graph::LoadMetric {
+                target_name: "TestSymbol".to_string(),
+                target_file: Some(PathBuf::from("test.cpp")),
+                semantic_load: 10,
+                include_load: 20,
+                collateral_load: 10,
+                total_load: 20,
+                semantic_symbols: vec![],
+                collateral_symbols: vec![],
+                collateral_sources: vec![],
+                largest_collateral_source: None,
+            }],
             file_metrics: vec![],
         };
 
@@ -1019,7 +1187,10 @@ mod tests {
 
         let loaded = mgr.load_load_checked(FP).unwrap();
         assert_eq!(report.symbol_metrics.len(), loaded.symbol_metrics.len());
-        assert_eq!(report.symbol_metrics[0].target_name, loaded.symbol_metrics[0].target_name);
+        assert_eq!(
+            report.symbol_metrics[0].target_name,
+            loaded.symbol_metrics[0].target_name
+        );
     }
 
     #[test]
@@ -1101,14 +1272,12 @@ mod tests {
 
         let preview = MigrationPreview {
             plan_id: "PLAN-001".to_string(),
-            rewrites: vec![
-                ConsumerRewrite {
-                    consumer_file: PathBuf::from("src/foo.cpp"),
-                    old_includes: vec![PathBuf::from("thing.h")],
-                    new_includes: vec![PathBuf::from("thing_types.h")],
-                    side_effect_preservations: vec![],
-                },
-            ],
+            rewrites: vec![ConsumerRewrite {
+                consumer_file: PathBuf::from("src/foo.cpp"),
+                old_includes: vec![PathBuf::from("thing.h")],
+                new_includes: vec![PathBuf::from("thing_types.h")],
+                side_effect_preservations: vec![],
+            }],
         };
 
         let migration_dir = mgr.save_migration_artifacts(&preview).unwrap();
@@ -1133,7 +1302,10 @@ mod tests {
                 ConsumerRewrite {
                     consumer_file: PathBuf::from("src/bar.cpp"),
                     old_includes: vec![PathBuf::from("thing.h")],
-                    new_includes: vec![PathBuf::from("thing_core.h"), PathBuf::from("thing_types.h")],
+                    new_includes: vec![
+                        PathBuf::from("thing_core.h"),
+                        PathBuf::from("thing_types.h"),
+                    ],
                     side_effect_preservations: vec![],
                 },
                 ConsumerRewrite {
@@ -1150,8 +1322,14 @@ mod tests {
 
         assert_eq!(loaded.plan_id, "PLAN-042");
         assert_eq!(loaded.rewrites.len(), 2);
-        assert_eq!(loaded.rewrites[0].consumer_file, PathBuf::from("src/bar.cpp"));
-        assert_eq!(loaded.rewrites[1].side_effect_preservations, vec![PathBuf::from("registry.h")]);
+        assert_eq!(
+            loaded.rewrites[0].consumer_file,
+            PathBuf::from("src/bar.cpp")
+        );
+        assert_eq!(
+            loaded.rewrites[1].side_effect_preservations,
+            vec![PathBuf::from("registry.h")]
+        );
     }
 
     #[test]
@@ -1184,7 +1362,8 @@ mod tests {
         };
 
         let migration_dir = mgr.save_migration_artifacts(&preview).unwrap();
-        let manifest_content = std::fs::read_to_string(migration_dir.join("manifest.json")).unwrap();
+        let manifest_content =
+            std::fs::read_to_string(migration_dir.join("manifest.json")).unwrap();
         let manifest: MigrationManifest = serde_json::from_str(&manifest_content).unwrap();
 
         assert_eq!(manifest.plan_id, "PLAN-007");

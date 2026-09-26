@@ -1,7 +1,7 @@
+use ariadne_build::TranslationUnit;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::path::Path;
-use ariadne_build::TranslationUnit;
 
 use crate::tu_store::SharedTuStoreContext;
 
@@ -34,17 +34,13 @@ impl PartialOrd for TuTask {
 impl Ord for TuTask {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.estimated_cost.cmp(&other.estimated_cost) {
-            Ordering::Equal => {
-                match other.tu.source_path.cmp(&self.tu.source_path) {
-                    Ordering::Equal => {
-                        match other.tu.file_id.cmp(&self.tu.file_id) {
-                            Ordering::Equal => other.task_id.cmp(&self.task_id),
-                            ord => ord,
-                        }
-                    }
+            Ordering::Equal => match other.tu.source_path.cmp(&self.tu.source_path) {
+                Ordering::Equal => match other.tu.file_id.cmp(&self.tu.file_id) {
+                    Ordering::Equal => other.task_id.cmp(&self.task_id),
                     ord => ord,
-                }
-            }
+                },
+                ord => ord,
+            },
             ord => ord,
         }
     }
@@ -231,10 +227,7 @@ mod tests {
     #[test]
     fn test_from_translation_units() {
         let repo_root = PathBuf::from(".");
-        let tus = vec![
-            make_tu("a.rs"),
-            make_tu("b.rs"),
-        ];
+        let tus = vec![make_tu("a.rs"), make_tu("b.rs")];
         let queue = PrioritizedTuQueue::from_translation_units(&repo_root, tus);
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.total_tasks(), 2);

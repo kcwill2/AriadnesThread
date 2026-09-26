@@ -1,5 +1,7 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
-use ariadne_ui::{build_call_elements, build_include_elements, GraphExportPayload, SummaryStats, UiState};
+use ariadne_ui::{
+    build_call_elements, build_include_elements, GraphExportPayload, SummaryStats, UiState,
+};
 use axum::{
     body::Body,
     http::{HeaderMap, Request, StatusCode},
@@ -33,7 +35,12 @@ pub fn empty_export_payload() -> GraphExportPayload {
     }
 }
 
-pub fn ready_state(repo_root: std::path::PathBuf, include_graph: IncludeGraph, call_graph: CallGraph, payload: GraphExportPayload) -> Arc<UiState> {
+pub fn ready_state(
+    repo_root: std::path::PathBuf,
+    include_graph: IncludeGraph,
+    call_graph: CallGraph,
+    payload: GraphExportPayload,
+) -> Arc<UiState> {
     Arc::new(UiState::new_loaded(
         repo_root,
         include_graph,
@@ -51,10 +58,18 @@ pub fn loading_state() -> Arc<UiState> {
 pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
     use ariadne_repo::FileId;
     let mut graph = IncludeGraph::new();
-    graph.file_paths.insert(FileId(1), std::path::PathBuf::from("a.h"));
-    graph.file_paths.insert(FileId(2), std::path::PathBuf::from("b.h"));
-    graph.file_paths.insert(FileId(3), std::path::PathBuf::from("c.cc"));
-    graph.file_paths.insert(FileId(7), std::path::PathBuf::from("d.h"));
+    graph
+        .file_paths
+        .insert(FileId(1), std::path::PathBuf::from("a.h"));
+    graph
+        .file_paths
+        .insert(FileId(2), std::path::PathBuf::from("b.h"));
+    graph
+        .file_paths
+        .insert(FileId(3), std::path::PathBuf::from("c.cc"));
+    graph
+        .file_paths
+        .insert(FileId(7), std::path::PathBuf::from("d.h"));
 
     let edge = |source: u64, destination: u64| ariadne_graph::IncludeEdge {
         source: FileId(source),
@@ -103,12 +118,17 @@ pub fn fixture_call_graph() -> (CallGraph, GraphExportPayload) {
     (graph, payload)
 }
 
-pub async fn request_route(app: axum::Router, uri: &str) -> (StatusCode, HeaderMap, serde_json::Value) {
+pub async fn request_route(
+    app: axum::Router,
+    uri: &str,
+) -> (StatusCode, HeaderMap, serde_json::Value) {
     let request = Request::builder().uri(uri).body(Body::empty()).unwrap();
     let response = app.oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json = if status == StatusCode::OK {
         serde_json::from_slice(&body).expect("OK response from a JSON route must carry a JSON body")
     } else {
@@ -122,6 +142,9 @@ pub async fn request_raw_body(app: axum::Router, uri: &str) -> (StatusCode, Head
     let response = app.oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
     (status, headers, body)
 }

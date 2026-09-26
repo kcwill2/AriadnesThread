@@ -1,7 +1,7 @@
+use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
-use serde::{Serialize, Deserialize};
-use ariadne_repo::FileId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TuMeasurement {
@@ -41,18 +41,25 @@ pub struct MeasurementComparison {
 
 impl MeasurementComparison {
     pub fn compare(before: BuildMeasurement, after: BuildMeasurement) -> Self {
-        let collateral_load_delta = if let (Some(b), Some(a)) = (before.collateral_load, after.collateral_load) {
-            Some((b, a))
-        } else {
-            None
-        };
-        
+        let collateral_load_delta =
+            if let (Some(b), Some(a)) = (before.collateral_load, after.collateral_load) {
+                Some((b, a))
+            } else {
+                None
+            };
+
         let affected_tus = after.affected_tus_count.or(before.affected_tus_count);
 
         Self {
-            frontend_cpu_delta: (before.total_frontend_cpu_time, after.total_frontend_cpu_time),
+            frontend_cpu_delta: (
+                before.total_frontend_cpu_time,
+                after.total_frontend_cpu_time,
+            ),
             wall_clock_delta: (before.full_build_wall_time, after.full_build_wall_time),
-            preprocessing_delta: (before.total_preprocessing_time, after.total_preprocessing_time),
+            preprocessing_delta: (
+                before.total_preprocessing_time,
+                after.total_preprocessing_time,
+            ),
             peak_memory_delta: (before.peak_memory_bytes, after.peak_memory_bytes),
             before,
             after,
@@ -85,7 +92,13 @@ impl MeasurementComparison {
                 }
                 s.chars().rev().collect()
             }
-            writeln!(&mut report, "Collateral load:\n    {} → {}", format_num(b), format_num(a)).unwrap();
+            writeln!(
+                &mut report,
+                "Collateral load:\n    {} → {}",
+                format_num(b),
+                format_num(a)
+            )
+            .unwrap();
             writeln!(&mut report).unwrap();
         }
 
@@ -99,10 +112,13 @@ impl MeasurementComparison {
             format!("{:.1}s", secs)
         };
 
-        writeln!(&mut report, "Measured front-end CPU:\n    {} → {}", 
+        writeln!(
+            &mut report,
+            "Measured front-end CPU:\n    {} → {}",
             format_duration(self.frontend_cpu_delta.0),
             format_duration(self.frontend_cpu_delta.1)
-        ).unwrap();
+        )
+        .unwrap();
 
         report
     }
@@ -126,7 +142,11 @@ impl BuildMeasurer {
         }
     }
 
-    pub fn with_structural_metrics(mut self, collateral_load: Option<usize>, affected_tus: Option<usize>) -> Self {
+    pub fn with_structural_metrics(
+        mut self,
+        collateral_load: Option<usize>,
+        affected_tus: Option<usize>,
+    ) -> Self {
         self.collateral_load = collateral_load;
         self.affected_tus = affected_tus;
         self
@@ -134,10 +154,10 @@ impl BuildMeasurer {
 
     pub fn measure_tu(&self, tu: &TranslationUnit) -> Result<TuMeasurement> {
         let start = std::time::Instant::now();
-        
+
         let mut exit_code = 0;
         let mut frontend_cpu_time = Duration::from_millis(0);
-        
+
         // In a real environment, we would run tu.compile_command here.
         // For fallback/simulation (like tests or missing cl.exe):
         // We'll just read the file or simulate a duration to ensure valid measurements.
@@ -146,14 +166,14 @@ impl BuildMeasurer {
         } else {
             self.repo_root.join(&tu.source_path)
         };
-        
+
         // Attempt to execute the command
         if !tu.compile_command.arguments.is_empty() {
             let cmd_name = &tu.compile_command.arguments[0];
             let mut command = std::process::Command::new(cmd_name);
             command.args(&tu.compile_command.arguments[1..]);
             command.current_dir(&tu.compile_command.directory);
-            
+
             if let Ok(mut child) = command.spawn() {
                 if let Ok(status) = child.wait() {
                     exit_code = status.code().unwrap_or(0);
@@ -163,7 +183,7 @@ impl BuildMeasurer {
                 let _ = std::fs::read(&file_path);
             }
         }
-        
+
         let wall_clock_time = start.elapsed().max(Duration::from_millis(1));
         if frontend_cpu_time.is_zero() {
             frontend_cpu_time = wall_clock_time; // Fallback
@@ -186,7 +206,7 @@ impl BuildMeasurer {
         let mut total_preprocessing_time = Duration::from_millis(0);
         let mut full_build_wall_time = Duration::from_millis(0);
         let mut peak_memory_bytes = 0;
-        
+
         for tu in tus {
             let m = self.measure_tu(tu)?;
             total_frontend_cpu_time += m.frontend_cpu_time;
@@ -200,7 +220,10 @@ impl BuildMeasurer {
 
         Ok(BuildMeasurement {
             repo_root: self.repo_root.clone(),
-            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             full_build_wall_time,
             total_frontend_cpu_time,
             total_preprocessing_time,
@@ -272,11 +295,11 @@ mod tests {
 
     #[test]
     fn test_build_measurer() {
-        use crate::types::{TranslationUnit, CompileCommand};
-        
-        let measurer = BuildMeasurer::new(PathBuf::from("/repo"))
-            .with_structural_metrics(Some(100), Some(2));
-            
+        use crate::types::{CompileCommand, TranslationUnit};
+
+        let measurer =
+            BuildMeasurer::new(PathBuf::from("/repo")).with_structural_metrics(Some(100), Some(2));
+
         let tus = vec![
             TranslationUnit {
                 file_id: FileId(1),
@@ -303,19 +326,25 @@ mod tests {
                     context_name: "Debug".to_string(),
                     output: None,
                 },
-            }
+            },
         ];
-        
+
         // This measure_all call requires `Result` so we use anyhow or std error
         let measurement = measurer.measure_all(&tus).unwrap();
-        
+
         assert_eq!(measurement.repo_root, PathBuf::from("/repo"));
         assert_eq!(measurement.collateral_load, Some(100));
         assert_eq!(measurement.affected_tus_count, Some(2));
         assert_eq!(measurement.tu_measurements.len(), 2);
         assert_eq!(measurement.tu_measurements[0].tu_file_id, FileId(1));
-        assert_eq!(measurement.tu_measurements[0].source_path, PathBuf::from("a.cpp"));
+        assert_eq!(
+            measurement.tu_measurements[0].source_path,
+            PathBuf::from("a.cpp")
+        );
         assert_eq!(measurement.tu_measurements[1].tu_file_id, FileId(2));
-        assert_eq!(measurement.tu_measurements[1].source_path, PathBuf::from("b.cpp"));
+        assert_eq!(
+            measurement.tu_measurements[1].source_path,
+            PathBuf::from("b.cpp")
+        );
     }
 }

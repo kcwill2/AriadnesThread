@@ -1,8 +1,8 @@
-use std::fmt;
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanId(pub String);
@@ -54,7 +54,10 @@ pub struct OptimizationPlan {
 
 impl OptimizationPlan {
     pub fn format_summary(&self) -> String {
-        format!("{}: {} -> {} symbols", self.id, self.collateral_load_before, self.collateral_load_after)
+        format!(
+            "{}: {} -> {} symbols",
+            self.id, self.collateral_load_before, self.collateral_load_after
+        )
     }
 
     pub fn format_detail(&self) -> String {
@@ -80,15 +83,21 @@ impl OptimizationPlan {
         writeln!(&mut out).unwrap();
         writeln!(&mut out, "Problem:").unwrap();
         writeln!(&mut out, "    {}", self.problem).unwrap();
-        
+
         if !self.proposed_extractions.is_empty() {
             writeln!(&mut out).unwrap();
             writeln!(&mut out, "Proposed extraction:").unwrap();
             for ext in &self.proposed_extractions {
-                writeln!(&mut out, "    {} → {}", ext.symbol_name, ext.target_header.display()).unwrap();
+                writeln!(
+                    &mut out,
+                    "    {} → {}",
+                    ext.symbol_name,
+                    ext.target_header.display()
+                )
+                .unwrap();
             }
         }
-        
+
         if !self.optimization_frontier.is_empty() {
             writeln!(&mut out).unwrap();
             writeln!(&mut out, "Optimization frontier:").unwrap();
@@ -96,19 +105,30 @@ impl OptimizationPlan {
                 writeln!(&mut out, "    {}", front.display()).unwrap();
             }
         }
-        
+
         writeln!(&mut out).unwrap();
         writeln!(&mut out, "Expected result:").unwrap();
-        writeln!(&mut out, "    {} → {} collateral symbols", format_number(self.collateral_load_before), format_number(self.collateral_load_after)).unwrap();
-        
+        writeln!(
+            &mut out,
+            "    {} → {} collateral symbols",
+            format_number(self.collateral_load_before),
+            format_number(self.collateral_load_after)
+        )
+        .unwrap();
+
         writeln!(&mut out).unwrap();
         writeln!(&mut out, "Risk:").unwrap();
         writeln!(&mut out, "    {}", self.risk).unwrap();
-        
+
         if !self.validation_required_tus.is_empty() {
             writeln!(&mut out).unwrap();
             writeln!(&mut out, "Validation required:").unwrap();
-            write!(&mut out, "    {} translation units", self.validation_required_tus.len()).unwrap();
+            write!(
+                &mut out,
+                "    {} translation units",
+                self.validation_required_tus.len()
+            )
+            .unwrap();
         }
 
         out
@@ -154,7 +174,7 @@ mod tests {
                     symbol_name: "ThingBuilder".to_string(),
                     symbol_id: SymbolId::new("sym_11"),
                     target_header: PathBuf::from("thing_builder.h"),
-                }
+                },
             ],
             optimization_frontier: vec![PathBuf::from("graphics.h")],
             risk: RiskLevel::Conservative,

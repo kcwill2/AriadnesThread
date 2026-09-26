@@ -23,7 +23,11 @@ fn setup_repo() -> TempDir {
         "#include \"common.h\"\nstruct ThingA { Common c; };",
     )
     .unwrap();
-    fs::write(root.join("include/header_b.h"), "struct ThingB { double x; };").unwrap();
+    fs::write(
+        root.join("include/header_b.h"),
+        "struct ThingB { double x; };",
+    )
+    .unwrap();
     fs::write(
         root.join("src/tu1.cpp"),
         "#include \"header_a.h\"\nvoid use_a(ThingA a) {}",
@@ -107,7 +111,10 @@ fn test_m18_warm_rerun_loads_all_stages_with_zero_parses() {
         );
     }
     assert_eq!(warm.stats.reanalyzed_tus, 0, "zero re-parses when warm");
-    assert_eq!(warm.stats.reused_tus, 0, "loaded index means no per-TU work");
+    assert_eq!(
+        warm.stats.reused_tus, 0,
+        "loaded index means no per-TU work"
+    );
 }
 
 #[test]
@@ -119,19 +126,30 @@ fn test_m18_header_edit_reparses_only_dependent_tu() {
     ensure_all(&mut cold);
 
     // tu1 includes header_a.h -> common.h; tu2 does not.
-    fs::write(root.join("include/common.h"), "struct Common { int id; int extra; };").unwrap();
+    fs::write(
+        root.join("include/common.h"),
+        "struct Common { int id; int extra; };",
+    )
+    .unwrap();
 
     let mut next = Pipeline::new(&root, None).unwrap();
     ensure_all(&mut next);
 
     assert_eq!(next.stats.reanalyzed_tus, 1, "only tu1 should re-parse");
     assert_eq!(next.stats.reused_tus, 1, "tu2 shard stays valid");
-    assert_eq!(next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX), Some(StageReuse::Rebuilt));
     assert_eq!(
-        next.stats.stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
+        next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX),
         Some(StageReuse::Rebuilt)
     );
-    assert_eq!(next.stats.stage_reuse(ariadne_pipeline::STAGE_REDUCED), Some(StageReuse::Rebuilt));
+    assert_eq!(
+        next.stats
+            .stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
+        Some(StageReuse::Rebuilt)
+    );
+    assert_eq!(
+        next.stats.stage_reuse(ariadne_pipeline::STAGE_REDUCED),
+        Some(StageReuse::Rebuilt)
+    );
 
     // A further no-change run is warm again for every stage.
     let mut settled = Pipeline::new(&root, None).unwrap();
@@ -159,7 +177,10 @@ fn test_m18_tu_body_edit_reparses_one_tu() {
     ensure_all(&mut next);
     assert_eq!(next.stats.reanalyzed_tus, 1);
     assert_eq!(next.stats.reused_tus, 1);
-    assert_eq!(next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX), Some(StageReuse::Rebuilt));
+    assert_eq!(
+        next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX),
+        Some(StageReuse::Rebuilt)
+    );
 }
 
 #[test]
@@ -179,7 +200,9 @@ fn test_m18_old_plain_shard_is_stale_and_rewritten() {
         .expect("tu1 analysis present")
         .clone();
     fs::write(
-        root.join("artifacts").join("shards").join(format!("{}.json", tu1_id.0)),
+        root.join("artifacts")
+            .join("shards")
+            .join(format!("{}.json", tu1_id.0)),
         serde_json::to_string(&analysis).unwrap(),
     )
     .unwrap();
@@ -189,14 +212,22 @@ fn test_m18_old_plain_shard_is_stale_and_rewritten() {
     // Plain pre-envelope shards must deserialize-fail into a miss, not trust.
     let mut next = Pipeline::new(&root, None).unwrap();
     next.ensure_index().unwrap();
-    assert_eq!(next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX), Some(StageReuse::Rebuilt));
-    assert_eq!(next.stats.reanalyzed_tus, 1, "only the corrupted TU re-parses");
+    assert_eq!(
+        next.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX),
+        Some(StageReuse::Rebuilt)
+    );
+    assert_eq!(
+        next.stats.reanalyzed_tus, 1,
+        "only the corrupted TU re-parses"
+    );
     assert_eq!(next.stats.reused_tus, 1, "intact shard still loads");
 
     // The reanalyzed TU was rewritten as a fingerprinted envelope.
     let envelope: ariadne_scheduler::tu_store::ShardCheckpoint = serde_json::from_str(
         &fs::read_to_string(
-            root.join("artifacts").join("shards").join(format!("{}.json", tu1_id.0)),
+            root.join("artifacts")
+                .join("shards")
+                .join(format!("{}.json", tu1_id.0)),
         )
         .unwrap(),
     )
@@ -204,7 +235,10 @@ fn test_m18_old_plain_shard_is_stale_and_rewritten() {
     assert!(!envelope.fingerprint.is_empty());
     let mut again = Pipeline::new(&root, None).unwrap();
     again.ensure_index().unwrap();
-    assert_eq!(again.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX), Some(StageReuse::Loaded));
+    assert_eq!(
+        again.stats.stage_reuse(ariadne_pipeline::STAGE_INDEX),
+        Some(StageReuse::Loaded)
+    );
 }
 
 #[test]
@@ -215,7 +249,10 @@ fn test_m18_corrupt_manifest_fingerprint_forces_rebuild() {
     let mut cold = Pipeline::new(&root, None).unwrap();
     ensure_all(&mut cold);
 
-    let manifest_path = root.join("artifacts").join("includes").join("manifest.json");
+    let manifest_path = root
+        .join("artifacts")
+        .join("includes")
+        .join("manifest.json");
     let manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
     let mut corrupt = manifest.as_object().unwrap().clone();
@@ -223,12 +260,17 @@ fn test_m18_corrupt_manifest_fingerprint_forces_rebuild() {
         "input_fingerprint".into(),
         serde_json::Value::String("0".repeat(64)),
     );
-    fs::write(&manifest_path, serde_json::to_string_pretty(&corrupt).unwrap()).unwrap();
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&corrupt).unwrap(),
+    )
+    .unwrap();
 
     let mut next = Pipeline::new(&root, None).unwrap();
     ensure_all(&mut next);
     assert_eq!(
-        next.stats.stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
+        next.stats
+            .stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
         Some(StageReuse::Rebuilt),
         "stale-fingerprint graph must not be trusted"
     );
@@ -241,7 +283,8 @@ fn test_m18_corrupt_manifest_fingerprint_forces_rebuild() {
     let mut warm = Pipeline::new(&root, None).unwrap();
     warm.ensure_include_graph().unwrap();
     assert_eq!(
-        warm.stats.stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
+        warm.stats
+            .stage_reuse(ariadne_pipeline::STAGE_INCLUDE_GRAPH),
         Some(StageReuse::Loaded),
         "rebuilt artifact is trusted afterwards"
     );
@@ -290,7 +333,9 @@ async fn test_m18_ui_warm_start_reports_all_stages_loaded() {
     assert_eq!(status["progress"]["state"].as_str(), Some("ready"));
     assert!(status["last_refresh"].as_u64().unwrap_or(0) > 0);
 
-    let stages = status["stages"].as_array().expect("status should carry stages");
+    let stages = status["stages"]
+        .as_array()
+        .expect("status should carry stages");
     assert_eq!(stages.len(), STAGES.len());
     for entry in stages {
         assert_eq!(

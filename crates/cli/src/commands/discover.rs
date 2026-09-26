@@ -1,9 +1,9 @@
-use std::path::PathBuf;
 use anyhow::Result;
-use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
 use ariadne_build::BuildDiscoverer;
 use ariadne_index::{contexts_fingerprint, contexts_material, Fingerprint};
+use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
 use ariadne_report::ArtifactManager;
+use std::path::PathBuf;
 
 pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
@@ -20,37 +20,62 @@ pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
     println!("Ownership:");
     println!(
         "  Repository: {}",
-        discovery.ownership_summary.get(&FileOwnership::Repository).unwrap_or(&0)
+        discovery
+            .ownership_summary
+            .get(&FileOwnership::Repository)
+            .unwrap_or(&0)
     );
     println!(
         "  ThirdParty: {}",
-        discovery.ownership_summary.get(&FileOwnership::ThirdParty).unwrap_or(&0)
+        discovery
+            .ownership_summary
+            .get(&FileOwnership::ThirdParty)
+            .unwrap_or(&0)
     );
     println!(
         "  Toolchain: {}",
-        discovery.ownership_summary.get(&FileOwnership::Toolchain).unwrap_or(&0)
+        discovery
+            .ownership_summary
+            .get(&FileOwnership::Toolchain)
+            .unwrap_or(&0)
     );
     println!(
         "  Generated: {}",
-        discovery.ownership_summary.get(&FileOwnership::Generated).unwrap_or(&0)
+        discovery
+            .ownership_summary
+            .get(&FileOwnership::Generated)
+            .unwrap_or(&0)
     );
     println!();
     println!("Optimization policy:");
     println!(
         "  Optimizable: {}",
-        discovery.policy_summary.get(&OptimizationPolicy::Optimizable).unwrap_or(&0)
+        discovery
+            .policy_summary
+            .get(&OptimizationPolicy::Optimizable)
+            .unwrap_or(&0)
     );
     println!(
         "  Contract: {}",
-        discovery.policy_summary.get(&OptimizationPolicy::Contract).unwrap_or(&0)
+        discovery
+            .policy_summary
+            .get(&OptimizationPolicy::Contract)
+            .unwrap_or(&0)
     );
     println!(
         "  Frozen: {}",
-        discovery.policy_summary.get(&OptimizationPolicy::Frozen).unwrap_or(&0)
+        discovery
+            .policy_summary
+            .get(&OptimizationPolicy::Frozen)
+            .unwrap_or(&0)
     );
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-    let hashes: Vec<_> = discovery.files.iter().map(|f| (f.id, f.content_hash.clone())).collect();
+    let hashes: Vec<_> = discovery
+        .files
+        .iter()
+        .map(|f| (f.id, f.content_hash.clone()))
+        .collect();
     let repo_fp = Fingerprint::inputs(&repository.root, &hashes);
     artifacts.save_repository_artifacts(&discovery, &repo_fp)?;
 
@@ -83,12 +108,20 @@ pub fn handle_build_discover(repo_path: &PathBuf) -> Result<()> {
         }
         println!();
     }
-    println!("Translation units: {}", build_result.translation_units.len());
+    println!(
+        "Translation units: {}",
+        build_result.translation_units.len()
+    );
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
     let hashes: Vec<_> = repo_discovery
         .as_ref()
-        .map(|d| d.files.iter().map(|f| (f.id, f.content_hash.clone())).collect())
+        .map(|d| {
+            d.files
+                .iter()
+                .map(|f| (f.id, f.content_hash.clone()))
+                .collect()
+        })
         .unwrap_or_default();
     let repo_fp = Fingerprint::inputs(&repository.root, &hashes);
     let contexts_fp = contexts_fingerprint(

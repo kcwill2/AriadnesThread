@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-use std::fs;
 use anyhow::Result;
-use tempfile::tempdir;
 use serde::Deserialize;
+use std::fs;
+use std::path::PathBuf;
+use tempfile::tempdir;
 
 use ariadne_cli::handle_index;
 use ariadne_index::DependencyKind;
@@ -20,15 +20,24 @@ struct IndexManifest {
 fn test_m4_semantic_indexing() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
     let result = handle_index(&repo_path)?;
-    
+
     assert!(result.total_symbols > 0, "Should have found some symbols");
     assert!(result.total_edges > 0, "Should have found some edges");
-    
+
     // Check manifest file
     let artifacts_dir = repo_path.join("artifacts/index");
-    assert!(artifacts_dir.join("manifest.json").exists(), "manifest.json should exist");
-    assert!(artifacts_dir.join("index.json").exists(), "index.json should exist");
-    assert!(artifacts_dir.join("tu_analyses.bin").exists(), "tu_analyses.bin should exist");
+    assert!(
+        artifacts_dir.join("manifest.json").exists(),
+        "manifest.json should exist"
+    );
+    assert!(
+        artifacts_dir.join("index.json").exists(),
+        "index.json should exist"
+    );
+    assert!(
+        artifacts_dir.join("tu_analyses.bin").exists(),
+        "tu_analyses.bin should exist"
+    );
 
     let manifest_content = fs::read_to_string(artifacts_dir.join("manifest.json"))?;
     let manifest: IndexManifest = serde_json::from_str(&manifest_content)?;
@@ -46,9 +55,11 @@ fn test_m4_semantic_indexing() -> Result<()> {
 fn test_m4_semantic_critical_patterns() -> Result<()> {
     let dir = tempdir()?;
     let repo_path = dir.path().to_path_buf();
-    
+
     fs::create_dir_all(repo_path.join("src"))?;
-    fs::write(repo_path.join("src/main.cpp"), r#"
+    fs::write(
+        repo_path.join("src/main.cpp"),
+        r#"
         class B1;
         class A1 { B1* ptr; };
 
@@ -63,25 +74,33 @@ fn test_m4_semantic_critical_patterns() -> Result<()> {
 
         class B5;
         class A5 { B5 make_b(); };
-    "#)?;
+    "#,
+    )?;
 
     // We also need a dummy CMakeLists.txt or something so that build context discovery can find it?
     // Let's just create a basic compile_commands.json
-    fs::write(repo_path.join("compile_commands.json"), serde_json::json!([
-        {
-            "directory": repo_path.to_string_lossy().into_owned(),
-            "command": "c++ -c src/main.cpp -o src/main.o",
-            "file": "src/main.cpp"
-        }
-    ]).to_string())?;
+    fs::write(
+        repo_path.join("compile_commands.json"),
+        serde_json::json!([
+            {
+                "directory": repo_path.to_string_lossy().into_owned(),
+                "command": "c++ -c src/main.cpp -o src/main.o",
+                "file": "src/main.cpp"
+            }
+        ])
+        .to_string(),
+    )?;
 
     let result = handle_index(&repo_path)?;
     assert_eq!(result.tu_analyses.len(), 1);
 
     let tu = &result.tu_analyses[0];
-    
+
     let get_edge_kind = |src: &str, dst: &str| {
-        tu.edges.iter().find(|e| e.src_symbol.0 == src && e.dst_symbol.0 == dst).map(|e| e.kind)
+        tu.edges
+            .iter()
+            .find(|e| e.src_symbol.0 == src && e.dst_symbol.0 == dst)
+            .map(|e| e.kind)
     };
 
     assert_eq!(get_edge_kind("A1", "B1"), Some(DependencyKind::Incomplete));

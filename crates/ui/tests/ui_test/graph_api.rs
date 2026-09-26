@@ -75,14 +75,20 @@ async fn test_search_advanced_queries_and_dto_paths() {
     // We will build a UI state with some mock elements to test search and DTO builder
     let mut include_graph = IncludeGraph::new();
     let file1 = ariadne_repo::FileId(1);
-    include_graph.file_paths.insert(file1, std::path::PathBuf::from("include/test1.h"));
-    
+    include_graph
+        .file_paths
+        .insert(file1, std::path::PathBuf::from("include/test1.h"));
+
     let mut call_graph = CallGraph::default();
     call_graph.nodes.push(ariadne_graph::CallNode {
         symbol_id: ariadne_index::SymbolId("func1".to_string()),
         name: "func1".to_string(),
         owning_file: file1,
-        location: Some(ariadne_index::types::FileLocation { file_id: file1, line: 10, column: 5 }),
+        location: Some(ariadne_index::types::FileLocation {
+            file_id: file1,
+            line: 10,
+            column: 5,
+        }),
     });
 
     let reduced_model = ReducedSemanticModel {
@@ -96,17 +102,18 @@ async fn test_search_advanced_queries_and_dto_paths() {
                 defining_file: Some(file1),
                 declarations: vec![],
                 definition: None,
-            }
+            },
         )]),
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
     };
 
-    let include_elements = build_include_elements(&include_graph, &std::collections::HashMap::new(), &[]);
+    let include_elements =
+        build_include_elements(&include_graph, &std::collections::HashMap::new(), &[]);
     let call_elements = build_call_elements(&call_graph);
     let sym_elements = build_symbol_elements(&reduced_model);
-    
+
     // Check DTO `path` field
     assert_eq!(call_elements[0].data["path"], "1:10"); // DTO populates path as file_id:line
     assert_eq!(sym_elements[0].data["path"], "1");
@@ -121,7 +128,12 @@ async fn test_search_advanced_queries_and_dto_paths() {
             include_graph: include_elements,
             symbol_graph: sym_elements,
             call_graph: call_elements,
-            stats: SummaryStats { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
+            stats: SummaryStats {
+                total_files: 0,
+                total_symbols: 0,
+                total_calls: 0,
+                cycle_count: 0,
+            },
             file_collateral: std::collections::HashMap::new(),
         },
     ));
@@ -129,26 +141,41 @@ async fn test_search_advanced_queries_and_dto_paths() {
     let app = build_router(state);
 
     // Test wildcard
-    let req = Request::builder().uri("/api/graph/search?q=*test*").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/graph/search?q=*test*")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
     assert!(!items.is_empty(), "Expected wildcard match");
 
     // Test regex
-    let req = Request::builder().uri("/api/graph/search?q=/^test/").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/graph/search?q=/^test/")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
     assert!(!items.is_empty(), "Expected regex match");
 
     // Test path
-    let req = Request::builder().uri("/api/graph/search?q=include/").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/graph/search?q=include/")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
     assert!(!items.is_empty(), "Expected path match");
 }
@@ -192,13 +219,15 @@ async fn test_server_collateral_endpoint() {
         .uri("/api/graph/collateral?file=1")
         .body(Body::empty())
         .unwrap();
-    
+
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let response: ariadne_ui::CollateralResponse = serde_json::from_slice(&body).unwrap();
-    
+
     assert_eq!(response.target_id, "1");
     // total_collateral, direct_collateral, transitive_collateral should be computed in the server logic
 }
@@ -207,7 +236,12 @@ fn fixture_sample_state() -> Arc<UiState> {
     let (include_graph, mut payload) = common::fixture_include_graph();
     let (call_graph, call_payload) = common::fixture_call_graph();
     payload.call_graph = call_payload.call_graph;
-    common::ready_state(std::path::PathBuf::from("."), include_graph, call_graph, payload)
+    common::ready_state(
+        std::path::PathBuf::from("."),
+        include_graph,
+        call_graph,
+        payload,
+    )
 }
 
 fn element_ids(elements: &serde_json::Value) -> Vec<String> {
@@ -215,7 +249,12 @@ fn element_ids(elements: &serde_json::Value) -> Vec<String> {
         .as_array()
         .expect("expected a JSON array of Cytoscape elements")
         .iter()
-        .map(|element| element["data"]["id"].as_str().expect("element id must be a string").to_string())
+        .map(|element| {
+            element["data"]["id"]
+                .as_str()
+                .expect("element id must be a string")
+                .to_string()
+        })
         .collect();
     ids.sort();
     ids
@@ -236,7 +275,11 @@ async fn test_all_graph_payload_routes_return_503_while_loading() {
     ];
     for uri in loading_uris {
         let (status, _headers, _body) = common::request_route(app.clone(), uri).await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri} must be unavailable while loading");
+        assert_eq!(
+            status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{uri} must be unavailable while loading"
+        );
     }
 }
 
@@ -249,43 +292,79 @@ async fn test_graph_traverse_returns_400_without_required_params() {
         "/api/graph/traverse?center=1",
     ] {
         let (status, _headers, _body) = common::request_route(app.clone(), uri).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} must require both graph_type and center");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{uri} must require both graph_type and center"
+        );
     }
 }
 
 #[tokio::test]
 async fn test_graph_traverse_include_depth_one_returns_center_and_neighbors() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/graph/traverse?graph_type=include&center=1&depth=1").await;
+    let (status, _headers, body) = common::request_route(
+        app,
+        "/api/graph/traverse?graph_type=include&center=1&depth=1",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let ids = element_ids(&body);
     assert!(ids.contains(&"1".to_string()) && ids.contains(&"2".to_string()));
-    assert!(ids.contains(&"1-2".to_string()), "edge 1-2 must be included");
-    assert!(!ids.contains(&"3".to_string()), "depth 1 must not reach file 3");
-    assert!(!ids.contains(&"7".to_string()), "isolated file 7 must not appear");
+    assert!(
+        ids.contains(&"1-2".to_string()),
+        "edge 1-2 must be included"
+    );
+    assert!(
+        !ids.contains(&"3".to_string()),
+        "depth 1 must not reach file 3"
+    );
+    assert!(
+        !ids.contains(&"7".to_string()),
+        "isolated file 7 must not appear"
+    );
 }
 
 #[tokio::test]
 async fn test_graph_traverse_include_depth_two_reaches_full_chain() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/graph/traverse?graph_type=include&center=1&depth=2").await;
+    let (status, _headers, body) = common::request_route(
+        app,
+        "/api/graph/traverse?graph_type=include&center=1&depth=2",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let ids = element_ids(&body);
-    assert_eq!(ids, vec!["1".to_string(), "1-2".to_string(), "2".to_string(), "2-3".to_string(), "3".to_string()]);
+    assert_eq!(
+        ids,
+        vec![
+            "1".to_string(),
+            "1-2".to_string(),
+            "2".to_string(),
+            "2-3".to_string(),
+            "3".to_string()
+        ]
+    );
 }
 
 #[tokio::test]
 async fn test_graph_traverse_include_with_non_numeric_center_yields_empty_array() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/graph/traverse?graph_type=include&center=not-a-file-id").await;
+    let (status, _headers, body) = common::request_route(
+        app,
+        "/api/graph/traverse?graph_type=include&center=not-a-file-id",
+    )
+    .await;
     assert_eq!(
-        status, StatusCode::OK,
+        status,
+        StatusCode::OK,
         "FINDING: a non-numeric include center is silently accepted, not rejected"
     );
-    assert_eq!(body, serde_json::json!([]), "invalid centers are indistinguishable from empty neighborhoods");
+    assert_eq!(
+        body,
+        serde_json::json!([]),
+        "invalid centers are indistinguishable from empty neighborhoods"
+    );
 }
 
 #[tokio::test]
@@ -306,7 +385,11 @@ async fn test_graph_path_returns_400_without_required_params() {
         "/api/graph/path?from=1&to=3",
     ] {
         let (status, _headers, _body) = common::request_route(app.clone(), uri).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} must require graph_type, from and to");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{uri} must require graph_type, from and to"
+        );
     }
 }
 
@@ -325,10 +408,15 @@ async fn test_graph_path_include_non_numeric_endpoints_return_null() {
     let (status, _headers, body) =
         common::request_route(app, "/api/graph/path?graph_type=include&from=a&to=3").await;
     assert_eq!(
-        status, StatusCode::OK,
+        status,
+        StatusCode::OK,
         "FINDING: non-numeric include endpoints are not rejected as invalid input"
     );
-    assert_eq!(body, serde_json::Value::Null, "invalid endpoints are indistinguishable from 'no path exists'");
+    assert_eq!(
+        body,
+        serde_json::Value::Null,
+        "invalid endpoints are indistinguishable from 'no path exists'"
+    );
 }
 
 #[tokio::test]
@@ -355,11 +443,22 @@ async fn test_graph_entrypoints_chain_locks_roots_leaves_hubs() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["graph_type"], "include");
     assert_eq!(body["cycles"], serde_json::json!([]));
-    assert_eq!(element_ids(&body["roots"]), vec!["1".to_string(), "7".to_string()]);
-    assert_eq!(element_ids(&body["leaves"]), vec!["3".to_string(), "7".to_string()]);
+    assert_eq!(
+        element_ids(&body["roots"]),
+        vec!["1".to_string(), "7".to_string()]
+    );
+    assert_eq!(
+        element_ids(&body["leaves"]),
+        vec!["3".to_string(), "7".to_string()]
+    );
     assert_eq!(
         element_ids(&body["top_hubs"]),
-        vec!["1".to_string(), "2".to_string(), "3".to_string(), "7".to_string()]
+        vec![
+            "1".to_string(),
+            "2".to_string(),
+            "3".to_string(),
+            "7".to_string()
+        ]
     );
 }
 
@@ -388,7 +487,12 @@ async fn test_graph_entrypoints_reports_empty_cycles_even_for_cyclic_graph() {
         resolved_path: None,
     });
     let call_graph = CallGraph::default();
-    let app = build_router(common::ready_state(std::path::PathBuf::from("."), include_graph, call_graph, payload));
+    let app = build_router(common::ready_state(
+        std::path::PathBuf::from("."),
+        include_graph,
+        call_graph,
+        payload,
+    ));
 
     let (status, _headers, body) =
         common::request_route(app, "/api/graph/entrypoints?graph_type=include").await;
@@ -398,16 +502,28 @@ async fn test_graph_entrypoints_reports_empty_cycles_even_for_cyclic_graph() {
         "FINDING: server.rs hardcodes cycles to [] (server.rs:347); the cycles key can never inform clients"
     );
     let isolated_only = vec!["7".to_string()];
-    assert_eq!(element_ids(&body["roots"]), isolated_only.clone(), "only the isolated file has zero in-degree once 1-2-3-1 is cyclic");
-    assert_eq!(element_ids(&body["leaves"]), isolated_only, "only the isolated file has zero out-degree once 1-2-3-1 is cyclic");
+    assert_eq!(
+        element_ids(&body["roots"]),
+        isolated_only.clone(),
+        "only the isolated file has zero in-degree once 1-2-3-1 is cyclic"
+    );
+    assert_eq!(
+        element_ids(&body["leaves"]),
+        isolated_only,
+        "only the isolated file has zero out-degree once 1-2-3-1 is cyclic"
+    );
 }
 
 #[tokio::test]
 async fn test_graph_entrypoints_unknown_graph_type_returns_empty_sets() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) = common::request_route(app, "/api/graph/entrypoints?graph_type=nope").await;
+    let (status, _headers, body) =
+        common::request_route(app, "/api/graph/entrypoints?graph_type=nope").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["graph_type"], "nope", "unknown graph_type is echoed back unvalidated");
+    assert_eq!(
+        body["graph_type"], "nope",
+        "unknown graph_type is echoed back unvalidated"
+    );
     let empty: Vec<String> = vec![];
     assert_eq!(element_ids(&body["roots"]), empty);
     assert_eq!(element_ids(&body["leaves"]), empty);
@@ -425,7 +541,8 @@ async fn test_graph_search_returns_400_without_q() {
 #[tokio::test]
 async fn test_graph_search_locks_result_item_shape_and_skips_edges() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) = common::request_route(app.clone(), "/api/graph/search?q=a.h").await;
+    let (status, _headers, body) =
+        common::request_route(app.clone(), "/api/graph/search?q=a.h").await;
     assert_eq!(status, StatusCode::OK);
     let items = body.as_array().unwrap();
     assert_eq!(items.len(), 1, "exactly the a.h node must match q=a.h");
@@ -434,7 +551,8 @@ async fn test_graph_search_locks_result_item_shape_and_skips_edges() {
     assert_eq!(items[0]["kind"], "HEADER");
     assert_eq!(items[0]["graph_type"], "include");
 
-    let (_status, _headers, edge_query) = common::request_route(app, "/api/graph/search?q=1-2").await;
+    let (_status, _headers, edge_query) =
+        common::request_route(app, "/api/graph/search?q=1-2").await;
     assert_eq!(
         edge_query.as_array().unwrap().len(),
         0,
@@ -445,7 +563,8 @@ async fn test_graph_search_locks_result_item_shape_and_skips_edges() {
 #[tokio::test]
 async fn test_graph_search_respects_limit_param_and_default_limit() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, all) = common::request_route(app.clone(), "/api/graph/search?q=&limit=99").await;
+    let (status, _headers, all) =
+        common::request_route(app.clone(), "/api/graph/search?q=&limit=99").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         all.as_array().unwrap().len(),
@@ -453,14 +572,16 @@ async fn test_graph_search_respects_limit_param_and_default_limit() {
         "empty q matches every node (4 include + 2 call) via substring semantics"
     );
 
-    let (_status, _headers, capped) = common::request_route(app, "/api/graph/search?q=&limit=1").await;
+    let (_status, _headers, capped) =
+        common::request_route(app, "/api/graph/search?q=&limit=1").await;
     assert_eq!(capped.as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn test_graph_search_graph_type_filter_limits_scope() {
     let app = build_router(fixture_sample_state());
-    let (_status, _headers, unfiltered) = common::request_route(app.clone(), "/api/graph/search?q=main").await;
+    let (_status, _headers, unfiltered) =
+        common::request_route(app.clone(), "/api/graph/search?q=main").await;
     let items = unfiltered.as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["graph_type"], "call");
@@ -468,7 +589,11 @@ async fn test_graph_search_graph_type_filter_limits_scope() {
 
     let (_status, _headers, include_only) =
         common::request_route(app.clone(), "/api/graph/search?q=main&graph_type=include").await;
-    assert_eq!(include_only.as_array().unwrap().len(), 0, "main is not an include-graph node");
+    assert_eq!(
+        include_only.as_array().unwrap().len(),
+        0,
+        "main is not an include-graph node"
+    );
 
     let (_status, _headers, call_only) =
         common::request_route(app, "/api/graph/search?q=main&graph_type=call").await;
@@ -488,7 +613,10 @@ async fn test_graph_collateral_non_numeric_file_returns_zeroed_response() {
     let (status, _headers, body) =
         common::request_route(app, "/api/graph/collateral?file=not-a-number").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["target_id"], "not-a-number", "the raw file value is echoed back");
+    assert_eq!(
+        body["target_id"], "not-a-number",
+        "the raw file value is echoed back"
+    );
     assert_eq!(body["total_collateral"], 0);
     assert_eq!(body["direct_collateral"], serde_json::json!({}));
     assert_eq!(body["transitive_collateral"], serde_json::json!({}));
@@ -497,7 +625,8 @@ async fn test_graph_collateral_non_numeric_file_returns_zeroed_response() {
 #[tokio::test]
 async fn test_graph_collateral_unknown_numeric_file_returns_zeroed_response() {
     let app = build_router(fixture_sample_state());
-    let (status, _headers, body) = common::request_route(app, "/api/graph/collateral?file=999").await;
+    let (status, _headers, body) =
+        common::request_route(app, "/api/graph/collateral?file=999").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["target_id"], "999");
     assert_eq!(body["total_collateral"], 0);
@@ -509,7 +638,8 @@ async fn test_graph_collateral_invalid_file_returns_200_zeros_even_while_loading
     let (status, _headers, body) =
         common::request_route(app, "/api/graph/collateral?file=not-a-number").await;
     assert_eq!(
-        status, StatusCode::OK,
+        status,
+        StatusCode::OK,
         "FINDING: file parsing happens before the 503 readiness gate, so an invalid file id \
          returns a 200 zeroed payload even while the server is still loading"
     );

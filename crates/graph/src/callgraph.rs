@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use ariadne_index::types::{FileLocation, SymbolId};
 use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallNode {
@@ -25,12 +25,19 @@ pub struct CallGraph {
 }
 
 impl CallGraph {
-    pub fn build_from_index(index_result: &ariadne_index::IndexResult, model: &crate::ReducedSemanticModel) -> Self {
-        let mut nodes: std::collections::BTreeMap<SymbolId, CallNode> = std::collections::BTreeMap::new();
-        let mut edges: std::collections::BTreeMap<(SymbolId, SymbolId), CallEdge> = std::collections::BTreeMap::new();
+    pub fn build_from_index(
+        index_result: &ariadne_index::IndexResult,
+        model: &crate::ReducedSemanticModel,
+    ) -> Self {
+        let mut nodes: std::collections::BTreeMap<SymbolId, CallNode> =
+            std::collections::BTreeMap::new();
+        let mut edges: std::collections::BTreeMap<(SymbolId, SymbolId), CallEdge> =
+            std::collections::BTreeMap::new();
 
-        let mut exact_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> = std::collections::HashMap::new();
-        let mut suffix_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> = std::collections::HashMap::new();
+        let mut exact_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
+            std::collections::HashMap::new();
+        let mut suffix_map: std::collections::HashMap<&str, &crate::ReducedSymbolRecord> =
+            std::collections::HashMap::new();
 
         for sym in model.symbols.values() {
             exact_map.insert(sym.id.0.as_str(), sym);
@@ -47,8 +54,9 @@ impl CallGraph {
             for site in &tu.call_sites {
                 let caller = site.caller_symbol.clone();
                 let callee_name = site.callee_name.as_str();
-                
-                let callee_opt = exact_map.get(callee_name)
+
+                let callee_opt = exact_map
+                    .get(callee_name)
                     .copied()
                     .or_else(|| suffix_map.get(callee_name).copied())
                     .or_else(|| {
@@ -62,17 +70,18 @@ impl CallGraph {
                         None
                     });
 
-                
                 if let Some(callee_sym) = callee_opt {
                     let callee = callee_sym.id.clone();
-                    
-                    let edge = edges.entry((caller.clone(), callee.clone())).or_insert_with(|| CallEdge {
-                        caller: caller.clone(),
-                        callee: callee.clone(),
-                        call_count: 0,
-                        call_locations: Vec::new(),
-                    });
-                    
+
+                    let edge = edges
+                        .entry((caller.clone(), callee.clone()))
+                        .or_insert_with(|| CallEdge {
+                            caller: caller.clone(),
+                            callee: callee.clone(),
+                            call_count: 0,
+                            call_locations: Vec::new(),
+                        });
+
                     edge.call_count += 1;
                     if !edge.call_locations.contains(&site.location) {
                         edge.call_locations.push(site.location.clone());
@@ -81,34 +90,52 @@ impl CallGraph {
                     // Add to nodes if not present
                     if !nodes.contains_key(&caller) {
                         if let Some(record) = model.symbols.get(&caller) {
-                            nodes.insert(caller.clone(), CallNode {
-                                symbol_id: caller.clone(),
-                                name: record.name.clone(),
-                                owning_file: record.defining_file.clone().unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
-                                location: None,
-                            });
+                            nodes.insert(
+                                caller.clone(),
+                                CallNode {
+                                    symbol_id: caller.clone(),
+                                    name: record.name.clone(),
+                                    owning_file: record.defining_file.clone().unwrap_or_else(
+                                        || ariadne_repo::FileId::from_relative_path("unknown"),
+                                    ),
+                                    location: None,
+                                },
+                            );
                         }
                     }
                     if !nodes.contains_key(&callee) {
-                        nodes.insert(callee.clone(), CallNode {
-                            symbol_id: callee.clone(),
-                            name: callee_sym.name.clone(),
-                            owning_file: callee_sym.defining_file.clone().unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
-                            location: None,
-                        });
+                        nodes.insert(
+                            callee.clone(),
+                            CallNode {
+                                symbol_id: callee.clone(),
+                                name: callee_sym.name.clone(),
+                                owning_file: callee_sym.defining_file.clone().unwrap_or_else(
+                                    || ariadne_repo::FileId::from_relative_path("unknown"),
+                                ),
+                                location: None,
+                            },
+                        );
                     }
                 }
             }
         }
-        
+
         for (sym_id, record) in &model.symbols {
-            if record.kind == ariadne_index::types::SymbolKind::Function && !nodes.contains_key(sym_id) {
-                nodes.insert(sym_id.clone(), CallNode {
-                    symbol_id: sym_id.clone(),
-                    name: record.name.clone(),
-                    owning_file: record.defining_file.clone().unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
-                    location: None,
-                });
+            if record.kind == ariadne_index::types::SymbolKind::Function
+                && !nodes.contains_key(sym_id)
+            {
+                nodes.insert(
+                    sym_id.clone(),
+                    CallNode {
+                        symbol_id: sym_id.clone(),
+                        name: record.name.clone(),
+                        owning_file: record
+                            .defining_file
+                            .clone()
+                            .unwrap_or_else(|| ariadne_repo::FileId::from_relative_path("unknown")),
+                        location: None,
+                    },
+                );
             }
         }
 
@@ -127,11 +154,13 @@ impl CallGraph {
     }
 
     pub fn detect_recursion_cycles(&self) -> Vec<Vec<SymbolId>> {
-        use std::collections::{HashSet, HashMap};
+        use std::collections::{HashMap, HashSet};
 
         let mut adj: HashMap<SymbolId, Vec<SymbolId>> = HashMap::new();
         for edge in &self.edges {
-            adj.entry(edge.caller.clone()).or_default().push(edge.callee.clone());
+            adj.entry(edge.caller.clone())
+                .or_default()
+                .push(edge.callee.clone());
         }
 
         let mut cycles = Vec::new();
@@ -143,7 +172,7 @@ impl CallGraph {
             adj: &HashMap<SymbolId, Vec<SymbolId>>,
             visited: &mut HashSet<SymbolId>,
             path: &mut Vec<SymbolId>,
-            cycles: &mut Vec<Vec<SymbolId>>
+            cycles: &mut Vec<Vec<SymbolId>>,
         ) {
             if let Some(idx) = path.iter().position(|x| x == node) {
                 cycles.push(path[idx..].to_vec());
@@ -176,7 +205,12 @@ impl CallGraph {
         }
 
         for cycle in &mut cycles {
-            let min_idx = cycle.iter().enumerate().min_by(|(_, a), (_, b)| a.cmp(b)).unwrap().0;
+            let min_idx = cycle
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.cmp(b))
+                .unwrap()
+                .0;
             cycle.rotate_left(min_idx);
         }
         cycles.sort();
@@ -186,7 +220,7 @@ impl CallGraph {
     }
 
     pub fn shortest_call_path(&self, from: &SymbolId, to: &SymbolId) -> Option<Vec<SymbolId>> {
-        use std::collections::{VecDeque, HashSet, HashMap};
+        use std::collections::{HashMap, HashSet, VecDeque};
 
         let mut queue = VecDeque::new();
         let mut visited = HashSet::new();
@@ -228,8 +262,8 @@ impl CallGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_index::types::{TuAnalysis, SymbolRecord, SymbolKind, CallSite};
     use crate::ReducedSemanticModel;
+    use ariadne_index::types::{CallSite, SymbolKind, SymbolRecord, TuAnalysis};
     use std::path::PathBuf;
 
     fn setup() -> (ariadne_index::IndexResult, ReducedSemanticModel) {
@@ -274,23 +308,39 @@ mod tests {
                 CallSite {
                     caller_symbol: sym_a.clone(),
                     callee_name: "B".into(),
-                    location: FileLocation { file_id: f1.clone(), line: 10, column: 5 },
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 10,
+                        column: 5,
+                    },
                 },
                 CallSite {
                     caller_symbol: sym_b.clone(),
                     callee_name: "C".into(),
-                    location: FileLocation { file_id: f1.clone(), line: 20, column: 5 },
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 20,
+                        column: 5,
+                    },
                 },
                 CallSite {
                     caller_symbol: sym_c.clone(),
                     callee_name: "A".into(), // cycle A -> B -> C -> A
-                    location: FileLocation { file_id: f1.clone(), line: 30, column: 5 },
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 30,
+                        column: 5,
+                    },
                 },
                 CallSite {
                     caller_symbol: sym_c.clone(),
                     callee_name: "C".into(), // self recursion
-                    location: FileLocation { file_id: f1.clone(), line: 31, column: 5 },
-                }
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 31,
+                        column: 5,
+                    },
+                },
             ],
         };
 
@@ -303,7 +353,7 @@ mod tests {
     fn test_callgraph_build() {
         let (index, model) = setup();
         let graph = CallGraph::build_from_index(&index, &model);
-        
+
         assert_eq!(graph.nodes.len(), 3);
         assert_eq!(graph.edges.len(), 4);
     }
@@ -312,7 +362,7 @@ mod tests {
     fn test_callers_and_callees() {
         let (index, model) = setup();
         let graph = CallGraph::build_from_index(&index, &model);
-        
+
         let callers_of_b = graph.callers_of(&SymbolId::new("B"));
         assert_eq!(callers_of_b.len(), 1);
         assert_eq!(callers_of_b[0].caller, SymbolId::new("A"));
@@ -326,7 +376,7 @@ mod tests {
     fn test_recursion_cycles() {
         let (index, model) = setup();
         let graph = CallGraph::build_from_index(&index, &model);
-        
+
         let cycles = graph.detect_recursion_cycles();
         assert_eq!(cycles.len(), 2);
     }
@@ -335,10 +385,13 @@ mod tests {
     fn test_shortest_call_path() {
         let (index, model) = setup();
         let graph = CallGraph::build_from_index(&index, &model);
-        
+
         let path = graph.shortest_call_path(&SymbolId::new("A"), &SymbolId::new("C"));
         assert!(path.is_some());
-        assert_eq!(path.unwrap(), vec![SymbolId::new("A"), SymbolId::new("B"), SymbolId::new("C")]);
+        assert_eq!(
+            path.unwrap(),
+            vec![SymbolId::new("A"), SymbolId::new("B"), SymbolId::new("C")]
+        );
     }
 
     #[test]
@@ -375,23 +428,35 @@ mod tests {
                 CallSite {
                     caller_symbol: sym_caller.clone(),
                     callee_name: "callee".into(), // Caller just says "callee()"
-                    location: FileLocation { file_id: f1.clone(), line: 10, column: 5 },
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 10,
+                        column: 5,
+                    },
                 },
                 CallSite {
                     caller_symbol: sym_caller.clone(),
                     callee_name: "MyClass::callee".into(), // Caller uses fully qualified name
-                    location: FileLocation { file_id: f1.clone(), line: 11, column: 5 },
-                }
+                    location: FileLocation {
+                        file_id: f1.clone(),
+                        line: 11,
+                        column: 5,
+                    },
+                },
             ],
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
         let model = ReducedSemanticModel::reduce(&index_result);
-        
+
         let graph = CallGraph::build_from_index(&index_result, &model);
-        
+
         let callers = graph.callers_of(&sym_callee);
-        assert_eq!(callers.len(), 1, "Should map both call sites to the same callee");
+        assert_eq!(
+            callers.len(),
+            1,
+            "Should map both call sites to the same callee"
+        );
         assert_eq!(callers[0].call_count, 2, "Should have 2 calls");
     }
 
@@ -427,24 +492,30 @@ mod tests {
             declarations: vec![],
             edges: vec![],
             references: vec![],
-            call_sites: vec![
-                CallSite {
-                    caller_symbol: sym_caller.clone(),
-                    callee_name: "exact::method".into(), // exact match for sym_exact by ID/Name
-                    location: FileLocation { file_id: f1.clone(), line: 10, column: 5 },
+            call_sites: vec![CallSite {
+                caller_symbol: sym_caller.clone(),
+                callee_name: "exact::method".into(), // exact match for sym_exact by ID/Name
+                location: FileLocation {
+                    file_id: f1.clone(),
+                    line: 10,
+                    column: 5,
                 },
-            ],
+            }],
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
         let model = ReducedSemanticModel::reduce(&index_result);
-        
+
         let graph = CallGraph::build_from_index(&index_result, &model);
-        
-        // Because of HashMap random order in the old implementation, it could pick sym_suffix 
+
+        // Because of HashMap random order in the old implementation, it could pick sym_suffix
         // since `callee_name` ("exact::method") ends with `::sym.name` ("::method").
         // We want to ensure it strictly picks exact matches first.
         let callers = graph.callers_of(&sym_exact);
-        assert_eq!(callers.len(), 1, "Should prefer exact match over suffix match");
+        assert_eq!(
+            callers.len(),
+            1,
+            "Should prefer exact match over suffix match"
+        );
     }
 }

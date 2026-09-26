@@ -1,13 +1,11 @@
+use anyhow::{Context, Result};
+use ariadne_repo::{FileId, RepositoryDiscoveryResult};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use ariadne_repo::{FileId, RepositoryDiscoveryResult};
 
-use crate::types::{
-    BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit,
-};
+use crate::types::{BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit};
 
 /// Clang compilation database raw entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,10 +173,9 @@ impl<'a> BuildDiscoverer<'a> {
 
         if let Some(disc) = self.repo_discovery {
             for f in &disc.files {
-                let is_cpp_source = f
-                    .path
-                    .extension()
-                    .map_or(false, |ext| ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c");
+                let is_cpp_source = f.path.extension().map_or(false, |ext| {
+                    ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c"
+                });
 
                 if is_cpp_source {
                     let cmd_args = vec![
@@ -286,7 +283,16 @@ fn parse_args(
     let mut arch = None;
     let mut raw_flags = Vec::new();
 
-    let is_flag = |s: &str| s.starts_with('-') || (s.starts_with('/') && !s.contains("usr") && !s.contains("bin") && !s.ends_with("c++") && !s.ends_with("g++") && !s.ends_with("clang") && !s.ends_with("clang++"));
+    let is_flag = |s: &str| {
+        s.starts_with('-')
+            || (s.starts_with('/')
+                && !s.contains("usr")
+                && !s.contains("bin")
+                && !s.ends_with("c++")
+                && !s.ends_with("g++")
+                && !s.ends_with("clang")
+                && !s.ends_with("clang++"))
+    };
 
     let mut iter = raw_args.iter().peekable();
 
@@ -391,12 +397,22 @@ mod tests {
             "-FI".to_string(),
             "/path/to/prefix.h".to_string(),
         ];
-        
-        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
-        
+
+        let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) =
+            parse_args(&cmd, &args);
+
         assert_eq!(compiler, "/usr/bin/c++");
-        assert_eq!(sys_inc_dirs, vec![PathBuf::from("/usr/include"), PathBuf::from("/usr/local/include")]);
-        assert_eq!(inc_dirs, vec![PathBuf::from("/path/to/include"), PathBuf::from("include")]);
+        assert_eq!(
+            sys_inc_dirs,
+            vec![
+                PathBuf::from("/usr/include"),
+                PathBuf::from("/usr/local/include")
+            ]
+        );
+        assert_eq!(
+            inc_dirs,
+            vec![PathBuf::from("/path/to/include"), PathBuf::from("include")]
+        );
         assert_eq!(defines, vec!["MACRO=1".to_string(), "MACRO_2".to_string()]);
         assert_eq!(lang_std, Some("c++20".to_string()));
         assert_eq!(forced_incs, vec![PathBuf::from("/path/to/prefix.h")]);
@@ -420,11 +436,18 @@ mod tests {
             "/FI".to_string(),
             "stdafx.h".to_string(),
         ];
-        
-        let (compiler, defines, inc_dirs, __sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) = parse_args(&cmd, &args);
-        
+
+        let (compiler, defines, inc_dirs, __sys_inc_dirs, forced_incs, lang_std, arch, _raw_flags) =
+            parse_args(&cmd, &args);
+
         assert_eq!(compiler, "cl.exe");
-        assert_eq!(inc_dirs, vec![PathBuf::from("include"), PathBuf::from("C:\\Program Files\\include")]);
+        assert_eq!(
+            inc_dirs,
+            vec![
+                PathBuf::from("include"),
+                PathBuf::from("C:\\Program Files\\include")
+            ]
+        );
         assert_eq!(defines, vec!["NDEBUG".to_string(), "DEBUG".to_string()]);
         assert_eq!(lang_std, Some("c++latest".to_string()));
         assert_eq!(arch, Some("AVX2".to_string()));
@@ -433,11 +456,22 @@ mod tests {
 
     #[test]
     fn test_parse_args_quote_handling_in_command() {
-        let cmd = Some("cl.exe /I \"C:\\Program Files\\include\" /D MACRO=\"spaced val\" src.cpp".to_string());
+        let cmd = Some(
+            "cl.exe /I \"C:\\Program Files\\include\" /D MACRO=\"spaced val\" src.cpp".to_string(),
+        );
         let args = vec![];
-        
-        let (compiler, defines, inc_dirs, _sys_inc_dirs, _forced_incs, _lang_std, _arch, _raw_flags) = parse_args(&cmd, &args);
-        
+
+        let (
+            compiler,
+            defines,
+            inc_dirs,
+            _sys_inc_dirs,
+            _forced_incs,
+            _lang_std,
+            _arch,
+            _raw_flags,
+        ) = parse_args(&cmd, &args);
+
         assert_eq!(compiler, "cl.exe");
         assert_eq!(inc_dirs, vec![PathBuf::from("C:\\Program Files\\include")]);
         assert_eq!(defines, vec!["MACRO=spaced val".to_string()]);
@@ -473,38 +507,39 @@ mod tests {
 
         assert_eq!(result.contexts.len(), 1);
         assert_eq!(result.translation_units.len(), 1);
-        
+
         let ctx = &result.contexts[0];
         assert_eq!(ctx.name, "Debug|x64");
         assert_eq!(ctx.compiler, "clang++");
         assert!(ctx.defines.contains(&"DEBUG".to_string()));
-        
+
         let tu = &result.translation_units[0];
-        assert_eq!(tu.compile_command.arguments, vec!["clang++", "-I", "include", "-D", "DEBUG", "src/thing.cpp"]);
+        assert_eq!(
+            tu.compile_command.arguments,
+            vec!["clang++", "-I", "include", "-D", "DEBUG", "src/thing.cpp"]
+        );
     }
 
     #[test]
     fn test_build_discoverer_infer_default() {
         let dir = tempdir().unwrap();
         let root = dir.path();
-        
+
         // No compile_commands.json
         // Mock a repository discovery result
         let file_path = root.join("src").join("main.cpp");
         let disc = RepositoryDiscoveryResult {
             root: root.to_path_buf(),
-            files: vec![
-                ariadne_repo::FileRecord {
-                    id: ariadne_repo::FileId::from_relative_path("src/main.cpp"),
-                    path: std::path::PathBuf::from("src/main.cpp"),
-                    canonical_path: file_path.clone(),
-                    kind: ariadne_repo::FileKind::Source,
-                    size: 0,
-                    content_hash: "dummy".to_string(),
-                    ownership: ariadne_repo::FileOwnership::Repository,
-                    optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
-                }
-            ],
+            files: vec![ariadne_repo::FileRecord {
+                id: ariadne_repo::FileId::from_relative_path("src/main.cpp"),
+                path: std::path::PathBuf::from("src/main.cpp"),
+                canonical_path: file_path.clone(),
+                kind: ariadne_repo::FileKind::Source,
+                size: 0,
+                content_hash: "dummy".to_string(),
+                ownership: ariadne_repo::FileOwnership::Repository,
+                optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+            }],
             ownership_summary: Default::default(),
             policy_summary: Default::default(),
         };

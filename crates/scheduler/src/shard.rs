@@ -6,7 +6,9 @@ pub struct HashPartitioner {
 
 impl HashPartitioner {
     pub fn new(num_partitions: usize) -> Self {
-        Self { num_partitions: num_partitions.max(1) }
+        Self {
+            num_partitions: num_partitions.max(1),
+        }
     }
     pub fn partition_key<H: std::hash::Hash>(&self, key: &H) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -21,14 +23,20 @@ pub struct ShardedReducer {
 
 impl ShardedReducer {
     pub fn new(num_reducers: usize) -> Self {
-        Self { num_reducers: num_reducers.max(1) }
+        Self {
+            num_reducers: num_reducers.max(1),
+        }
     }
 
-    pub async fn reduce(&self, repo_root: std::path::PathBuf, analyses: &[ariadne_index::TuAnalysis]) -> ariadne_graph::ReducedSemanticModel {
-        use std::collections::{BTreeMap, BTreeSet};
-        use ariadne_graph::{ReducedSemanticModel, ReducedSymbolRecord, ReducedSemanticEdge};
-        use ariadne_index::types::{SymbolId, DependencyKind};
+    pub async fn reduce(
+        &self,
+        repo_root: std::path::PathBuf,
+        analyses: &[ariadne_index::TuAnalysis],
+    ) -> ariadne_graph::ReducedSemanticModel {
+        use ariadne_graph::{ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord};
+        use ariadne_index::types::{DependencyKind, SymbolId};
         use ariadne_repo::FileId;
+        use std::collections::{BTreeMap, BTreeSet};
 
         let num_reducers = self.num_reducers;
         let partitioner = HashPartitioner::new(num_reducers);
@@ -39,7 +47,10 @@ impl ShardedReducer {
         }
 
         let mut partitions: Vec<ReducerInput> = (0..num_reducers)
-            .map(|_| ReducerInput { symbols: Vec::new(), edges: Vec::new() })
+            .map(|_| ReducerInput {
+                symbols: Vec::new(),
+                edges: Vec::new(),
+            })
             .collect();
 
         for tu in analyses {
@@ -63,14 +74,17 @@ impl ShardedReducer {
                 let mut file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
 
                 for (sym, tu_file) in input.symbols {
-                    let entry = symbols.entry(sym.id.clone()).or_insert_with(|| ReducedSymbolRecord {
-                        id: sym.id.clone(),
-                        name: sym.name.clone(),
-                        kind: sym.kind,
-                        defining_file: None,
-                        declarations: Vec::new(),
-                        definition: None,
-                    });
+                    let entry =
+                        symbols
+                            .entry(sym.id.clone())
+                            .or_insert_with(|| ReducedSymbolRecord {
+                                id: sym.id.clone(),
+                                name: sym.name.clone(),
+                                kind: sym.kind,
+                                defining_file: None,
+                                declarations: Vec::new(),
+                                definition: None,
+                            });
 
                     for decl in sym.declarations {
                         if !entry.declarations.contains(&decl) {
@@ -87,12 +101,21 @@ impl ShardedReducer {
                     }
 
                     tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
-                    file_symbols.entry(sym.owning_file).or_default().insert(sym.id);
+                    file_symbols
+                        .entry(sym.owning_file)
+                        .or_default()
+                        .insert(sym.id);
                 }
 
                 for (edge, tu_file) in input.edges {
-                    tu_usage.entry(edge.src_symbol.clone()).or_default().insert(tu_file.clone());
-                    tu_usage.entry(edge.dst_symbol.clone()).or_default().insert(tu_file);
+                    tu_usage
+                        .entry(edge.src_symbol.clone())
+                        .or_default()
+                        .insert(tu_file.clone());
+                    tu_usage
+                        .entry(edge.dst_symbol.clone())
+                        .or_default()
+                        .insert(tu_file);
 
                     let key = (edge.src_symbol, edge.dst_symbol);
                     match raw_edges.get(&key) {
@@ -140,7 +163,11 @@ impl ShardedReducer {
                 kind,
             })
             .collect();
-        final_edges.sort_by(|a, b| a.src_symbol.cmp(&b.src_symbol).then_with(|| a.dst_symbol.cmp(&b.dst_symbol)));
+        final_edges.sort_by(|a, b| {
+            a.src_symbol
+                .cmp(&b.src_symbol)
+                .then_with(|| a.dst_symbol.cmp(&b.dst_symbol))
+        });
 
         let tu_usage: BTreeMap<SymbolId, Vec<FileId>> = final_tu_usage
             .into_iter()
@@ -165,10 +192,13 @@ impl ShardedReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use ariadne_index::types::{TuAnalysis, IndexResult, SymbolRecord, SymbolKind, SemanticEdge, SymbolId, DeclId, DependencyKind};
     use ariadne_graph::ReducedSemanticModel;
+    use ariadne_index::types::{
+        DeclId, DependencyKind, IndexResult, SemanticEdge, SymbolId, SymbolKind, SymbolRecord,
+        TuAnalysis,
+    };
     use ariadne_repo::FileId;
+    use std::path::PathBuf;
 
     #[test]
     fn test_hash_partitioner_determinism() {
@@ -246,7 +276,9 @@ mod tests {
         let direct_model = ReducedSemanticModel::reduce(&index_res);
 
         // Sharded reduction with 1 reducer
-        let sharded_model_1 = ShardedReducer::new(1).reduce(repo_root.clone(), &analyses).await;
+        let sharded_model_1 = ShardedReducer::new(1)
+            .reduce(repo_root.clone(), &analyses)
+            .await;
 
         // Sharded reduction with 4 reducers
         let sharded_model_4 = ShardedReducer::new(4).reduce(repo_root, &analyses).await;

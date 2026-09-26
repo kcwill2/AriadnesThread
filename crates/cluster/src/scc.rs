@@ -10,7 +10,9 @@ pub struct SymbolScc {
 pub fn compute_symbol_sccs(symbols: &[SymbolId], edges: &[SemanticEdge]) -> Vec<SymbolScc> {
     let mut adj: HashMap<&SymbolId, Vec<&SymbolId>> = HashMap::new();
     for edge in edges {
-        adj.entry(&edge.src_symbol).or_default().push(&edge.dst_symbol);
+        adj.entry(&edge.src_symbol)
+            .or_default()
+            .push(&edge.dst_symbol);
     }
 
     let mut index = 0;
@@ -84,7 +86,6 @@ fn strongconnect<'a>(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,16 +104,9 @@ mod tests {
 
     #[test]
     fn test_acyclic_sccs() {
-        let syms = vec![
-            SymbolId::new("A"),
-            SymbolId::new("B"),
-            SymbolId::new("C"),
-        ];
+        let syms = vec![SymbolId::new("A"), SymbolId::new("B"), SymbolId::new("C")];
         // A -> B -> C
-        let edges = vec![
-            edge("A", "B"),
-            edge("B", "C"),
-        ];
+        let edges = vec![edge("A", "B"), edge("B", "C")];
 
         let sccs = compute_symbol_sccs(&syms, &edges);
         assert_eq!(sccs.len(), 3);
@@ -142,11 +136,11 @@ mod tests {
 
         let sccs = compute_symbol_sccs(&syms, &edges);
         assert_eq!(sccs.len(), 2);
-        
+
         let mut lengths: Vec<usize> = sccs.iter().map(|scc| scc.symbols.len()).collect();
         lengths.sort();
         assert_eq!(lengths, vec![1, 3]);
-        
+
         let cycle_scc = sccs.iter().find(|scc| scc.symbols.len() == 3).unwrap();
         assert!(cycle_scc.symbols.contains(&SymbolId::new("A")));
         assert!(cycle_scc.symbols.contains(&SymbolId::new("B")));
@@ -163,10 +157,7 @@ mod tests {
 
     #[test]
     fn test_disconnected_components() {
-        let syms = vec![
-            SymbolId::new("A"),
-            SymbolId::new("B"),
-        ];
+        let syms = vec![SymbolId::new("A"), SymbolId::new("B")];
         let edges = vec![];
         let sccs = compute_symbol_sccs(&syms, &edges);
         assert_eq!(sccs.len(), 2);
@@ -174,12 +165,8 @@ mod tests {
 
     #[test]
     fn test_self_loop() {
-        let syms = vec![
-            SymbolId::new("A"),
-        ];
-        let edges = vec![
-            edge("A", "A"),
-        ];
+        let syms = vec![SymbolId::new("A")];
+        let edges = vec![edge("A", "A")];
         let sccs = compute_symbol_sccs(&syms, &edges);
         assert_eq!(sccs.len(), 1);
         assert_eq!(sccs[0].symbols.len(), 1);
@@ -231,7 +218,7 @@ mod tests {
         ];
         let sccs = compute_symbol_sccs(&syms, &edges);
         assert_eq!(sccs.len(), 2);
-        
+
         let mut lengths: Vec<usize> = sccs.iter().map(|scc| scc.symbols.len()).collect();
         lengths.sort();
         assert_eq!(lengths, vec![2, 2]);

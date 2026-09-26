@@ -1,8 +1,8 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 use ariadne_build::BuildDiscoveryResult;
 use ariadne_graph::ReducedSemanticModel;
@@ -117,12 +117,14 @@ impl<'a> ProductionAnalyzer<'a> {
         let start_time = Instant::now();
         let total_tus = self.build_discovery.translation_units.len();
 
-        let checkpoint_dir = self.checkpoint_dir.clone().unwrap_or_else(|| {
-            shard_dir(&self.repo.root)
-        });
+        let checkpoint_dir = self
+            .checkpoint_dir
+            .clone()
+            .unwrap_or_else(|| shard_dir(&self.repo.root));
         fs::create_dir_all(&checkpoint_dir)?;
 
-        let store_ctx = TuStoreContext::new(self.repo_discovery, self.build_discovery.contexts.clone());
+        let store_ctx =
+            TuStoreContext::new(self.repo_discovery, self.build_discovery.contexts.clone());
 
         let mut completed_analyses: Vec<TuAnalysis> = Vec::new();
         let mut remaining_tus = Vec::new();
@@ -134,7 +136,8 @@ impl<'a> ProductionAnalyzer<'a> {
         // Check for existing checkpointed shards; a shard is reused only when
         // its envelope fingerprint still matches the code on disk.
         for tu in &self.build_discovery.translation_units {
-            let closure = compute_tu_closure(tu, &self.repo.root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
+            let closure =
+                compute_tu_closure(tu, &self.repo.root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
             let fp = closure.fingerprint.combined_hash.clone();
             if let Some(shard) = load_shard(&checkpoint_dir, tu.file_id) {
                 if shard.fingerprint == fp {
@@ -183,7 +186,9 @@ impl<'a> ProductionAnalyzer<'a> {
 
         // Sharded reduction across partitions
         let reducer = ShardedReducer::new(self.num_reducers);
-        let reduced_model = reducer.reduce(self.repo.root.clone(), &completed_analyses).await;
+        let reduced_model = reducer
+            .reduce(self.repo.root.clone(), &completed_analyses)
+            .await;
 
         let total_semantic_edges = reduced_model.edges.len();
         let elapsed = start_time.elapsed();
@@ -214,9 +219,9 @@ impl<'a> ProductionAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use ariadne_build::{CompileCommand, TranslationUnit};
     use ariadne_repo::FileId;
+    use tempfile::tempdir;
 
     #[test]
     fn test_format_stats_m13() {
@@ -252,7 +257,9 @@ mod tests {
         fs::write(&f1_path, "class Alpha {};").unwrap();
         fs::write(&f2_path, "class Beta { Alpha a; };").unwrap();
 
-        let repo = Repository { root: repo_root.clone() };
+        let repo = Repository {
+            root: repo_root.clone(),
+        };
         let f1_id = FileId::from_relative_path("src/a.cpp");
         let f2_id = FileId::from_relative_path("src/b.cpp");
 

@@ -1,11 +1,11 @@
-use std::path::PathBuf;
-use std::fs;
-use std::collections::HashSet;
-use sha2::{Sha256, Digest};
 use anyhow::Result;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 
-use ariadne_cli::{handle_query_symbol, handle_query_deps, handle_query_users, handle_index};
+use ariadne_cli::{handle_index, handle_query_deps, handle_query_symbol, handle_query_users};
 use ariadne_graph::ReducedSemanticModel;
 
 /// The real reduced-stage fingerprint, so this fixture's reduced artifact
@@ -43,13 +43,13 @@ fn hash_file(path: &PathBuf) -> Result<String> {
 #[test]
 fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
-    
+
     let artifacts_dir = repo_path.join("artifacts/reduced");
-    
+
     // Explicitly rebuild instead of removing directories to avoid Windows os error 5
     let index_result = handle_index(&repo_path)?;
     let model = ReducedSemanticModel::reduce(&index_result);
-    
+
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
     let artifacts = ariadne_report::ArtifactManager::prepare_for_repo(&repo)?;
     let reduced_fp = reduced_fingerprint(&repo_path)?;
@@ -60,14 +60,22 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     // tu_usage contains both src/thing.cpp and tests/consumer.cpp
     // Dependency edges are deduplicated
 
-    let thing_sym = model.find_symbol("Thing").expect("Thing symbol should exist");
+    let thing_sym = model
+        .find_symbol("Thing")
+        .expect("Thing symbol should exist");
     assert_eq!(thing_sym.name, "Thing");
-    
-    let def_file = thing_sym.defining_file.as_ref().expect("Thing should have a defining file");
-    
+
+    let def_file = thing_sym
+        .defining_file
+        .as_ref()
+        .expect("Thing should have a defining file");
+
     // We expect the file ID to match include/thing.h
     let expected_def_id = ariadne_repo::FileId::from_relative_path("include/thing.h");
-    assert_eq!(*def_file, expected_def_id, "Definition should point to include/thing.h");
+    assert_eq!(
+        *def_file, expected_def_id,
+        "Definition should point to include/thing.h"
+    );
 
     let users = model.get_users(&thing_sym.id);
     let mut users_set = HashSet::new();
@@ -78,8 +86,14 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     let expected_src = ariadne_repo::FileId::from_relative_path("src/thing.cpp");
     let expected_tests = ariadne_repo::FileId::from_relative_path("tests/consumer.cpp");
 
-    assert!(users_set.contains(&expected_src), "tu_usage should contain src/thing.cpp");
-    assert!(users_set.contains(&expected_tests), "tu_usage should contain tests/consumer.cpp");
+    assert!(
+        users_set.contains(&expected_src),
+        "tu_usage should contain src/thing.cpp"
+    );
+    assert!(
+        users_set.contains(&expected_tests),
+        "tu_usage should contain tests/consumer.cpp"
+    );
 
     // 2. Query verification
     handle_query_symbol(&repo_path, "Thing")?;
@@ -95,7 +109,7 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
 
     let manifest_content = fs::read_to_string(artifacts_dir.join("manifest.json"))?;
     let manifest: ReducedManifest = serde_json::from_str(&manifest_content)?;
-    
+
     assert_eq!(manifest.total_symbols, model.symbols.len());
     assert_eq!(manifest.total_edges, model.edges.len());
     assert_eq!(manifest.total_tu_usages, model.tu_usage.len());
@@ -112,14 +126,20 @@ fn test_m5_reduced_model_determinism() -> Result<()> {
     let run_and_hash = || -> Result<Vec<String>> {
         let index_result = handle_index(&repo_path)?;
         let model = ReducedSemanticModel::reduce(&index_result);
-        
+
         let repo = ariadne_repo::Repository::locate(&repo_path)?;
         let artifacts = ariadne_report::ArtifactManager::prepare_for_repo(&repo)?;
-    let reduced_fp = reduced_fingerprint(&repo_path)?;
-    artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
+        let reduced_fp = reduced_fingerprint(&repo_path)?;
+        artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
 
         let mut hashes = Vec::new();
-        for file in &["symbols.bin", "edges.bin", "tu-usage.bin", "file-symbols.bin", "manifest.json"] {
+        for file in &[
+            "symbols.bin",
+            "edges.bin",
+            "tu-usage.bin",
+            "file-symbols.bin",
+            "manifest.json",
+        ] {
             hashes.push(hash_file(&artifacts_dir.join(file))?);
         }
         Ok(hashes)
@@ -128,7 +148,10 @@ fn test_m5_reduced_model_determinism() -> Result<()> {
     let hashes1 = run_and_hash()?;
     let hashes2 = run_and_hash()?;
 
-    assert_eq!(hashes1, hashes2, "Hashes should match identically between runs");
+    assert_eq!(
+        hashes1, hashes2,
+        "Hashes should match identically between runs"
+    );
 
     Ok(())
 }

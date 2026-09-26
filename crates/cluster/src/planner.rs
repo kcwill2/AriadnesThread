@@ -1,14 +1,14 @@
-use ariadne_graph::IncludeGraph;
-use ariadne_graph::reduced::ReducedSemanticModel;
-use ariadne_repo::{FileId, FileRecord, OptimizationPolicy};
-use ariadne_graph::load::LoadAnalyzer;
-use crate::plan::{OptimizationPlan, PlanRejection, PlanId, ProposedExtraction, RiskLevel};
-use crate::frontier::FrontierAnalyzer;
 use crate::checker::ConstraintChecker;
+use crate::frontier::FrontierAnalyzer;
+use crate::plan::{OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, RiskLevel};
 use crate::scc;
+use ariadne_graph::load::LoadAnalyzer;
+use ariadne_graph::reduced::ReducedSemanticModel;
+use ariadne_graph::IncludeGraph;
+use ariadne_index::types::SymbolId;
+use ariadne_repo::{FileId, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use ariadne_index::types::SymbolId;
 
 pub struct OptimizationPlanner<'a> {
     pub include_graph: &'a IncludeGraph,
@@ -36,25 +36,33 @@ impl<'a> OptimizationPlanner<'a> {
         let mut plans = Vec::new();
         let load_analyzer = LoadAnalyzer::new(self.include_graph, self.model);
         let frontier_analyzer = FrontierAnalyzer::new();
-        
+
         let mut file_policies = HashMap::new();
         let mut file_ownerships = HashMap::new();
         let mut path_to_policy = HashMap::new();
         for record in self.file_records {
-            let path = self.include_graph.file_paths.get(&record.id).cloned().unwrap_or_default();
+            let path = self
+                .include_graph
+                .file_paths
+                .get(&record.id)
+                .cloned()
+                .unwrap_or_default();
             file_policies.insert(record.id, record.optimization_policy);
             file_ownerships.insert(record.id, record.ownership.clone());
             if !path.as_os_str().is_empty() {
                 path_to_policy.insert(path, record.optimization_policy);
             }
         }
-        
+
         let checker = ConstraintChecker::new(path_to_policy, HashSet::new());
         let mut plan_id_counter = 1;
-        let mut sorted_headers: Vec<FileId> = self.include_graph.file_paths.keys().copied().collect();
+        let mut sorted_headers: Vec<FileId> =
+            self.include_graph.file_paths.keys().copied().collect();
         sorted_headers.sort();
 
-        let header_consumers = self.include_graph.map_header_consuming_tus(self.tu_file_ids);
+        let header_consumers = self
+            .include_graph
+            .map_header_consuming_tus(self.tu_file_ids);
 
         for file_id in sorted_headers {
             let path = self.include_graph.file_paths.get(&file_id).unwrap();
@@ -63,7 +71,7 @@ impl<'a> OptimizationPlanner<'a> {
                 continue;
             }
             let metric = metric_res.unwrap();
-            
+
             if metric.collateral_load == 0 {
                 continue;
             }
@@ -72,30 +80,53 @@ impl<'a> OptimizationPlanner<'a> {
                 None => continue,
             };
 
-            let policy = file_policies.get(&file_id).copied().unwrap_or(OptimizationPolicy::Optimizable);
+            let policy = file_policies
+                .get(&file_id)
+                .copied()
+                .unwrap_or(OptimizationPolicy::Optimizable);
             if policy != OptimizationPolicy::Optimizable {
                 continue;
             }
 
-            let file_syms = self.model.file_symbols.get(&file_id).cloned().unwrap_or_default();
-            let mapped_edges: Vec<ariadne_index::types::SemanticEdge> = self.model.edges.iter().map(|e| {
-                ariadne_index::types::SemanticEdge {
+            let file_syms = self
+                .model
+                .file_symbols
+                .get(&file_id)
+                .cloned()
+                .unwrap_or_default();
+            let mapped_edges: Vec<ariadne_index::types::SemanticEdge> = self
+                .model
+                .edges
+                .iter()
+                .map(|e| ariadne_index::types::SemanticEdge {
                     src_symbol: e.src_symbol.clone(),
                     dst_symbol: e.dst_symbol.clone(),
                     kind: e.kind,
                     src_file: FileId(0),
                     dst_file: FileId(0),
-                }
-            }).collect();
+                })
+                .collect();
             let sccs = scc::compute_symbol_sccs(&file_syms, &mapped_edges);
 
             let mut proposed_extractions = Vec::new();
-            
+
             for scc in &sccs {
                 for sym_id in &scc.symbols {
                     if let Some(record) = self.model.symbols.get(sym_id) {
-                        let new_header_path = path.with_file_name(format!("{}_extracted.h", sanitize_header_stem(&record.name)));
-                        if checker.validate_extraction(sym_id, &new_header_path, scc.symbols.len() > 1, false, None).is_ok() {
+                        let new_header_path = path.with_file_name(format!(
+                            "{}_extracted.h",
+                            sanitize_header_stem(&record.name)
+                        ));
+                        if checker
+                            .validate_extraction(
+                                sym_id,
+                                &new_header_path,
+                                scc.symbols.len() > 1,
+                                false,
+                                None,
+                            )
+                            .is_ok()
+                        {
                             proposed_extractions.push(ProposedExtraction {
                                 symbol_name: record.name.clone(),
                                 symbol_id: sym_id.clone(),
@@ -105,24 +136,29 @@ impl<'a> OptimizationPlanner<'a> {
                     }
                 }
             }
-            
+
             if proposed_extractions.is_empty() {
                 continue;
             }
 
             let optimization_frontier = frontier_analyzer.find_frontiers(
-                file_id, 
-                lcs.file_id, 
-                self.include_graph, 
-                &file_policies, 
-                &file_ownerships
+                file_id,
+                lcs.file_id,
+                self.include_graph,
+                &file_policies,
+                &file_ownerships,
             );
 
             let plan_id = format!("PLAN-{:03}", plan_id_counter);
             plan_id_counter += 1;
 
-            let validation_required_tus = header_consumers.get(&file_id)
-                .map(|tus| tus.iter().filter_map(|id| self.include_graph.file_paths.get(id).cloned()).collect())
+            let validation_required_tus = header_consumers
+                .get(&file_id)
+                .map(|tus| {
+                    tus.iter()
+                        .filter_map(|id| self.include_graph.file_paths.get(id).cloned())
+                        .collect()
+                })
                 .unwrap_or_default();
 
             let rationale = format!(
@@ -160,7 +196,13 @@ impl<'a> OptimizationPlanner<'a> {
         file_policies: HashMap<PathBuf, OptimizationPolicy>,
     ) -> Result<(), PlanRejection> {
         let checker = ConstraintChecker::new(file_policies, HashSet::new());
-        checker.validate_extraction(symbol, target_file, splits_scc, creates_include_cycle, unresolved_dep)
+        checker.validate_extraction(
+            symbol,
+            target_file,
+            splits_scc,
+            creates_include_cycle,
+            unresolved_dep,
+        )
     }
 }
 
@@ -192,10 +234,10 @@ fn sanitize_header_stem(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_graph::IncludeGraph;
     use ariadne_graph::reduced::{ReducedSemanticModel, ReducedSymbolRecord};
-    use ariadne_repo::{FileId, FileRecord, FileOwnership};
-    use ariadne_index::types::{SymbolKind};
+    use ariadne_graph::IncludeGraph;
+    use ariadne_index::types::SymbolKind;
+    use ariadne_repo::{FileId, FileOwnership, FileRecord};
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
@@ -204,7 +246,7 @@ mod tests {
         let mut include_graph = IncludeGraph::new();
         include_graph.register_file(FileId(1), PathBuf::from("start.h"));
         include_graph.register_file(FileId(2), PathBuf::from("col.h"));
-        
+
         use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
         include_graph.add_edge(IncludeEdge {
             source: FileId(1),
@@ -225,25 +267,31 @@ mod tests {
         };
 
         let sym_a = SymbolId::new("A");
-        model.symbols.insert(sym_a.clone(), ReducedSymbolRecord {
-            id: sym_a.clone(),
-            name: "A".to_string(),
-            kind: SymbolKind::Class,
-            defining_file: Some(FileId(1)),
-            declarations: vec![],
-            definition: None,
-        });
+        model.symbols.insert(
+            sym_a.clone(),
+            ReducedSymbolRecord {
+                id: sym_a.clone(),
+                name: "A".to_string(),
+                kind: SymbolKind::Class,
+                defining_file: Some(FileId(1)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
         model.file_symbols.insert(FileId(1), vec![sym_a.clone()]);
-        
+
         let sym_b = SymbolId::new("B");
-        model.symbols.insert(sym_b.clone(), ReducedSymbolRecord {
-            id: sym_b.clone(),
-            name: "B".to_string(),
-            kind: SymbolKind::Class,
-            defining_file: Some(FileId(2)),
-            declarations: vec![],
-            definition: None,
-        });
+        model.symbols.insert(
+            sym_b.clone(),
+            ReducedSymbolRecord {
+                id: sym_b.clone(),
+                name: "B".to_string(),
+                kind: SymbolKind::Class,
+                defining_file: Some(FileId(2)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
         model.file_symbols.insert(FileId(2), vec![sym_b.clone()]);
 
         let file_records = vec![
@@ -266,13 +314,13 @@ mod tests {
                 content_hash: String::new(),
                 ownership: FileOwnership::ThirdParty,
                 optimization_policy: OptimizationPolicy::Frozen,
-            }
+            },
         ];
         let tu_file_ids = vec![];
 
         let planner = OptimizationPlanner::new(&include_graph, &model, &file_records, &tu_file_ids);
         let plans = planner.plan();
-        
+
         assert_eq!(plans.len(), 1, "Should generate exactly one plan");
         assert_eq!(plans[0].id.0, "PLAN-001");
         assert_eq!(plans[0].target_file_id, FileId(1));

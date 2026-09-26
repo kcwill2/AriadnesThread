@@ -1,8 +1,8 @@
 //! Data models for include graph, edges, closures, and reports.
 
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Classification of an included header file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -50,7 +50,11 @@ pub struct IncludeClosure {
 }
 
 impl IncludeClosure {
-    pub fn new(file_id: FileId, mut direct_includes: Vec<FileId>, mut transitive_includes: Vec<FileId>) -> Self {
+    pub fn new(
+        file_id: FileId,
+        mut direct_includes: Vec<FileId>,
+        mut transitive_includes: Vec<FileId>,
+    ) -> Self {
         direct_includes.sort();
         direct_includes.dedup();
         transitive_includes.sort();

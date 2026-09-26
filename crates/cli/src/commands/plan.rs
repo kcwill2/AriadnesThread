@@ -1,19 +1,31 @@
-use std::path::PathBuf;
 use anyhow::Result;
+use ariadne_pipeline::Pipeline;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
-use ariadne_pipeline::Pipeline;
+use std::path::PathBuf;
 
 pub fn handle_plan(repo_path: &PathBuf) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, _closures) = pipeline.get_or_build_include_graph()?;
     let model = pipeline.get_or_build_reduced()?;
-    let tu_file_ids: Vec<_> = pipeline.build.translation_units.iter().map(|tu| tu.file_id).collect();
+    let tu_file_ids: Vec<_> = pipeline
+        .build
+        .translation_units
+        .iter()
+        .map(|tu| tu.file_id)
+        .collect();
 
-    let planner = ariadne_cluster::planner::OptimizationPlanner::new(&graph, &model, &pipeline.discovery.files, &tu_file_ids);
+    let planner = ariadne_cluster::planner::OptimizationPlanner::new(
+        &graph,
+        &model,
+        &pipeline.discovery.files,
+        &tu_file_ids,
+    );
     let plans = planner.plan();
 
-    pipeline.manager.save_plan_artifacts(&pipeline.repo.root, &plans, &pipeline.fps.plan)?;
+    pipeline
+        .manager
+        .save_plan_artifacts(&pipeline.repo.root, &plans, &pipeline.fps.plan)?;
 
     println!("Optimization plans: {}", plans.len());
     println!();

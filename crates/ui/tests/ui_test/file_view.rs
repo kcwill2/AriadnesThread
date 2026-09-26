@@ -24,7 +24,10 @@ async fn test_source_route_returns_file_content() {
     let (status, headers, body) =
         common::request_raw_body(app, "/api/source?file=src/widget.cc").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(headers.get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+    assert_eq!(
+        headers.get("Content-Type").unwrap(),
+        "text/plain; charset=utf-8"
+    );
     assert_eq!(body, b"// widget source\n".to_vec());
 }
 
@@ -55,10 +58,22 @@ async fn test_source_route_returns_400_without_file_param() {
 async fn test_index_html_source_drawer_uses_source_route() {
     let html = ariadne_ui::INDEX_HTML;
 
-    assert!(html.contains("id=\"sourceDrawer\""), "missing source drawer container");
-    assert!(html.contains("openSourceDrawer()"), "missing openSourceDrawer handler");
-    assert!(html.contains("closeSourceDrawer()"), "missing closeSourceDrawer handler");
-    assert!(html.contains("id=\"drawerTitle\""), "missing drawer title element");
+    assert!(
+        html.contains("id=\"sourceDrawer\""),
+        "missing source drawer container"
+    );
+    assert!(
+        html.contains("openSourceDrawer()"),
+        "missing openSourceDrawer handler"
+    );
+    assert!(
+        html.contains("closeSourceDrawer()"),
+        "missing closeSourceDrawer handler"
+    );
+    assert!(
+        html.contains("id=\"drawerTitle\""),
+        "missing drawer title element"
+    );
     assert!(
         html.contains("fetch(`/api/source?file="),
         "source drawer must fetch /api/source with an encoded file path"

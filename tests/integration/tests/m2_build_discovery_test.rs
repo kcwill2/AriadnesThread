@@ -1,9 +1,9 @@
+use ariadne_build::BuildDiscoverer;
+use ariadne_cli::handle_build_discover;
+use ariadne_repo::Repository;
+use ariadne_report::{ArtifactManager, BuildContextManifest};
 use std::fs;
 use tempfile::tempdir;
-use ariadne_repo::Repository;
-use ariadne_build::BuildDiscoverer;
-use ariadne_report::{ArtifactManager, BuildContextManifest};
-use ariadne_cli::handle_build_discover;
 
 #[test]
 fn test_m2_build_discovery_determinism_and_contexts() {
@@ -12,8 +12,16 @@ fn test_m2_build_discovery_determinism_and_contexts() {
 
     fs::create_dir_all(root.join("include")).unwrap();
     fs::create_dir_all(root.join("src")).unwrap();
-    fs::write(root.join("include/thing.h"), "#pragma once\nclass Thing {};").unwrap();
-    fs::write(root.join("src/thing.cpp"), "#include \"thing.h\"\nint main() { return 0; }").unwrap();
+    fs::write(
+        root.join("include/thing.h"),
+        "#pragma once\nclass Thing {};",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/thing.cpp"),
+        "#include \"thing.h\"\nint main() { return 0; }",
+    )
+    .unwrap();
 
     let compile_commands_json = format!(
         r#"[
@@ -44,24 +52,59 @@ fn test_m2_build_discovery_determinism_and_contexts() {
     let res2 = discoverer2.discover().expect("Build discovery 2 failed");
 
     // Acceptance criterion: Running discovery twice against the same build configuration produces equivalent normalized compilation contexts.
-    assert_eq!(res1.contexts, res2.contexts, "Compilation contexts must be deterministic");
-    assert_eq!(res1.translation_units, res2.translation_units, "Translation units must be deterministic");
+    assert_eq!(
+        res1.contexts, res2.contexts,
+        "Compilation contexts must be deterministic"
+    );
+    assert_eq!(
+        res1.translation_units, res2.translation_units,
+        "Translation units must be deterministic"
+    );
 
-    assert_eq!(res1.contexts.len(), 2, "Should discover Debug|x64 and Release|x64 contexts");
+    assert_eq!(
+        res1.contexts.len(),
+        2,
+        "Should discover Debug|x64 and Release|x64 contexts"
+    );
 
-    let debug_ctx = res1.contexts.iter().find(|c| c.name == "Debug|x64").expect("Debug|x64 context missing");
-    assert!(debug_ctx.defines.contains(&"DEBUG".to_string()), "Debug context must contain DEBUG define");
+    let debug_ctx = res1
+        .contexts
+        .iter()
+        .find(|c| c.name == "Debug|x64")
+        .expect("Debug|x64 context missing");
+    assert!(
+        debug_ctx.defines.contains(&"DEBUG".to_string()),
+        "Debug context must contain DEBUG define"
+    );
 
-    let release_ctx = res1.contexts.iter().find(|c| c.name == "Release|x64").expect("Release|x64 context missing");
-    assert!(release_ctx.defines.contains(&"NDEBUG".to_string()), "Release context must contain NDEBUG define");
+    let release_ctx = res1
+        .contexts
+        .iter()
+        .find(|c| c.name == "Release|x64")
+        .expect("Release|x64 context missing");
+    assert!(
+        release_ctx.defines.contains(&"NDEBUG".to_string()),
+        "Release context must contain NDEBUG define"
+    );
 
     // Test artifact generation
     let artifact_mgr = ArtifactManager::init(root).expect("ArtifactManager init failed");
-    let ctx_dir = artifact_mgr.save_build_context_artifacts(&res1, "m2-test-fingerprint").expect("save_build_context_artifacts failed");
+    let ctx_dir = artifact_mgr
+        .save_build_context_artifacts(&res1, "m2-test-fingerprint")
+        .expect("save_build_context_artifacts failed");
 
-    assert!(ctx_dir.join("contexts.json").exists(), "contexts.json must exist");
-    assert!(ctx_dir.join("commands.json").exists(), "commands.json must exist");
-    assert!(ctx_dir.join("manifest.json").exists(), "manifest.json must exist");
+    assert!(
+        ctx_dir.join("contexts.json").exists(),
+        "contexts.json must exist"
+    );
+    assert!(
+        ctx_dir.join("commands.json").exists(),
+        "commands.json must exist"
+    );
+    assert!(
+        ctx_dir.join("manifest.json").exists(),
+        "manifest.json must exist"
+    );
 
     let manifest_str = fs::read_to_string(ctx_dir.join("manifest.json")).unwrap();
     let manifest: BuildContextManifest = serde_json::from_str(&manifest_str).unwrap();
@@ -76,8 +119,16 @@ fn test_m2_cli_handle_build_discover() {
 
     fs::create_dir_all(root.join("include")).unwrap();
     fs::create_dir_all(root.join("src")).unwrap();
-    fs::write(root.join("include/thing.h"), "#pragma once\nclass Thing {};").unwrap();
-    fs::write(root.join("src/thing.cpp"), "#include \"thing.h\"\nint main() { return 0; }").unwrap();
+    fs::write(
+        root.join("include/thing.h"),
+        "#pragma once\nclass Thing {};",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/thing.cpp"),
+        "#include \"thing.h\"\nint main() { return 0; }",
+    )
+    .unwrap();
 
     let compile_commands_json = format!(
         r#"[
@@ -96,5 +147,8 @@ fn test_m2_cli_handle_build_discover() {
     assert!(res.is_ok(), "handle_build_discover should succeed");
 
     let artifact_manifest = root.join("artifacts/contexts/manifest.json");
-    assert!(artifact_manifest.exists(), "CLI handle_build_discover must save artifact manifest.json");
+    assert!(
+        artifact_manifest.exists(),
+        "CLI handle_build_discover must save artifact manifest.json"
+    );
 }

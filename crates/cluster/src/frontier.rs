@@ -63,7 +63,9 @@ impl FrontierAnalyzer {
             if *file_id == collateral_file {
                 break; // Stop before the collateral root itself? The requirement says "before reaching ... collateral root headers".
             }
-            let policy = file_policies.get(file_id).unwrap_or(&OptimizationPolicy::Optimizable);
+            let policy = file_policies
+                .get(file_id)
+                .unwrap_or(&OptimizationPolicy::Optimizable);
             if *policy == OptimizationPolicy::Optimizable {
                 last_optimizable = Some(*file_id);
             } else {
@@ -137,7 +139,7 @@ mod tests {
 
         let analyzer = FrontierAnalyzer::new();
         let frontiers = analyzer.find_frontiers(f_start, f_col, &graph, &policies, &ownerships);
-        
+
         // Frontier should be mid1.h, since mid2 is frozen.
         assert_eq!(frontiers.len(), 1);
         assert_eq!(frontiers[0], PathBuf::from("mid1.h"));

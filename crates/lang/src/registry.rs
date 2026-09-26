@@ -40,7 +40,9 @@ pub struct LanguageRegistry {
 impl LanguageRegistry {
     /// Creates an empty registry.
     pub fn new() -> Self {
-        Self { plugins: Vec::new() }
+        Self {
+            plugins: Vec::new(),
+        }
     }
 
     /// Appends `plugin` and returns `self` for builder-style chaining.
@@ -90,7 +92,9 @@ mod tests {
 
     struct MockDetector;
     impl LanguageDetector for MockDetector {
-        fn name(&self) -> &str { "mock" }
+        fn name(&self) -> &str {
+            "mock"
+        }
         fn detect(&self, path: &Path) -> SourceFileKind {
             match path.extension().and_then(|e| e.to_str()) {
                 Some("mock") => SourceFileKind::Source,
@@ -102,33 +106,51 @@ mod tests {
     struct MockAnalyzer;
     impl SemanticAnalyzer for MockAnalyzer {
         fn analyze(&self, file_id: FileId, _source: &str, _ctx: &str) -> TuAnalysis {
-            TuAnalysis { tu_file_id: file_id, ..TuAnalysis::default() }
+            TuAnalysis {
+                tu_file_id: file_id,
+                ..TuAnalysis::default()
+            }
         }
     }
 
     struct MockResolver;
     impl DependencyResolver for MockResolver {
-        fn resolve_edges(&self, _fid: FileId, _p: &Path, _src: &str, _ctx: &ResolutionContext<'_>) -> Vec<RawDepEdge> {
+        fn resolve_edges(
+            &self,
+            _fid: FileId,
+            _p: &Path,
+            _src: &str,
+            _ctx: &ResolutionContext<'_>,
+        ) -> Vec<RawDepEdge> {
             vec![]
         }
     }
 
     struct MockConstraints;
     impl ClusteringConstraints for MockConstraints {
-        fn colocated_groups(&self, _: &[SymbolRecord]) -> Vec<Vec<SymbolId>> { vec![] }
-        fn frozen_symbols(&self, _: &[SymbolRecord]) -> HashSet<SymbolId> { HashSet::new() }
+        fn colocated_groups(&self, _: &[SymbolRecord]) -> Vec<Vec<SymbolId>> {
+            vec![]
+        }
+        fn frozen_symbols(&self, _: &[SymbolRecord]) -> HashSet<SymbolId> {
+            HashSet::new()
+        }
     }
 
     struct MockExtractor;
     impl SourceExtractor for MockExtractor {
         fn extract(&self, _: &[SymbolBody], _ns: &str, _deps: &[String]) -> GeneratedSourceFile {
-            GeneratedSourceFile { path: PathBuf::from("out.mock"), content: String::new() }
+            GeneratedSourceFile {
+                path: PathBuf::from("out.mock"),
+                content: String::new(),
+            }
         }
     }
 
     struct MockRewriter;
     impl DependencyRewriter for MockRewriter {
-        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String { source.to_string() }
+        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
+            source.to_string()
+        }
     }
 
     struct MockValidator;
@@ -139,37 +161,51 @@ mod tests {
     }
 
     struct MockPlugin {
-        detector:    MockDetector,
-        analyzer:    MockAnalyzer,
-        resolver:    MockResolver,
+        detector: MockDetector,
+        analyzer: MockAnalyzer,
+        resolver: MockResolver,
         constraints: MockConstraints,
-        extractor:   MockExtractor,
-        rewriter:    MockRewriter,
-        validator:   MockValidator,
+        extractor: MockExtractor,
+        rewriter: MockRewriter,
+        validator: MockValidator,
     }
 
     impl MockPlugin {
         fn new() -> Self {
             Self {
-                detector:    MockDetector,
-                analyzer:    MockAnalyzer,
-                resolver:    MockResolver,
+                detector: MockDetector,
+                analyzer: MockAnalyzer,
+                resolver: MockResolver,
                 constraints: MockConstraints,
-                extractor:   MockExtractor,
-                rewriter:    MockRewriter,
-                validator:   MockValidator,
+                extractor: MockExtractor,
+                rewriter: MockRewriter,
+                validator: MockValidator,
             }
         }
     }
 
     impl LanguagePlugin for MockPlugin {
-        fn detector(&self)    -> &dyn LanguageDetector      { &self.detector }
-        fn analyzer(&self)    -> &dyn SemanticAnalyzer       { &self.analyzer }
-        fn resolver(&self)    -> &dyn DependencyResolver     { &self.resolver }
-        fn constraints(&self) -> &dyn ClusteringConstraints  { &self.constraints }
-        fn extractor(&self)   -> &dyn SourceExtractor        { &self.extractor }
-        fn rewriter(&self)    -> &dyn DependencyRewriter     { &self.rewriter }
-        fn validator(&self)   -> &dyn CompilerValidator      { &self.validator }
+        fn detector(&self) -> &dyn LanguageDetector {
+            &self.detector
+        }
+        fn analyzer(&self) -> &dyn SemanticAnalyzer {
+            &self.analyzer
+        }
+        fn resolver(&self) -> &dyn DependencyResolver {
+            &self.resolver
+        }
+        fn constraints(&self) -> &dyn ClusteringConstraints {
+            &self.constraints
+        }
+        fn extractor(&self) -> &dyn SourceExtractor {
+            &self.extractor
+        }
+        fn rewriter(&self) -> &dyn DependencyRewriter {
+            &self.rewriter
+        }
+        fn validator(&self) -> &dyn CompilerValidator {
+            &self.validator
+        }
     }
 
     // ── tests ─────────────────────────────────────────────────────────────────
@@ -178,14 +214,20 @@ mod tests {
     fn empty_registry_returns_none() {
         let registry = LanguageRegistry::new();
         assert!(registry.plugin_for(Path::new("src/main.cpp")).is_none());
-        assert_eq!(registry.detect(Path::new("src/main.cpp")), SourceFileKind::Other);
+        assert_eq!(
+            registry.detect(Path::new("src/main.cpp")),
+            SourceFileKind::Other
+        );
     }
 
     #[test]
     fn registered_plugin_is_found_for_matching_extension() {
         let registry = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
         assert!(registry.plugin_for(Path::new("src/main.mock")).is_some());
-        assert_eq!(registry.detect(Path::new("src/main.mock")), SourceFileKind::Source);
+        assert_eq!(
+            registry.detect(Path::new("src/main.mock")),
+            SourceFileKind::Source
+        );
     }
 
     #[test]

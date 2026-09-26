@@ -1,7 +1,7 @@
 //! Policy and ownership classification logic for repository discovery.
 
-use std::path::Path;
 use crate::types::{FileOwnership, OptimizationPolicy};
+use std::path::Path;
 
 /// Classifies a file's ownership and optimization policy based on path rules and directory patterns.
 pub fn classify_ownership_and_policy(
@@ -22,10 +22,21 @@ pub fn classify_ownership_and_policy(
         .collect();
 
     for comp in &components {
-        if comp == "third_party" || comp == "third-party" || comp == "vendor" || comp == "deps" || comp == "external" {
+        if comp == "third_party"
+            || comp == "third-party"
+            || comp == "vendor"
+            || comp == "deps"
+            || comp == "external"
+        {
             return (FileOwnership::ThirdParty, OptimizationPolicy::Frozen);
         }
-        if comp == "generated" || comp == "gen" || comp == "build" || comp == "out" || comp == "target" || comp == "$build" {
+        if comp == "generated"
+            || comp == "gen"
+            || comp == "build"
+            || comp == "out"
+            || comp == "target"
+            || comp == "$build"
+        {
             return (FileOwnership::Generated, OptimizationPolicy::Frozen);
         }
     }
@@ -48,14 +59,16 @@ mod tests {
         assert_eq!(own, FileOwnership::Repository);
         assert_eq!(pol, OptimizationPolicy::Optimizable);
 
-        let (own, pol) = classify_ownership_and_policy(Path::new("third_party/fmt/format.h"), false);
+        let (own, pol) =
+            classify_ownership_and_policy(Path::new("third_party/fmt/format.h"), false);
         assert_eq!(own, FileOwnership::ThirdParty);
         assert_eq!(pol, OptimizationPolicy::Frozen);
     }
 
     #[test]
     fn test_generated_directory_detection() {
-        let (own, pol) = classify_ownership_and_policy(Path::new("src/generated/parser.cpp"), false);
+        let (own, pol) =
+            classify_ownership_and_policy(Path::new("src/generated/parser.cpp"), false);
         assert_eq!(own, FileOwnership::Generated);
         assert_eq!(pol, OptimizationPolicy::Frozen);
     }

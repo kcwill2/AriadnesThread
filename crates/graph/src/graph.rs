@@ -1,10 +1,10 @@
 //! Physical file include graph structure, closure calculation, cycle detection, and visualization.
 
+use crate::types::{IncludeClosure, IncludeEdge, IncludeKind, IncludeReport};
+use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use ariadne_repo::FileId;
-use crate::types::{IncludeClosure, IncludeEdge, IncludeKind, IncludeReport};
 
 /// Central include graph model managing dependency edges, closures, and analysis.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -31,7 +31,10 @@ impl IncludeGraph {
     /// Finds a FileId by matching filename or relative path.
     pub fn find_file_id(&self, path_or_name: &Path) -> Option<FileId> {
         let target_str = path_or_name.to_string_lossy();
-        let target_name = path_or_name.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let target_name = path_or_name
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
 
         for (&id, path) in &self.file_paths {
             if path == path_or_name || path.to_string_lossy() == target_str {
@@ -134,7 +137,10 @@ impl IncludeGraph {
         for &tu_id in tu_file_ids {
             if let Some(closure) = closures.get(&tu_id) {
                 for &inc_header in &closure.transitive_includes {
-                    header_consumers.entry(inc_header).or_default().insert(tu_id);
+                    header_consumers
+                        .entry(inc_header)
+                        .or_default()
+                        .insert(tu_id);
                 }
             }
         }
@@ -410,6 +416,9 @@ mod tests {
         });
 
         let cycles = graph.detect_cycles();
-        assert!(!cycles.is_empty(), "Cycle must be detected between a.h and b.h");
+        assert!(
+            !cycles.is_empty(),
+            "Cycle must be detected between a.h and b.h"
+        );
     }
 }

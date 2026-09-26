@@ -17,22 +17,26 @@ async fn test_m15_graph_ui_command() {
         Some(export_file.clone()),
         2,
         true,
-    ).await;
-    
+    )
+    .await;
+
     assert!(result.is_ok(), "run_ui failed for export");
-    
+
     // Verify file exists and has content
     assert!(export_file.exists(), "Export file should exist");
     let content = fs::read_to_string(&export_file).unwrap();
     assert!(content.len() > 1024, "Export file too small");
-    assert!(content.contains("window.__ARIADNE_DATA__"), "Export missing data payload");
-    
+    assert!(
+        content.contains("window.__ARIADNE_DATA__"),
+        "Export missing data payload"
+    );
+
     // 2. Test HTTP server running
     // We bind to port 0 to get an ephemeral port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener); // Free the port so the server can use it
-    
+
     let server_task = tokio::spawn(async move {
         let result = ariadne_cli::run_ui(
             Some(repo_dir.clone()),
@@ -41,10 +45,11 @@ async fn test_m15_graph_ui_command() {
             None,
             2,
             true, // no watch: keep the test deterministic
-        ).await;
+        )
+        .await;
         assert!(result.is_ok());
     });
-    
+
     // Give server time to start and poll until the artifact-first boot is ready
     let base_url = format!("http://127.0.0.1:{}", port);
     let mut status_json = serde_json::Value::Null;
@@ -68,31 +73,31 @@ async fn test_m15_graph_ui_command() {
         status_json["last_refresh"].as_u64().unwrap_or(0) > 0,
         "ready status should carry last_refresh"
     );
-    
+
     // Test status endpoint
     let status_resp = reqwest::get(&format!("{}/api/status", base_url))
         .await
         .expect("Failed to request status endpoint");
     assert!(status_resp.status().is_success());
-    
+
     // Test include graph endpoint
     let include_resp = reqwest::get(&format!("{}/api/graph/include", base_url))
         .await
         .expect("Failed to request include endpoint");
     assert!(include_resp.status().is_success());
-    
+
     // Test symbol graph endpoint
     let symbol_resp = reqwest::get(&format!("{}/api/graph/symbol", base_url))
         .await
         .expect("Failed to request symbol endpoint");
     assert!(symbol_resp.status().is_success());
-    
+
     // Test call graph endpoint
     let call_resp = reqwest::get(&format!("{}/api/graph/call", base_url))
         .await
         .expect("Failed to request call endpoint");
     assert!(call_resp.status().is_success());
-    
+
     // We don't gracefully shut down in this simple test, but aborting the task is fine
     server_task.abort();
 }

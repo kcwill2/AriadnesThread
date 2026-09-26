@@ -1,6 +1,6 @@
-use std::path::Path;
-use ariadne_repo::FileId;
 use crate::types::*;
+use ariadne_repo::FileId;
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Token {
@@ -202,7 +202,7 @@ impl<'a> ParserCtx<'a> {
             let decl_id = DeclId::new(format!("decl_{}", self.decl_counter));
 
             let mut is_definition = false;
-            
+
             if self.i + 2 < self.tokens.len() {
                 match &self.tokens[self.i + 2].kind {
                     TokenKind::Punct(p) if p == ";" => {
@@ -220,7 +220,10 @@ impl<'a> ParserCtx<'a> {
                         let mut j = self.i + 3;
                         while j < self.tokens.len() {
                             if let TokenKind::Word(base_w) = &self.tokens[j].kind {
-                                if base_w != "public" && base_w != "private" && base_w != "protected" {
+                                if base_w != "public"
+                                    && base_w != "private"
+                                    && base_w != "protected"
+                                {
                                     self.edges.push(SemanticEdge {
                                         src_symbol: SymbolId::new(name.clone()),
                                         dst_symbol: SymbolId::new(base_w.clone()),
@@ -246,7 +249,11 @@ impl<'a> ParserCtx<'a> {
                 is_definition,
             });
 
-            let kind = if w == "class" { SymbolKind::Class } else { SymbolKind::Struct };
+            let kind = if w == "class" {
+                SymbolKind::Class
+            } else {
+                SymbolKind::Struct
+            };
 
             if let Some(existing) = self.symbols.iter_mut().find(|s| s.id == symbol_id) {
                 existing.declarations.push(decl_id.clone());
@@ -313,7 +320,10 @@ impl<'a> ParserCtx<'a> {
             if self.brace_depth > 0 && self.i + 1 < self.tokens.len() {
                 if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
                     if p == "(" {
-                        let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw"];
+                        let reserved = [
+                            "if", "while", "for", "switch", "return", "sizeof", "catch", "new",
+                            "delete", "throw",
+                        ];
                         if !reserved.contains(&w) {
                             self.call_sites.push(CallSite {
                                 caller_symbol: func_symbol.clone(),
@@ -335,7 +345,22 @@ impl<'a> ParserCtx<'a> {
         if self.current_function.is_none() && self.i + 1 < self.tokens.len() {
             if let TokenKind::Punct(p) = &self.tokens[self.i + 1].kind {
                 if p == "(" {
-                    let reserved = ["if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw", "class", "struct", "namespace", "else"];
+                    let reserved = [
+                        "if",
+                        "while",
+                        "for",
+                        "switch",
+                        "return",
+                        "sizeof",
+                        "catch",
+                        "new",
+                        "delete",
+                        "throw",
+                        "class",
+                        "struct",
+                        "namespace",
+                        "else",
+                    ];
                     if reserved.contains(&w) {
                         return;
                     }
@@ -349,7 +374,9 @@ impl<'a> ParserCtx<'a> {
                             if colon1 == ":" {
                                 if let TokenKind::Punct(colon2) = &self.tokens[self.i - 2].kind {
                                     if colon2 == ":" && self.i >= 3 {
-                                        if let TokenKind::Word(class_name) = &self.tokens[self.i - 3].kind {
+                                        if let TokenKind::Word(class_name) =
+                                            &self.tokens[self.i - 3].kind
+                                        {
                                             name = format!("{}::{}", class_name, name);
                                         }
                                     }
@@ -363,23 +390,27 @@ impl<'a> ParserCtx<'a> {
                         column: token.column,
                     };
                     let symbol_id = SymbolId::new(name.clone());
-                    
+
                     let mut is_definition = false;
                     let mut j = self.i + 2;
                     let mut paren_depth = 1;
                     while j < self.tokens.len() && paren_depth > 0 {
                         if let TokenKind::Punct(p2) = &self.tokens[j].kind {
-                            if p2 == "(" { paren_depth += 1; }
-                            else if p2 == ")" { paren_depth -= 1; }
+                            if p2 == "(" {
+                                paren_depth += 1;
+                            } else if p2 == ")" {
+                                paren_depth -= 1;
+                            }
                         }
                         j += 1;
                     }
-                    
+
                     while j < self.tokens.len() {
                         if let TokenKind::Punct(p3) = &self.tokens[j].kind {
                             if p3 == "{" {
                                 is_definition = true;
-                                self.current_function = Some((symbol_id.clone(), self.brace_depth + 1));
+                                self.current_function =
+                                    Some((symbol_id.clone(), self.brace_depth + 1));
                                 break;
                             } else if p3 == ";" {
                                 break;
@@ -417,7 +448,11 @@ impl<'a> ParserCtx<'a> {
                     // Extract return type edge
                     if self.i > 0 {
                         if let TokenKind::Word(ret_type) = &self.tokens[self.i - 1].kind {
-                            if ret_type != "void" && ret_type != "virtual" && ret_type != "static" && ret_type != "inline" {
+                            if ret_type != "void"
+                                && ret_type != "virtual"
+                                && ret_type != "static"
+                                && ret_type != "inline"
+                            {
                                 self.edges.push(SemanticEdge {
                                     src_symbol: symbol_id.clone(),
                                     dst_symbol: SymbolId::new(ret_type.clone()),
@@ -435,15 +470,20 @@ impl<'a> ParserCtx<'a> {
                     while k < self.tokens.len() && param_paren > 0 {
                         match &self.tokens[k].kind {
                             TokenKind::Punct(p) => {
-                                if p == "(" { param_paren += 1; }
-                                else if p == ")" { param_paren -= 1; }
+                                if p == "(" {
+                                    param_paren += 1;
+                                } else if p == ")" {
+                                    param_paren -= 1;
+                                }
                             }
                             TokenKind::Word(param_type) => {
                                 // If followed by a word (param name) or * or & or , or ), it might be a type
                                 if param_type != "const" {
                                     if k + 1 < self.tokens.len() {
                                         let next = &self.tokens[k + 1].kind;
-                                        if matches!(next, TokenKind::Word(_)) || matches!(next, TokenKind::Punct(p) if p == "*" || p == "&") {
+                                        if matches!(next, TokenKind::Word(_))
+                                            || matches!(next, TokenKind::Punct(p) if p == "*" || p == "&")
+                                        {
                                             self.edges.push(SemanticEdge {
                                                 src_symbol: symbol_id.clone(),
                                                 dst_symbol: SymbolId::new(param_type.clone()),
@@ -485,11 +525,15 @@ impl<'a> ParserCtx<'a> {
                                 }
                             }
                         }
-                        
+
                         self.edges.push(SemanticEdge {
                             src_symbol: SymbolId::new(parent.clone()),
                             dst_symbol: SymbolId::new(type_name),
-                            kind: if is_function { DependencyKind::Incomplete } else { DependencyKind::Complete },
+                            kind: if is_function {
+                                DependencyKind::Incomplete
+                            } else {
+                                DependencyKind::Complete
+                            },
                             src_file: self.tu_file_id.clone(),
                             dst_file: self.tu_file_id.clone(),
                         });
@@ -612,7 +656,10 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
+        let edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Incomplete);
     }
@@ -630,7 +677,10 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
+        let edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Complete);
     }
@@ -646,7 +696,10 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
+        let edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Complete);
     }
@@ -666,7 +719,10 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
+        let edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Complete);
     }
@@ -684,7 +740,10 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let edge = tu.edges.iter().find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
+        let edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "A" && e.dst_symbol.0 == "B");
         assert!(edge.is_some(), "Edge A -> B must exist");
         assert_eq!(edge.unwrap().kind, DependencyKind::Incomplete);
     }
@@ -707,13 +766,21 @@ mod tests {
             "Debug|x64",
         );
         assert_eq!(tu.call_sites.len(), 3);
-        
-        let target_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "target").collect();
+
+        let target_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "target")
+            .collect();
         assert_eq!(target_calls.len(), 2);
         assert_eq!(target_calls[0].callee_name, "helper");
         assert_eq!(target_calls[1].callee_name, "helper");
-        
-        let recursive_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "recursive").collect();
+
+        let recursive_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "recursive")
+            .collect();
         assert_eq!(recursive_calls.len(), 1);
         assert_eq!(recursive_calls[0].callee_name, "recursive");
     }
@@ -740,12 +807,28 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let myclass_method_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "method" || c.caller_symbol.0 == "MyClass::method").collect();
-        assert_eq!(myclass_method_calls.len(), 1, "Call site inside method must be extracted");
+        let myclass_method_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "method" || c.caller_symbol.0 == "MyClass::method")
+            .collect();
+        assert_eq!(
+            myclass_method_calls.len(),
+            1,
+            "Call site inside method must be extracted"
+        );
         assert_eq!(myclass_method_calls[0].callee_name, "helper");
 
-        let global_func_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "global_func").collect();
-        assert_eq!(global_func_calls.len(), 1, "Call site inside global_func must be extracted");
+        let global_func_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "global_func")
+            .collect();
+        assert_eq!(
+            global_func_calls.len(),
+            1,
+            "Call site inside global_func must be extracted"
+        );
         assert_eq!(global_func_calls[0].callee_name, "helper2");
     }
 
@@ -768,10 +851,26 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let foo_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "foo").collect();
-        assert_eq!(foo_calls.len(), 2, "Call to MACRO and func should be captured");
-        let bar_calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "bar").collect();
-        assert_eq!(bar_calls.len(), 2, "bar should also capture MACRO and func calls");
+        let foo_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "foo")
+            .collect();
+        assert_eq!(
+            foo_calls.len(),
+            2,
+            "Call to MACRO and func should be captured"
+        );
+        let bar_calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| c.caller_symbol.0 == "bar")
+            .collect();
+        assert_eq!(
+            bar_calls.len(),
+            2,
+            "bar should also capture MACRO and func calls"
+        );
     }
 
     #[test]
@@ -788,8 +887,19 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let calls: Vec<_> = tu.call_sites.iter().filter(|c| c.caller_symbol.0 == "inline_method" || c.caller_symbol.0 == "MyClass::inline_method").collect();
-        assert_eq!(calls.len(), 1, "Call site inside inline member method must be extracted");
+        let calls: Vec<_> = tu
+            .call_sites
+            .iter()
+            .filter(|c| {
+                c.caller_symbol.0 == "inline_method"
+                    || c.caller_symbol.0 == "MyClass::inline_method"
+            })
+            .collect();
+        assert_eq!(
+            calls.len(),
+            1,
+            "Call site inside inline member method must be extracted"
+        );
         assert_eq!(calls[0].callee_name, "helper");
     }
 
@@ -807,13 +917,26 @@ mod tests {
             code,
             "Debug|x64",
         );
-        let b_edge = tu.edges.iter().find(|e| e.src_symbol.0 == "global_func" && e.dst_symbol.0 == "B");
-        assert!(b_edge.is_some(), "Edge global_func -> B must exist (incomplete)");
+        let b_edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "global_func" && e.dst_symbol.0 == "B");
+        assert!(
+            b_edge.is_some(),
+            "Edge global_func -> B must exist (incomplete)"
+        );
         assert_eq!(b_edge.unwrap().kind, DependencyKind::Incomplete);
 
-        let c_edge = tu.edges.iter().find(|e| e.src_symbol.0 == "global_func" && e.dst_symbol.0 == "C");
-        assert!(c_edge.is_some(), "Edge global_func -> C must exist (complete)");
+        let c_edge = tu
+            .edges
+            .iter()
+            .find(|e| e.src_symbol.0 == "global_func" && e.dst_symbol.0 == "C");
+        assert!(
+            c_edge.is_some(),
+            "Edge global_func -> C must exist (complete)"
+        );
         assert_eq!(c_edge.unwrap().kind, DependencyKind::Complete);
     }
 }
-#[cfg(test)] mod analyzer_characterization_tests;
+#[cfg(test)]
+mod analyzer_characterization_tests;

@@ -9,11 +9,10 @@ impl TransformEngine {
     }
 }
 
-use std::path::PathBuf;
-use ariadne_index::SymbolKind;
-use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_cluster::plan::OptimizationPlan;
-
+use ariadne_graph::reduced::ReducedSemanticModel;
+use ariadne_index::SymbolKind;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct ExtractedSymbol {
@@ -67,7 +66,10 @@ impl ConsumerRewrite {
             out.push_str(&format!("    + #include \"{}\"\n", new.display()));
         }
         for preserved in &self.side_effect_preservations {
-            out.push_str(&format!("    ~ #include \"{}\" // side-effect preserved\n", preserved.display()));
+            out.push_str(&format!(
+                "    ~ #include \"{}\" // side-effect preserved\n",
+                preserved.display()
+            ));
         }
         out
     }
@@ -110,7 +112,10 @@ impl IncludeRewriter {
         symbol_name_to_header: BTreeMap<String, PathBuf>,
         generated_headers: Vec<GeneratedHeader>,
     ) -> Self {
-        Self { symbol_name_to_header, generated_headers }
+        Self {
+            symbol_name_to_header,
+            generated_headers,
+        }
     }
 
     /// Build a ConsumerRewrite for one consumer file.
@@ -144,7 +149,11 @@ impl IncludeRewriter {
         for target in &target_headers {
             all_new_includes.insert(target.clone());
             // Find the GeneratedHeader to get its required_includes
-            if let Some(gen_hdr) = self.generated_headers.iter().find(|h| &h.filename == target) {
+            if let Some(gen_hdr) = self
+                .generated_headers
+                .iter()
+                .find(|h| &h.filename == target)
+            {
                 for prereq in &gen_hdr.required_includes {
                     all_new_includes.insert(prereq.clone());
                 }
@@ -208,11 +217,16 @@ impl<'a> HeaderExtractor<'a> {
     }
 
     pub fn extract(&self, plan: &OptimizationPlan) -> ExtractionResult {
-        let mut groups: BTreeMap<PathBuf, Vec<&ariadne_cluster::plan::ProposedExtraction>> = BTreeMap::new();
-        let mut symbol_to_header: BTreeMap<ariadne_index::types::SymbolId, PathBuf> = BTreeMap::new();
+        let mut groups: BTreeMap<PathBuf, Vec<&ariadne_cluster::plan::ProposedExtraction>> =
+            BTreeMap::new();
+        let mut symbol_to_header: BTreeMap<ariadne_index::types::SymbolId, PathBuf> =
+            BTreeMap::new();
 
         for ext in &plan.proposed_extractions {
-            groups.entry(ext.target_header.clone()).or_default().push(ext);
+            groups
+                .entry(ext.target_header.clone())
+                .or_default()
+                .push(ext);
             symbol_to_header.insert(ext.symbol_id.clone(), ext.target_header.clone());
         }
 
@@ -223,12 +237,14 @@ impl<'a> HeaderExtractor<'a> {
             let mut required_includes = BTreeSet::new();
 
             for ext in extractions {
-                let kind = self.model.find_symbol(&ext.symbol_id.0)
+                let kind = self
+                    .model
+                    .find_symbol(&ext.symbol_id.0)
                     .map(|r| r.kind)
                     .unwrap_or(SymbolKind::Other);
-                
+
                 let body = format!("// Symbol: {} ({:?})", ext.symbol_name, kind);
-                
+
                 symbols.push(ExtractedSymbol {
                     name: ext.symbol_name.clone(),
                     kind,
@@ -257,7 +273,10 @@ impl<'a> HeaderExtractor<'a> {
 
         let mut adj: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
         for h in &headers {
-            adj.insert(h.filename.clone(), h.required_includes.iter().cloned().collect());
+            adj.insert(
+                h.filename.clone(),
+                h.required_includes.iter().cloned().collect(),
+            );
         }
 
         fn has_cycle(
@@ -419,8 +438,12 @@ mod tests {
 
         assert_eq!(result.plan_id, "PLAN-001");
         assert_eq!(result.headers.len(), 2);
-        
-        let a_hdr = result.headers.iter().find(|h| h.filename == std::path::PathBuf::from("a.h")).unwrap();
+
+        let a_hdr = result
+            .headers
+            .iter()
+            .find(|h| h.filename == std::path::PathBuf::from("a.h"))
+            .unwrap();
         assert_eq!(a_hdr.symbols.len(), 1);
         assert_eq!(a_hdr.symbols[0].name, "A");
         assert_eq!(a_hdr.symbols[0].body, "// Symbol: A (Other)");
@@ -476,8 +499,8 @@ mod tests {
     #[test]
     fn test_acyclic_includes() {
         use ariadne_cluster::plan::{PlanId, ProposedExtraction, RiskLevel};
-        use ariadne_index::types::{SymbolId, DependencyKind};
         use ariadne_graph::reduced::ReducedSemanticEdge;
+        use ariadne_index::types::{DependencyKind, SymbolId};
         use ariadne_repo::FileId;
 
         let plan = OptimizationPlan {
@@ -523,25 +546,32 @@ mod tests {
 
         // Check if there is an error
         let has_errors = !result.errors.is_empty();
-        
+
         // Or if graph is acyclic
         let mut a_reqs_b = false;
         let mut b_reqs_a = false;
-        
+
         for h in &result.headers {
             if h.filename == std::path::PathBuf::from("a.h") {
-                if h.required_includes.contains(&std::path::PathBuf::from("b.h")) {
+                if h.required_includes
+                    .contains(&std::path::PathBuf::from("b.h"))
+                {
                     a_reqs_b = true;
                 }
             } else if h.filename == std::path::PathBuf::from("b.h") {
-                if h.required_includes.contains(&std::path::PathBuf::from("a.h")) {
+                if h.required_includes
+                    .contains(&std::path::PathBuf::from("a.h"))
+                {
                     b_reqs_a = true;
                 }
             }
         }
-        
+
         let has_cycle = a_reqs_b && b_reqs_a;
-        assert!(has_errors || !has_cycle, "Extractor must either emit an error or resolve the cycle");
+        assert!(
+            has_errors || !has_cycle,
+            "Extractor must either emit an error or resolve the cycle"
+        );
     }
 
     #[test]
@@ -609,7 +639,11 @@ mod tests {
         };
         let diff = rewrite.format_diff();
         assert!(diff.contains("- #include \"thing.h\""), "diff: {}", diff);
-        assert!(diff.contains("+ #include \"thing_types.h\""), "diff: {}", diff);
+        assert!(
+            diff.contains("+ #include \"thing_types.h\""),
+            "diff: {}",
+            diff
+        );
         assert!(diff.contains("src/foo.cpp"), "diff: {}", diff);
     }
 
@@ -663,17 +697,22 @@ mod tests {
     fn test_migration_preview_side_effect_preservation() {
         let preview = MigrationPreview {
             plan_id: "PLAN-002".to_string(),
-            rewrites: vec![
-                ConsumerRewrite {
-                    consumer_file: std::path::PathBuf::from("src/init.cpp"),
-                    old_includes: vec![std::path::PathBuf::from("thing.h"), std::path::PathBuf::from("registry.h")],
-                    new_includes: vec![std::path::PathBuf::from("thing_types.h")],
-                    side_effect_preservations: vec![std::path::PathBuf::from("registry.h")],
-                },
-            ],
+            rewrites: vec![ConsumerRewrite {
+                consumer_file: std::path::PathBuf::from("src/init.cpp"),
+                old_includes: vec![
+                    std::path::PathBuf::from("thing.h"),
+                    std::path::PathBuf::from("registry.h"),
+                ],
+                new_includes: vec![std::path::PathBuf::from("thing_types.h")],
+                side_effect_preservations: vec![std::path::PathBuf::from("registry.h")],
+            }],
         };
         let diff = preview.format_diff();
-        assert!(diff.contains("~ #include \"registry.h\" // side-effect preserved"), "diff: {}", diff);
+        assert!(
+            diff.contains("~ #include \"registry.h\" // side-effect preserved"),
+            "diff: {}",
+            diff
+        );
         assert_eq!(preview.effective_rewrites(), 1);
     }
 
@@ -692,14 +731,12 @@ mod tests {
         let mut sym_map: BTreeMap<String, PathBuf> = BTreeMap::new();
         sym_map.insert("ThingConfig".to_string(), PathBuf::from("thing_types.h"));
 
-        let gen_headers = vec![
-            GeneratedHeader {
-                filename: PathBuf::from("thing_types.h"),
-                pragma_once: true,
-                symbols: vec![],
-                required_includes: vec![],
-            },
-        ];
+        let gen_headers = vec![GeneratedHeader {
+            filename: PathBuf::from("thing_types.h"),
+            pragma_once: true,
+            symbols: vec![],
+            required_includes: vec![],
+        }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
         let rewrite = rewriter.compute_rewrite(
@@ -709,8 +746,13 @@ mod tests {
         );
 
         assert_eq!(rewrite.consumer_file, PathBuf::from("src/foo.cpp"));
-        assert!(rewrite.new_includes.contains(&PathBuf::from("thing_types.h")),
-            "new_includes: {:?}", rewrite.new_includes);
+        assert!(
+            rewrite
+                .new_includes
+                .contains(&PathBuf::from("thing_types.h")),
+            "new_includes: {:?}",
+            rewrite.new_includes
+        );
         assert!(rewrite.side_effect_preservations.is_empty());
     }
 
@@ -743,10 +785,20 @@ mod tests {
         );
 
         // Should have both target headers (and thing_types.h as predecessor of thing_core.h)
-        assert!(rewrite.new_includes.contains(&PathBuf::from("thing_types.h")),
-            "new_includes: {:?}", rewrite.new_includes);
-        assert!(rewrite.new_includes.contains(&PathBuf::from("thing_core.h")),
-            "new_includes: {:?}", rewrite.new_includes);
+        assert!(
+            rewrite
+                .new_includes
+                .contains(&PathBuf::from("thing_types.h")),
+            "new_includes: {:?}",
+            rewrite.new_includes
+        );
+        assert!(
+            rewrite
+                .new_includes
+                .contains(&PathBuf::from("thing_core.h")),
+            "new_includes: {:?}",
+            rewrite.new_includes
+        );
         assert!(rewrite.side_effect_preservations.is_empty());
     }
 
@@ -764,10 +816,18 @@ mod tests {
         );
 
         // Must NOT silently remove registry.h
-        assert!(rewrite.side_effect_preservations.contains(&PathBuf::from("registry.h")),
-            "side_effect_preservations: {:?}", rewrite.side_effect_preservations);
-        assert!(rewrite.new_includes.is_empty(),
-            "new_includes should be empty: {:?}", rewrite.new_includes);
+        assert!(
+            rewrite
+                .side_effect_preservations
+                .contains(&PathBuf::from("registry.h")),
+            "side_effect_preservations: {:?}",
+            rewrite.side_effect_preservations
+        );
+        assert!(
+            rewrite.new_includes.is_empty(),
+            "new_includes should be empty: {:?}",
+            rewrite.new_includes
+        );
     }
 
     #[test]
@@ -776,14 +836,12 @@ mod tests {
         let mut sym_map: BTreeMap<String, PathBuf> = BTreeMap::new();
         sym_map.insert("ThingBuilder".to_string(), PathBuf::from("thing_core.h"));
 
-        let gen_headers = vec![
-            GeneratedHeader {
-                filename: PathBuf::from("thing_core.h"),
-                pragma_once: true,
-                symbols: vec![],
-                required_includes: vec![PathBuf::from("thing_types.h")],
-            },
-        ];
+        let gen_headers = vec![GeneratedHeader {
+            filename: PathBuf::from("thing_core.h"),
+            pragma_once: true,
+            symbols: vec![],
+            required_includes: vec![PathBuf::from("thing_types.h")],
+        }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
         let rewrite = rewriter.compute_rewrite(
@@ -792,9 +850,16 @@ mod tests {
             &["ThingBuilder".to_string()],
         );
 
-        assert!(rewrite.new_includes.contains(&PathBuf::from("thing_core.h")));
-        assert!(rewrite.new_includes.contains(&PathBuf::from("thing_types.h")),
-            "Predecessor thing_types.h should be included. new_includes: {:?}", rewrite.new_includes);
+        assert!(rewrite
+            .new_includes
+            .contains(&PathBuf::from("thing_core.h")));
+        assert!(
+            rewrite
+                .new_includes
+                .contains(&PathBuf::from("thing_types.h")),
+            "Predecessor thing_types.h should be included. new_includes: {:?}",
+            rewrite.new_includes
+        );
     }
 
     #[test]
@@ -820,8 +885,16 @@ mod tests {
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
         let consumers = vec![
-            (PathBuf::from("src/foo.cpp"), vec![PathBuf::from("thing.h")], vec!["ThingConfig".to_string()]),
-            (PathBuf::from("src/bar.cpp"), vec![PathBuf::from("thing.h")], vec!["ThingBuilder".to_string()]),
+            (
+                PathBuf::from("src/foo.cpp"),
+                vec![PathBuf::from("thing.h")],
+                vec!["ThingConfig".to_string()],
+            ),
+            (
+                PathBuf::from("src/bar.cpp"),
+                vec![PathBuf::from("thing.h")],
+                vec!["ThingBuilder".to_string()],
+            ),
         ];
 
         let preview = rewriter.build_preview("PLAN-001".to_string(), &consumers);

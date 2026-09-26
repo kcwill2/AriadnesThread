@@ -1,19 +1,25 @@
+use anyhow::Result;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::Result;
 
-use ariadne_repo::{FileId, Repository};
-use ariadne_build::BuildDiscoverer;
 use crate::{IncludeClosure, IncludeGraph, IncludeReport, IncludeResolver};
+use ariadne_build::BuildDiscoverer;
+use ariadne_repo::{FileId, Repository};
 
 pub fn build_include_graph(
     repo_path: &Path,
-) -> Result<(Repository, IncludeGraph, HashMap<FileId, IncludeClosure>, IncludeReport)> {
+) -> Result<(
+    Repository,
+    IncludeGraph,
+    HashMap<FileId, IncludeClosure>,
+    IncludeReport,
+)> {
     let repository = Repository::locate(repo_path)?;
     let repo_discovery = repository.discover()?;
 
-    let build_discoverer = BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
+    let build_discoverer =
+        BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
     let build_result = build_discoverer.discover()?;
 
     let mut graph = IncludeGraph::new();
@@ -26,7 +32,11 @@ pub fn build_include_graph(
     let mut scan_queue: VecDeque<(FileId, PathBuf, Option<String>)> = VecDeque::new();
 
     for tu in &build_result.translation_units {
-        scan_queue.push_back((tu.file_id, tu.source_path.clone(), Some(tu.context_name.clone())));
+        scan_queue.push_back((
+            tu.file_id,
+            tu.source_path.clone(),
+            Some(tu.context_name.clone()),
+        ));
     }
 
     while let Some((file_id, rel_path, ctx_name_opt)) = scan_queue.pop_front() {
@@ -46,7 +56,8 @@ pub fn build_include_graph(
             .and_then(|name| build_result.contexts.iter().find(|c| &c.name == name))
             .or_else(|| build_result.contexts.first());
 
-        let mut resolver = IncludeResolver::new(&repository.root).with_repo_discovery(&repo_discovery);
+        let mut resolver =
+            IncludeResolver::new(&repository.root).with_repo_discovery(&repo_discovery);
         if let Some(ctx) = target_ctx {
             resolver = resolver.with_context(ctx);
         }

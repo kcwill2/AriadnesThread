@@ -1,14 +1,18 @@
-use std::io::{self, BufRead, Write};
-use std::process::Command;
-use std::fs;
-use std::path::PathBuf;
-use clap::Parser;
-use serde::{Deserialize, Serialize};
 use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
 use ariadne_repo::FileId;
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Parser, Debug)]
-#[command(name = "clang-worker", version = "0.1.0", about = "Sidecar Clang Worker")]
+#[command(
+    name = "clang-worker",
+    version = "0.1.0",
+    about = "Sidecar Clang Worker"
+)]
 struct Cli {
     #[arg(long)]
     file: Option<PathBuf>,
@@ -34,10 +38,7 @@ pub struct WorkerResponse {
 }
 
 fn check_clang_available() -> bool {
-    Command::new("clang")
-        .arg("--version")
-        .output()
-        .is_ok()
+    Command::new("clang").arg("--version").output().is_ok()
 }
 
 fn process_request(req: WorkerRequest) -> WorkerResponse {
@@ -60,20 +61,22 @@ fn process_request(req: WorkerRequest) -> WorkerResponse {
         }
     };
 
-    let file_id = req.file_id.unwrap_or_else(|| FileId::from_relative_path(&req.source_file));
+    let file_id = req
+        .file_id
+        .unwrap_or_else(|| FileId::from_relative_path(&req.source_file));
     let context_name = req.context_name.as_deref().unwrap_or("fallback_context");
 
     if check_clang_available() {
         // Construct MSVC compatibility command
         let mut cmd = Command::new("clang");
         cmd.arg("-fsyntax-only")
-           .arg("-Xclang")
-           .arg("-ast-dump=json")
-           .arg("-target")
-           .arg("x86_64-pc-windows-msvc")
-           .arg("-fms-compatibility")
-           .arg("-fms-extensions")
-           .arg("-fdelayed-template-parsing");
+            .arg("-Xclang")
+            .arg("-ast-dump=json")
+            .arg("-target")
+            .arg("x86_64-pc-windows-msvc")
+            .arg("-fms-compatibility")
+            .arg("-fms-extensions")
+            .arg("-fdelayed-template-parsing");
 
         for def in &req.defines {
             cmd.arg(format!("-D{}", def));
@@ -97,11 +100,13 @@ fn process_request(req: WorkerRequest) -> WorkerResponse {
 
     // Graceful fallback to built-in CppSemanticAnalyzer
     let analysis = CppSemanticAnalyzer::analyze_source(file_id, &source_code, context_name);
-    
+
     WorkerResponse {
         status: "success".to_string(),
         analysis: Some(analysis),
-        message: Some("Fallback to built-in semantic analyzer due to missing/failing Clang".to_string()),
+        message: Some(
+            "Fallback to built-in semantic analyzer due to missing/failing Clang".to_string(),
+        ),
     }
 }
 
@@ -121,7 +126,9 @@ fn main() {
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         if let Ok(line_str) = line {
-            if line_str.trim().is_empty() { continue; }
+            if line_str.trim().is_empty() {
+                continue;
+            }
             match serde_json::from_str::<WorkerRequest>(&line_str) {
                 Ok(req) => {
                     let resp = process_request(req);

@@ -1,12 +1,12 @@
+use anyhow::Result;
+use ariadne_index::StageFingerprints;
+use ariadne_pipeline::{Pipeline, ProgressEvent};
+use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use anyhow::Result;
-use ariadne_index::StageFingerprints;
-use ariadne_pipeline::{Pipeline, ProgressEvent};
-use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 
 pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
@@ -51,11 +51,19 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let progress_cb = move |event: &ProgressEvent| match event {
         ProgressEvent::TuIndex { done, total } => {
             let percent = 20 + if *total > 0 { 35 * done / total } else { 35 };
-            (cb_progress)(percent, "[2/5] Indexing translation units...", &format!("{}/{} TUs", done, total));
+            (cb_progress)(
+                percent,
+                "[2/5] Indexing translation units...",
+                &format!("{}/{} TUs", done, total),
+            );
         }
         ProgressEvent::CollateralFile { done, total } => {
             let percent = 80 + if *total > 0 { 15 * done / total } else { 15 };
-            (cb_progress)(percent, "[5/5] Analyzing collateral...", &format!("{}/{} files", done, total));
+            (cb_progress)(
+                percent,
+                "[5/5] Analyzing collateral...",
+                &format!("{}/{} files", done, total),
+            );
         }
     };
     let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
@@ -250,7 +258,10 @@ pub async fn run_ui(
         let app = ariadne_ui::build_router(state.clone());
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
-        println!("AriadnesThread Visualizer loading at http://localhost:{}", port);
+        println!(
+            "AriadnesThread Visualizer loading at http://localhost:{}",
+            port
+        );
         if !no_open {
             let _ = open::that(format!("http://localhost:{}", port));
         }
@@ -270,25 +281,28 @@ pub async fn run_ui(
             })
         };
 
-        tokio::task::spawn_blocking(move || {
-            match build_ui_payload(&boot_repo, boot_progress) {
-                Ok(out) => {
-                    let fps = swap_into_state(&boot_state, out);
-                    let _ = fps_tx.send(Some(fps));
-                }
-                Err(e) => {
-                    let mut p = boot_state.progress.write().unwrap();
-                    p.state = "error".to_string();
-                    p.message = e.to_string();
-                    let _ = fps_tx.send(None);
-                }
+        tokio::task::spawn_blocking(move || match build_ui_payload(&boot_repo, boot_progress) {
+            Ok(out) => {
+                let fps = swap_into_state(&boot_state, out);
+                let _ = fps_tx.send(Some(fps));
+            }
+            Err(e) => {
+                let mut p = boot_state.progress.write().unwrap();
+                p.state = "error".to_string();
+                p.message = e.to_string();
+                let _ = fps_tx.send(None);
             }
         });
 
         if !no_watch {
             tokio::spawn(async move {
                 if let Ok(Some(fps)) = fps_rx.await {
-                    spawn_watcher(state, repo_path, Duration::from_secs(watch_interval.max(1)), fps);
+                    spawn_watcher(
+                        state,
+                        repo_path,
+                        Duration::from_secs(watch_interval.max(1)),
+                        fps,
+                    );
                 }
             });
         }

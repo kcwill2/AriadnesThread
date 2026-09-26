@@ -18,9 +18,7 @@ use ariadne_graph::{
     build_include_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer,
     ReducedSemanticModel,
 };
-use ariadne_index::{
-    IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION,
-};
+use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
@@ -73,7 +71,10 @@ impl RunStats {
     }
 
     pub fn stage_reuse(&self, stage: &str) -> Option<StageReuse> {
-        self.stages.iter().find(|s| s.stage == stage).map(|s| s.reuse)
+        self.stages
+            .iter()
+            .find(|s| s.stage == stage)
+            .map(|s| s.reuse)
     }
 
     pub fn format_summary(&self) -> String {
@@ -93,8 +94,16 @@ impl RunStats {
             "{} TUs reused, {} reanalyzed; stages loaded: {}; rebuilt: {}",
             self.reused_tus,
             self.reanalyzed_tus,
-            if loaded.is_empty() { "none".into() } else { loaded.join(", ") },
-            if rebuilt.is_empty() { "none".into() } else { rebuilt.join(", ") },
+            if loaded.is_empty() {
+                "none".into()
+            } else {
+                loaded.join(", ")
+            },
+            if rebuilt.is_empty() {
+                "none".into()
+            } else {
+                rebuilt.join(", ")
+            },
         )
     }
 }
@@ -234,7 +243,10 @@ impl Pipeline {
             .manager
             .stage_is_fresh("includes", &self.fps.include_graph)
         {
-            if let Ok(loaded) = self.manager.load_include_checked(&self.fps.include_graph, &self.discovery) {
+            if let Ok(loaded) = self
+                .manager
+                .load_include_checked(&self.fps.include_graph, &self.discovery)
+            {
                 self.include_cache = Some(loaded);
                 self.stats.record(STAGE_INCLUDE_GRAPH, StageReuse::Loaded);
                 return Ok(());
@@ -304,9 +316,7 @@ impl Pipeline {
         Ok(())
     }
 
-    fn rebuild_index_single_threaded(
-        &mut self,
-    ) -> Result<(IndexResult, IncrementalStats)> {
+    fn rebuild_index_single_threaded(&mut self) -> Result<(IndexResult, IncrementalStats)> {
         let store_dir = shard_dir(&self.repo.root);
         let store_ctx = self.store_ctx.clone();
         let repo_root = self.repo.root.clone();
@@ -351,7 +361,10 @@ impl Pipeline {
 
         self.progress = progress;
         let index_result = IndexResult::new(repo_root, analyses);
-        Ok((index_result, IncrementalStats::calculate(reused, reanalyzed)))
+        Ok((
+            index_result,
+            IncrementalStats::calculate(reused, reanalyzed),
+        ))
     }
 
     pub fn get_or_build_index(&mut self) -> Result<IndexResult> {
@@ -378,7 +391,8 @@ impl Pipeline {
 
         self.ensure_index()?;
         let model = ReducedSemanticModel::reduce(self.index_cache.as_ref().unwrap());
-        self.manager.save_reduced_artifacts(&model, &self.fps.reduced)?;
+        self.manager
+            .save_reduced_artifacts(&model, &self.fps.reduced)?;
         self.reduced_cache = Some(model);
         self.stats.record(STAGE_REDUCED, StageReuse::Rebuilt);
         Ok(())
@@ -398,7 +412,10 @@ impl Pipeline {
             return Ok(());
         }
 
-        if self.manager.stage_is_fresh("callgraph", &self.fps.callgraph) {
+        if self
+            .manager
+            .stage_is_fresh("callgraph", &self.fps.callgraph)
+        {
             if let Ok(loaded) = self.manager.load_callgraph_checked(&self.fps.callgraph) {
                 self.callgraph_cache = Some(loaded);
                 self.stats.record(STAGE_CALLGRAPH, StageReuse::Loaded);
@@ -506,7 +523,11 @@ mod tests {
             "#include \"common.h\"\nstruct ThingA { Common c; };",
         )
         .unwrap();
-        fs::write(root.join("include/header_b.h"), "struct ThingB { double x; };").unwrap();
+        fs::write(
+            root.join("include/header_b.h"),
+            "struct ThingB { double x; };",
+        )
+        .unwrap();
         fs::write(
             root.join("src/tu1.cpp"),
             "#include \"header_a.h\"\nvoid use_a(ThingA a) {}",
@@ -544,7 +565,13 @@ mod tests {
         cold.ensure_load().unwrap();
         assert_eq!(cold.stats.reanalyzed_tus, 2);
         assert_eq!(cold.stats.reused_tus, 0);
-        for stage in [STAGE_INCLUDE_GRAPH, STAGE_INDEX, STAGE_REDUCED, STAGE_CALLGRAPH, STAGE_LOAD] {
+        for stage in [
+            STAGE_INCLUDE_GRAPH,
+            STAGE_INDEX,
+            STAGE_REDUCED,
+            STAGE_CALLGRAPH,
+            STAGE_LOAD,
+        ] {
             assert_eq!(cold.stats.stage_reuse(stage), Some(StageReuse::Rebuilt));
         }
 
@@ -555,9 +582,18 @@ mod tests {
         warm.ensure_reduced().unwrap();
         warm.ensure_callgraph().unwrap();
         warm.ensure_load().unwrap();
-        assert_eq!(warm.stats.reused_tus, 0, "loaded index means zero parse work");
+        assert_eq!(
+            warm.stats.reused_tus, 0,
+            "loaded index means zero parse work"
+        );
         assert_eq!(warm.stats.reanalyzed_tus, 0);
-        for stage in [STAGE_INCLUDE_GRAPH, STAGE_INDEX, STAGE_REDUCED, STAGE_CALLGRAPH, STAGE_LOAD] {
+        for stage in [
+            STAGE_INCLUDE_GRAPH,
+            STAGE_INDEX,
+            STAGE_REDUCED,
+            STAGE_CALLGRAPH,
+            STAGE_LOAD,
+        ] {
             assert_eq!(
                 warm.stats.stage_reuse(stage),
                 Some(StageReuse::Loaded),
@@ -578,15 +614,25 @@ mod tests {
         cold.ensure_reduced().unwrap();
 
         // Edit common.h: tu1 depends on it via header_a.h, tu2 does not.
-        fs::write(root.join("include/common.h"), "struct Common { int id; int extra; };").unwrap();
+        fs::write(
+            root.join("include/common.h"),
+            "struct Common { int id; int extra; };",
+        )
+        .unwrap();
 
         let mut next = Pipeline::new(&root, None).unwrap();
         next.ensure_index().unwrap();
         next.ensure_include_graph().unwrap();
         assert_eq!(next.stats.reanalyzed_tus, 1, "only tu1 should re-parse");
         assert_eq!(next.stats.reused_tus, 1, "tu2 shard stays valid");
-        assert_eq!(next.stats.stage_reuse(STAGE_INDEX), Some(StageReuse::Rebuilt));
-        assert_eq!(next.stats.stage_reuse(STAGE_INCLUDE_GRAPH), Some(StageReuse::Rebuilt));
+        assert_eq!(
+            next.stats.stage_reuse(STAGE_INDEX),
+            Some(StageReuse::Rebuilt)
+        );
+        assert_eq!(
+            next.stats.stage_reuse(STAGE_INCLUDE_GRAPH),
+            Some(StageReuse::Rebuilt)
+        );
     }
 
     #[test]
@@ -606,15 +652,25 @@ mod tests {
             "input_fingerprint".into(),
             serde_json::Value::String("0".repeat(64)),
         );
-        fs::write(&manifest_path, serde_json::to_string_pretty(&corrupt).unwrap()).unwrap();
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&corrupt).unwrap(),
+        )
+        .unwrap();
 
         let mut next = Pipeline::new(&root, None).unwrap();
         next.ensure_index().unwrap();
-        assert_eq!(next.stats.stage_reuse(STAGE_INDEX), Some(StageReuse::Rebuilt));
+        assert_eq!(
+            next.stats.stage_reuse(STAGE_INDEX),
+            Some(StageReuse::Rebuilt)
+        );
         // The rebuilt index artifact is valid again for subsequent runs.
         let mut after = Pipeline::new(&root, None).unwrap();
         after.ensure_index().unwrap();
-        assert_eq!(after.stats.stage_reuse(STAGE_INDEX), Some(StageReuse::Loaded));
+        assert_eq!(
+            after.stats.stage_reuse(STAGE_INDEX),
+            Some(StageReuse::Loaded)
+        );
     }
 
     #[test]
@@ -624,7 +680,10 @@ mod tests {
 
         let mut cold = Pipeline::new(&root, Some(2)).unwrap();
         cold.ensure_index().unwrap();
-        let captured = cold.production_stats.clone().expect("workers run captures real stats");
+        let captured = cold
+            .production_stats
+            .clone()
+            .expect("workers run captures real stats");
         assert_eq!(captured.total_tus, 2);
         assert_eq!(captured.progress_completed, 2);
         assert_eq!(captured.progress_total, 2);
@@ -633,7 +692,10 @@ mod tests {
         // Warm run: the index stage loads, no worker run measured anything.
         let mut warm = Pipeline::new(&root, Some(2)).unwrap();
         warm.ensure_index().unwrap();
-        assert_eq!(warm.stats.stage_reuse(STAGE_INDEX), Some(StageReuse::Loaded));
+        assert_eq!(
+            warm.stats.stage_reuse(STAGE_INDEX),
+            Some(StageReuse::Loaded)
+        );
         assert!(
             warm.production_stats.is_none(),
             "loaded stage must not invent measurements"

@@ -1,10 +1,10 @@
 //! Filesystem traversal and hashing for repository discovery.
 
+use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 
 use crate::policy::classify_ownership_and_policy;
 use crate::types::{
@@ -13,8 +13,8 @@ use crate::types::{
 
 /// Computes the SHA-256 hex digest of a file's contents.
 pub fn compute_file_hash(path: &Path) -> Result<String> {
-    let bytes = fs::read(path)
-        .with_context(|| format!("Failed to read file for hashing: {:?}", path))?;
+    let bytes =
+        fs::read(path).with_context(|| format!("Failed to read file for hashing: {:?}", path))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(format!("{:x}", hasher.finalize()))
@@ -80,10 +80,7 @@ pub fn discover_repository_files(root: &Path) -> Result<Vec<FileRecord>> {
 }
 
 /// Constructs a complete RepositoryDiscoveryResult with summary counts.
-pub fn build_discovery_result(
-    root: PathBuf,
-    files: Vec<FileRecord>,
-) -> RepositoryDiscoveryResult {
+pub fn build_discovery_result(root: PathBuf, files: Vec<FileRecord>) -> RepositoryDiscoveryResult {
     let mut ownership_summary = HashMap::new();
     ownership_summary.insert(FileOwnership::Repository, 0);
     ownership_summary.insert(FileOwnership::ThirdParty, 0);
@@ -122,7 +119,10 @@ mod tests {
 
         let hash = compute_file_hash(&file_path).unwrap();
         // SHA-256 of "hello world"
-        assert_eq!(hash, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
 
         let missing = dir.path().join("missing.txt");
         assert!(compute_file_hash(&missing).is_err());
@@ -155,7 +155,7 @@ mod tests {
         let files = discover_repository_files(root).unwrap();
 
         assert_eq!(files.len(), 2, "Should only contain main.cpp and utils.h");
-        
+
         // Results should be alphabetically sorted
         assert_eq!(files[0].path.to_str().unwrap(), "src/main.cpp");
         assert_eq!(files[1].path.to_str().unwrap(), "src/utils.h");
@@ -196,4 +196,3 @@ mod tests {
         assert_eq!(result.policy_summary[&OptimizationPolicy::Contract], 0);
     }
 }
-

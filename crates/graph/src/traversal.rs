@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use ariadne_repo::FileId;
+use crate::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_index::types::SymbolId;
-use crate::{IncludeGraph, ReducedSemanticModel, CallGraph};
+use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraversalDirection {
@@ -17,32 +17,43 @@ pub struct SubgraphSelection<T> {
 }
 
 impl IncludeGraph {
-    pub fn traverse_neighborhood(&self, center: FileId, depth: usize, direction: TraversalDirection) -> SubgraphSelection<FileId> {
+    pub fn traverse_neighborhood(
+        &self,
+        center: FileId,
+        depth: usize,
+        direction: TraversalDirection,
+    ) -> SubgraphSelection<FileId> {
         use std::collections::{HashSet, VecDeque};
-        
+
         let mut visited_nodes = HashSet::new();
         let mut queue = VecDeque::new();
-        
+
         queue.push_back((center, 0));
         visited_nodes.insert(center);
-        
+
         while let Some((curr, d)) = queue.pop_front() {
             if d >= depth {
                 continue;
             }
-            
+
             for edge in &self.edges {
                 if let Some(dest) = edge.destination {
                     let mut next_node = None;
-                    
-                    if (direction == TraversalDirection::Outgoing || direction == TraversalDirection::Both) && edge.source == curr {
+
+                    if (direction == TraversalDirection::Outgoing
+                        || direction == TraversalDirection::Both)
+                        && edge.source == curr
+                    {
                         next_node = Some(dest);
                     }
-                    
-                    if (direction == TraversalDirection::Incoming || direction == TraversalDirection::Both) && dest == curr {
+
+                    if (direction == TraversalDirection::Incoming
+                        || direction == TraversalDirection::Both)
+                        && dest == curr
+                    {
                         next_node = Some(edge.source);
                     }
-                    
+
                     if let Some(n) = next_node {
                         if !visited_nodes.contains(&n) {
                             visited_nodes.insert(n);
@@ -52,7 +63,7 @@ impl IncludeGraph {
                 }
             }
         }
-        
+
         let mut edges = HashSet::new();
         for edge in &self.edges {
             if let Some(dest) = edge.destination {
@@ -61,17 +72,20 @@ impl IncludeGraph {
                 }
             }
         }
-        
+
         let mut nodes: Vec<_> = visited_nodes.into_iter().collect();
         nodes.sort();
         let mut edges_vec: Vec<_> = edges.into_iter().collect();
         edges_vec.sort();
-        
-        SubgraphSelection { nodes, edges: edges_vec }
+
+        SubgraphSelection {
+            nodes,
+            edges: edges_vec,
+        }
     }
 
     pub fn shortest_include_path(&self, from: FileId, to: FileId) -> Option<Vec<FileId>> {
-        use std::collections::{VecDeque, HashSet, HashMap};
+        use std::collections::{HashMap, HashSet, VecDeque};
 
         if from == to {
             return Some(vec![from]);
@@ -165,31 +179,42 @@ impl IncludeGraph {
 }
 
 impl ReducedSemanticModel {
-    pub fn traverse_neighborhood(&self, center: &SymbolId, depth: usize, direction: TraversalDirection) -> SubgraphSelection<SymbolId> {
+    pub fn traverse_neighborhood(
+        &self,
+        center: &SymbolId,
+        depth: usize,
+        direction: TraversalDirection,
+    ) -> SubgraphSelection<SymbolId> {
         use std::collections::{HashSet, VecDeque};
-        
+
         let mut visited_nodes = HashSet::new();
         let mut queue = VecDeque::new();
-        
+
         queue.push_back((center.clone(), 0));
         visited_nodes.insert(center.clone());
-        
+
         while let Some((curr, d)) = queue.pop_front() {
             if d >= depth {
                 continue;
             }
-            
+
             for edge in &self.edges {
                 let mut next_node = None;
-                
-                if (direction == TraversalDirection::Outgoing || direction == TraversalDirection::Both) && edge.src_symbol == curr {
+
+                if (direction == TraversalDirection::Outgoing
+                    || direction == TraversalDirection::Both)
+                    && edge.src_symbol == curr
+                {
                     next_node = Some(edge.dst_symbol.clone());
                 }
-                
-                if (direction == TraversalDirection::Incoming || direction == TraversalDirection::Both) && edge.dst_symbol == curr {
+
+                if (direction == TraversalDirection::Incoming
+                    || direction == TraversalDirection::Both)
+                    && edge.dst_symbol == curr
+                {
                     next_node = Some(edge.src_symbol.clone());
                 }
-                
+
                 if let Some(n) = next_node {
                     if !visited_nodes.contains(&n) {
                         visited_nodes.insert(n.clone());
@@ -198,24 +223,32 @@ impl ReducedSemanticModel {
                 }
             }
         }
-        
+
         let mut edges = HashSet::new();
         for edge in &self.edges {
-            if visited_nodes.contains(&edge.src_symbol) && visited_nodes.contains(&edge.dst_symbol) {
+            if visited_nodes.contains(&edge.src_symbol) && visited_nodes.contains(&edge.dst_symbol)
+            {
                 edges.insert((edge.src_symbol.clone(), edge.dst_symbol.clone()));
             }
         }
-        
+
         let mut nodes: Vec<_> = visited_nodes.into_iter().collect();
         nodes.sort();
         let mut edges_vec: Vec<_> = edges.into_iter().collect();
         edges_vec.sort();
-        
-        SubgraphSelection { nodes, edges: edges_vec }
+
+        SubgraphSelection {
+            nodes,
+            edges: edges_vec,
+        }
     }
 
-    pub fn shortest_dependency_path(&self, from: &SymbolId, to: &SymbolId) -> Option<Vec<SymbolId>> {
-        use std::collections::{VecDeque, HashSet, HashMap};
+    pub fn shortest_dependency_path(
+        &self,
+        from: &SymbolId,
+        to: &SymbolId,
+    ) -> Option<Vec<SymbolId>> {
+        use std::collections::{HashMap, HashSet, VecDeque};
 
         if from == to {
             return Some(vec![from.clone()]);
@@ -305,31 +338,42 @@ impl ReducedSemanticModel {
 }
 
 impl CallGraph {
-    pub fn traverse_neighborhood(&self, center: &SymbolId, depth: usize, direction: TraversalDirection) -> SubgraphSelection<SymbolId> {
+    pub fn traverse_neighborhood(
+        &self,
+        center: &SymbolId,
+        depth: usize,
+        direction: TraversalDirection,
+    ) -> SubgraphSelection<SymbolId> {
         use std::collections::{HashSet, VecDeque};
-        
+
         let mut visited_nodes = HashSet::new();
         let mut queue = VecDeque::new();
-        
+
         queue.push_back((center.clone(), 0));
         visited_nodes.insert(center.clone());
-        
+
         while let Some((curr, d)) = queue.pop_front() {
             if d >= depth {
                 continue;
             }
-            
+
             for edge in &self.edges {
                 let mut next_node = None;
-                
-                if (direction == TraversalDirection::Outgoing || direction == TraversalDirection::Both) && edge.caller == curr {
+
+                if (direction == TraversalDirection::Outgoing
+                    || direction == TraversalDirection::Both)
+                    && edge.caller == curr
+                {
                     next_node = Some(edge.callee.clone());
                 }
-                
-                if (direction == TraversalDirection::Incoming || direction == TraversalDirection::Both) && edge.callee == curr {
+
+                if (direction == TraversalDirection::Incoming
+                    || direction == TraversalDirection::Both)
+                    && edge.callee == curr
+                {
                     next_node = Some(edge.caller.clone());
                 }
-                
+
                 if let Some(n) = next_node {
                     if !visited_nodes.contains(&n) {
                         visited_nodes.insert(n.clone());
@@ -338,20 +382,23 @@ impl CallGraph {
                 }
             }
         }
-        
+
         let mut edges = HashSet::new();
         for edge in &self.edges {
             if visited_nodes.contains(&edge.caller) && visited_nodes.contains(&edge.callee) {
                 edges.insert((edge.caller.clone(), edge.callee.clone()));
             }
         }
-        
+
         let mut nodes: Vec<_> = visited_nodes.into_iter().collect();
         nodes.sort();
         let mut edges_vec: Vec<_> = edges.into_iter().collect();
         edges_vec.sort();
-        
-        SubgraphSelection { nodes, edges: edges_vec }
+
+        SubgraphSelection {
+            nodes,
+            edges: edges_vec,
+        }
     }
 
     pub fn get_entrypoints(&self, limit: usize) -> (Vec<SymbolId>, Vec<SymbolId>, Vec<SymbolId>) {
@@ -405,8 +452,8 @@ impl CallGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
+    use std::path::PathBuf;
 
     #[test]
     fn test_include_graph_traversal() {

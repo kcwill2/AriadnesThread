@@ -81,13 +81,19 @@ async fn fetch_status(client: &Client, base_url: &str) -> Option<Value> {
         .ok()
 }
 
-async fn fetch_index_page(client: &Client, base_url: &str) -> Option<(u16, Option<String>, Option<String>, usize)> {
+async fn fetch_index_page(
+    client: &Client,
+    base_url: &str,
+) -> Option<(u16, Option<String>, Option<String>, usize)> {
     let response = client.get(format!("{base_url}/")).send().await.ok()?;
     let status = response.status().as_u16();
     let headers = response.headers().clone();
     let body = response.text().await.ok()?;
     let header_value = |name: reqwest::header::HeaderName| -> Option<String> {
-        headers.get(name).and_then(|v| v.to_str().ok()).map(str::to_string)
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
     };
     Some((
         status,
@@ -108,7 +114,9 @@ async fn fetch_graph_include_status(client: &Client, base_url: &str) -> u16 {
 
 async fn probe_live_routes(client: &Client, base_url: &str) -> LiveProbe {
     let (index_status, index_cache_control, index_content_type, _body_len) =
-        fetch_index_page(client, base_url).await.unwrap_or((0, None, None, 0));
+        fetch_index_page(client, base_url)
+            .await
+            .unwrap_or((0, None, None, 0));
     let graph_include_status = fetch_graph_include_status(client, base_url).await;
     LiveProbe {
         index_status,
@@ -176,14 +184,23 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
             matches!(state, "loading" | "ready"),
             "status.progress.state must be loading or ready, got {state}"
         );
-        assert!(snapshot["progress"]["percent"].is_number(), "progress.percent must be numeric");
-        assert!(snapshot["stages"].is_array(), "status.stages must be an array");
+        assert!(
+            snapshot["progress"]["percent"].is_number(),
+            "progress.percent must be numeric"
+        );
+        assert!(
+            snapshot["stages"].is_array(),
+            "status.stages must be an array"
+        );
     }
 
     // Best-effort live-during-load lock: while loading the index route already serves
     // HTML (Cache-Control: no-store) yet the graph route stays gated until ready.
     if let Some(probe) = &live_probe {
-        assert_eq!(probe.index_status, 200, "index route must serve while loading");
+        assert_eq!(
+            probe.index_status, 200,
+            "index route must serve while loading"
+        );
         assert_eq!(
             probe.index_cache_control.as_deref(),
             Some("no-store"),
@@ -194,13 +211,22 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
             Some("text/html; charset=utf-8"),
             "index route should serve HTML while loading"
         );
-        assert_eq!(probe.graph_include_status, 503, "graph route must stay gated until ready");
+        assert_eq!(
+            probe.graph_include_status, 503,
+            "graph route must stay gated until ready"
+        );
     }
 
     // Best-effort loading-window contract whenever a loading snapshot is observable.
-    if let Some(loading) = trace.iter().find(|s| s["progress"]["state"].as_str() == Some("loading")) {
+    if let Some(loading) = trace
+        .iter()
+        .find(|s| s["progress"]["state"].as_str() == Some("loading"))
+    {
         let percent = loading["progress"]["percent"].as_u64().unwrap_or(100);
-        assert!(percent < 100, "loading snapshot must report percent below 100, got {percent}");
+        assert!(
+            percent < 100,
+            "loading snapshot must report percent below 100, got {percent}"
+        );
         let phase = loading["progress"]["phase"].as_str().unwrap_or_default();
         assert!(
             phase == "Initializing" || (phase.starts_with('[') && phase.contains("/5]")),
@@ -211,30 +237,71 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
     // Lock the terminal ready state and the labels run_ui actually exposes.
     let ready = trace.last().expect("trace ends on a ready snapshot");
     assert_eq!(ready["progress"]["state"].as_str(), Some("ready"));
-    assert_eq!(ready["progress"]["percent"].as_u64(), Some(100), "ready must report 100%");
-    assert_eq!(ready["progress"]["phase"].as_str(), Some("Complete"), "ready phase label");
-    assert_eq!(ready["progress"]["message"].as_str(), Some("Ready"), "ready message label");
-    assert!(ready["last_refresh"].as_u64().unwrap_or(0) > 0, "ready status carries last_refresh");
-    assert_eq!(ready["rebuilding"].as_bool(), Some(false), "ready status should not be rebuilding");
-    assert_eq!(ready["repo_name"].as_str(), Some("basic"), "ready status carries the repo name");
-    assert!(ready["stats"]["total_files"].as_u64().unwrap_or(0) > 0, "ready stats report files");
+    assert_eq!(
+        ready["progress"]["percent"].as_u64(),
+        Some(100),
+        "ready must report 100%"
+    );
+    assert_eq!(
+        ready["progress"]["phase"].as_str(),
+        Some("Complete"),
+        "ready phase label"
+    );
+    assert_eq!(
+        ready["progress"]["message"].as_str(),
+        Some("Ready"),
+        "ready message label"
+    );
+    assert!(
+        ready["last_refresh"].as_u64().unwrap_or(0) > 0,
+        "ready status carries last_refresh"
+    );
+    assert_eq!(
+        ready["rebuilding"].as_bool(),
+        Some(false),
+        "ready status should not be rebuilding"
+    );
+    assert_eq!(
+        ready["repo_name"].as_str(),
+        Some("basic"),
+        "ready status carries the repo name"
+    );
+    assert!(
+        ready["stats"]["total_files"].as_u64().unwrap_or(0) > 0,
+        "ready stats report files"
+    );
 
     // The index route serves HTML with Cache-Control: no-store (both while loading,
     // if sampled, and once ready).
-    let (index_status, cache_control, content_type, body_len) = fetch_index_page(&client, &base_url)
-        .await
-        .context("index route reachable after ready")?;
-    assert_eq!(index_status, 200, "index route should serve 200 after ready");
-    assert_eq!(cache_control.as_deref(), Some("no-store"), "index route must send Cache-Control: no-store");
+    let (index_status, cache_control, content_type, body_len) =
+        fetch_index_page(&client, &base_url)
+            .await
+            .context("index route reachable after ready")?;
+    assert_eq!(
+        index_status, 200,
+        "index route should serve 200 after ready"
+    );
+    assert_eq!(
+        cache_control.as_deref(),
+        Some("no-store"),
+        "index route must send Cache-Control: no-store"
+    );
     assert_eq!(content_type.as_deref(), Some("text/html; charset=utf-8"));
     assert!(body_len > 0, "index HTML should be non-empty");
 
     // The graph API becomes reachable once the payload is swapped in at ready.
-    assert_eq!(fetch_graph_include_status(&client, &base_url).await, 200, "include graph reachable once ready");
+    assert_eq!(
+        fetch_graph_include_status(&client, &base_url).await,
+        200,
+        "include graph reachable once ready"
+    );
 
     // Clean shutdown: abort drops the axum listener and the port becomes reusable.
     server.handle.abort();
     drop(server);
-    assert!(wait_until_port_released(port).await, "server port should be released after shutdown");
+    assert!(
+        wait_until_port_released(port).await,
+        "server port should be released after shutdown"
+    );
     Ok(())
 }

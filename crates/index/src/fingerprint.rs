@@ -1,9 +1,9 @@
-use std::path::Path;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
+use crate::cache::CURRENT_ANALYSIS_VERSION;
 use ariadne_build::{CompilationContext, TranslationUnit};
 use ariadne_repo::FileId;
-use crate::cache::CURRENT_ANALYSIS_VERSION;
 
 /// Hash a set of labeled parts into one hex digest.
 pub fn hash_parts(parts: &[&str]) -> String {
@@ -93,7 +93,8 @@ pub struct StageFingerprints {
 
 impl StageFingerprints {
     pub fn compute(repository: String, contexts: String) -> Self {
-        let include_graph = Fingerprint::chain("include-graph", &[repository.clone(), contexts.clone()]);
+        let include_graph =
+            Fingerprint::chain("include-graph", &[repository.clone(), contexts.clone()]);
         let index = Fingerprint::chain("index", &[repository.clone(), contexts.clone()]);
         let reduced = Fingerprint::chain("reduced", std::slice::from_ref(&index));
         let callgraph = Fingerprint::chain("callgraph", &[index.clone(), reduced.clone()]);

@@ -1,12 +1,12 @@
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 
-use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
 use crate::queue::{PrioritizedTuQueue, TuTask};
+use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerStatus {
@@ -26,7 +26,8 @@ impl WorkerBackend for DefaultWorkerBackend {
         if let Some(ctx) = &task.context {
             // Canonical closure-merge analysis: identical content to the
             // single-threaded index path so all shard store entries agree.
-            let (analysis, _fingerprint) = crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
+            let (analysis, _fingerprint) =
+                crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
             return Ok(analysis);
         }
         let full_path = repo_root.join(&task.tu.source_path);
@@ -45,7 +46,7 @@ pub struct ClangWorkerBackend;
 impl WorkerBackend for ClangWorkerBackend {
     fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
         let full_path = repo_root.join(&task.tu.source_path);
-        
+
         let mut defines = Vec::new();
         let mut include_dirs = Vec::new();
         for arg in &task.tu.compile_command.arguments {
@@ -97,7 +98,10 @@ impl WorkerBackend for ClangWorkerBackend {
             candidate_paths = Vec::new();
         }
 
-        let mut child_res = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not started"));
+        let mut child_res = Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "not started",
+        ));
 
         #[cfg(test)]
         if let Some((fake_program, fake_args)) = &fake_worker_cmd {
@@ -129,7 +133,16 @@ impl WorkerBackend for ClangWorkerBackend {
         if child_res.is_err() && !cargo_fallback_suppressed {
             // Try cargo run as fallback for dev environments
             child_res = std::process::Command::new("cargo")
-                .args(&["run", "-q", "-p", "clang-worker", "--bin", "clang-worker", "--", "--file"])
+                .args(&[
+                    "run",
+                    "-q",
+                    "-p",
+                    "clang-worker",
+                    "--bin",
+                    "clang-worker",
+                    "--",
+                    "--file",
+                ])
                 .arg(&req_path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -147,7 +160,9 @@ impl WorkerBackend for ClangWorkerBackend {
                         if let Ok(resp) = serde_json::from_str::<serde_json::Value>(line) {
                             if resp.get("status").and_then(|s| s.as_str()) == Some("success") {
                                 if let Some(analysis_json) = resp.get("analysis") {
-                                    if let Ok(analysis) = serde_json::from_value::<TuAnalysis>(analysis_json.clone()) {
+                                    if let Ok(analysis) =
+                                        serde_json::from_value::<TuAnalysis>(analysis_json.clone())
+                                    {
                                         success = true;
                                         analysis_res = Some(analysis);
                                         break;
@@ -209,11 +224,18 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
         self.peak_memory_bytes.load(Ordering::Relaxed)
     }
 
-    pub async fn run(&self, repo_root: &Path, queue: &mut PrioritizedTuQueue) -> Result<Vec<TuAnalysis>> {
+    pub async fn run(
+        &self,
+        repo_root: &Path,
+        queue: &mut PrioritizedTuQueue,
+    ) -> Result<Vec<TuAnalysis>> {
         use tokio::sync::mpsc;
 
         let num_workers = self.config.num_workers.max(1);
-        let queue_mutex = Arc::new(Mutex::new(std::mem::replace(queue, PrioritizedTuQueue::new(vec![]))));
+        let queue_mutex = Arc::new(Mutex::new(std::mem::replace(
+            queue,
+            PrioritizedTuQueue::new(vec![]),
+        )));
         let retries = Arc::new(Mutex::new(HashMap::<usize, usize>::new()));
         let (tx, mut rx) = mpsc::channel(num_workers * 2);
 
@@ -265,7 +287,10 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
                                 let mut locked_q = q.lock().await;
                                 locked_q.requeue(task);
                             } else {
-                                let err_msg = format!("Task {} failed after {} retries: {}", task.task_id, max_retries, e);
+                                let err_msg = format!(
+                                    "Task {} failed after {} retries: {}",
+                                    task.task_id, max_retries, e
+                                );
                                 let _ = tx_worker.send(Err(anyhow!(err_msg))).await;
                                 break;
                             }
@@ -288,7 +313,8 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
                     let sym_bytes = (analysis.symbols.len() * 128) as u64;
                     let edge_bytes = (analysis.edges.len() * 64) as u64;
                     approx_mem = approx_mem.saturating_add(sym_bytes + edge_bytes + 512);
-                    self.peak_memory_bytes.fetch_max(approx_mem, Ordering::Relaxed);
+                    self.peak_memory_bytes
+                        .fetch_max(approx_mem, Ordering::Relaxed);
                     results.push(analysis);
                 }
                 Err(e) => {
@@ -332,11 +358,11 @@ mod fake_process_tests {
     //! Characterization: ClangWorkerBackend::execute driven by a fake worker process
     //! (cmd.exe /c type <response file>) and WorkerPool::run dispatch semantics.
     use super::*;
+    use ariadne_build::{CompileCommand, TranslationUnit};
+    use ariadne_repo::FileId;
     use std::ffi::OsString;
     use std::sync::atomic::AtomicUsize;
     use std::sync::{Mutex, MutexGuard};
-    use ariadne_build::{CompileCommand, TranslationUnit};
-    use ariadne_repo::FileId;
 
     const WORKER_MALFORMED_RESPONSE: &str = "{{{ this is not valid json";
     const WORKER_ERROR_STATUS_RESPONSE: &str = r#"{"status":"error","message":"worker boom"}"#;
@@ -495,8 +521,7 @@ mod fake_process_tests {
             analysis,
             DefaultWorkerBackend
                 .execute(&task, repo.path())
-                .expect("default backend fallback must succeed"
-            )
+                .expect("default backend fallback must succeed")
         );
     }
 
@@ -515,8 +540,7 @@ mod fake_process_tests {
             analysis,
             DefaultWorkerBackend
                 .execute(&task, repo.path())
-                .expect("default backend fallback must succeed"
-            )
+                .expect("default backend fallback must succeed")
         );
     }
 
@@ -536,8 +560,7 @@ mod fake_process_tests {
             analysis,
             DefaultWorkerBackend
                 .execute(&task, repo.path())
-                .expect("default backend fallback must succeed"
-            )
+                .expect("default backend fallback must succeed")
         );
     }
 
@@ -576,8 +599,7 @@ mod fake_process_tests {
             analysis,
             DefaultWorkerBackend
                 .execute(&task, repo.path())
-                .expect("default backend fallback must succeed"
-            )
+                .expect("default backend fallback must succeed")
         );
     }
 
@@ -597,8 +619,7 @@ mod fake_process_tests {
             analysis,
             DefaultWorkerBackend
                 .execute(&task, repo.path())
-                .expect("default backend fallback must succeed"
-            )
+                .expect("default backend fallback must succeed")
         );
     }
 
@@ -638,7 +659,10 @@ mod fake_process_tests {
     impl WorkerBackend for SelectivelyFailingBackend {
         fn execute(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             if task.task_id == self.fatal_task_id {
-                return Err(anyhow!("simulated permanent crash for task {}", task.task_id));
+                return Err(anyhow!(
+                    "simulated permanent crash for task {}",
+                    task.task_id
+                ));
             }
             self.successful_executions.fetch_add(1, Ordering::SeqCst);
             Ok(TuAnalysis {
@@ -667,18 +691,40 @@ mod fake_process_tests {
     #[tokio::test]
     async fn run_with_single_worker_orders_results_by_priority_pop_order() {
         let tus = vec![
-            TuTask { task_id: 9101, tu: make_tagged_tu("order_high.cpp"), estimated_cost: 30, context: None },
-            TuTask { task_id: 9102, tu: make_tagged_tu("order_mid.cpp"), estimated_cost: 20, context: None },
-            TuTask { task_id: 9103, tu: make_tagged_tu("order_low.cpp"), estimated_cost: 10, context: None },
+            TuTask {
+                task_id: 9101,
+                tu: make_tagged_tu("order_high.cpp"),
+                estimated_cost: 30,
+                context: None,
+            },
+            TuTask {
+                task_id: 9102,
+                tu: make_tagged_tu("order_mid.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
+            TuTask {
+                task_id: 9103,
+                tu: make_tagged_tu("order_low.cpp"),
+                estimated_cost: 10,
+                context: None,
+            },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(
             TagBySourcePathBackend,
-            WorkerPoolConfig { num_workers: 1, max_retries: 0, ..Default::default() },
+            WorkerPoolConfig {
+                num_workers: 1,
+                max_retries: 0,
+                ..Default::default()
+            },
         );
         let repo = tempfile::tempdir().expect("repo tempdir");
 
-        let analyses = pool.run(repo.path(), &mut queue).await.expect("single-worker run must be Ok");
+        let analyses = pool
+            .run(repo.path(), &mut queue)
+            .await
+            .expect("single-worker run must be Ok");
         let arrival_order: Vec<String> = analyses
             .into_iter()
             .map(|analysis| analysis.context_name)
@@ -709,9 +755,24 @@ mod fake_process_tests {
     #[tokio::test]
     async fn run_continues_other_tasks_while_permanent_failure_exhausts_retries() {
         let tus = vec![
-            TuTask { task_id: 9201, tu: make_tagged_tu("fatal.cpp"), estimated_cost: 30, context: None },
-            TuTask { task_id: 9202, tu: make_tagged_tu("good_one.cpp"), estimated_cost: 20, context: None },
-            TuTask { task_id: 9203, tu: make_tagged_tu("good_two.cpp"), estimated_cost: 10, context: None },
+            TuTask {
+                task_id: 9201,
+                tu: make_tagged_tu("fatal.cpp"),
+                estimated_cost: 30,
+                context: None,
+            },
+            TuTask {
+                task_id: 9202,
+                tu: make_tagged_tu("good_one.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
+            TuTask {
+                task_id: 9203,
+                tu: make_tagged_tu("good_two.cpp"),
+                estimated_cost: 10,
+                context: None,
+            },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let successful_executions = Arc::new(AtomicUsize::new(0));
@@ -721,21 +782,34 @@ mod fake_process_tests {
         };
         let pool = WorkerPool::new(
             backend,
-            WorkerPoolConfig { num_workers: 2, max_retries: 1, ..Default::default() },
+            WorkerPoolConfig {
+                num_workers: 2,
+                max_retries: 1,
+                ..Default::default()
+            },
         );
         let repo = tempfile::tempdir().expect("repo tempdir");
 
         let outcome = pool.run(repo.path(), &mut queue).await;
         let err = outcome.expect_err("exhausted retries must surface a fatal pool error");
         let err_text = format!("{err:#}");
-        assert!(err_text.contains("Task 9201"), "fatal error must name the task: {err_text}");
-        assert!(err_text.contains("failed after 1 retries"), "fatal error must state retry budget: {err_text}");
+        assert!(
+            err_text.contains("Task 9201"),
+            "fatal error must name the task: {err_text}"
+        );
+        assert!(
+            err_text.contains("failed after 1 retries"),
+            "fatal error must state retry budget: {err_text}"
+        );
         assert_eq!(
             successful_executions.load(Ordering::SeqCst),
             2,
             "other tasks must keep executing to completion while the failing task exhausts retries"
         );
-        assert!(queue.is_empty(), "all tasks must be consumed from the queue before run returns");
+        assert!(
+            queue.is_empty(),
+            "all tasks must be consumed from the queue before run returns"
+        );
     }
 
     #[tokio::test]
@@ -750,15 +824,28 @@ mod fake_process_tests {
             .collect();
         let mut queue = PrioritizedTuQueue::new(tus);
         let total_executions = Arc::new(AtomicUsize::new(0));
-        let backend = CountingBackend { total_executions: Arc::clone(&total_executions) };
+        let backend = CountingBackend {
+            total_executions: Arc::clone(&total_executions),
+        };
         let pool = WorkerPool::new(
             backend,
-            WorkerPoolConfig { num_workers: 3, max_retries: 2, ..Default::default() },
+            WorkerPoolConfig {
+                num_workers: 3,
+                max_retries: 2,
+                ..Default::default()
+            },
         );
         let repo = tempfile::tempdir().expect("repo tempdir");
 
-        let analyses = pool.run(repo.path(), &mut queue).await.expect("clean multi-worker run must be Ok");
-        assert_eq!(analyses.len(), 5, "every queued task must yield one analysis");
+        let analyses = pool
+            .run(repo.path(), &mut queue)
+            .await
+            .expect("clean multi-worker run must be Ok");
+        assert_eq!(
+            analyses.len(),
+            5,
+            "every queued task must yield one analysis"
+        );
         assert_eq!(
             total_executions.load(Ordering::SeqCst),
             5,
@@ -770,10 +857,10 @@ mod fake_process_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::sync::atomic::AtomicUsize;
     use ariadne_build::{CompileCommand, TranslationUnit};
     use ariadne_repo::FileId;
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicUsize;
 
     fn make_tu(path: &str) -> TranslationUnit {
         TranslationUnit {
@@ -820,12 +907,33 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_success() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
-            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20, context: None },
-            TuTask { task_id: 3, tu: make_tu("c.cpp"), estimated_cost: 15, context: None },
+            TuTask {
+                task_id: 1,
+                tu: make_tu("a.cpp"),
+                estimated_cost: 10,
+                context: None,
+            },
+            TuTask {
+                task_id: 2,
+                tu: make_tu("b.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
+            TuTask {
+                task_id: 3,
+                tu: make_tu("c.cpp"),
+                estimated_cost: 15,
+                context: None,
+            },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
-        let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig { num_workers: 2, ..Default::default() });
+        let pool = WorkerPool::new(
+            DefaultWorkerBackend,
+            WorkerPoolConfig {
+                num_workers: 2,
+                ..Default::default()
+            },
+        );
         let temp_dir = tempfile::tempdir().unwrap();
         let results = pool.run(temp_dir.path(), &mut queue).await.unwrap();
         assert_eq!(results.len(), 3);
@@ -834,11 +942,30 @@ mod tests {
     #[tokio::test]
     async fn test_worker_pool_failure_recovery() {
         let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
-            TuTask { task_id: 2, tu: make_tu("b.cpp"), estimated_cost: 20, context: None },
+            TuTask {
+                task_id: 1,
+                tu: make_tu("a.cpp"),
+                estimated_cost: 10,
+                context: None,
+            },
+            TuTask {
+                task_id: 2,
+                tu: make_tu("b.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
-        let pool = WorkerPool::new(FlakyBackend { attempts: AtomicUsize::new(0) }, WorkerPoolConfig { num_workers: 2, max_retries: 2, ..Default::default() });
+        let pool = WorkerPool::new(
+            FlakyBackend {
+                attempts: AtomicUsize::new(0),
+            },
+            WorkerPoolConfig {
+                num_workers: 2,
+                max_retries: 2,
+                ..Default::default()
+            },
+        );
         let temp_dir = tempfile::tempdir().unwrap();
         let results = pool.run(temp_dir.path(), &mut queue).await.unwrap();
         assert_eq!(results.len(), 2);
@@ -846,11 +973,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_pool_max_retries_exceeded() {
-        let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
-        ];
+        let tus = vec![TuTask {
+            task_id: 1,
+            tu: make_tu("a.cpp"),
+            estimated_cost: 10,
+            context: None,
+        }];
         let mut queue = PrioritizedTuQueue::new(tus);
-        let pool = WorkerPool::new(FailingBackend, WorkerPoolConfig { num_workers: 1, max_retries: 2, ..Default::default() });
+        let pool = WorkerPool::new(
+            FailingBackend,
+            WorkerPoolConfig {
+                num_workers: 1,
+                max_retries: 2,
+                ..Default::default()
+            },
+        );
         let temp_dir = tempfile::tempdir().unwrap();
         let res = pool.run(temp_dir.path(), &mut queue).await;
         assert!(res.is_err());
@@ -858,9 +995,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_pool_memory_tracking() {
-        let tus = vec![
-            TuTask { task_id: 1, tu: make_tu("a.cpp"), estimated_cost: 10, context: None },
-        ];
+        let tus = vec![TuTask {
+            task_id: 1,
+            tu: make_tu("a.cpp"),
+            estimated_cost: 10,
+            context: None,
+        }];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
         let temp_dir = tempfile::tempdir().unwrap();

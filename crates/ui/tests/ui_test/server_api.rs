@@ -52,16 +52,24 @@ async fn test_async_ui_state_loading() {
     let app = build_router(state.clone());
 
     // Before loading, status should be loading
-    let req = Request::builder().uri("/api/status").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/status")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let status: ariadne_ui::server::StatusResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(status.progress.state, "loading");
     assert_eq!(status.progress.percent, 0);
 
     // Graph endpoints should return 503 or empty array when loading. Let's say empty array as per unit 1 or 503.
-    let req = Request::builder().uri("/api/graph/include").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/graph/include")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 
@@ -75,7 +83,12 @@ async fn test_async_ui_state_loading() {
             include_graph: vec![],
             symbol_graph: vec![],
             call_graph: vec![],
-            stats: SummaryStats { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
+            stats: SummaryStats {
+                total_files: 0,
+                total_symbols: 0,
+                total_calls: 0,
+                cycle_count: 0,
+            },
             file_collateral: HashMap::new(),
         });
         *state.include_graph.write().unwrap() = Some(IncludeGraph::new());
@@ -90,14 +103,22 @@ async fn test_async_ui_state_loading() {
     }
 
     // Now status should be ready
-    let req = Request::builder().uri("/api/status").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/status")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let status: ariadne_ui::server::StatusResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(status.progress.state, "ready");
-    
+
     // Graph endpoints should now return OK
-    let req = Request::builder().uri("/api/graph/include").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/api/graph/include")
+        .body(Body::empty())
+        .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
@@ -132,15 +153,18 @@ async fn test_server_index_route() {
 
     let app = build_router(state);
 
-    let req = Request::builder()
-        .uri("/")
-        .body(Body::empty())
-        .unwrap();
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(res.headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
-    assert_eq!(res.headers().get("Cache-Control").unwrap(), "no-store",
-        "index must never be cached: stale HTML silently hides new UI features");
+    assert_eq!(
+        res.headers().get("Content-Type").unwrap(),
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        res.headers().get("Cache-Control").unwrap(),
+        "no-store",
+        "index must never be cached: stale HTML silently hides new UI features"
+    );
 }
 
 #[tokio::test]
@@ -155,7 +179,10 @@ async fn test_index_route_body_matches_bundled_index_html() {
     let (status, headers, body) = common::request_raw_body(app, "/").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers.get("Cache-Control").unwrap(), "no-store");
-    assert_eq!(headers.get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        headers.get("Content-Type").unwrap(),
+        "text/html; charset=utf-8"
+    );
     assert_eq!(
         body,
         ariadne_ui::INDEX_HTML.as_bytes(),
@@ -208,7 +235,10 @@ async fn test_status_route_locks_ready_response_shape() {
     assert_eq!(body["repo_name"], "fixture-repo");
     assert_eq!(body["progress"]["state"], "ready");
     assert_eq!(body["progress"]["percent"], 100);
-    assert!(body["stats"].is_object(), "stats must be an object when loaded");
+    assert!(
+        body["stats"].is_object(),
+        "stats must be an object when loaded"
+    );
     assert_eq!(body["stats"]["total_files"], 0);
     assert_eq!(body["stages"], serde_json::json!([]));
     assert_eq!(body["last_refresh"], serde_json::Value::Null);

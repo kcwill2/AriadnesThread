@@ -1,25 +1,29 @@
-pub mod optimize;
 pub mod commands;
+pub mod optimize;
 
-pub use optimize::*;
+pub use commands::analyze::*;
 pub use commands::discover::*;
 pub use commands::includes::*;
 pub use commands::index::*;
-pub use commands::query::*;
-pub use commands::analyze::*;
-pub use commands::plan::*;
-pub use commands::transform::*;
 pub use commands::measure::*;
+pub use commands::plan::*;
+pub use commands::query::*;
+pub use commands::transform::*;
 pub use commands::ui::*;
+pub use optimize::*;
 
 pub use ariadne_graph::build_include_graph;
 
-use std::path::PathBuf;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "tool", version = "0.1.0", about = "C++ Dependency Optimization Tool")]
+#[command(
+    name = "tool",
+    version = "0.1.0",
+    about = "C++ Dependency Optimization Tool"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -115,7 +119,6 @@ pub enum PlanSubcommands {
         id: String,
     },
 }
-
 
 #[derive(Subcommand)]
 pub enum TransformSubcommands {
@@ -245,8 +248,6 @@ pub enum Commands {
     },
 }
 
-
-
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
@@ -255,9 +256,24 @@ pub fn run() -> Result<()> {
         Some(Commands::Version) | None => {
             println!("tool version 0.1.0");
         }
-        Some(Commands::Analyze { repo, workers, command }) => match (repo, command) {
-            (Some(repo_path), Some(AnalyzeSubcommands::Load { repo: load_repo, symbol, file })) => {
-                let r = if repo_path != load_repo { load_repo } else { repo_path };
+        Some(Commands::Analyze {
+            repo,
+            workers,
+            command,
+        }) => match (repo, command) {
+            (
+                Some(repo_path),
+                Some(AnalyzeSubcommands::Load {
+                    repo: load_repo,
+                    symbol,
+                    file,
+                }),
+            ) => {
+                let r = if repo_path != load_repo {
+                    load_repo
+                } else {
+                    repo_path
+                };
                 handle_analyze_load(&r, symbol.as_deref(), file.as_deref())?;
             }
             (None, Some(AnalyzeSubcommands::Load { repo, symbol, file })) => {
@@ -274,13 +290,23 @@ pub fn run() -> Result<()> {
                 bail!("Repository path required for tool analyze command");
             }
         },
-        Some(Commands::Explain { command: ExplainSubcommands::Load { repo, symbol, file, source } }) => {
+        Some(Commands::Explain {
+            command:
+                ExplainSubcommands::Load {
+                    repo,
+                    symbol,
+                    file,
+                    source,
+                },
+        }) => {
             handle_explain_load(&repo, symbol.as_deref(), file.as_deref(), source.as_deref())?;
         }
         Some(Commands::Discover { repo }) => {
             handle_discover(&repo)?;
         }
-        Some(Commands::Build { command: BuildSubcommands::Discover { repo } }) => {
+        Some(Commands::Build {
+            command: BuildSubcommands::Discover { repo },
+        }) => {
             handle_build_discover(&repo)?;
         }
         Some(Commands::Includes { repo, command }) => match (repo, command) {
@@ -324,25 +350,43 @@ pub fn run() -> Result<()> {
                 handle_transform_extract(&repo, &plan)?;
             }
         },
-        Some(Commands::Migrate { repo, plan, preview }) => {
+        Some(Commands::Migrate {
+            repo,
+            plan,
+            preview,
+        }) => {
             handle_migrate(&repo, &plan, preview)?;
-        },
+        }
         Some(Commands::Apply { repo, plan }) => {
             handle_apply(&repo, &plan)?;
-        },
+        }
         Some(Commands::Measure { repo }) => {
             handle_measure(&repo)?;
-        },
+        }
         Some(Commands::Compare { before, after }) => {
             handle_compare(&before, &after)?;
-        },
+        }
         Some(Commands::Optimize { repo }) => {
             handle_optimize(&repo)?;
-        },
-        Some(Commands::Ui { repo, port, no_open, export, watch_interval, no_watch }) => {
+        }
+        Some(Commands::Ui {
+            repo,
+            port,
+            no_open,
+            export,
+            watch_interval,
+            no_watch,
+        }) => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(run_ui(repo, port, no_open, export, watch_interval, no_watch))?;
-        },
+            rt.block_on(run_ui(
+                repo,
+                port,
+                no_open,
+                export,
+                watch_interval,
+                no_watch,
+            ))?;
+        }
     }
 
     Ok(())
@@ -359,7 +403,16 @@ mod tests {
         let args = vec!["tool", "analyze", "load", "my_repo", "--symbol", "MyClass"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Analyze { repo, workers: _, command: Some(AnalyzeSubcommands::Load { repo: load_repo, symbol, file }) } => {
+            Commands::Analyze {
+                repo,
+                workers: _,
+                command:
+                    Some(AnalyzeSubcommands::Load {
+                        repo: load_repo,
+                        symbol,
+                        file,
+                    }),
+            } => {
                 assert_eq!(repo, None);
                 assert_eq!(load_repo.to_str().unwrap(), "my_repo");
                 assert_eq!(symbol.unwrap(), "MyClass");
@@ -371,10 +424,27 @@ mod tests {
 
     #[test]
     fn test_cli_explain_load() {
-        let args = vec!["tool", "explain", "load", "my_repo", "--file", "my_file.cpp", "--source", "Huge.h"];
+        let args = vec![
+            "tool",
+            "explain",
+            "load",
+            "my_repo",
+            "--file",
+            "my_file.cpp",
+            "--source",
+            "Huge.h",
+        ];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Explain { command: ExplainSubcommands::Load { repo, symbol, file, source } } => {
+            Commands::Explain {
+                command:
+                    ExplainSubcommands::Load {
+                        repo,
+                        symbol,
+                        file,
+                        source,
+                    },
+            } => {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
                 assert_eq!(symbol, None);
                 assert_eq!(file.unwrap().to_str().unwrap(), "my_file.cpp");
@@ -402,7 +472,10 @@ mod tests {
         let args = vec!["tool", "plan", "show", "my_repo", "--id", "PLAN-001"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Plan { repo: _, command: Some(PlanSubcommands::Show { repo, id }) } => {
+            Commands::Plan {
+                repo: _,
+                command: Some(PlanSubcommands::Show { repo, id }),
+            } => {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
                 assert_eq!(id, "PLAN-001");
             }
@@ -412,10 +485,19 @@ mod tests {
 
     #[test]
     fn test_cli_transform_extract() {
-        let args = vec!["tool", "transform", "extract", "my_repo", "--plan", "PLAN-001"];
+        let args = vec![
+            "tool",
+            "transform",
+            "extract",
+            "my_repo",
+            "--plan",
+            "PLAN-001",
+        ];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Transform { command: TransformSubcommands::Extract { repo, plan } } => {
+            Commands::Transform {
+                command: TransformSubcommands::Extract { repo, plan },
+            } => {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
                 assert_eq!(plan, "PLAN-001");
             }
@@ -425,10 +507,21 @@ mod tests {
 
     #[test]
     fn test_cli_migrate_preview() {
-        let args = vec!["tool", "migrate", "my_repo", "--plan", "PLAN-001", "--preview"];
+        let args = vec![
+            "tool",
+            "migrate",
+            "my_repo",
+            "--plan",
+            "PLAN-001",
+            "--preview",
+        ];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Migrate { repo, plan, preview } => {
+            Commands::Migrate {
+                repo,
+                plan,
+                preview,
+            } => {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
                 assert_eq!(plan, "PLAN-001");
                 assert!(preview);
@@ -442,7 +535,11 @@ mod tests {
         let args = vec!["tool", "migrate", "my_repo", "--plan", "PLAN-001"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Migrate { repo, plan, preview } => {
+            Commands::Migrate {
+                repo,
+                plan,
+                preview,
+            } => {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
                 assert_eq!(plan, "PLAN-001");
                 assert!(!preview); // default is false
@@ -490,34 +587,40 @@ mod tests {
 
     #[test]
     fn test_handle_measure() {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
         let temp = std::env::temp_dir().join(format!("ariadne_test_meas_{}", unique));
         let repo_dir = temp.join("repo");
         fs::create_dir_all(repo_dir.join("src")).unwrap();
         fs::write(repo_dir.join("ariadne.toml"), "").unwrap();
-        
+
         let result = handle_measure(&repo_dir);
         assert!(result.is_ok());
-        
+
         let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
     fn test_handle_compare() {
-        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
         let temp = std::env::temp_dir().join(format!("ariadne_test_comp_{}", unique));
-        
+
         let before_dir = temp.join("before");
         fs::create_dir_all(&before_dir).unwrap();
-        
+
         let after_dir = temp.join("after");
         fs::create_dir_all(&after_dir).unwrap();
-        
+
         let result = handle_compare(&before_dir, &after_dir);
-        // This will fail because there are no valid measurement artifacts, 
+        // This will fail because there are no valid measurement artifacts,
         // but for now the command doesn't even exist.
         assert!(result.is_err());
-        
+
         let _ = fs::remove_dir_all(temp);
     }
 
@@ -526,7 +629,11 @@ mod tests {
         let args = vec!["tool", "analyze", "my_repo"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Analyze { repo, workers, command } => {
+            Commands::Analyze {
+                repo,
+                workers,
+                command,
+            } => {
                 assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
                 assert_eq!(workers, None);
                 assert!(command.is_none());
@@ -540,7 +647,11 @@ mod tests {
         let args = vec!["tool", "analyze", "my_repo", "--workers", "32"];
         let cli = Cli::parse_from(args);
         match cli.command.unwrap() {
-            Commands::Analyze { repo, workers, command } => {
+            Commands::Analyze {
+                repo,
+                workers,
+                command,
+            } => {
                 assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
                 assert_eq!(workers, Some(32));
                 assert!(command.is_none());
@@ -551,7 +662,12 @@ mod tests {
 
     #[test]
     fn test_handle_analyze() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let repo_dir = root.join("tests/fixtures/basic");
 
         let result = handle_analyze(&repo_dir).unwrap();

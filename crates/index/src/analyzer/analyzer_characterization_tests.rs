@@ -26,11 +26,31 @@ fn tokenize_word_and_punct_run_locks_one_based_line_and_column() {
     assert_eq!(
         tokenize("int f();"),
         vec![
-            Token { kind: TokenKind::Word("int".into()), line: 1, column: 1 },
-            Token { kind: TokenKind::Word("f".into()), line: 1, column: 5 },
-            Token { kind: TokenKind::Punct("(".into()), line: 1, column: 6 },
-            Token { kind: TokenKind::Punct(")".into()), line: 1, column: 7 },
-            Token { kind: TokenKind::Punct(";".into()), line: 1, column: 8 },
+            Token {
+                kind: TokenKind::Word("int".into()),
+                line: 1,
+                column: 1
+            },
+            Token {
+                kind: TokenKind::Word("f".into()),
+                line: 1,
+                column: 5
+            },
+            Token {
+                kind: TokenKind::Punct("(".into()),
+                line: 1,
+                column: 6
+            },
+            Token {
+                kind: TokenKind::Punct(")".into()),
+                line: 1,
+                column: 7
+            },
+            Token {
+                kind: TokenKind::Punct(";".into()),
+                line: 1,
+                column: 8
+            },
         ]
     );
 }
@@ -39,7 +59,9 @@ fn tokenize_word_and_punct_run_locks_one_based_line_and_column() {
 fn tokenize_splits_multi_char_operators_into_single_char_puncts() {
     expect_token_kinds(
         "x == 42 >= y",
-        &["word:x", "punct:=", "punct:=", "word:42", "punct:>", "punct:=", "word:y"],
+        &[
+            "word:x", "punct:=", "punct:=", "word:42", "punct:>", "punct:=", "word:y",
+        ],
     );
 }
 
@@ -47,7 +69,9 @@ fn tokenize_splits_multi_char_operators_into_single_char_puncts() {
 fn tokenize_string_literal_with_braces_and_comment_openers_yields_no_string_token() {
     expect_token_kinds(
         "x = \"}{ /* // */\"; y();",
-        &["word:x", "punct:=", "punct:;", "word:y", "punct:(", "punct:)", "punct:;"],
+        &[
+            "word:x", "punct:=", "punct:;", "word:y", "punct:(", "punct:)", "punct:;",
+        ],
     );
 }
 
@@ -63,7 +87,9 @@ fn tokenize_char_literal_is_swallowed_like_a_string_literal() {
 fn tokenize_escaped_quote_does_not_terminate_string_early() {
     expect_token_kinds(
         "x = \"a\\\"b\"; f();",
-        &["word:x", "punct:=", "punct:;", "word:f", "punct:(", "punct:)", "punct:;"],
+        &[
+            "word:x", "punct:=", "punct:;", "word:f", "punct:(", "punct:)", "punct:;",
+        ],
     );
 }
 
@@ -72,8 +98,16 @@ fn tokenize_string_spanning_newline_advances_line_number_and_hides_braces() {
     assert_eq!(
         tokenize("a \"x\n} y\" b"),
         vec![
-            Token { kind: TokenKind::Word("a".into()), line: 1, column: 1 },
-            Token { kind: TokenKind::Word("b".into()), line: 2, column: 6 },
+            Token {
+                kind: TokenKind::Word("a".into()),
+                line: 1,
+                column: 1
+            },
+            Token {
+                kind: TokenKind::Word("b".into()),
+                line: 2,
+                column: 6
+            },
         ]
     );
 }
@@ -97,7 +131,11 @@ fn tokenize_block_comment_hides_braces_until_terminator() {
 fn tokenize_line_comment_skips_to_newline_without_emitting_tokens() {
     assert_eq!(
         tokenize("// }\n}"),
-        vec![Token { kind: TokenKind::Punct("}".into()), line: 2, column: 1 }]
+        vec![Token {
+            kind: TokenKind::Punct("}".into()),
+            line: 2,
+            column: 1
+        }]
     );
     expect_token_kinds("a } // trailing", &["word:a", "punct:}"]);
 }
@@ -107,8 +145,16 @@ fn tokenize_line_comment_with_trailing_backslash_does_not_continue_to_next_line(
     assert_eq!(
         tokenize("a // b \\\n}"),
         vec![
-            Token { kind: TokenKind::Word("a".into()), line: 1, column: 1 },
-            Token { kind: TokenKind::Punct("}".into()), line: 2, column: 1 },
+            Token {
+                kind: TokenKind::Word("a".into()),
+                line: 1,
+                column: 1
+            },
+            Token {
+                kind: TokenKind::Punct("}".into()),
+                line: 2,
+                column: 1
+            },
         ]
     );
 }
@@ -136,7 +182,11 @@ fn tokenize_crlf_input_produces_identical_tokens_to_lf_input() {
 fn tokenize_tab_counts_as_one_column() {
     assert_eq!(
         tokenize("\tfoo"),
-        vec![Token { kind: TokenKind::Word("foo".into()), line: 1, column: 2 }]
+        vec![Token {
+            kind: TokenKind::Word("foo".into()),
+            line: 1,
+            column: 2
+        }]
     );
 }
 
@@ -145,9 +195,21 @@ fn tokenize_nested_template_angle_brackets_split_into_two_gt_puncts() {
     expect_token_kinds(
         "std::vector<std::pair<int,char>>",
         &[
-            "word:std", "punct::", "punct::", "word:vector", "punct:<",
-            "word:std", "punct::", "punct::", "word:pair", "punct:<",
-            "word:int", "punct:,", "word:char", "punct:>", "punct:>",
+            "word:std",
+            "punct::",
+            "punct::",
+            "word:vector",
+            "punct:<",
+            "word:std",
+            "punct::",
+            "punct::",
+            "word:pair",
+            "punct:<",
+            "word:int",
+            "punct:,",
+            "word:char",
+            "punct:>",
+            "punct:>",
         ],
     );
 }
@@ -157,8 +219,14 @@ fn tokenize_nested_namespace_braces_produce_separate_puncts() {
     expect_token_kinds(
         "namespace a { namespace b { } }",
         &[
-            "word:namespace", "word:a", "punct:{",
-            "word:namespace", "word:b", "punct:{", "punct:}", "punct:}",
+            "word:namespace",
+            "word:a",
+            "punct:{",
+            "word:namespace",
+            "word:b",
+            "punct:{",
+            "punct:}",
+            "punct:}",
         ],
     );
 }
@@ -167,7 +235,14 @@ fn tokenize_nested_namespace_braces_produce_separate_puncts() {
 fn tokenize_macro_call_keeps_macro_name_and_parens_as_separate_tokens() {
     expect_token_kinds(
         "MACRO(func())",
-        &["word:MACRO", "punct:(", "word:func", "punct:(", "punct:)", "punct:)"],
+        &[
+            "word:MACRO",
+            "punct:(",
+            "word:func",
+            "punct:(",
+            "punct:)",
+            "punct:)",
+        ],
     );
 }
 
@@ -175,7 +250,13 @@ fn tokenize_macro_call_keeps_macro_name_and_parens_as_separate_tokens() {
 fn tokenize_preprocessor_include_lines_keep_angle_brackets_but_swallow_quoted_paths() {
     expect_token_kinds(
         "#include <vector>",
-        &["punct:#", "word:include", "punct:<", "word:vector", "punct:>"],
+        &[
+            "punct:#",
+            "word:include",
+            "punct:<",
+            "word:vector",
+            "punct:>",
+        ],
     );
     expect_token_kinds("#include \"q.h\"", &["punct:#", "word:include"]);
 }
@@ -185,8 +266,17 @@ fn tokenize_numbers_split_on_dot_and_digit_separators_swallow_groups() {
     expect_token_kinds(
         "f = 1.5 + 1'000'000 + 0x1F;",
         &[
-            "word:f", "punct:=", "word:1", "punct:.", "word:5", "punct:+",
-            "word:1", "word:000", "punct:+", "word:0x1F", "punct:;",
+            "word:f",
+            "punct:=",
+            "word:1",
+            "punct:.",
+            "word:5",
+            "punct:+",
+            "word:1",
+            "word:000",
+            "punct:+",
+            "word:0x1F",
+            "punct:;",
         ],
     );
 }
@@ -219,7 +309,9 @@ fn analyze_global_function(
         symbols: ctx.symbols,
         declarations: ctx.declarations,
         edges: ctx.edges,
-        opened_function: ctx.current_function.map(|(symbol_id, depth)| (symbol_id.0, depth)),
+        opened_function: ctx
+            .current_function
+            .map(|(symbol_id, depth)| (symbol_id.0, depth)),
     }
 }
 
@@ -268,7 +360,10 @@ fn handle_global_function_semicolon_is_declaration_but_brace_opens_definition() 
     let declaration = analyze_global_function("void d();", "d", None);
     assert!(!declaration.declarations[0].is_definition);
     assert!(declaration.opened_function.is_none());
-    assert!(declaration.edges.is_empty(), "void return type is excluded from edges");
+    assert!(
+        declaration.edges.is_empty(),
+        "void return type is excluded from edges"
+    );
 
     let definition = analyze_global_function("void e() {}", "e", None);
     assert!(definition.declarations[0].is_definition);
@@ -283,8 +378,20 @@ fn handle_global_function_semicolon_is_declaration_but_brace_opens_definition() 
 #[test]
 fn handle_global_function_reserved_keywords_never_record_a_declaration() {
     for keyword in [
-        "if", "while", "for", "switch", "return", "sizeof", "catch", "new", "delete", "throw",
-        "class", "struct", "namespace", "else",
+        "if",
+        "while",
+        "for",
+        "switch",
+        "return",
+        "sizeof",
+        "catch",
+        "new",
+        "delete",
+        "throw",
+        "class",
+        "struct",
+        "namespace",
+        "else",
     ] {
         let outcome = analyze_global_function(&format!("{keyword}(x);"), keyword, None);
         assert!(
@@ -335,7 +442,10 @@ fn handle_global_function_named_parameters_emit_incomplete_edges() {
     let outcome = analyze_global_function("void take(A a, B* b, const C& c);", "take", None);
     assert_eq!(edge_targets(&outcome.edges, "take"), vec!["A", "B", "C"]);
     assert!(
-        outcome.edges.iter().all(|edge| edge.kind == DependencyKind::Incomplete),
+        outcome
+            .edges
+            .iter()
+            .all(|edge| edge.kind == DependencyKind::Incomplete),
         "all parameter edges are Incomplete"
     );
 }
@@ -404,7 +514,8 @@ fn handle_global_function_repeated_macro_definition_overwrites_definition_decl()
         .iter()
         .enumerate()
         .filter_map(|(index, token)| {
-            matches!(&token.kind, TokenKind::Word(word) if word.as_str() == "TEST_F").then_some(index)
+            matches!(&token.kind, TokenKind::Word(word) if word.as_str() == "TEST_F")
+                .then_some(index)
         })
         .collect();
     assert_eq!(macro_indices.len(), 2);
@@ -478,7 +589,11 @@ fn handle_global_function_through_analyzer_drops_namespace_qualifiers() {
         "namespace a { namespace b { int inner() { return 1; } } }",
         "Debug|x64",
     );
-    let symbol_names: Vec<String> = tu.symbols.iter().map(|symbol| symbol.name.clone()).collect();
+    let symbol_names: Vec<String> = tu
+        .symbols
+        .iter()
+        .map(|symbol| symbol.name.clone())
+        .collect();
     assert_eq!(
         symbol_names,
         vec!["inner"],

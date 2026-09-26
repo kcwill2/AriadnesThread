@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use ariadne_repo::FileId;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Represents a compiler environment and build settings configuration.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -136,7 +136,12 @@ mod tests {
             directory: PathBuf::from("/repo"),
             file: file_path.clone(),
             command: Some("cl.exe /c /DDEBUG src/main.cpp".into()),
-            arguments: vec!["cl.exe".into(), "/c".into(), "/DDEBUG".into(), "src/main.cpp".into()],
+            arguments: vec![
+                "cl.exe".into(),
+                "/c".into(),
+                "/DDEBUG".into(),
+                "src/main.cpp".into(),
+            ],
             context_name: "Debug|x64".into(),
             output: None,
         };

@@ -1,5 +1,8 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
-use ariadne_ui::{build_call_elements, build_include_elements, build_symbol_elements, GraphExportPayload, SummaryStats};
+use ariadne_ui::{
+    build_call_elements, build_include_elements, build_symbol_elements, GraphExportPayload,
+    SummaryStats,
+};
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -83,23 +86,29 @@ fn test_build_symbol_elements_filters_unindexed() {
     let sym_a = ariadne_index::SymbolId("A".to_string());
     let sym_b = ariadne_index::SymbolId("B".to_string());
     let sym_char = ariadne_index::SymbolId("char".to_string());
-    
-    symbols.insert(sym_a.clone(), ariadne_graph::ReducedSymbolRecord {
-        id: sym_a.clone(),
-        name: "A".to_string(),
-        kind: ariadne_index::SymbolKind::Class,
-        defining_file: None,
-        declarations: vec![],
-        definition: None,
-    });
-    symbols.insert(sym_b.clone(), ariadne_graph::ReducedSymbolRecord {
-        id: sym_b.clone(),
-        name: "B".to_string(),
-        kind: ariadne_index::SymbolKind::Class,
-        defining_file: None,
-        declarations: vec![],
-        definition: None,
-    });
+
+    symbols.insert(
+        sym_a.clone(),
+        ariadne_graph::ReducedSymbolRecord {
+            id: sym_a.clone(),
+            name: "A".to_string(),
+            kind: ariadne_index::SymbolKind::Class,
+            defining_file: None,
+            declarations: vec![],
+            definition: None,
+        },
+    );
+    symbols.insert(
+        sym_b.clone(),
+        ariadne_graph::ReducedSymbolRecord {
+            id: sym_b.clone(),
+            name: "B".to_string(),
+            kind: ariadne_index::SymbolKind::Class,
+            defining_file: None,
+            declarations: vec![],
+            definition: None,
+        },
+    );
 
     let edges = vec![
         ariadne_graph::ReducedSemanticEdge {
@@ -123,7 +132,7 @@ fn test_build_symbol_elements_filters_unindexed() {
     };
 
     let elements = build_symbol_elements(&model);
-    
+
     // Nodes for A and B = 2 elements.
     // Edge A->B = 1 element.
     // Total should be 3.
@@ -159,5 +168,8 @@ fn test_file_collateral_dto_serialization() {
     assert!(serialized.contains(r#""file_collateral":{"1":{"2":5}}"#));
 
     let deserialized: GraphExportPayload = serde_json::from_str(&serialized).unwrap();
-    assert_eq!(deserialized.file_collateral.get("1").unwrap().get("2"), Some(&5));
+    assert_eq!(
+        deserialized.file_collateral.get("1").unwrap().get("2"),
+        Some(&5)
+    );
 }

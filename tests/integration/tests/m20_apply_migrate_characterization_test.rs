@@ -83,7 +83,10 @@ fn expected_thing_plan_new_includes() -> Vec<PathBuf> {
 fn migrate_preview_writes_migration_artifacts_without_disk_changes() -> Result<()> {
     let (_repo_guard, repo_root, plans) = provision_indexed_repo_with_plans()?;
     let plan_id = plan_id_targeting_thing_header(&plans);
-    assert_eq!(plan_id, "PLAN-002", "thing.h plan id is stable across fresh runs");
+    assert_eq!(
+        plan_id, "PLAN-002",
+        "thing.h plan id is stable across fresh runs"
+    );
 
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_before = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
@@ -112,8 +115,14 @@ fn migrate_preview_writes_migration_artifacts_without_disk_changes() -> Result<(
 
     let consumer_after = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_after = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
-    assert_eq!(consumer_before, consumer_after, "migrate must not modify consumers");
-    assert_eq!(thing_impl_before, thing_impl_after, "migrate must not modify consumers");
+    assert_eq!(
+        consumer_before, consumer_after,
+        "migrate must not modify consumers"
+    );
+    assert_eq!(
+        thing_impl_before, thing_impl_after,
+        "migrate must not modify consumers"
+    );
     assert!(
         !repo_root.join("generated").exists(),
         "migrate must not write generated headers"
@@ -150,7 +159,11 @@ fn migrate_regenerates_missing_plan_artifacts_and_succeeds() -> Result<()> {
         .join("preview.json")
         .exists());
     assert!(
-        repo_root.join("artifacts").join("plans").join("plans.bin").exists(),
+        repo_root
+            .join("artifacts")
+            .join("plans")
+            .join("plans.bin")
+            .exists(),
         "the in-command fallback must regenerate plan artifacts when they are missing"
     );
     assert!(
@@ -167,7 +180,10 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
 
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_before = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
-    assert!(!repo_root.join("generated").exists(), "precondition: no generated dir");
+    assert!(
+        !repo_root.join("generated").exists(),
+        "precondition: no generated dir"
+    );
 
     handle_apply(&repo_root, &plan_id)?;
 
@@ -187,10 +203,7 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
         .iter()
         .map(|tier| tier["tier"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(
-        tiers,
-        vec!["Structural", "GeneratedHeaders", "AffectedTUs"]
-    );
+    assert_eq!(tiers, vec!["Structural", "GeneratedHeaders", "AffectedTUs"]);
 
     let generated_files = list_relative_files(&repo_root.join("generated"))?;
     assert_eq!(
@@ -234,8 +247,8 @@ fn apply_unknown_plan_id_reports_not_found() -> Result<()> {
 fn apply_and_migrate_missing_repo_path_report_locate_failure() -> Result<()> {
     let missing = std::env::temp_dir().join("ariadne-m20-does-not-exist-7c1d4e");
 
-    let apply_error = handle_apply(&missing, "PLAN-001")
-        .expect_err("apply on a missing path must fail");
+    let apply_error =
+        handle_apply(&missing, "PLAN-001").expect_err("apply on a missing path must fail");
     let apply_message = format!("{apply_error:#}");
     assert!(
         apply_message.contains("Failed to locate repository path"),

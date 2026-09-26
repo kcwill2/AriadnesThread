@@ -1,13 +1,13 @@
 //! Validation harness and transactional verification.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
-use ariadne_transform::{ExtractionResult, MigrationPreview};
 use anyhow::Result;
+use ariadne_transform::{ExtractionResult, MigrationPreview};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValidationTier {
@@ -30,8 +30,13 @@ pub struct TierResult {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyOutcome {
-    Committed { tiers_passed: Vec<TierResult> },
-    RolledBack { failed_tier: TierResult, tiers_passed: Vec<TierResult> },
+    Committed {
+        tiers_passed: Vec<TierResult>,
+    },
+    RolledBack {
+        failed_tier: TierResult,
+        tiers_passed: Vec<TierResult>,
+    },
 }
 
 impl ApplyOutcome {
@@ -44,7 +49,10 @@ impl ApplyOutcome {
                 }
                 out.push_str("\nCommitted.");
             }
-            ApplyOutcome::RolledBack { failed_tier, tiers_passed } => {
+            ApplyOutcome::RolledBack {
+                failed_tier,
+                tiers_passed,
+            } => {
                 for tr in tiers_passed {
                     out.push_str(&format_tier(tr));
                 }
@@ -111,20 +119,20 @@ impl TransactionApplier {
     ) -> Result<(FileSnapshot, Vec<PathBuf>)> {
         let mut paths_to_snapshot = Vec::new();
         let mut new_paths = Vec::new();
-        
+
         let gen_dir = repo_root.join("generated");
         for header in &extraction.headers {
             paths_to_snapshot.push(gen_dir.join(&header.filename));
         }
-        
+
         for rw in &migration.rewrites {
             paths_to_snapshot.push(repo_root.join(&rw.consumer_file));
         }
-        
+
         let snapshot = FileSnapshot::capture(&paths_to_snapshot)?;
-        
+
         fs::create_dir_all(&gen_dir)?;
-        
+
         for header in &extraction.headers {
             let path = gen_dir.join(&header.filename);
             if let Some(parent) = path.parent() {
@@ -133,7 +141,7 @@ impl TransactionApplier {
             if !path.exists() {
                 new_paths.push(path.clone());
             }
-            
+
             let mut content = String::new();
             if header.pragma_once {
                 content.push_str("#pragma once\n\n");
@@ -150,41 +158,38 @@ impl TransactionApplier {
             }
             fs::write(&path, content)?;
         }
-        
+
         for rw in &migration.rewrites {
             let path = repo_root.join(&rw.consumer_file);
             let mut content = fs::read_to_string(&path)?;
-            
+
             for old_inc in &rw.old_includes {
                 let s1 = format!("#include \"{}\"", old_inc.display());
                 let s2 = format!("#include <{}>", old_inc.display());
-                
+
                 let mut new_lines = String::new();
                 for new_inc in &rw.new_includes {
                     new_lines.push_str(&format!("#include \"{}\"\n", new_inc.display()));
                 }
                 let new_lines = new_lines.trim_end();
-                
+
                 content = content.replace(&s1, new_lines);
                 content = content.replace(&s2, new_lines);
             }
-            
+
             fs::write(&path, content)?;
         }
-        
+
         Ok((snapshot, new_paths))
     }
 
-    pub fn rollback(
-        snapshot: &FileSnapshot,
-        new_paths: &[PathBuf],
-    ) -> Result<()> {
+    pub fn rollback(snapshot: &FileSnapshot, new_paths: &[PathBuf]) -> Result<()> {
         for path in new_paths {
             if path.exists() {
                 fs::remove_file(path)?;
             }
         }
-        
+
         for (path, content_opt) in &snapshot.entries {
             match content_opt {
                 Some(content) => {
@@ -200,7 +205,7 @@ impl TransactionApplier {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -224,7 +229,10 @@ impl TierValidator {
         } else {
             ValidationStatus::Fail(extraction.errors.join(", "))
         };
-        TierResult { tier: ValidationTier::Structural, status }
+        TierResult {
+            tier: ValidationTier::Structural,
+            status,
+        }
     }
 
     pub fn validate_generated_headers(
@@ -243,7 +251,10 @@ impl TierValidator {
                 if !p1.exists() && !p2.exists() {
                     return TierResult {
                         tier: ValidationTier::GeneratedHeaders,
-                        status: ValidationStatus::Fail(format!("Missing include: {}", req.display())),
+                        status: ValidationStatus::Fail(format!(
+                            "Missing include: {}",
+                            req.display()
+                        )),
                     };
                 }
             }
@@ -269,7 +280,10 @@ impl TierValidator {
                 if !p1.exists() && !p2.exists() && new_inc.extension().is_some() {
                     return TierResult {
                         tier: ValidationTier::AffectedTUs,
-                        status: ValidationStatus::Fail(format!("Missing TU include: {}", new_inc.display())),
+                        status: ValidationStatus::Fail(format!(
+                            "Missing TU include: {}",
+                            new_inc.display()
+                        )),
                     };
                 }
             }
@@ -285,14 +299,23 @@ impl TierValidator {
 mod tests {
     use super::*;
     use ariadne_transform::{ConsumerRewrite, GeneratedHeader};
-    
+
     #[test]
     fn test_format_output() {
         let outcome1 = ApplyOutcome::Committed {
             tiers_passed: vec![
-                TierResult { tier: ValidationTier::Structural, status: ValidationStatus::Pass },
-                TierResult { tier: ValidationTier::GeneratedHeaders, status: ValidationStatus::Pass },
-                TierResult { tier: ValidationTier::AffectedTUs, status: ValidationStatus::Pass },
+                TierResult {
+                    tier: ValidationTier::Structural,
+                    status: ValidationStatus::Pass,
+                },
+                TierResult {
+                    tier: ValidationTier::GeneratedHeaders,
+                    status: ValidationStatus::Pass,
+                },
+                TierResult {
+                    tier: ValidationTier::AffectedTUs,
+                    status: ValidationStatus::Pass,
+                },
             ],
         };
         assert_eq!(
@@ -301,10 +324,14 @@ mod tests {
         );
 
         let outcome2 = ApplyOutcome::RolledBack {
-            failed_tier: TierResult { tier: ValidationTier::GeneratedHeaders, status: ValidationStatus::Fail("Missing include".into()) },
-            tiers_passed: vec![
-                TierResult { tier: ValidationTier::Structural, status: ValidationStatus::Pass },
-            ],
+            failed_tier: TierResult {
+                tier: ValidationTier::GeneratedHeaders,
+                status: ValidationStatus::Fail("Missing include".into()),
+            },
+            tiers_passed: vec![TierResult {
+                tier: ValidationTier::Structural,
+                status: ValidationStatus::Pass,
+            }],
         };
         assert_eq!(
             outcome2.format_output(),
@@ -317,15 +344,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p1 = dir.path().join("a.txt");
         let p2 = dir.path().join("b.txt");
-        
+
         fs::write(&p1, "hello").unwrap();
-        
+
         let snap = FileSnapshot::capture(&[p1.clone(), p2.clone()]).unwrap();
         assert_eq!(snap.entries[&p1], Some(b"hello".to_vec()));
         assert_eq!(snap.entries[&p2], None);
-        
+
         let f1 = snap.fingerprint();
-        
+
         fs::write(&p1, "world").unwrap();
         let snap2 = FileSnapshot::capture(&[p1, p2]).unwrap();
         assert_ne!(f1, snap2.fingerprint());
@@ -335,46 +362,42 @@ mod tests {
     fn test_transaction_apply_and_rollback() {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
-        
+
         let src_dir = repo.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let consumer = src_dir.join("main.cpp");
         fs::write(&consumer, "#include \"old.h\"\nint main() {}").unwrap();
-        
+
         let extraction = ExtractionResult {
             plan_id: "P1".into(),
-            headers: vec![
-                GeneratedHeader {
-                    filename: "new.h".into(),
-                    pragma_once: true,
-                    symbols: vec![],
-                    required_includes: vec![],
-                }
-            ],
+            headers: vec![GeneratedHeader {
+                filename: "new.h".into(),
+                pragma_once: true,
+                symbols: vec![],
+                required_includes: vec![],
+            }],
             errors: vec![],
         };
-        
+
         let migration = MigrationPreview {
             plan_id: "P1".into(),
-            rewrites: vec![
-                ConsumerRewrite {
-                    consumer_file: PathBuf::from("src/main.cpp"),
-                    old_includes: vec![PathBuf::from("old.h")],
-                    new_includes: vec![PathBuf::from("new.h")],
-                    side_effect_preservations: vec![],
-                }
-            ],
+            rewrites: vec![ConsumerRewrite {
+                consumer_file: PathBuf::from("src/main.cpp"),
+                old_includes: vec![PathBuf::from("old.h")],
+                new_includes: vec![PathBuf::from("new.h")],
+                side_effect_preservations: vec![],
+            }],
         };
-        
+
         let (snap, new_paths) = TransactionApplier::apply(repo, &extraction, &migration).unwrap();
-        
+
         assert!(repo.join("generated/new.h").exists());
         let consumer_content = fs::read_to_string(&consumer).unwrap();
         assert!(consumer_content.contains("#include \"new.h\""));
         assert!(!consumer_content.contains("#include \"old.h\""));
-        
+
         assert!(TransactionApplier::verify_restored(&snap).is_err());
-        
+
         TransactionApplier::rollback(&snap, &new_paths).unwrap();
         assert!(TransactionApplier::verify_restored(&snap).is_ok());
         assert!(!repo.join("generated/new.h").exists());

@@ -79,7 +79,8 @@ pub struct GraphExportPayload {
     pub call_graph: Vec<CytoscapeElement>,
     pub stats: SummaryStats,
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub file_collateral: std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
+    pub file_collateral:
+        std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
 }
 
 pub fn build_include_elements(
@@ -114,7 +115,10 @@ pub fn build_include_elements(
 
     for (file_id, path) in &graph.file_paths {
         let path_str = path.to_string_lossy();
-        let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or(&path_str);
+        let fname = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path_str);
         let kind = if fname.ends_with(".h") || fname.ends_with(".hpp") || fname.ends_with(".hxx") {
             "HEADER"
         } else {
@@ -162,9 +166,13 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
     let mut elements = Vec::new();
     let mut in_degrees = std::collections::HashMap::new();
     let mut out_degrees = std::collections::HashMap::new();
-    
-    let valid_edges: Vec<_> = model.edges.iter()
-        .filter(|e| model.symbols.contains_key(&e.src_symbol) && model.symbols.contains_key(&e.dst_symbol))
+
+    let valid_edges: Vec<_> = model
+        .edges
+        .iter()
+        .filter(|e| {
+            model.symbols.contains_key(&e.src_symbol) && model.symbols.contains_key(&e.dst_symbol)
+        })
         .collect();
 
     for edge in &valid_edges {
@@ -176,7 +184,10 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
         let kind_str = format!("{:?}", sym.kind).to_uppercase();
         let in_degree = in_degrees.get(&sym.id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(&sym.id).copied().unwrap_or(0);
-        let path_str = sym.defining_file.map(|f| f.0.to_string()).unwrap_or_default();
+        let path_str = sym
+            .defining_file
+            .map(|f| f.0.to_string())
+            .unwrap_or_default();
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": sym.id.0.clone(),
@@ -201,7 +212,11 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
                 "kind": format!("{:?}", edge.kind),
                 "incomplete": is_incomplete,
             }),
-            classes: if is_incomplete { Some("incomplete".into()) } else { Some("complete".into()) },
+            classes: if is_incomplete {
+                Some("incomplete".into())
+            } else {
+                Some("complete".into())
+            },
         });
     }
     elements
@@ -248,7 +263,11 @@ pub fn build_call_elements(callgraph: &ariadne_graph::CallGraph) -> Vec<Cytoscap
                 "call_count": edge.call_count,
                 "is_cycle": is_self_recursion,
             }),
-            classes: if is_self_recursion { Some("cycle".into()) } else { None },
+            classes: if is_self_recursion {
+                Some("cycle".into())
+            } else {
+                None
+            },
         });
     }
     elements

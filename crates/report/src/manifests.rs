@@ -1,8 +1,8 @@
+use ariadne_graph::LoadMetric;
+use ariadne_repo::{FileOwnership, OptimizationPolicy};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use ariadne_repo::{FileOwnership, OptimizationPolicy};
-use ariadne_graph::LoadMetric;
 
 /// Metadata manifest for repository discovery artifact.
 #[derive(Debug, Clone, Serialize, Deserialize)]

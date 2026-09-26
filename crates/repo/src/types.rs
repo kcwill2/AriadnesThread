@@ -1,10 +1,10 @@
 //! Core types for repository discovery and file modeling.
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Unique, stable identifier for a file within a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -43,7 +43,12 @@ pub enum FileKind {
 
 impl FileKind {
     pub fn from_path(path: &Path) -> Self {
-        match path.extension().and_then(|ext| ext.to_str()).map(|s| s.to_lowercase()).as_deref() {
+        match path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.to_lowercase())
+            .as_deref()
+        {
             Some("h" | "hpp" | "hxx" | "hh" | "inl" | "ipp") => FileKind::Header,
             Some("cpp" | "cc" | "cxx" | "c") => FileKind::Source,
             Some("scala") => FileKind::ScalaSource,
@@ -59,7 +64,10 @@ impl FileKind {
 
     /// Returns `true` for any file kind that should be semantically analysed.
     pub fn is_analyzable(&self) -> bool {
-        matches!(self, FileKind::Header | FileKind::Source | FileKind::ScalaSource)
+        matches!(
+            self,
+            FileKind::Header | FileKind::Source | FileKind::ScalaSource
+        )
     }
 }
 
@@ -75,7 +83,9 @@ impl SourceLanguage {
     pub fn from_file_kind(kind: FileKind) -> Self {
         match kind {
             FileKind::Header | FileKind::Source => SourceLanguage::Cpp,
-            FileKind::ScalaSource | FileKind::ScalaScript | FileKind::BuildDefinition => SourceLanguage::Scala,
+            FileKind::ScalaSource | FileKind::ScalaScript | FileKind::BuildDefinition => {
+                SourceLanguage::Scala
+            }
             FileKind::Other => SourceLanguage::Other,
         }
     }

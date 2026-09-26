@@ -1,7 +1,7 @@
 //! Artifact generation and load reporting.
 
-pub mod manifests;
 pub mod manager;
+pub mod manifests;
 
-pub use manifests::*;
 pub use manager::*;
+pub use manifests::*;

@@ -1,19 +1,19 @@
 //! Include and semantic graph structures.
 
-pub mod graph;
-pub mod resolver;
-pub mod types;
-pub mod reduced;
-pub mod load;
-pub mod callgraph;
 pub mod builder;
+pub mod callgraph;
+pub mod graph;
+pub mod load;
+pub mod reduced;
+pub mod resolver;
 pub mod traversal;
+pub mod types;
 
-pub use graph::*;
-pub use resolver::*;
-pub use types::*;
-pub use reduced::*;
-pub use load::*;
-pub use callgraph::*;
 pub use builder::*;
+pub use callgraph::*;
+pub use graph::*;
+pub use load::*;
+pub use reduced::*;
+pub use resolver::*;
 pub use traversal::*;
+pub use types::*;

@@ -96,8 +96,12 @@ fn optimize_writes_report_artifact_equal_to_returned_report() -> Result<()> {
 
     let report = EndToEndOptimizer::new(&repo_root).optimize()?;
 
-    let report_json =
-        fs::read_to_string(repo_root.join("artifacts").join("optimize").join("report.json"))?;
+    let report_json = fs::read_to_string(
+        repo_root
+            .join("artifacts")
+            .join("optimize")
+            .join("report.json"),
+    )?;
     let persisted: OptimizationReport = serde_json::from_str(&report_json)?;
     assert_eq!(
         persisted, report,
@@ -184,10 +188,7 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
         dispatched.collateral_opportunities,
         direct.collateral_opportunities
     );
-    assert_eq!(
-        dispatched.safe_plans_available,
-        direct.safe_plans_available
-    );
+    assert_eq!(dispatched.safe_plans_available, direct.safe_plans_available);
     assert_eq!(
         dispatched.affected_consumer_files,
         direct.affected_consumer_files
@@ -196,10 +197,7 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
         dispatched.validation_passed_tus,
         direct.validation_passed_tus
     );
-    assert_eq!(
-        dispatched.validation_total_tus,
-        direct.validation_total_tus
-    );
+    assert_eq!(dispatched.validation_total_tus, direct.validation_total_tus);
     assert_eq!(dispatched.build_passed, direct.build_passed);
     assert_eq!(
         dispatched.committed_transformations,
