@@ -678,4 +678,159 @@ mod tests {
         assert!(summary_empty.contains("None"));
         assert!(summary_empty.contains("0 symbols"));
     }
+
+    #[test]
+    fn test_explain_symbol_load_locks_complete_output() {
+        let (ig, model) = setup_mock_data();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let explanation = analyzer
+            .explain_symbol_load("Thing", None)
+            .expect("explain_symbol_load failed");
+        assert_eq!(explanation.target_name, "Thing");
+        assert_eq!(explanation.target_file, PathBuf::from("Thing.h"));
+        assert_eq!(
+            explanation.path,
+            vec!["Thing", "Thing.h", "graphics.h", "HugeThirdParty.h"]
+        );
+        assert_eq!(explanation.collateral_source, "HugeThirdParty.h");
+        assert_eq!(explanation.collateral_symbols_count, 1);
+        assert_eq!(
+            explanation.reason,
+            "HugeThirdParty.h is included by graphics.h.\nNo semantic dependency from Thing reaches symbols owned by HugeThirdParty.h."
+        );
+
+        let expected_format = concat!(
+            "Thing\n",
+            "  ↓\n",
+            "Thing.h\n",
+            "  ↓\n",
+            "graphics.h\n",
+            "  ↓\n",
+            "HugeThirdParty.h\n",
+            "\n",
+            "Reason:\n",
+            "  HugeThirdParty.h is included by graphics.h.\n",
+            "  No semantic dependency from Thing reaches symbols owned by HugeThirdParty.h.\n",
+        );
+        assert_eq!(explanation.format_explanation(), expected_format);
+    }
+
+    #[test]
+    fn test_explain_file_load_locks_complete_output() {
+        let (ig, model) = setup_mock_data();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let explanation = analyzer
+            .explain_file_load(std::path::Path::new("Thing.h"), None)
+            .expect("explain_file_load failed");
+        assert_eq!(explanation.target_name, "Thing.h");
+        assert_eq!(explanation.target_file, PathBuf::from("Thing.h"));
+        assert_eq!(
+            explanation.path,
+            vec!["Thing.h", "graphics.h", "HugeThirdParty.h"]
+        );
+        assert_eq!(explanation.collateral_source, "HugeThirdParty.h");
+        assert_eq!(explanation.collateral_symbols_count, 1);
+        assert_eq!(
+            explanation.reason,
+            "HugeThirdParty.h is included by graphics.h.\nNo semantic dependency from Thing.h reaches symbols owned by HugeThirdParty.h."
+        );
+
+        let expected_format = concat!(
+            "Thing.h\n",
+            "  ↓\n",
+            "graphics.h\n",
+            "  ↓\n",
+            "HugeThirdParty.h\n",
+            "\n",
+            "Reason:\n",
+            "  HugeThirdParty.h is included by graphics.h.\n",
+            "  No semantic dependency from Thing.h reaches symbols owned by HugeThirdParty.h.\n",
+        );
+        assert_eq!(explanation.format_explanation(), expected_format);
+    }
+
+    #[test]
+    fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
+        // A symbol whose unreached siblings live in its own defining file makes
+        // the collateral source the target file itself, so the include path is
+        // a single node (start == end) and the parent renders as that file.
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(10), PathBuf::from("Self.h"));
+        ig.register_file(FileId(11), PathBuf::from("Dep.h"));
+        ig.add_edge(IncludeEdge {
+            source: FileId(10),
+            destination: Some(FileId(11)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "Dep.h".to_string(),
+            resolved_path: Some(PathBuf::from("Dep.h")),
+        });
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
+
+        let sym_main = SymbolId::new("Main");
+        model.symbols.insert(
+            sym_main.clone(),
+            ReducedSymbolRecord {
+                id: sym_main.clone(),
+                name: "Main".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(FileId(10)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        let sym_sidecar = SymbolId::new("Sidecar");
+        model.symbols.insert(
+            sym_sidecar.clone(),
+            ReducedSymbolRecord {
+                id: sym_sidecar.clone(),
+                name: "Sidecar".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(FileId(10)),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        model
+            .file_symbols
+            .insert(FileId(10), vec![sym_main, sym_sidecar]);
+
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let metric = analyzer
+            .analyze_symbol_load("Main")
+            .expect("analyze_symbol_load failed");
+        assert_eq!(metric.semantic_load, 1);
+        assert_eq!(metric.collateral_load, 1);
+        assert_eq!(
+            metric
+                .largest_collateral_source
+                .as_ref()
+                .expect("same-file collateral source")
+                .path,
+            PathBuf::from("Self.h")
+        );
+
+        let explanation = analyzer
+            .explain_symbol_load("Main", None)
+            .expect("explain_symbol_load failed");
+        assert_eq!(explanation.path, vec!["Main", "Self.h"]);
+        assert_eq!(explanation.target_file, PathBuf::from("Self.h"));
+        assert_eq!(explanation.collateral_source, "Self.h");
+        assert_eq!(explanation.collateral_symbols_count, 1);
+        assert_eq!(
+            explanation.reason,
+            "Self.h is included by Self.h.\nNo semantic dependency from Main reaches symbols owned by Self.h."
+        );
+    }
 }
