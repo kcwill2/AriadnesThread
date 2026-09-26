@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
@@ -15,6 +15,16 @@ pub struct UiBuildResult {
     pub payload: GraphExportPayload,
     pub status: StageStatus,
     pub fps: StageFingerprints,
+}
+
+/// Poison recovery: the holder already panicked elsewhere; the data stays
+/// memory-consistent, so keep serving/rebuilding instead of cascading panics.
+fn read_state<'a, T>(lock: &'a RwLock<T>) -> std::sync::RwLockReadGuard<'a, T> {
+    lock.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn write_state<'a, T>(lock: &'a RwLock<T>) -> std::sync::RwLockWriteGuard<'a, T> {
+    lock.write().unwrap_or_else(|e| e.into_inner())
 }
 
 fn now_ms() -> u64 {
@@ -152,12 +162,12 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
 /// serving every request until each slot is replaced.
 fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
     let fps = out.fps.clone();
-    *state.include_graph.write().unwrap() = Some(out.include_graph);
-    *state.reduced_model.write().unwrap() = Some(out.reduced_model);
-    *state.call_graph.write().unwrap() = Some(out.call_graph);
-    *state.payload.write().unwrap() = Some(out.payload);
-    *state.stage_status.write().unwrap() = out.status;
-    let mut p = state.progress.write().unwrap();
+    *write_state(&state.include_graph) = Some(out.include_graph);
+    *write_state(&state.reduced_model) = Some(out.reduced_model);
+    *write_state(&state.call_graph) = Some(out.call_graph);
+    *write_state(&state.payload) = Some(out.payload);
+    *write_state(&state.stage_status) = out.status;
+    let mut p = write_state(&state.progress);
     p.state = "ready".to_string();
     p.phase = "Complete".to_string();
     p.message = "Ready".to_string();
@@ -199,23 +209,23 @@ fn spawn_watcher(
                             return;
                         }
                     };
-                    if fresh_fps == *fps_lock.read().unwrap() {
+                    if fresh_fps == *read_state(&fps_lock) {
                         return;
                     }
-                    state.stage_status.write().unwrap().rebuilding = true;
+                    write_state(&state.stage_status).rebuilding = true;
                     // Exactly one pipeline build serves the new fingerprints
                     // and the payload; its own fps replace the rehashed ones.
                     let quiet: ProgressFn = Arc::new(|_percent, _phase, _message| ());
                     match build_ui_payload(&repo, quiet) {
                         Ok(out) => {
                             let new_fps = swap_into_state(&state, out);
-                            *fps_lock.write().unwrap() = new_fps;
+                            *write_state(&fps_lock) = new_fps;
                         }
                         Err(e) => {
                             tracing::warn!("UI live refresh failed: {e}");
                         }
                     }
-                    state.stage_status.write().unwrap().rebuilding = false;
+                    write_state(&state.stage_status).rebuilding = false;
                 }));
                 let _ = outcome;
                 rebuilding.store(false, Ordering::SeqCst);
@@ -232,7 +242,10 @@ pub async fn run_ui(
     watch_interval: u64,
     no_watch: bool,
 ) -> Result<()> {
-    let repo_path = repo_opt.unwrap_or_else(|| std::env::current_dir().unwrap());
+    let repo_path = match repo_opt {
+        Some(path) => path,
+        None => std::env::current_dir().context("current working directory unavailable")?,
+    };
 
     if let Some(path) = export_opt {
         let export_progress: ProgressFn = Arc::new(|percent, phase, message| {
@@ -273,7 +286,7 @@ pub async fn run_ui(
         let boot_progress: ProgressFn = {
             let st = boot_state.clone();
             Arc::new(move |percent, phase, message| {
-                let mut p = st.progress.write().unwrap();
+                let mut p = write_state(&st.progress);
                 p.state = "loading".to_string();
                 p.phase = phase.to_string();
                 p.message = message.to_string();
@@ -287,7 +300,7 @@ pub async fn run_ui(
                 let _ = fps_tx.send(Some(fps));
             }
             Err(e) => {
-                let mut p = boot_state.progress.write().unwrap();
+                let mut p = write_state(&boot_state.progress);
                 p.state = "error".to_string();
                 p.message = e.to_string();
                 let _ = fps_tx.send(None);
