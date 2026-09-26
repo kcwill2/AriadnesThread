@@ -260,46 +260,11 @@ pub fn run() -> Result<()> {
             repo,
             workers,
             command,
-        }) => match (repo, command) {
-            (
-                Some(repo_path),
-                Some(AnalyzeSubcommands::Load {
-                    repo: load_repo,
-                    symbol,
-                    file,
-                }),
-            ) => {
-                let r = if repo_path != load_repo {
-                    load_repo
-                } else {
-                    repo_path
-                };
-                handle_analyze_load(&r, symbol.as_deref(), file.as_deref())?;
-            }
-            (None, Some(AnalyzeSubcommands::Load { repo, symbol, file })) => {
-                handle_analyze_load(&repo, symbol.as_deref(), file.as_deref())?;
-            }
-            (Some(repo_path), None) => {
-                if let Some(w) = workers {
-                    handle_production_analyze(&repo_path, Some(w))?;
-                } else {
-                    handle_analyze(&repo_path)?;
-                }
-            }
-            (None, None) => {
-                bail!("Repository path required for tool analyze command");
-            }
-        },
-        Some(Commands::Explain {
-            command:
-                ExplainSubcommands::Load {
-                    repo,
-                    symbol,
-                    file,
-                    source,
-                },
         }) => {
-            handle_explain_load(&repo, symbol.as_deref(), file.as_deref(), source.as_deref())?;
+            dispatch_analyze(repo, workers, command)?;
+        }
+        Some(Commands::Explain { command }) => {
+            dispatch_explain(command)?;
         }
         Some(Commands::Discover { repo }) => {
             handle_discover(&repo)?;
@@ -309,47 +274,21 @@ pub fn run() -> Result<()> {
         }) => {
             handle_build_discover(&repo)?;
         }
-        Some(Commands::Includes { repo, command }) => match (repo, command) {
-            (_, Some(IncludesSubcommands::Explain { repo, file })) => {
-                handle_includes_explain(&repo, &file)?;
-            }
-            (Some(repo_path), None) => {
-                handle_includes(&repo_path)?;
-            }
-            (None, None) => {
-                bail!("Repository path required for tool includes command");
-            }
-        },
+        Some(Commands::Includes { repo, command }) => {
+            dispatch_includes(repo, command)?;
+        }
         Some(Commands::Index { repo }) => {
             handle_index(&repo)?;
         }
-        Some(Commands::Query { command }) => match command {
-            QuerySubcommands::Symbol { repo, name } => {
-                handle_query_symbol(&repo, &name)?;
-            }
-            QuerySubcommands::Deps { repo, name } => {
-                handle_query_deps(&repo, &name)?;
-            }
-            QuerySubcommands::Users { repo, name } => {
-                handle_query_users(&repo, &name)?;
-            }
-        },
-        Some(Commands::Plan { repo, command }) => match (repo, command) {
-            (_, Some(PlanSubcommands::Show { repo, id })) => {
-                handle_plan_show(&repo, &id)?;
-            }
-            (Some(repo_path), None) => {
-                handle_plan(&repo_path)?;
-            }
-            (None, None) => {
-                bail!("Repository path required for tool plan command");
-            }
-        },
-        Some(Commands::Transform { command }) => match command {
-            TransformSubcommands::Extract { repo, plan } => {
-                handle_transform_extract(&repo, &plan)?;
-            }
-        },
+        Some(Commands::Query { command }) => {
+            dispatch_query(command)?;
+        }
+        Some(Commands::Plan { repo, command }) => {
+            dispatch_plan(repo, command)?;
+        }
+        Some(Commands::Transform { command }) => {
+            dispatch_transform(command)?;
+        }
         Some(Commands::Migrate {
             repo,
             plan,
@@ -377,18 +316,136 @@ pub fn run() -> Result<()> {
             watch_interval,
             no_watch,
         }) => {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(run_ui(
-                repo,
-                port,
-                no_open,
-                export,
-                watch_interval,
-                no_watch,
-            ))?;
+            dispatch_ui(repo, port, no_open, export, watch_interval, no_watch)?;
         }
     }
 
+    Ok(())
+}
+
+fn dispatch_analyze(
+    repo: Option<PathBuf>,
+    workers: Option<usize>,
+    command: Option<AnalyzeSubcommands>,
+) -> Result<()> {
+    match (repo, command) {
+        (
+            Some(repo_path),
+            Some(AnalyzeSubcommands::Load {
+                repo: load_repo,
+                symbol,
+                file,
+            }),
+        ) => {
+            let r = if repo_path != load_repo {
+                load_repo
+            } else {
+                repo_path
+            };
+            handle_analyze_load(&r, symbol.as_deref(), file.as_deref())?;
+        }
+        (None, Some(AnalyzeSubcommands::Load { repo, symbol, file })) => {
+            handle_analyze_load(&repo, symbol.as_deref(), file.as_deref())?;
+        }
+        (Some(repo_path), None) => {
+            if let Some(w) = workers {
+                handle_production_analyze(&repo_path, Some(w))?;
+            } else {
+                handle_analyze(&repo_path)?;
+            }
+        }
+        (None, None) => {
+            bail!("Repository path required for tool analyze command");
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_explain(command: ExplainSubcommands) -> Result<()> {
+    match command {
+        ExplainSubcommands::Load {
+            repo,
+            symbol,
+            file,
+            source,
+        } => {
+            handle_explain_load(&repo, symbol.as_deref(), file.as_deref(), source.as_deref())?;
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>) -> Result<()> {
+    match (repo, command) {
+        (_, Some(IncludesSubcommands::Explain { repo, file })) => {
+            handle_includes_explain(&repo, &file)?;
+        }
+        (Some(repo_path), None) => {
+            handle_includes(&repo_path)?;
+        }
+        (None, None) => {
+            bail!("Repository path required for tool includes command");
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_query(command: QuerySubcommands) -> Result<()> {
+    match command {
+        QuerySubcommands::Symbol { repo, name } => {
+            handle_query_symbol(&repo, &name)?;
+        }
+        QuerySubcommands::Deps { repo, name } => {
+            handle_query_deps(&repo, &name)?;
+        }
+        QuerySubcommands::Users { repo, name } => {
+            handle_query_users(&repo, &name)?;
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> Result<()> {
+    match (repo, command) {
+        (_, Some(PlanSubcommands::Show { repo, id })) => {
+            handle_plan_show(&repo, &id)?;
+        }
+        (Some(repo_path), None) => {
+            handle_plan(&repo_path)?;
+        }
+        (None, None) => {
+            bail!("Repository path required for tool plan command");
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_transform(command: TransformSubcommands) -> Result<()> {
+    match command {
+        TransformSubcommands::Extract { repo, plan } => {
+            handle_transform_extract(&repo, &plan)?;
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_ui(
+    repo: Option<PathBuf>,
+    port: u16,
+    no_open: bool,
+    export: Option<PathBuf>,
+    watch_interval: u64,
+    no_watch: bool,
+) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_ui(
+        repo,
+        port,
+        no_open,
+        export,
+        watch_interval,
+        no_watch,
+    ))?;
     Ok(())
 }
 
