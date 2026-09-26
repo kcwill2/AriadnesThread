@@ -76,59 +76,56 @@ impl OptimizationPlan {
         }
 
         let mut out = String::new();
-        writeln!(&mut out, "{}", self.id).unwrap();
-        writeln!(&mut out).unwrap();
-        writeln!(&mut out, "Target:").unwrap();
-        writeln!(&mut out, "    {}", self.target_file.display()).unwrap();
-        writeln!(&mut out).unwrap();
-        writeln!(&mut out, "Problem:").unwrap();
-        writeln!(&mut out, "    {}", self.problem).unwrap();
+        let _ = writeln!(&mut out, "{}", self.id);
+        let _ = writeln!(&mut out);
+        let _ = writeln!(&mut out, "Target:");
+        let _ = writeln!(&mut out, "    {}", self.target_file.display());
+        let _ = writeln!(&mut out);
+        let _ = writeln!(&mut out, "Problem:");
+        let _ = writeln!(&mut out, "    {}", self.problem);
 
         if !self.proposed_extractions.is_empty() {
-            writeln!(&mut out).unwrap();
-            writeln!(&mut out, "Proposed extraction:").unwrap();
+            let _ = writeln!(&mut out);
+            let _ = writeln!(&mut out, "Proposed extraction:");
             for ext in &self.proposed_extractions {
-                writeln!(
+                let _ = writeln!(
                     &mut out,
                     "    {} → {}",
                     ext.symbol_name,
                     ext.target_header.display()
-                )
-                .unwrap();
+                );
             }
         }
 
         if !self.optimization_frontier.is_empty() {
-            writeln!(&mut out).unwrap();
-            writeln!(&mut out, "Optimization frontier:").unwrap();
+            let _ = writeln!(&mut out);
+            let _ = writeln!(&mut out, "Optimization frontier:");
             for front in &self.optimization_frontier {
-                writeln!(&mut out, "    {}", front.display()).unwrap();
+                let _ = writeln!(&mut out, "    {}", front.display());
             }
         }
 
-        writeln!(&mut out).unwrap();
-        writeln!(&mut out, "Expected result:").unwrap();
-        writeln!(
+        let _ = writeln!(&mut out);
+        let _ = writeln!(&mut out, "Expected result:");
+        let _ = writeln!(
             &mut out,
             "    {} → {} collateral symbols",
             format_number(self.collateral_load_before),
             format_number(self.collateral_load_after)
-        )
-        .unwrap();
+        );
 
-        writeln!(&mut out).unwrap();
-        writeln!(&mut out, "Risk:").unwrap();
-        writeln!(&mut out, "    {}", self.risk).unwrap();
+        let _ = writeln!(&mut out);
+        let _ = writeln!(&mut out, "Risk:");
+        let _ = writeln!(&mut out, "    {}", self.risk);
 
         if !self.validation_required_tus.is_empty() {
-            writeln!(&mut out).unwrap();
-            writeln!(&mut out, "Validation required:").unwrap();
-            write!(
+            let _ = writeln!(&mut out);
+            let _ = writeln!(&mut out, "Validation required:");
+            let _ = write!(
                 &mut out,
                 "    {} translation units",
                 self.validation_required_tus.len()
-            )
-            .unwrap();
+            );
         }
 
         out
