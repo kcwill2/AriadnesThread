@@ -253,6 +253,69 @@ fn split_command_string(cmd: &str) -> Vec<String> {
     args
 }
 
+/// Peekable cursor over the raw argument list consumed by `parse_args`.
+type ArgCursor<'a> = std::iter::Peekable<std::slice::Iter<'a, String>>;
+
+fn raw_argument_list(command: &Option<String>, arguments: &[String]) -> Vec<String> {
+    if !arguments.is_empty() {
+        arguments.to_vec()
+    } else if let Some(ref cmd) = command {
+        split_command_string(cmd)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Heuristic from the original parser: `/`-prefixed unix-ish paths that
+/// contain "usr"/"bin" or end in a compiler name are treated as paths, not
+/// MSVC-style flags.
+fn is_compilation_flag(s: &str) -> bool {
+    s.starts_with('-')
+        || (s.starts_with('/')
+            && !s.contains("usr")
+            && !s.contains("bin")
+            && !s.ends_with("c++")
+            && !s.ends_with("g++")
+            && !s.ends_with("clang")
+            && !s.ends_with("clang++"))
+}
+
+fn take_compiler_executable(iter: &mut ArgCursor<'_>) -> String {
+    if let Some(first) = iter.peek() {
+        if !is_compilation_flag(first) {
+            return iter.next().unwrap().clone();
+        }
+    }
+    "cl.exe".to_string()
+}
+
+/// Value of a flag family whose value may be joined to the flag (`-DFOO`)
+/// or the next token (`-D FOO`). A bare flag consumes the next token even
+/// when it is another flag; at end-of-args it yields an empty value.
+fn take_prefixed_value(arg: &str, prefixes: &[&str], iter: &mut ArgCursor<'_>) -> Option<String> {
+    let prefix = prefixes.iter().find(|p| arg.starts_with(**p))?;
+    let value = if arg.len() > prefix.len() {
+        arg[prefix.len()..].to_string()
+    } else if iter.peek().is_some() {
+        iter.next().unwrap().clone()
+    } else {
+        String::new()
+    };
+    Some(value)
+}
+
+fn language_standard_from_flag(arg: &str) -> Option<String> {
+    if !arg.starts_with("-std=") && !arg.starts_with("/std:") {
+        return None;
+    }
+    let pos = arg.find('=').or_else(|| arg.find(':'))?;
+    Some(arg[pos + 1..].to_string())
+}
+
+fn arch_target_from_flag(arg: &str) -> Option<String> {
+    Some(arg.strip_prefix("/arch:")?.to_string())
+}
+
 fn parse_args(
     command: &Option<String>,
     arguments: &[String],
@@ -266,15 +329,10 @@ fn parse_args(
     Option<String>,
     Vec<String>,
 ) {
-    let raw_args: Vec<String> = if !arguments.is_empty() {
-        arguments.to_vec()
-    } else if let Some(ref cmd) = command {
-        split_command_string(cmd)
-    } else {
-        Vec::new()
-    };
+    let raw_args = raw_argument_list(command, arguments);
+    let mut iter = raw_args.iter().peekable();
 
-    let mut compiler = "cl.exe".to_string();
+    let compiler = take_compiler_executable(&mut iter);
     let mut defines = Vec::new();
     let mut include_dirs = Vec::new();
     let mut system_include_dirs = Vec::new();
@@ -283,81 +341,34 @@ fn parse_args(
     let mut arch = None;
     let mut raw_flags = Vec::new();
 
-    let is_flag = |s: &str| {
-        s.starts_with('-')
-            || (s.starts_with('/')
-                && !s.contains("usr")
-                && !s.contains("bin")
-                && !s.ends_with("c++")
-                && !s.ends_with("g++")
-                && !s.ends_with("clang")
-                && !s.ends_with("clang++"))
-    };
-
-    let mut iter = raw_args.iter().peekable();
-
-    if let Some(first) = iter.peek() {
-        if !is_flag(first) {
-            compiler = (*first).clone();
-            iter.next();
-        }
-    }
     while let Some(arg) = iter.next() {
-        if arg.starts_with("-D") || arg.starts_with("/D") {
-            let val = if arg.len() > 2 {
-                &arg[2..]
-            } else if let Some(_next) = iter.peek() {
-                iter.next().unwrap()
-            } else {
-                ""
-            };
-            if !val.is_empty() {
-                defines.push(val.to_string());
+        if let Some(value) = take_prefixed_value(arg, &["-D", "/D"], &mut iter) {
+            if !value.is_empty() {
+                defines.push(value);
             }
-        } else if arg.starts_with("-isystem") {
-            let val = if arg.len() > 8 {
-                &arg[8..]
-            } else if iter.peek().is_some() {
-                iter.next().unwrap()
-            } else {
-                ""
-            };
-            if !val.is_empty() {
-                system_include_dirs.push(PathBuf::from(val));
+        } else if let Some(value) = take_prefixed_value(arg, &["-isystem"], &mut iter) {
+            if !value.is_empty() {
+                system_include_dirs.push(PathBuf::from(value));
             }
-        } else if arg.starts_with("/external:I") {
-            let val = &arg[11..];
-            if !val.is_empty() {
-                system_include_dirs.push(PathBuf::from(val));
+        } else if let Some(value) = arg.strip_prefix("/external:I") {
+            // No next-token form: a bare /external:I only strips an empty
+            // suffix here and its intended path token is dropped downstream.
+            if !value.is_empty() {
+                system_include_dirs.push(PathBuf::from(value));
             }
-        } else if arg.starts_with("-I") || arg.starts_with("/I") {
-            let val = if arg.len() > 2 {
-                &arg[2..]
-            } else if let Some(_next) = iter.peek() {
-                iter.next().unwrap()
-            } else {
-                ""
-            };
-            if !val.is_empty() {
-                include_dirs.push(PathBuf::from(val));
+        } else if let Some(value) = take_prefixed_value(arg, &["-I", "/I"], &mut iter) {
+            if !value.is_empty() {
+                include_dirs.push(PathBuf::from(value));
             }
-        } else if arg.starts_with("-FI") || arg.starts_with("/FI") {
-            let val = if arg.len() > 3 {
-                &arg[3..]
-            } else if let Some(_next) = iter.peek() {
-                iter.next().unwrap()
-            } else {
-                ""
-            };
-            if !val.is_empty() {
-                forced_includes.push(PathBuf::from(val));
+        } else if let Some(value) = take_prefixed_value(arg, &["-FI", "/FI"], &mut iter) {
+            if !value.is_empty() {
+                forced_includes.push(PathBuf::from(value));
             }
-        } else if arg.starts_with("-std=") || arg.starts_with("/std:") {
-            let pos = arg.find('=').or_else(|| arg.find(':')).unwrap();
-            lang_std = Some(arg[pos + 1..].to_string());
-        } else if arg.starts_with("/arch:") {
-            arch = Some(arg[6..].to_string());
-        } else if is_flag(arg) {
+        } else if let Some(spec) = language_standard_from_flag(arg) {
+            lang_std = Some(spec);
+        } else if let Some(target) = arch_target_from_flag(arg) {
+            arch = Some(target);
+        } else if is_compilation_flag(arg) {
             raw_flags.push(arg.clone());
         }
     }
