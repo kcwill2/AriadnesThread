@@ -232,6 +232,10 @@ fn sanitize_header_stem(name: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "planner_characterization_tests.rs"]
+mod planner_characterization;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use ariadne_graph::reduced::{ReducedSemanticModel, ReducedSymbolRecord};
