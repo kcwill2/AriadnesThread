@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn test_missing_stage_cache_returns_error_not_panic() {
         let dir = setup_repo();
-        let pipeline = Pipeline::new(&dir.path().to_path_buf(), None).unwrap();
+        let pipeline = Pipeline::new(dir.path(), None).unwrap();
 
         assert_missing_cache_error(
             pipeline.cached_include_graph(),
