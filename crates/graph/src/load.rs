@@ -240,6 +240,39 @@ impl<'a> LoadAnalyzer<'a> {
         sources
     }
 
+    /// Required headers for a set of symbols: the defining files of the
+    /// semantic closure of `symbol_ids` (with contributing closure-symbol
+    /// counts), EXCLUDING the seeds' own defining files — a header does not
+    /// "require" the file the seed itself is defined in. The exclusion is
+    /// per seed defining-file, not per symbol: a non-seed closure symbol is
+    /// dropped too whenever its defining file equals ANY seed defining file.
+    /// Unknown symbol ids are ignored. Ordered `(count desc, path asc)` per
+    /// I6, sharing the grouping contract of `contributing_sources`.
+    pub fn required_headers_for_symbols(
+        &self,
+        symbol_ids: &[SymbolId],
+    ) -> Vec<(FileId, PathBuf, usize)> {
+        let seed_files: HashSet<FileId> = symbol_ids
+            .iter()
+            .filter_map(|s| self.model.symbols.get(s).and_then(|r| r.defining_file))
+            .collect();
+        let closure = self.get_semantic_closure_of_symbols(symbol_ids);
+        let required: Vec<SymbolId> = closure
+            .into_iter()
+            .filter(|sym| {
+                self.model
+                    .symbols
+                    .get(sym)
+                    .and_then(|r| r.defining_file)
+                    .is_some_and(|f| !seed_files.contains(&f))
+            })
+            .collect();
+        self.contributing_sources(&required)
+            .into_iter()
+            .map(|src| (src.file_id, src.path, src.symbol_count))
+            .collect()
+    }
+
     fn compute_load(
         &self,
         target_name: String,
