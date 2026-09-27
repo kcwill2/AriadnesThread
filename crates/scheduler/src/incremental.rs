@@ -136,6 +136,7 @@ mod tests {
         RepositoryDiscoveryResult,
     };
     use std::collections::HashMap;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn setup_test_data() -> (
@@ -149,6 +150,14 @@ mod tests {
 
         let repo = Repository { root: root.clone() };
 
+        write_incremental_fixture_files(&root);
+        let repo_discovery = given_discovered_files(&root);
+        let build_result = given_build_units(&root);
+
+        (repo, repo_discovery, build_result, temp_dir)
+    }
+
+    fn write_incremental_fixture_files(root: &Path) {
         // Create some files
         std::fs::write(
             root.join("main.cpp"),
@@ -157,98 +166,65 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("header.h"), "void foo();").unwrap();
         std::fs::write(root.join("utils.cpp"), "void bar() {}").unwrap();
+    }
 
-        let mut repo_discovery = RepositoryDiscoveryResult {
-            root: root.clone(),
-            files: vec![],
+    fn record_repository_file(
+        root: &Path,
+        rel: &str,
+        kind: FileKind,
+        content_hash: &str,
+    ) -> FileRecord {
+        FileRecord {
+            id: FileId::from_relative_path(rel),
+            path: root.join(rel),
+            canonical_path: root.join(rel),
+            kind,
+            size: 10,
+            content_hash: content_hash.to_string(),
+            ownership: FileOwnership::Repository,
+            optimization_policy: OptimizationPolicy::Optimizable,
+        }
+    }
+
+    fn given_discovered_files(root: &Path) -> RepositoryDiscoveryResult {
+        RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files: vec![
+                record_repository_file(root, "main.cpp", FileKind::Source, "hash_main1"),
+                record_repository_file(root, "header.h", FileKind::Header, "hash_header1"),
+                record_repository_file(root, "utils.cpp", FileKind::Source, "hash_utils1"),
+            ],
             ownership_summary: HashMap::new(),
             policy_summary: HashMap::new(),
-        };
+        }
+    }
 
-        let f_main = FileRecord {
-            id: FileId::from_relative_path("main.cpp"),
-            path: root.join("main.cpp"),
-            canonical_path: root.join("main.cpp"),
-            kind: FileKind::Source,
-            size: 10,
-            content_hash: "hash_main1".to_string(),
-            ownership: FileOwnership::Repository,
-            optimization_policy: OptimizationPolicy::Optimizable,
-        };
-        let f_header = FileRecord {
-            id: FileId::from_relative_path("header.h"),
-            path: root.join("header.h"),
-            canonical_path: root.join("header.h"),
-            kind: FileKind::Header,
-            size: 10,
-            content_hash: "hash_header1".to_string(),
-            ownership: FileOwnership::Repository,
-            optimization_policy: OptimizationPolicy::Optimizable,
-        };
-        let f_utils = FileRecord {
-            id: FileId::from_relative_path("utils.cpp"),
-            path: root.join("utils.cpp"),
-            canonical_path: root.join("utils.cpp"),
-            kind: FileKind::Source,
-            size: 10,
-            content_hash: "hash_utils1".to_string(),
-            ownership: FileOwnership::Repository,
-            optimization_policy: OptimizationPolicy::Optimizable,
-        };
+    fn translation_unit_for(root: &Path, rel: &str, context_name: &str) -> TranslationUnit {
+        TranslationUnit {
+            file_id: FileId::from_relative_path(rel),
+            source_path: root.join(rel),
+            context_name: context_name.to_string(),
+            compile_command: CompileCommand {
+                directory: root.to_path_buf(),
+                file: root.join(rel),
+                command: Some(format!("clang++ -c {}", rel)),
+                arguments: vec!["clang++".to_string(), "-c".to_string(), rel.to_string()],
+                context_name: context_name.to_string(),
+                output: None,
+            },
+        }
+    }
 
-        repo_discovery.files.push(f_main);
-        repo_discovery.files.push(f_header);
-        repo_discovery.files.push(f_utils);
-
-        let mut build_result = BuildDiscoveryResult {
-            repo_root: root.clone(),
-            contexts: vec![],
-            translation_units: vec![],
-        };
-
+    fn given_build_units(root: &Path) -> BuildDiscoveryResult {
         let ctx = CompilationContext::new("test_ctx", "clang++");
-        build_result.contexts.push(ctx.clone());
-
-        let tu_main = TranslationUnit {
-            file_id: FileId::from_relative_path("main.cpp"),
-            source_path: root.join("main.cpp"),
-            context_name: ctx.name.clone(),
-            compile_command: CompileCommand {
-                directory: root.clone(),
-                file: root.join("main.cpp"),
-                command: Some("clang++ -c main.cpp".to_string()),
-                arguments: vec![
-                    "clang++".to_string(),
-                    "-c".to_string(),
-                    "main.cpp".to_string(),
-                ],
-                context_name: ctx.name.clone(),
-                output: None,
-            },
-        };
-
-        let tu_utils = TranslationUnit {
-            file_id: FileId::from_relative_path("utils.cpp"),
-            source_path: root.join("utils.cpp"),
-            context_name: ctx.name.clone(),
-            compile_command: CompileCommand {
-                directory: root.clone(),
-                file: root.join("utils.cpp"),
-                command: Some("clang++ -c utils.cpp".to_string()),
-                arguments: vec![
-                    "clang++".to_string(),
-                    "-c".to_string(),
-                    "utils.cpp".to_string(),
-                ],
-                context_name: ctx.name.clone(),
-                output: None,
-            },
-        };
-
-        build_result.translation_units.push(tu_main);
-        build_result.translation_units.push(tu_utils);
-
-        (repo, repo_discovery, build_result, temp_dir)
+        BuildDiscoveryResult {
+            repo_root: root.to_path_buf(),
+            contexts: vec![ctx.clone()],
+            translation_units: vec![
+                translation_unit_for(root, "main.cpp", &ctx.name),
+                translation_unit_for(root, "utils.cpp", &ctx.name),
+            ],
+        }
     }
 
     #[test]
