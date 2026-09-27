@@ -264,3 +264,102 @@ fn test_standalone_export_embeds_extraction_proposals() {
     );
     assert!(!empty_blob.contains("D2PLAN-42"));
 }
+
+fn impact_fixture_entry(impact: Option<ariadne_ui::ImpactSummary>) -> ariadne_ui::JustificationEntry {
+    ariadne_ui::JustificationEntry {
+        justified_symbols: vec!["Parser".to_string()],
+        collateral_symbols: vec![],
+        justified_count: 1,
+        collateral_count: 0,
+        justified_truncated: false,
+        collateral_truncated: false,
+        required_headers: vec!["core.h".to_string()],
+        impact,
+    }
+}
+
+fn payload_with_impact(impact: Option<ariadne_ui::ImpactSummary>) -> GraphExportPayload {
+    let mut entries = HashMap::new();
+    entries.insert("5".to_string(), impact_fixture_entry(impact));
+    let mut file_justification = HashMap::new();
+    file_justification.insert("3".to_string(), entries);
+    GraphExportPayload {
+        repo_name: "impact-fixture".to_string(),
+        include_graph: vec![],
+        symbol_graph: vec![],
+        call_graph: vec![],
+        stats: SummaryStats {
+            total_files: 0,
+            total_symbols: 0,
+            total_calls: 0,
+            cycle_count: 0,
+        },
+        file_collateral: HashMap::new(),
+        file_justification,
+        extraction_proposals: vec![],
+    }
+}
+
+fn sample_impact_summary() -> ariadne_ui::ImpactSummary {
+    ariadne_ui::ImpactSummary {
+        dropped_from_root_count: 7,
+        still_reachable_count: 2,
+        dropped_sample: vec!["vendored_marker.h".to_string()],
+        dropped_sample_truncated: false,
+        root_closure_before: 31,
+        root_closure_after: 24,
+        symbols_no_longer_parsed: 123,
+    }
+}
+
+#[test]
+fn test_standalone_export_embeds_impact_summaries() {
+    // R1 chain lock: an impact summary on a file_justification entry must
+    // survive dto serialization all the way into the standalone export's
+    // __ARIADNE_DATA__ blob, and the same file must ship the preview.js
+    // consumer that reads it (resolvePreviewImpact reads entry.impact).
+    let payload = payload_with_impact(Some(sample_impact_summary()));
+    let temp_dir = tempfile::tempdir().unwrap();
+    let out_path = temp_dir.path().join("impact-report.html");
+    ariadne_ui::export_standalone_html(&payload, "", &out_path).unwrap();
+    let content = std::fs::read_to_string(&out_path).unwrap();
+    let blob = export_data_blob(&content);
+
+    for key in [
+        "\"impact\"",
+        "\"dropped_from_root_count\"",
+        "\"dropped_sample\"",
+        "\"symbols_no_longer_parsed\"",
+    ] {
+        assert!(
+            blob.contains(key),
+            "impact key {key} must be embedded in the __ARIADNE_DATA__ blob"
+        );
+    }
+    assert!(blob.contains("\"dropped_from_root_count\":7"));
+    assert!(blob.contains("\"symbols_no_longer_parsed\":123"));
+    assert!(
+        blob.contains("vendored_marker.h"),
+        "the distinctive dropped_sample marker must survive serialization"
+    );
+    assert!(
+        content.contains("resolvePreviewImpact"),
+        "the standalone report must inline the preview consumer for impact data"
+    );
+
+    // Negative half: impact: None must skip the key entirely (E-I4 serde lock),
+    // while the entry itself still ships.
+    let none_path = temp_dir.path().join("impact-none.html");
+    ariadne_ui::export_standalone_html(&payload_with_impact(None), "", &none_path).unwrap();
+    let none_content = std::fs::read_to_string(&none_path).unwrap();
+    let none_blob = export_data_blob(&none_content);
+    assert!(
+        none_blob.contains("\"file_justification\""),
+        "the entry ships even without an impact summary"
+    );
+    assert!(
+        !none_blob.contains("\"impact\""),
+        "impact: None must be skipped from the exported blob"
+    );
+    assert!(!none_blob.contains("vendored_marker.h"));
+}
