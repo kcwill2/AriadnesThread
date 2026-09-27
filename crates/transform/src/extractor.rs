@@ -33,46 +33,71 @@ impl<'a> HeaderExtractor<'a> {
         let mut headers = Vec::new();
 
         for (target_header, extractions) in groups {
-            let mut symbols = Vec::new();
-            let mut required_includes = BTreeSet::new();
-
-            for ext in extractions {
-                let kind = self
-                    .model
-                    .find_symbol(&ext.symbol_id.0)
-                    .map(|r| r.kind)
-                    .unwrap_or(SymbolKind::Other);
-
-                let body = format!("// Symbol: {} ({:?})", ext.symbol_name, kind);
-
-                symbols.push(ExtractedSymbol {
-                    name: ext.symbol_name.clone(),
-                    kind,
-                    forward_declarable: false,
-                    body,
-                });
-
-                for edge in self.model.get_dependencies(&ext.symbol_id) {
-                    if let Some(dep_header) = symbol_to_header.get(&edge.dst_symbol) {
-                        if dep_header != &target_header {
-                            required_includes.insert(dep_header.clone());
-                        }
-                    }
-                }
-            }
-
-            headers.push(GeneratedHeader {
-                filename: target_header,
-                pragma_once: true,
-                symbols,
-                required_includes: required_includes.into_iter().collect(),
-            });
+            headers.push(self.build_generated_header(
+                target_header,
+                extractions,
+                &symbol_to_header,
+            ));
         }
 
         let mut errors = vec![];
 
+        if Self::detect_cycle_in_headers(&headers) {
+            errors.push("Cycle detected in generated headers".to_string());
+        }
+
+        ExtractionResult {
+            plan_id: plan.id.0.clone(),
+            headers,
+            errors,
+        }
+    }
+
+    fn build_generated_header(
+        &self,
+        target_header: PathBuf,
+        extractions: Vec<&ariadne_cluster::plan::ProposedExtraction>,
+        symbol_to_header: &BTreeMap<ariadne_index::types::SymbolId, PathBuf>,
+    ) -> GeneratedHeader {
+        let mut symbols = Vec::new();
+        let mut required_includes = BTreeSet::new();
+
+        for ext in extractions {
+            let kind = self
+                .model
+                .find_symbol(&ext.symbol_id.0)
+                .map(|r| r.kind)
+                .unwrap_or(SymbolKind::Other);
+
+            let body = format!("// Symbol: {} ({:?})", ext.symbol_name, kind);
+
+            symbols.push(ExtractedSymbol {
+                name: ext.symbol_name.clone(),
+                kind,
+                forward_declarable: false,
+                body,
+            });
+
+            for edge in self.model.get_dependencies(&ext.symbol_id) {
+                if let Some(dep_header) = symbol_to_header.get(&edge.dst_symbol) {
+                    if dep_header != &target_header {
+                        required_includes.insert(dep_header.clone());
+                    }
+                }
+            }
+        }
+
+        GeneratedHeader {
+            filename: target_header,
+            pragma_once: true,
+            symbols,
+            required_includes: required_includes.into_iter().collect(),
+        }
+    }
+
+    fn detect_cycle_in_headers(headers: &[GeneratedHeader]) -> bool {
         let mut adj: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
-        for h in &headers {
+        for h in headers {
             adj.insert(
                 h.filename.clone(),
                 h.required_includes.iter().cloned().collect(),
@@ -107,7 +132,7 @@ impl<'a> HeaderExtractor<'a> {
         let mut stack = BTreeSet::new();
         let mut cycle_found = false;
 
-        for h in &headers {
+        for h in headers {
             if !visited.contains(&h.filename) {
                 if has_cycle(&h.filename, &adj, &mut visited, &mut stack) {
                     cycle_found = true;
@@ -116,15 +141,7 @@ impl<'a> HeaderExtractor<'a> {
             }
         }
 
-        if cycle_found {
-            errors.push("Cycle detected in generated headers".to_string());
-        }
-
-        ExtractionResult {
-            plan_id: plan.id.0.clone(),
-            headers,
-            errors,
-        }
+        cycle_found
     }
 }
 
