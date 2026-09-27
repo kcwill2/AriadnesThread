@@ -336,8 +336,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_resolve_directive() {
+    fn include_directive(raw_path: &str, is_angled: bool, line: u32) -> RawIncludeDirective {
+        RawIncludeDirective {
+            raw_path: raw_path.into(),
+            is_angled,
+            line,
+            column: 1,
+        }
+    }
+
+    fn given_resolver_fixture() -> (
+        tempfile::TempDir,
+        RepositoryDiscoveryResult,
+        CompilationContext,
+    ) {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
 
@@ -369,6 +381,18 @@ mod tests {
         context.include_dirs = vec![PathBuf::from("third_party/lib")];
         context.system_include_dirs = vec![PathBuf::from("usr/include")];
 
+        // Setup a real disk file for the fallback test
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/sibling.h"), "").unwrap();
+
+        (temp, discovery, context)
+    }
+
+    #[test]
+    fn test_resolve_directive() {
+        let (temp, discovery, context) = given_resolver_fixture();
+        let root = temp.path();
+
         let resolver = IncludeResolver::new(root)
             .with_repo_discovery(&discovery)
             .with_context(&context);
@@ -376,19 +400,13 @@ mod tests {
         let source_id = FileId::from_relative_path("src/main.cpp");
         let source_rel_path = Path::new("src/main.cpp");
 
-        // Setup a real disk file for the fallback test
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/sibling.h"), "").unwrap();
-
         // 1. Quoted local relative includes
         // Disk fallback (sibling.h is not in discovery)
-        let dir1 = RawIncludeDirective {
-            raw_path: "sibling.h".into(),
-            is_angled: false,
-            line: 1,
-            column: 1,
-        };
-        let edge1 = resolver.resolve_directive(source_id, source_rel_path, &dir1);
+        let edge1 = resolver.resolve_directive(
+            source_id,
+            source_rel_path,
+            &include_directive("sibling.h", false, 1),
+        );
         assert_eq!(edge1.kind, IncludeKind::Local);
         assert_eq!(
             edge1.destination,
@@ -397,13 +415,11 @@ mod tests {
         assert_eq!(edge1.resolved_path, Some(PathBuf::from("src/sibling.h")));
 
         // Found in discovery (repo local traversal)
-        let dir2 = RawIncludeDirective {
-            raw_path: "../common/helper.h".into(),
-            is_angled: false,
-            line: 2,
-            column: 1,
-        };
-        let edge2 = resolver.resolve_directive(source_id, source_rel_path, &dir2);
+        let edge2 = resolver.resolve_directive(
+            source_id,
+            source_rel_path,
+            &include_directive("../common/helper.h", false, 2),
+        );
         assert_eq!(edge2.kind, IncludeKind::Local);
         assert_eq!(
             edge2.destination,
@@ -412,13 +428,11 @@ mod tests {
 
         // 2. Angled includes
         // Toolchain (System)
-        let dir3 = RawIncludeDirective {
-            raw_path: "system.h".into(),
-            is_angled: true,
-            line: 3,
-            column: 1,
-        };
-        let edge3 = resolver.resolve_directive(source_id, source_rel_path, &dir3);
+        let edge3 = resolver.resolve_directive(
+            source_id,
+            source_rel_path,
+            &include_directive("system.h", true, 3),
+        );
         assert_eq!(edge3.kind, IncludeKind::System);
         assert_eq!(
             edge3.destination,
@@ -426,13 +440,11 @@ mod tests {
         );
 
         // ThirdParty (External) - Note: include_dirs maps to External if the file is ThirdParty
-        let dir4 = RawIncludeDirective {
-            raw_path: "lib.h".into(),
-            is_angled: true,
-            line: 4,
-            column: 1,
-        };
-        let edge4 = resolver.resolve_directive(source_id, source_rel_path, &dir4);
+        let edge4 = resolver.resolve_directive(
+            source_id,
+            source_rel_path,
+            &include_directive("lib.h", true, 4),
+        );
         assert_eq!(edge4.kind, IncludeKind::External);
         assert_eq!(
             edge4.destination,
@@ -440,13 +452,11 @@ mod tests {
         );
 
         // 3. Unresolved include
-        let dir5 = RawIncludeDirective {
-            raw_path: "nonexistent.h".into(),
-            is_angled: false,
-            line: 5,
-            column: 1,
-        };
-        let edge5 = resolver.resolve_directive(source_id, source_rel_path, &dir5);
+        let edge5 = resolver.resolve_directive(
+            source_id,
+            source_rel_path,
+            &include_directive("nonexistent.h", false, 5),
+        );
         assert_eq!(edge5.destination, None);
         assert_eq!(edge5.resolved_path, None);
     }
