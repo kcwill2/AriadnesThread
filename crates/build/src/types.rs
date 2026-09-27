@@ -160,17 +160,23 @@ mod tests {
             compile_command: cmd2,
         };
 
-        let mut res = BuildDiscoveryResult {
+        let mut discovery_result = BuildDiscoveryResult {
             repo_root: PathBuf::from("/repo"),
             contexts: vec![ctx1, ctx2],
             translation_units: vec![tu1, tu2],
         };
 
-        res.normalize();
+        discovery_result.normalize();
 
-        assert_eq!(res.contexts[0].name, "Debug|x64");
-        assert_eq!(res.contexts[1].name, "Release|x64");
-        assert_eq!(res.translation_units[0].context_name, "Debug|x64");
-        assert_eq!(res.translation_units[1].context_name, "Release|x64");
+        assert_eq!(discovery_result.contexts[0].name, "Debug|x64");
+        assert_eq!(discovery_result.contexts[1].name, "Release|x64");
+        assert_eq!(
+            discovery_result.translation_units[0].context_name,
+            "Debug|x64"
+        );
+        assert_eq!(
+            discovery_result.translation_units[1].context_name,
+            "Release|x64"
+        );
     }
 }
