@@ -15,6 +15,22 @@ fn path_basename(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
+/// E-I9 (plan 1790521470000): needs-sets carry includable headers only —
+/// `.h`/`.hpp`/`.hxx`, case-sensitive, mirroring the ui node-kind detection
+/// in `dto.rs`. `.ipp`/`.inl` template-impl files are deliberately OUT for
+/// now: whether they belong in the includable set is a future question, not
+/// today's. Paths without a final component (e.g. `..`, empty) are never
+/// includable.
+pub fn is_includable_header(path: &Path) -> bool {
+    match path.file_name() {
+        Some(name) => {
+            let name = name.to_string_lossy();
+            name.ends_with(".h") || name.ends_with(".hpp") || name.ends_with(".hxx")
+        }
+        None => false,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributingSource {
     pub file_id: FileId,
@@ -246,8 +262,14 @@ impl<'a> LoadAnalyzer<'a> {
     /// "require" the file the seed itself is defined in. The exclusion is
     /// per seed defining-file, not per symbol: a non-seed closure symbol is
     /// dropped too whenever its defining file equals ANY seed defining file.
-    /// Unknown symbol ids are ignored. Ordered `(count desc, path asc)` per
-    /// I6, sharing the grouping contract of `contributing_sources`.
+    /// Rows are includable headers only (E-I9): a closure symbol defined in
+    /// a translation unit (`.cc`/`.cpp`/...) contributes no include
+    /// requirement — it is satisfied by a declaration elsewhere or by
+    /// linking — and defining files unregistered in `file_paths` cannot be
+    /// shown to be headers, so they are dropped as well. Filtering happens
+    /// before grouping, so counts never fold in source files. Unknown
+    /// symbol ids are ignored. Ordered `(count desc, path asc)` per I6,
+    /// sharing the grouping contract of `contributing_sources`.
     pub fn required_headers_for_symbols(
         &self,
         symbol_ids: &[SymbolId],
@@ -264,7 +286,14 @@ impl<'a> LoadAnalyzer<'a> {
                     .symbols
                     .get(sym)
                     .and_then(|r| r.defining_file)
-                    .is_some_and(|f| !seed_files.contains(&f))
+                    .is_some_and(|f| {
+                        !seed_files.contains(&f)
+                            && self
+                                .include_graph
+                                .file_paths
+                                .get(&f)
+                                .is_some_and(|p| is_includable_header(p))
+                    })
             })
             .collect();
         self.contributing_sources(&required)
