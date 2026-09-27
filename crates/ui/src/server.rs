@@ -666,6 +666,7 @@ pub async fn api_justification(
             if let Ok(metric) = analyzer.analyze_file_load(path) {
                 response = crate::dto::build_file_justification_detail(
                     &query.file,
+                    file_id,
                     &metric,
                     &analyzer,
                     reduced_ref,

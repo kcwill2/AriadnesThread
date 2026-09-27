@@ -71,10 +71,28 @@ pub struct CollateralResponse {
     pub transitive_collateral: std::collections::HashMap<String, usize>,
 }
 
+/// Capped payload summary of one `ExtractionImpact` (E-I4): counts plus at
+/// most `IMPACT_DROPPED_SAMPLE_MAX` basenames taken from the already
+/// path-asc-sorted `dropped_from_root`. Closure sizes keep the graph crate's
+/// seed-excluded convention (no +1 for the root).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImpactSummary {
+    pub dropped_from_root_count: usize,
+    pub still_reachable_count: usize,
+    pub dropped_sample: Vec<String>,
+    pub dropped_sample_truncated: bool,
+    pub root_closure_before: usize,
+    pub root_closure_after: usize,
+    pub symbols_no_longer_parsed: usize,
+}
+
 /// Symbol-attributed split of one include edge (root file -> source header):
 /// which symbols justify the edge and which ride along as collateral payload.
 /// Name lists are capped per I3; `justified_count`/`collateral_count` stay the
 /// raw uncapped counts and match `file_collateral` (same LoadMetric source).
+/// `impact` is the bounded extraction-impact summary (E-I4), present only on
+/// eligible entries; the key is ABSENT from JSON when `None`
+/// (`skip_serializing_if` — locked by the serde key tests).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JustificationEntry {
     pub justified_symbols: Vec<String>,
@@ -84,14 +102,20 @@ pub struct JustificationEntry {
     pub justified_truncated: bool,
     pub collateral_truncated: bool,
     pub required_headers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<ImpactSummary>,
 }
 
 /// One unbounded contributor row of the live `/api/justification` route.
+/// `impact` carries the FULL unbounded `ExtractionImpact` (E-I4: only the
+/// payload path summarizes); the entry-level summary stays `None` here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceJustification {
     pub source_id: String,
     pub source_label: String,
     pub entry: JustificationEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<ariadne_graph::ExtractionImpact>,
 }
 
 /// Full per-file justification detail served by `/api/justification` (I3:
@@ -110,6 +134,12 @@ pub struct FileJustificationResponse {
 const JUSTIFICATION_MAX_SOURCES: usize = 16;
 const JUSTIFICATION_MAX_NAMES: usize = 12;
 const JUSTIFICATION_MAX_HEADERS: usize = 8;
+
+/// E-I4 impact bounds: dropped-header basenames per summary sample, and how
+/// many entries per root file may carry a summary (selection follows the
+/// existing rank order — the top-ranked eligible sources win the slots).
+const IMPACT_DROPPED_SAMPLE_MAX: usize = 8;
+const IMPACT_MAX_ENTRIES_PER_ROOT: usize = 8;
 
 /// Extraction-proposal payload caps (I3/I8): top proposals per payload,
 /// symbol names per proposal (I6: sorted by SymbolId before capping; the UI
@@ -192,6 +222,7 @@ pub fn build_file_justification(
         let ranked = rank_source_ids(&sides);
 
         let mut per_root = std::collections::HashMap::new();
+        let mut impact_slots = 0usize;
         for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
             let s = &sides[&id];
             let (justified_symbols, justified_truncated) =
@@ -209,16 +240,35 @@ pub fn build_file_justification(
                     )
                 })
                 .unwrap_or_default();
+            let justified_count = s.justified.map_or(0, |x| x.symbol_count);
+            let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
+            let mut impact = None;
+            if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
+                impact = entry_extraction_impact(
+                    &analyzer,
+                    ariadne_repo::FileId(*root_id),
+                    id,
+                    s.justified,
+                    justified_count,
+                    collateral_count,
+                )
+                .as_ref()
+                .map(impact_summary_from);
+                if impact.is_some() {
+                    impact_slots += 1;
+                }
+            }
             per_root.insert(
                 id.to_string(),
                 JustificationEntry {
                     justified_symbols,
                     collateral_symbols,
-                    justified_count: s.justified.map_or(0, |x| x.symbol_count),
-                    collateral_count: s.collateral.map_or(0, |x| x.symbol_count),
+                    justified_count,
+                    collateral_count,
                     justified_truncated,
                     collateral_truncated,
                     required_headers,
+                    impact,
                 },
             );
         }
@@ -270,8 +320,11 @@ fn rank_source_ids(sides: &std::collections::HashMap<u64, SourceSides<'_>>) -> V
 /// `/api/justification` route: every contributing source, full symbol-name
 /// lists (truncation flags stay false), per-entry required headers with the
 /// source's own basename excluded. Same ranking contract as the payload (I6).
+/// Eligible entries carry the FULL `ExtractionImpact` (E-I4: only the payload
+/// path summarizes); no per-root cap on this route.
 pub fn build_file_justification_detail(
     target_id: &str,
+    root: ariadne_repo::FileId,
     metric: &ariadne_graph::LoadMetric,
     analyzer: &ariadne_graph::LoadAnalyzer,
     model: &ariadne_graph::ReducedSemanticModel,
@@ -300,6 +353,14 @@ pub fn build_file_justification_detail(
             .unwrap_or_default();
         total_justified += justified_count;
         total_collateral += collateral_count;
+        let impact = entry_extraction_impact(
+            analyzer,
+            root,
+            id,
+            s.justified,
+            justified_count,
+            collateral_count,
+        );
         entries.push(SourceJustification {
             source_id: id.to_string(),
             source_label,
@@ -311,7 +372,9 @@ pub fn build_file_justification_detail(
                 justified_truncated,
                 collateral_truncated,
                 required_headers,
+                impact: None,
             },
+            impact,
         });
     }
     FileJustificationResponse {
@@ -319,6 +382,49 @@ pub fn build_file_justification_detail(
         total_justified,
         total_collateral,
         entries,
+    }
+}
+
+/// E-I3/E-I4 eligibility + one `extraction_impact` call for a single kept
+/// entry: `None` when the edge is not eligible (either side empty, or the
+/// self-edge `root == source`) or the ids are unknown to the graph. Callers
+/// summarize for the payload and embed the raw struct for the route; the BFS
+/// runs at most once per kept entry.
+fn entry_extraction_impact(
+    analyzer: &ariadne_graph::LoadAnalyzer,
+    root: ariadne_repo::FileId,
+    source_id: u64,
+    justified: Option<&ariadne_graph::ContributingSource>,
+    justified_count: usize,
+    collateral_count: usize,
+) -> Option<ariadne_graph::ExtractionImpact> {
+    if justified_count == 0 || collateral_count == 0 || root.0 == source_id {
+        return None;
+    }
+    let symbols = justified?.symbols.as_slice();
+    analyzer.extraction_impact(root, ariadne_repo::FileId(source_id), symbols)
+}
+
+/// Map a full `ExtractionImpact` to its bounded payload summary (E-I4): counts
+/// plus the first `IMPACT_DROPPED_SAMPLE_MAX` basenames of the path-asc-sorted
+/// `dropped_from_root`; the `truncated` flag is set iff that list exceeds the
+/// cap. Closure sizes pass through unchanged (already seed-excluded by the
+/// graph crate — never re-add the root).
+pub fn impact_summary_from(impact: &ariadne_graph::ExtractionImpact) -> ImpactSummary {
+    let dropped_from_root_count = impact.dropped_from_root.len();
+    ImpactSummary {
+        dropped_from_root_count,
+        still_reachable_count: impact.still_reachable.len(),
+        dropped_sample: impact
+            .dropped_from_root
+            .iter()
+            .take(IMPACT_DROPPED_SAMPLE_MAX)
+            .map(|h| path_basename(&h.path))
+            .collect(),
+        dropped_sample_truncated: dropped_from_root_count > IMPACT_DROPPED_SAMPLE_MAX,
+        root_closure_before: impact.root_closure_before,
+        root_closure_after: impact.root_closure_after,
+        symbols_no_longer_parsed: impact.symbols_no_longer_parsed,
     }
 }
 
