@@ -606,8 +606,8 @@ fn assert_hotspot_tour_and_canvas_isolation(html: &str) {
         "tour must only close hotspots if the tour step opened them"
     );
     assert!(
-        html.contains(".hotspot-panel.tour-highlighted-element"),
-        "tour highlight must keep the hotspot panel absolutely positioned"
+        !html.contains(".hotspot-panel.tour-highlighted-element"),
+        "tour highlight must not pin the hotspot panel out of the workspace layout"
     );
 
     // Older exports without file_collateral degrade to Fan-in with an inline hint
@@ -628,16 +628,16 @@ fn assert_hotspot_tour_and_canvas_isolation(html: &str) {
         "missing normalized hotspot bar"
     );
 
-    // Panel clicks/scrolls must not reach canvas handlers (deselect-on-click, pan, zoom)
+    // Panel no longer lives inside the canvas, so canvas handlers must drop the obsolete guards.
     assert!(
-        html.matches("closest('.hotspot-panel')").count() >= 3,
-        "canvas mousedown/click/wheel handlers must ignore events inside the hotspot panel"
+        !ariadne_ui::GRAPH_JS.contains("closest('.hotspot-panel')"),
+        "canvas mousedown/click/wheel handlers must no longer special-case a panel that is outside the canvas"
     );
 
-    // Wheel over the panel scrolls the list, falling through to the graph view at its edges
+    // Wheel fallback is dead once the panel owns its own column (native scrolling takes over).
     assert!(
-        html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
-        "wheel over hotspot panel should scroll the list, then reach the graph view at the edges"
+        !ariadne_ui::GRAPH_JS.contains("hsList"),
+        "the hsList wheel fallback is dead once the panel owns its own column"
     );
 }
 
@@ -649,6 +649,68 @@ fn test_ui_hotspots_panel() {
     assert_hotspot_burden_and_list_rules(html.as_str());
     assert_hotspot_metric_options(html.as_str());
     assert_hotspot_tour_and_canvas_isolation(html.as_str());
+}
+
+fn css_rule_body(css: &str, selector: &str) -> String {
+    let at = css.find(selector).unwrap_or_else(|| {
+        panic!("styles.css must contain a rule for {selector}");
+    });
+    let open = css[at..]
+        .find('{')
+        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
+    let close = css[at + open..]
+        .find('}')
+        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
+    css[at + open + 1..at + open + close].to_string()
+}
+
+#[test]
+fn test_hotspots_panel_is_collapsible_layout_column() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    // The panel is a direct workspace child placed before the canvas, like the
+    // inspector — never a floating overlay that can cover the legend box.
+    let workspace = html
+        .find("class=\"workspace\"")
+        .expect("workspace container");
+    let panel = html.find("id=\"hotspotPanel\"").expect("hotspot panel");
+    let canvas = html
+        .find("id=\"canvasContainer\"")
+        .expect("canvas container");
+    assert!(
+        panel > workspace && panel < canvas,
+        "hotspot panel must sit inside .workspace before the graph canvas"
+    );
+
+    let body = css_rule_body(ariadne_ui::STYLES_CSS, ".hotspot-panel");
+    assert!(
+        body.contains("position: static"),
+        ".hotspot-panel must be a static flex column, not an absolute overlay"
+    );
+    assert!(
+        body.contains("width: 300px") && body.contains("flex-shrink: 0"),
+        ".hotspot-panel must reserve a fixed 300px workspace column"
+    );
+    assert!(
+        body.contains("background: var(--bg-surface)"),
+        ".hotspot-panel must paint an opaque workspace surface"
+    );
+    assert!(
+        !body.contains("max-height"),
+        ".hotspot-panel must not cap its height; the column owns its height"
+    );
+
+    let list = css_rule_body(ariadne_ui::STYLES_CSS, ".hotspot-list");
+    assert!(
+        list.contains("min-height: 0") && list.contains("flex: 1"),
+        ".hotspot-list must grow and scroll inside the column instead of the panel growing past the viewport"
+    );
+
+    let page = common::page_content();
+    assert!(
+        page.contains("beside the open list"),
+        "help text must say the heat map renders beside the open list, not behind it"
+    );
 }
 
 #[test]
