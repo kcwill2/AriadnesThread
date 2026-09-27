@@ -534,12 +534,14 @@ fn test_impact_capped_to_eight_entries_per_root_by_rank() {
 fn test_impact_dropped_sample_caps_at_eight_with_truncation_flag() {
     // fat9.h drops 9 headers (d0..d8): sample == first 8 path-asc, truncated.
     // fat8.h drops exactly 8 (e0..e7): sample == 8, not truncated.
+    let dnames: Vec<String> = (0..9).map(|i| format!("d{i}.h")).collect();
+    let enames: Vec<String> = (0..8).map(|i| format!("e{i}.h")).collect();
     let mut paths: Vec<(u64, &str)> = vec![(1, "root.cc"), (2, "fat9.h"), (3, "fat8.h")];
-    for i in 0..9 {
-        paths.push((20 + i, Box::leak(format!("d{i}.h").into_boxed_str()).as_ref()));
+    for (idx, name) in dnames.iter().enumerate() {
+        paths.push((20 + idx as u64, name));
     }
-    for i in 0..8 {
-        paths.push((30 + i, Box::leak(format!("e{i}.h").into_boxed_str()).as_ref()));
+    for (idx, name) in enames.iter().enumerate() {
+        paths.push((30 + idx as u64, name));
     }
     let mut graph = graph_with_paths(&paths);
     graph.edges.push(include_edge(1, 2));
