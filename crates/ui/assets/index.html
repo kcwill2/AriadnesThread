@@ -406,7 +406,7 @@
           <p><strong>Edges:</strong> Complete dependencies are solid, incomplete (forward declarations) are dashed.</p>
           <p><strong>Closure:</strong> Number of transitive dependencies.</p>
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
-          <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden. The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along.</p>
+          <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden. The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along. With Preview after extraction (on justification rows and proposal cards) the map marks what the selected file would stop including (red dashed), what still arrives via other paths (amber dashed), and what the slim edge keeps (green).</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
           <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
         </div>
@@ -429,6 +429,7 @@
   <script src="/app/graph.js"></script>
   <script src="/app/file-view.js"></script>
   <script src="/app/hotspots.js"></script>
+  <script src="/app/preview.js"></script>
   <script src="/app/main.js"></script>
 </body>
 </html>

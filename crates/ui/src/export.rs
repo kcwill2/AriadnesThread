@@ -1,5 +1,5 @@
 use crate::dto::GraphExportPayload;
-use crate::{API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, STYLES_CSS};
+use crate::{API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, PREVIEW_JS, STYLES_CSS};
 use std::borrow::Cow;
 
 /// Reassemble the split UI assets into the self-contained single-file page.
@@ -15,6 +15,7 @@ fn standalone_template() -> String {
         ("graph.js", GRAPH_JS),
         ("file-view.js", FILE_VIEW_JS),
         ("hotspots.js", HOTSPOTS_JS),
+        ("preview.js", PREVIEW_JS),
         ("main.js", MAIN_JS),
     ] {
         let tag = format!("<script src=\"/app/{name}\"></script>");

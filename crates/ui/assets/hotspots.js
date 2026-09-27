@@ -272,12 +272,21 @@
     // Card renderer shared by the hotspot panel list and the inspector tie-in
     // (api.js renderInspectorProposalCard). Payload order is already sorted
     // (delta desc, plan_id asc) per D1, so render it as-is; never re-sort here.
+    // The preview control (E3) runs against the CURRENTLY selected consumer root,
+    // never the planner's global target — the label says so — and only appears
+    // when that root's justification data carries impact for this card's file.
     function renderExtractionProposalCard(p) {
       const headers = (p.required_headers || []).map(escapeHtml).join(', ');
       const names = (p.symbol_names || []).map(escapeHtml).join(', ');
       const hidden = (p.total_symbols || 0) - (p.symbol_names || []).length;
       const more = hidden > 0 ? ` <span class="just-more">+${hidden} more</span>` : '';
       const needs = headers ? ` needs: ${headers}` : '';
+      const previewRoot = selectedNodeId === null || selectedNodeId === undefined ? null : String(selectedNodeId);
+      const previewable = previewRoot !== null && window.ariadnePreview
+        && window.ariadnePreview.hasImpact(previewRoot, String(p.target_file_id));
+      const previewBtn = previewable
+        ? `<div class="extraction-row"><button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(previewRoot)}" data-preview-source="${escapeHtml(String(p.target_file_id))}">Preview drop from selected file</button></div>`
+        : '';
       return `
         <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${escapeHtml(p.problem || '')}">
           <div class="extraction-title">${escapeHtml(p.target_file || String(p.target_file_id))}</div>
@@ -285,12 +294,16 @@
           <div class="extraction-names">${names || '<em>no symbol names</em>'}${more}</div>
           <div class="extraction-row"><span class="just-tag just-needs">needs</span>${needs || '<em>none</em>'}</div>
           <div class="extraction-row"><span class="just-tag">${p.consumer_tu_count || 0} TU(s)</span><span class="just-tag">${escapeHtml(p.risk || '')}</span></div>
+          ${previewBtn}
         </div>`;
     }
 
     // Section lives and dies with the payload: absent/empty extraction_proposals
-    // hides the whole section (I4), byte-identical to pre-D2 output.
+    // hides the whole section (I4), byte-identical to pre-D2 output. The E3
+    // preview control is selection-dependent, so the source cache also keys on
+    // the selected root to refresh card buttons when the selection changes.
     let extractionProposalsSource = null;
+    let extractionProposalsRoot = null;
     function renderProposalsSection() {
       const section = document.getElementById('proposedExtractionsSection');
       if (!section) return;
@@ -298,12 +311,15 @@
       if (proposals.length === 0) {
         section.style.display = 'none';
         extractionProposalsSource = null;
+        extractionProposalsRoot = null;
         return;
       }
-      if (extractionProposalsSource === proposals) return;
+      if (extractionProposalsSource === proposals && extractionProposalsRoot === selectedNodeId) return;
       document.getElementById('proposedExtractionsList').innerHTML =
         proposals.map(renderExtractionProposalCard).join('');
+      if (window.bindPreviewControls) window.bindPreviewControls(document.getElementById('proposedExtractionsList'));
       extractionProposalsSource = proposals;
+      extractionProposalsRoot = selectedNodeId;
       section.style.display = 'block';
     }
 

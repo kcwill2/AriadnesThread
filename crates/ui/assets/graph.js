@@ -196,6 +196,8 @@
       const edgesLayer = document.getElementById('edgesLayer');
       nodesLayer.innerHTML = '';
       edgesLayer.innerHTML = '';
+      // E3: every re-render (new selection, Esc, filters) drops preview state; the overlay returns only by explicit click.
+      if (window.ariadnePreview) window.ariadnePreview.clearPreview();
 
       if (selectedNodeId) {
         edgesLayer.classList.add('edges-has-selection');

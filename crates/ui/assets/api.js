@@ -158,7 +158,7 @@
     function payloadJustificationRows(nodeId) {
       const map = (graphData.file_justification || {})[nodeId] || {};
       return Object.keys(map)
-        .map(id => ({ id, label: justificationBasename(id), entry: map[id] }))
+        .map(id => ({ id, label: justificationBasename(id), entry: map[id], impact: map[id].impact || null }))
         .sort((a, b) => justificationCombined(b) - justificationCombined(a) || Number(a.id) - Number(b.id))
         .slice(0, 16);
     }
@@ -176,16 +176,19 @@
       return `<div class="just-part"><span class="just-tag just-needs">needs</span><span>${escapeHtml(headers.join(', '))}</span></div>`;
     }
 
-    function justificationRowHtml(row, expanded) {
+    function justificationRowHtml(row, expanded, nodeId) {
       const e = row.entry;
       const body = [
         justificationSidePart('for', 'just-justified', e.justified_symbols || [], e.justified_truncated, e.justified_count || 0),
         justificationNeedsPart(e.required_headers),
         justificationSidePart('collateral', 'just-collateral', e.collateral_symbols || [], e.collateral_truncated, e.collateral_count || 0),
       ].join('');
+      const previewBtn = row.impact
+        ? `<button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(String(nodeId))}" data-preview-source="${escapeHtml(String(row.id))}">Preview after extraction</button>`
+        : '';
       const summary = `<summary><span style="color:var(--cyan);">${escapeHtml(row.label || row.id)}</span>`
         + `<span style="color:var(--text-sub);">${e.justified_count || 0} sym · ${e.collateral_count || 0} col</span></summary>`;
-      return `<details class="link-item just-row"${expanded ? ' open' : ''}>${summary}<div class="just-body">${body || '<div class="just-part">No symbol names recorded.</div>'}</div></details>`;
+      return `<details class="link-item just-row"${expanded ? ' open' : ''}>${summary}<div class="just-body">${body || '<div class="just-part">No symbol names recorded.</div>'}${previewBtn}</div></details>`;
     }
 
     function justificationTotals(rows, detail) {
@@ -203,14 +206,15 @@
       const section = document.getElementById('inspJustificationSection');
       if (!section) return false;
       const rows = (detail && Array.isArray(detail.entries))
-        ? detail.entries.slice(0, 16).map(e => ({ id: String(e.source_id), label: e.source_label, entry: e.entry }))
+        ? detail.entries.slice(0, 16).map(e => ({ id: String(e.source_id), label: e.source_label, entry: e.entry, impact: e.impact || null }))
         : payloadJustificationRows(nodeId);
       if (rows.length === 0) {
         section.style.display = 'none';
         return false;
       }
-      document.getElementById('inspJustificationList').innerHTML =
-        rows.map((row, i) => justificationRowHtml(row, i === 0)).join('');
+      const list = document.getElementById('inspJustificationList');
+      list.innerHTML = rows.map((row, i) => justificationRowHtml(row, i === 0, nodeId)).join('');
+      if (window.bindPreviewControls) window.bindPreviewControls(list);
       document.getElementById('inspJustificationCount').textContent = justificationTotals(rows, detail);
       section.style.display = 'block';
       const collateralSection = document.getElementById('inspCollateralSection');
@@ -232,7 +236,9 @@
         section.style.display = 'none';
         return;
       }
-      document.getElementById('inspProposalCard').innerHTML = renderExtractionProposalCard(match);
+      const cardSlot = document.getElementById('inspProposalCard');
+      cardSlot.innerHTML = renderExtractionProposalCard(match);
+      if (window.bindPreviewControls) window.bindPreviewControls(cardSlot);
       section.style.display = 'block';
     }
 

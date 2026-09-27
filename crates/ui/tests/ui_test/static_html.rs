@@ -786,7 +786,7 @@ fn test_script_tag_order_preserves_original_execution_order() {
 
 #[tokio::test]
 async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
-    let assets: [(&str, &str, &str); 6] = [
+    let assets: [(&str, &str, &str); 7] = [
         (
             "/styles.css",
             ariadne_ui::STYLES_CSS,
@@ -812,6 +812,7 @@ async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
             ariadne_ui::HOTSPOTS_JS,
             "text/javascript; charset=utf-8",
         ),
+        ("/app/preview.js", ariadne_ui::PREVIEW_JS, "text/javascript; charset=utf-8"),
         (
             "/app/main.js",
             ariadne_ui::MAIN_JS,

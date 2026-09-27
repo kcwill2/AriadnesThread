@@ -1126,3 +1126,53 @@
     .hotspot-panel.tour-highlighted-element {
       position: absolute !important;
     }
+
+    /* E3: after-extraction preview overlay. These compose with (not replace) the
+       C1 heat/tri-state classes, so the underlying tiers stay readable. */
+    .node-group.preview-eliminated rect {
+      stroke: #ef4444 !important;
+      stroke-width: 2.5px !important;
+      stroke-dasharray: 4 3;
+      opacity: 0.55;
+      filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
+    }
+
+    /* SVG2 text-decoration: line-through is supported in current browsers; if a
+       renderer drops it, the red dashed card + legend already disambiguate. */
+    .node-group.preview-eliminated text {
+      text-decoration: line-through;
+      fill: #fca5a5 !important;
+    }
+
+    .node-group.preview-kept rect {
+      stroke: #4ade80 !important;
+      stroke-width: 2.5px !important;
+      opacity: 1;
+    }
+
+    .node-group.preview-still-reachable rect {
+      stroke: #f59e0b !important;
+      stroke-width: 2.5px !important;
+      stroke-dasharray: 2 3;
+    }
+
+    .just-preview-btn {
+      align-self: flex-start;
+      margin-top: 6px;
+      padding: 3px 8px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      color: var(--cyan);
+      font-size: 10px;
+      font-weight: 600;
+      font-family: monospace;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .just-preview-btn:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--cyan);
+    }
+
