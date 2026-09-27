@@ -78,8 +78,8 @@ fn test_justification_section_fills_vertical_space() {
         "#inspJustificationSection must grow (flex: 1 ...) as a flex column to fill free vertical space"
     );
     assert!(
-        section.contains("overflow: hidden"),
-        "#inspJustificationSection needs overflow: hidden so its inner list can never paint over later siblings"
+        section.contains("overflow: clip"),
+        "#inspJustificationSection needs overflow: clip so its inner list can never paint over later siblings"
     );
 
     let list = css_rule_body(css, "#inspJustificationList");
@@ -132,9 +132,12 @@ fn test_justification_section_cannot_shrink_below_content() {
          (title + list floor) so flex-shrink can never collapse it below its own content"
     );
     assert!(
-        section.contains("overflow: hidden"),
-        "#inspJustificationSection must clip its own box (overflow: hidden) as paint safety against \
-         any remaining overflow spilling over later siblings"
+        section.contains("overflow: clip"),
+        "#inspJustificationSection must use a NON-scrollable overflow (visible/clip); the min-content \
+         floor exists only while the flexbox automatic minimum stays content-based. overflow: hidden, \
+         auto, or scroll turns the section into a scroll container, which zeroes that automatic \
+         minimum (the c08d1e6 regression mechanism) and lets it collapse below its content again. \
+         clip additionally guarantees nothing paints over later siblings."
     );
 }
 
