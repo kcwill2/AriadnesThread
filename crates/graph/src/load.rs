@@ -131,6 +131,42 @@ pub struct LoadAnalyzer<'a> {
     symbol_adjacency: RefCell<Option<HashMap<SymbolId, Vec<SymbolId>>>>,
 }
 
+/// One header row in an `ExtractionImpact` list. `symbol_count` is the total
+/// number of symbols the reduced model attributes to the file (0 when the
+/// file has none registered).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImpactHeader {
+    pub file_id: FileId,
+    pub path: PathBuf,
+    pub symbol_count: usize,
+}
+
+/// Per-consumer extraction preview for one edge (root F × source S × justified
+/// symbols). All header sets use the STRICT closure convention —
+/// `closure(X)` = transitive includes of X, NOT containing X itself (matching
+/// `IncludeClosure::transitive_includes`; `get_transitive_includes` unions the
+/// seed and is NOT used for these sets). `closure_after(F)` excludes F too.
+/// Every list is sorted by `(path asc, file_id asc)` for determinism.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionImpact {
+    pub root_file_id: FileId,
+    pub source_file_id: FileId,
+    /// R: required headers of the justified symbols (header-only per E-I9,
+    /// never containing S itself).
+    pub required_headers: Vec<ImpactHeader>,
+    /// `closure(S) \ closure({S} ∪ R)` — the subtree S's slim edge sheds.
+    pub dropped_directly: Vec<ImpactHeader>,
+    /// `closure(F) \ closure_after(F)` — what F actually stops seeing.
+    pub dropped_from_root: Vec<ImpactHeader>,
+    /// `dropped_directly \ dropped_from_root` — shed headers that keep
+    /// arriving via sibling paths; never counted as savings.
+    pub still_reachable: Vec<ImpactHeader>,
+    pub root_closure_before: usize,
+    pub root_closure_after: usize,
+    /// Σ symbol_count over `dropped_from_root` only.
+    pub symbols_no_longer_parsed: usize,
+}
+
 impl<'a> LoadAnalyzer<'a> {
     pub fn new(include_graph: &'a IncludeGraph, model: &'a ReducedSemanticModel) -> Self {
         Self {
@@ -300,6 +336,155 @@ impl<'a> LoadAnalyzer<'a> {
             .into_iter()
             .map(|src| (src.file_id, src.path, src.symbol_count))
             .collect()
+    }
+
+    /// Strict include closure of a file: transitive includes WITHOUT the file
+    /// itself, served from the shared `closures` cache (real edges only).
+    fn strict_closure(&self, file_id: FileId) -> HashSet<FileId> {
+        let mut guard = self.closures.borrow_mut();
+        let closures = guard.get_or_insert_with(|| self.include_graph.compute_closures());
+        closures
+            .get(&file_id)
+            .map(|c| c.transitive_includes.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// BFS from `start` over real include edges where `source`'s outgoing
+    /// edges are REPLACED by edges to every header in `replacement`
+    /// (override expansion; the graph is never cloned). The result contains
+    /// `start` itself; callers using strict-closure sizes subtract it.
+    /// The `closures` cache models real edges only, so closure_after cannot
+    /// reuse it — this BFS is the modeled after-state.
+    fn override_closure(
+        &self,
+        start: FileId,
+        source: FileId,
+        replacement: &HashSet<FileId>,
+    ) -> HashSet<FileId> {
+        let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
+        for edge in &self.include_graph.edges {
+            if let Some(dest) = edge.destination {
+                adj.entry(edge.source).or_default().push(dest);
+            }
+        }
+
+        let mut visited: HashSet<FileId> = HashSet::new();
+        visited.insert(start);
+        let mut stack = vec![start];
+        while let Some(current) = stack.pop() {
+            let nexts: Vec<FileId> = if current == source {
+                replacement.iter().copied().collect()
+            } else {
+                adj.get(&current).cloned().unwrap_or_default()
+            };
+            for next in nexts {
+                if visited.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        visited
+    }
+
+    /// One header row: identity plus the model's total symbol count for the
+    /// file (0 when none registered).
+    fn impact_header(&self, file_id: FileId) -> ImpactHeader {
+        ImpactHeader {
+            file_id,
+            path: self
+                .include_graph
+                .file_paths
+                .get(&file_id)
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("unknown")),
+            symbol_count: self
+                .model
+                .file_symbols
+                .get(&file_id)
+                .map(|s| s.len())
+                .unwrap_or(0),
+        }
+    }
+
+    fn impact_headers(&self, ids: &HashSet<FileId>) -> Vec<ImpactHeader> {
+        let mut rows: Vec<ImpactHeader> = ids.iter().map(|&id| self.impact_header(id)).collect();
+        rows.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.file_id.cmp(&b.file_id)));
+        rows
+    }
+
+    /// Per-consumer extraction preview (E-I1..E-I3): given a consumer edge
+    /// root F → source S and the symbols justified on that edge, compute what
+    /// the slim edge sheds (`dropped_directly`), what F actually stops seeing
+    /// (`dropped_from_root`, via the modeled `closure_after`), and the decoy
+    /// headers that keep arriving via sibling paths (`still_reachable`).
+    /// Returns `None` for `root == source`, an empty justified set, or file
+    /// ids unregistered in `file_paths`.
+    pub fn extraction_impact(
+        &self,
+        root: FileId,
+        source: FileId,
+        justified_symbols: &[SymbolId],
+    ) -> Option<ExtractionImpact> {
+        if root == source || justified_symbols.is_empty() {
+            return None;
+        }
+        if !self.include_graph.file_paths.contains_key(&root)
+            || !self.include_graph.file_paths.contains_key(&source)
+        {
+            return None;
+        }
+
+        // R never contains S (contract: "excluding S itself"); the A2 rule
+        // drops seed defining files, but justified symbols need not all be
+        // defined in S, so filter defensively.
+        let required: Vec<(FileId, PathBuf, usize)> = self
+            .required_headers_for_symbols(justified_symbols)
+            .into_iter()
+            .filter(|(id, _, _)| *id != source)
+            .collect();
+        let required_set: HashSet<FileId> = required.iter().map(|(id, _, _)| *id).collect();
+
+        let kept_subtree = self.override_closure(source, source, &required_set);
+        let dropped_directly: HashSet<FileId> = self
+            .strict_closure(source)
+            .difference(&kept_subtree)
+            .copied()
+            .collect();
+
+        let root_after = self.override_closure(root, source, &required_set);
+        let root_closure_after = root_after.len().saturating_sub(1);
+        let root_before = self.strict_closure(root);
+        let dropped_from_root: HashSet<FileId> = root_before
+            .difference(&root_after)
+            .copied()
+            .collect();
+        let still_reachable: HashSet<FileId> = dropped_directly
+            .difference(&dropped_from_root)
+            .copied()
+            .collect();
+
+        let partition_union: HashSet<FileId> = dropped_from_root
+            .union(&still_reachable)
+            .copied()
+            .collect();
+        debug_assert!(
+            partition_union == dropped_directly
+                && dropped_from_root.is_disjoint(&still_reachable),
+            "E-I1: dropped_directly must partition into dropped_from_root ⊎ still_reachable"
+        );
+
+        let dropped_from_root_rows = self.impact_headers(&dropped_from_root);
+        Some(ExtractionImpact {
+            root_file_id: root,
+            source_file_id: source,
+            required_headers: self.impact_headers(&required_set),
+            dropped_directly: self.impact_headers(&dropped_directly),
+            dropped_from_root: dropped_from_root_rows.clone(),
+            still_reachable: self.impact_headers(&still_reachable),
+            root_closure_before: root_before.len(),
+            root_closure_after,
+            symbols_no_longer_parsed: dropped_from_root_rows.iter().map(|h| h.symbol_count).sum(),
+        })
     }
 
     fn compute_load(
