@@ -169,7 +169,7 @@ impl<'a> ProductionAnalyzer<'a> {
                 },
             );
 
-            let new_analyses = pool.run(&self.repo.root, &mut queue).await?;
+            let new_analyses = pool.run_worker_pool(&self.repo.root, &mut queue).await?;
             peak_mem = pool.peak_memory_bytes();
 
             for analysis in new_analyses {

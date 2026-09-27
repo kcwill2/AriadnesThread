@@ -45,7 +45,7 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
         self.peak_memory_bytes.load(Ordering::Relaxed)
     }
 
-    pub async fn run(
+    pub async fn run_worker_pool(
         &self,
         repo_root: &Path,
         queue: &mut PrioritizedTuQueue,
@@ -92,7 +92,7 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
                         None => break,
                     };
 
-                    let result = backend.execute(&task, &root);
+                    let result = backend.analyze_task(&task, &root);
                     match result {
                         Ok(analysis) => {
                             if tx_worker.send(Ok(analysis)).await.is_err() {
@@ -174,7 +174,7 @@ mod fake_process_tests {
     struct TagBySourcePathBackend;
 
     impl WorkerBackend for TagBySourcePathBackend {
-        fn execute(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             Ok(TuAnalysis {
                 tu_file_id: task.tu.file_id,
                 context_name: task.tu.source_path.to_string_lossy().to_string(),
@@ -189,7 +189,7 @@ mod fake_process_tests {
     }
 
     impl WorkerBackend for SelectivelyFailingBackend {
-        fn execute(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             if task.task_id == self.fatal_task_id {
                 return Err(anyhow!(
                     "simulated permanent crash for task {}",
@@ -210,7 +210,7 @@ mod fake_process_tests {
     }
 
     impl WorkerBackend for CountingBackend {
-        fn execute(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             self.total_executions.fetch_add(1, Ordering::SeqCst);
             Ok(TuAnalysis {
                 tu_file_id: task.tu.file_id,
@@ -254,7 +254,7 @@ mod fake_process_tests {
         let repo = tempfile::tempdir().expect("repo tempdir");
 
         let analyses = pool
-            .run(repo.path(), &mut queue)
+            .run_worker_pool(repo.path(), &mut queue)
             .await
             .expect("single-worker run must be Ok");
         let arrival_order: Vec<String> = analyses
@@ -322,7 +322,7 @@ mod fake_process_tests {
         );
         let repo = tempfile::tempdir().expect("repo tempdir");
 
-        let outcome = pool.run(repo.path(), &mut queue).await;
+        let outcome = pool.run_worker_pool(repo.path(), &mut queue).await;
         let err = outcome.expect_err("exhausted retries must surface a fatal pool error");
         let err_text = format!("{err:#}");
         assert!(
@@ -370,7 +370,7 @@ mod fake_process_tests {
         let repo = tempfile::tempdir().expect("repo tempdir");
 
         let analyses = pool
-            .run(repo.path(), &mut queue)
+            .run_worker_pool(repo.path(), &mut queue)
             .await
             .expect("clean multi-worker run must be Ok");
         assert_eq!(
@@ -418,7 +418,7 @@ mod tests {
     }
 
     impl WorkerBackend for FlakyBackend {
-        fn execute(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
             if task.task_id == 1 && attempt == 0 {
                 return Err(anyhow!("Transient worker failure"));
@@ -434,7 +434,7 @@ mod tests {
     struct FailingBackend;
 
     impl WorkerBackend for FailingBackend {
-        fn execute(&self, _task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+        fn analyze_task(&self, _task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
             Err(anyhow!("Permanent worker crash"))
         }
     }
@@ -470,7 +470,10 @@ mod tests {
             },
         );
         let temp_dir = tempfile::tempdir().unwrap();
-        let results = pool.run(temp_dir.path(), &mut queue).await.unwrap();
+        let results = pool
+            .run_worker_pool(temp_dir.path(), &mut queue)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 3);
     }
 
@@ -502,7 +505,10 @@ mod tests {
             },
         );
         let temp_dir = tempfile::tempdir().unwrap();
-        let results = pool.run(temp_dir.path(), &mut queue).await.unwrap();
+        let results = pool
+            .run_worker_pool(temp_dir.path(), &mut queue)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -524,7 +530,7 @@ mod tests {
             },
         );
         let temp_dir = tempfile::tempdir().unwrap();
-        let res = pool.run(temp_dir.path(), &mut queue).await;
+        let res = pool.run_worker_pool(temp_dir.path(), &mut queue).await;
         assert!(res.is_err());
     }
 
@@ -539,7 +545,10 @@ mod tests {
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
         let temp_dir = tempfile::tempdir().unwrap();
-        let _ = pool.run(temp_dir.path(), &mut queue).await.unwrap();
+        let _ = pool
+            .run_worker_pool(temp_dir.path(), &mut queue)
+            .await
+            .unwrap();
         assert!(pool.peak_memory_bytes() > 0);
     }
 }

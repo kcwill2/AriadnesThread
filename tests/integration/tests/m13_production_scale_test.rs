@@ -115,7 +115,7 @@ async fn test_m13_failure_recovery() {
     }
 
     impl WorkerBackend for FaultyWorkerBackend {
-        fn execute(
+        fn analyze_task(
             &self,
             task: &TuTask,
             repo_root: &std::path::Path,
@@ -125,7 +125,7 @@ async fn test_m13_failure_recovery() {
             if task.task_id == 1 && attempt == 0 {
                 return Err(anyhow!("Simulated worker crash"));
             }
-            DefaultWorkerBackend.execute(task, repo_root)
+            DefaultWorkerBackend.analyze_task(task, repo_root)
         }
     }
 
@@ -165,7 +165,7 @@ async fn test_m13_failure_recovery() {
     );
 
     let results = pool
-        .run(&root, &mut queue)
+        .run_worker_pool(&root, &mut queue)
         .await
         .expect("Pool should recover from failure");
     assert_eq!(

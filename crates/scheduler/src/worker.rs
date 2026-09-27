@@ -12,13 +12,13 @@ pub enum WorkerStatus {
 }
 
 pub trait WorkerBackend: Send + Sync {
-    fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis>;
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis>;
 }
 
 pub struct DefaultWorkerBackend;
 
 impl WorkerBackend for DefaultWorkerBackend {
-    fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
         if let Some(ctx) = &task.context {
             // Canonical closure-merge analysis: identical content to the
             // single-threaded index path so all shard store entries agree.
@@ -175,7 +175,7 @@ impl ClangWorkerBackend {
 }
 
 impl WorkerBackend for ClangWorkerBackend {
-    fn execute(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
         let full_path = repo_root.join(&task.tu.source_path);
         let req = Self::build_analyze_request(task, &full_path);
 
@@ -197,7 +197,7 @@ impl WorkerBackend for ClangWorkerBackend {
         match analysis {
             Some(analysis) => Ok(analysis),
             // Fallback if execution failed or response invalid
-            None => DefaultWorkerBackend.execute(task, repo_root),
+            None => DefaultWorkerBackend.analyze_task(task, repo_root),
         }
     }
 }
@@ -361,7 +361,7 @@ mod fake_process_tests {
             install_fake_worker_printing_file(&canned_success_response(&canned_analysis));
 
         let analysis = ClangWorkerBackend
-            .execute(&probe_task(9001, "probe_ok.cpp"), repo.path())
+            .analyze_task(&probe_task(9001, "probe_ok.cpp"), repo.path())
             .expect("well-formed success line must decode to Ok, not fall back");
         assert_eq!(analysis, canned_analysis);
     }
@@ -375,12 +375,12 @@ mod fake_process_tests {
 
         let task = probe_task(9002, "probe_malformed.cpp");
         let analysis = ClangWorkerBackend
-            .execute(&task, repo.path())
+            .analyze_task(&task, repo.path())
             .expect("malformed worker JSON must degrade to Ok via in-process fallback");
         assert_eq!(
             analysis,
             DefaultWorkerBackend
-                .execute(&task, repo.path())
+                .analyze_task(&task, repo.path())
                 .expect("default backend fallback must succeed")
         );
     }
@@ -394,12 +394,12 @@ mod fake_process_tests {
 
         let task = probe_task(9003, "probe_error.cpp");
         let analysis = ClangWorkerBackend
-            .execute(&task, repo.path())
+            .analyze_task(&task, repo.path())
             .expect("error-status worker JSON must degrade to Ok via in-process fallback");
         assert_eq!(
             analysis,
             DefaultWorkerBackend
-                .execute(&task, repo.path())
+                .analyze_task(&task, repo.path())
                 .expect("default backend fallback must succeed")
         );
     }
@@ -414,12 +414,12 @@ mod fake_process_tests {
 
         let task = probe_task(9004, "probe_noanalysis.cpp");
         let analysis = ClangWorkerBackend
-            .execute(&task, repo.path())
+            .analyze_task(&task, repo.path())
             .expect("success line without analysis must degrade to Ok via fallback");
         assert_eq!(
             analysis,
             DefaultWorkerBackend
-                .execute(&task, repo.path())
+                .analyze_task(&task, repo.path())
                 .expect("default backend fallback must succeed")
         );
     }
@@ -440,7 +440,7 @@ mod fake_process_tests {
         let _fake_worker = install_fake_worker_printing_file(&noisy_body);
 
         let analysis = ClangWorkerBackend
-            .execute(&probe_task(9005, "probe_mixed.cpp"), repo.path())
+            .analyze_task(&probe_task(9005, "probe_mixed.cpp"), repo.path())
             .expect("success line after noise must decode to Ok, not fall back");
         assert_eq!(analysis, canned_analysis);
     }
@@ -453,12 +453,12 @@ mod fake_process_tests {
 
         let task = probe_task(9006, "probe_exit3.cpp");
         let analysis = ClangWorkerBackend
-            .execute(&task, repo.path())
+            .analyze_task(&task, repo.path())
             .expect("nonzero worker exit must degrade to Ok via in-process fallback");
         assert_eq!(
             analysis,
             DefaultWorkerBackend
-                .execute(&task, repo.path())
+                .analyze_task(&task, repo.path())
                 .expect("default backend fallback must succeed")
         );
     }
@@ -473,12 +473,12 @@ mod fake_process_tests {
 
         let task = probe_task(9007, "probe_spawnfail.cpp");
         let analysis = ClangWorkerBackend
-            .execute(&task, repo.path())
+            .analyze_task(&task, repo.path())
             .expect("spawn failure must degrade to Ok via in-process fallback, never Err");
         assert_eq!(
             analysis,
             DefaultWorkerBackend
-                .execute(&task, repo.path())
+                .analyze_task(&task, repo.path())
                 .expect("default backend fallback must succeed")
         );
     }
@@ -490,7 +490,7 @@ mod fake_process_tests {
         let _fake_worker = install_fake_worker_exiting_with("0");
 
         ClangWorkerBackend
-            .execute(&probe_task(9008, "probe_reqcleanup.cpp"), repo.path())
+            .analyze_task(&probe_task(9008, "probe_reqcleanup.cpp"), repo.path())
             .expect("zero-exit worker with empty stdout must degrade to Ok via fallback");
         let request_path = std::env::temp_dir().join("worker_req_9008.json");
         assert!(

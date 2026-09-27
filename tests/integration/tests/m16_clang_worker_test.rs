@@ -53,7 +53,7 @@ async fn test_clang_worker_backend_fallback_succeeds() {
             ..Default::default()
         },
     );
-    let results = pool.run(&root, &mut queue).await;
+    let results = pool.run_worker_pool(&root, &mut queue).await;
     assert!(
         results.is_ok(),
         "Pool with ClangWorkerBackend must not error: {:?}",
@@ -76,7 +76,10 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
     }];
     let mut queue_clang = PrioritizedTuQueue::new(tasks_clang);
     let pool_clang = WorkerPool::new(ClangWorkerBackend, WorkerPoolConfig::default());
-    let clang_results = pool_clang.run(&root, &mut queue_clang).await.unwrap();
+    let clang_results = pool_clang
+        .run_worker_pool(&root, &mut queue_clang)
+        .await
+        .unwrap();
 
     let tasks_default = vec![TuTask {
         task_id: 1,
@@ -86,7 +89,10 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
     }];
     let mut queue_default = PrioritizedTuQueue::new(tasks_default);
     let pool_default = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
-    let default_results = pool_default.run(&root, &mut queue_default).await.unwrap();
+    let default_results = pool_default
+        .run_worker_pool(&root, &mut queue_default)
+        .await
+        .unwrap();
 
     assert_eq!(clang_results.len(), 1);
     assert_eq!(default_results.len(), 1);
@@ -126,6 +132,6 @@ async fn test_clang_worker_processes_multiple_translation_units() {
             ..Default::default()
         },
     );
-    let results = pool.run(&root, &mut queue).await.unwrap();
+    let results = pool.run_worker_pool(&root, &mut queue).await.unwrap();
     assert_eq!(results.len(), 2, "All TUs must be processed");
 }
