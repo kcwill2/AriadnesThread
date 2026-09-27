@@ -491,10 +491,10 @@ mod tests {
             tu_usage: BTreeMap::new(),
             file_symbols: BTreeMap::new(),
         };
-        let mut add_symbol = |model: &mut ReducedSemanticModel,
-                              name: &str,
-                              kind: SymbolKind,
-                              defining_file: Option<FileId>| {
+        let add_symbol = |model: &mut ReducedSemanticModel,
+                          name: &str,
+                          kind: SymbolKind,
+                          defining_file: Option<FileId>| {
             let id = SymbolId::new(name);
             model.symbols.insert(
                 id.clone(),
