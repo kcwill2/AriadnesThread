@@ -1,6 +1,6 @@
 use ariadne_graph::{
-    ContributingSource, IncludeGraph, LoadMetric, ReducedSemanticEdge, ReducedSemanticModel,
-    ReducedSymbolRecord,
+    ContributingSource, IncludeEdge, IncludeGraph, IncludeKind, LoadMetric, ReducedSemanticEdge,
+    ReducedSemanticModel, ReducedSymbolRecord, SourceLocation,
 };
 use ariadne_index::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_repo::FileId;
@@ -344,4 +344,292 @@ fn test_payload_round_trip_carries_justification_entries() {
     let round = back.file_justification.get("1").unwrap().get("2").unwrap();
     assert_eq!(round.required_headers, vec!["a.h", "b.h"]);
     assert_eq!(round.justified_symbols, vec!["X", "Y", "Z"]);
+}
+
+// --- E2: bounded ImpactSummary on payload entries (plan 1790521470000) -----------------
+
+fn include_edge(from: u64, to: u64) -> IncludeEdge {
+    IncludeEdge {
+        source: FileId(from),
+        destination: Some(FileId(to)),
+        context_name: String::new(),
+        source_location: SourceLocation { line: 1, column: 1 },
+        kind: IncludeKind::Local,
+        raw_path: String::new(),
+        resolved_path: None,
+    }
+}
+
+fn json_keys(value: &serde_json::Value) -> Vec<String> {
+    let mut keys: Vec<String> = value
+        .as_object()
+        .expect("expected a JSON object")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// Sibling-path shape replicated from load_impact_tests at the DTO level:
+/// root.cc(1) -> fat.h(2), fat.h -> base.h(3), fat.h -> c.h(4),
+/// c.h -> d.h(5), c.h -> e.h(6), plus the sibling edge root.cc -> d.h(5).
+/// FatA/FatB justified on fat.h need only base.h, so the slim edge sheds
+/// {c, d, e} but d.h still arrives via the sibling edge.
+fn impact_fixture() -> (
+    IncludeGraph,
+    ReducedSemanticModel,
+    HashMap<PathBuf, u64>,
+    Vec<LoadMetric>,
+) {
+    let mut graph = graph_with_paths(&[
+        (1, "root.cc"),
+        (2, "fat.h"),
+        (3, "base.h"),
+        (4, "c.h"),
+        (5, "d.h"),
+        (6, "e.h"),
+        (7, "onlycol.h"),
+        (8, "onlyjust.h"),
+    ]);
+    for (from, to) in [(1u64, 2u64), (1, 5), (2, 3), (2, 4), (4, 5), (4, 6)] {
+        graph.edges.push(include_edge(from, to));
+    }
+    let mut model = model_with(
+        vec![
+            sym("FatA", 2),
+            sym("FatB", 2),
+            sym("ColA", 2),
+            sym("BaseT", 3),
+            sym("Csym", 4),
+            sym("Dsym", 5),
+            sym("Esym", 6),
+            sym("OC1", 7),
+            sym("OJ1", 8),
+            sym("SelfJ", 1),
+            sym("SelfC", 1),
+        ],
+        vec![("FatA", "BaseT"), ("FatB", "BaseT")],
+    );
+    model.file_symbols = vec![
+        (
+            FileId(2),
+            vec![SymbolId::new("FatA"), SymbolId::new("FatB"), SymbolId::new("ColA")],
+        ),
+        (FileId(3), vec![SymbolId::new("BaseT")]),
+        (FileId(4), vec![SymbolId::new("Csym")]),
+        (FileId(5), vec![SymbolId::new("Dsym")]),
+        (FileId(6), vec![SymbolId::new("Esym")]),
+    ]
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+    let metrics = vec![metric_with(
+        "root.cc",
+        vec![
+            source(2, "fat.h", vec!["FatA", "FatB"]),
+            source(1, "root.cc", vec!["SelfJ"]),
+            source(8, "onlyjust.h", vec!["OJ1"]),
+        ],
+        vec![
+            source(2, "fat.h", vec!["ColA"]),
+            source(1, "root.cc", vec!["SelfC"]),
+            source(7, "onlycol.h", vec!["OC1"]),
+        ],
+    )];
+    let ids = path_to_id(&graph);
+    (graph, model, ids, metrics)
+}
+
+#[test]
+fn test_impact_present_on_eligible_entry_with_correct_drop_counts() {
+    let (graph, model, ids, metrics) = impact_fixture();
+    let out = build_file_justification(&metrics, &graph, &model, &ids);
+    let entry = out.get("1").unwrap().get("2").expect("fat.h entry");
+
+    // Hand computation (strict-closure convention, seed excluded):
+    //   closure(root.cc) = {fat, base, c, d, e}                    -> before 5
+    //   R = {base}; closure_after = {fat, base, d} (d via sibling) -> after 3
+    //   dropped_from_root = {c.h, e.h}; still_reachable = {d.h}
+    //   symbols_no_longer_parsed = Csym(1) + Esym(1) = 2
+    let expected = ariadne_ui::ImpactSummary {
+        dropped_from_root_count: 2,
+        still_reachable_count: 1,
+        dropped_sample: vec!["c.h".to_string(), "e.h".to_string()],
+        dropped_sample_truncated: false,
+        root_closure_before: 5,
+        root_closure_after: 3,
+        symbols_no_longer_parsed: 2,
+    };
+    assert_eq!(entry.impact.as_ref(), Some(&expected));
+}
+
+#[test]
+fn test_impact_absent_on_ineligible_entries() {
+    let (graph, model, ids, metrics) = impact_fixture();
+    let out = build_file_justification(&metrics, &graph, &model, &ids);
+    let root = out.get("1").unwrap();
+
+    assert!(
+        root.get("1").expect("self row").impact.is_none(),
+        "root == source never carries impact (E-I3 at the surface)"
+    );
+    assert!(
+        root.get("7").expect("collateral-only row").impact.is_none(),
+        "collateral_count == 0 is not eligible (E-I4)"
+    );
+    assert!(
+        root.get("8").expect("justified-only row").impact.is_none(),
+        "justified-only rows carry no collateral to shed; E-I4 excludes them"
+    );
+}
+
+#[test]
+fn test_impact_capped_to_eight_entries_per_root_by_rank() {
+    // 9 eligible sources (justified>0 and collateral>0 on the same file),
+    // combined counts 10..2 so rank order is id order: files 10..17 must
+    // carry impact (top 8), file 18 (lowest rank) must not.
+    let mut paths: Vec<(u64, &str)> = vec![(1, "root.cc")];
+    let names: Vec<String> = (10..=18).map(|i| format!("s{i}.h")).collect();
+    for (i, name) in (10..=18).zip(names.iter()) {
+        paths.push((i, name.as_str()));
+    }
+    let graph = graph_with_paths(&paths);
+
+    let mut semantic = Vec::new();
+    let mut collateral = Vec::new();
+    let znames: Vec<String> = (10..=18).map(|i| format!("z{i}")).collect();
+    for (idx, i) in (10..=18u64).enumerate() {
+        semantic.push(source(i, &format!("s{i}.h"), vec![znames[idx].as_str()]));
+        collateral.push(source_with_count(
+            i,
+            &format!("s{i}.h"),
+            &format!("c{i}"),
+            19 - i as usize,
+        ));
+    }
+    let model = model_with(vec![], vec![]);
+    let metrics = vec![metric_with("root.cc", semantic, collateral)];
+    let out = build_file_justification(&metrics, &graph, &model, &path_to_id(&graph));
+    let root = out.get("1").unwrap();
+
+    let with_impact: Vec<&String> = root
+        .iter()
+        .filter(|(_, e)| e.impact.is_some())
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(with_impact.len(), 8, "exactly 8 entries per root carry impact");
+    for i in 10..=17 {
+        assert!(
+            root.get(&i.to_string()).unwrap().impact.is_some(),
+            "ranked-eligible source {i} must carry impact"
+        );
+    }
+    assert!(
+        root.get("18").unwrap().impact.is_none(),
+        "the 9th eligible source (lowest rank) must be None"
+    );
+}
+
+#[test]
+fn test_impact_dropped_sample_caps_at_eight_with_truncation_flag() {
+    // fat9.h drops 9 headers (d0..d8): sample == first 8 path-asc, truncated.
+    // fat8.h drops exactly 8 (e0..e7): sample == 8, not truncated.
+    let mut paths: Vec<(u64, &str)> = vec![(1, "root.cc"), (2, "fat9.h"), (3, "fat8.h")];
+    for i in 0..9 {
+        paths.push((20 + i, Box::leak(format!("d{i}.h").into_boxed_str()).as_ref()));
+    }
+    for i in 0..8 {
+        paths.push((30 + i, Box::leak(format!("e{i}.h").into_boxed_str()).as_ref()));
+    }
+    let mut graph = graph_with_paths(&paths);
+    graph.edges.push(include_edge(1, 2));
+    graph.edges.push(include_edge(1, 3));
+    for i in 0..9 {
+        graph.edges.push(include_edge(2, 20 + i));
+    }
+    for i in 0..8 {
+        graph.edges.push(include_edge(3, 30 + i));
+    }
+    // F9/F8 have no semantic edges: R = {} and the whole child set drops.
+    let model = model_with(
+        vec![
+            sym("F9", 2),
+            sym("C9", 2),
+            sym("F8", 3),
+            sym("C8", 3),
+        ],
+        vec![],
+    );
+    let metrics = vec![metric_with(
+        "root.cc",
+        vec![
+            source(2, "fat9.h", vec!["F9"]),
+            source(3, "fat8.h", vec!["F8"]),
+        ],
+        vec![
+            source(2, "fat9.h", vec!["C9"]),
+            source(3, "fat8.h", vec!["C8"]),
+        ],
+    )];
+    let out = build_file_justification(&metrics, &graph, &model, &path_to_id(&graph));
+    let root = out.get("1").unwrap();
+
+    let nine = root.get("2").unwrap().impact.as_ref().expect("9-drop impact");
+    assert_eq!(nine.dropped_from_root_count, 9);
+    assert_eq!(
+        nine.dropped_sample,
+        vec!["d0.h", "d1.h", "d2.h", "d3.h", "d4.h", "d5.h", "d6.h", "d7.h"]
+    );
+    assert!(nine.dropped_sample_truncated, "9 > 8 marks the sample truncated");
+    assert_eq!(nine.root_closure_before, 19);
+    assert_eq!(nine.root_closure_after, 10);
+
+    let eight = root.get("3").unwrap().impact.as_ref().expect("8-drop impact");
+    assert_eq!(eight.dropped_from_root_count, 8);
+    assert_eq!(
+        eight.dropped_sample,
+        vec!["e0.h", "e1.h", "e2.h", "e3.h", "e4.h", "e5.h", "e6.h", "e7.h"]
+    );
+    assert!(!eight.dropped_sample_truncated, "exactly 8 must not truncate");
+}
+
+#[test]
+fn test_impact_summary_serde_key_lock_and_none_omission() {
+    let (graph, model, ids, metrics) = impact_fixture();
+    let out = build_file_justification(&metrics, &graph, &model, &ids);
+    let root = out.get("1").unwrap();
+
+    let some_json = serde_json::to_value(root.get("2").unwrap()).unwrap();
+    assert_eq!(
+        json_keys(&some_json),
+        vec![
+            "collateral_count",
+            "collateral_symbols",
+            "collateral_truncated",
+            "impact",
+            "justified_count",
+            "justified_symbols",
+            "justified_truncated",
+            "required_headers",
+        ]
+    );
+    assert_eq!(
+        json_keys(&some_json["impact"]),
+        vec![
+            "dropped_from_root_count",
+            "dropped_sample",
+            "dropped_sample_truncated",
+            "root_closure_after",
+            "root_closure_before",
+            "still_reachable_count",
+            "symbols_no_longer_parsed",
+        ],
+        "ImpactSummary field names are a locked wire contract"
+    );
+
+    let none_json = serde_json::to_value(root.get("7").unwrap()).unwrap();
+    assert!(
+        none_json.get("impact").is_none(),
+        "None impact must be ABSENT from the JSON (skip_serializing_if)"
+    );
 }

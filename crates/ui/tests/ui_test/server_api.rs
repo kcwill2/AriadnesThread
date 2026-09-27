@@ -313,28 +313,41 @@ fn justification_sym(id: &str, file: u64) -> ariadne_graph::ReducedSymbolRecord 
     }
 }
 
-/// Live-route fixture: root.cc(1) includes jobserver.h(2), huge.h(3), tiny.h(4).
-/// `main` justifies all 13 jobserver symbols (past the payload 12-name cap);
-/// those reach r1@req1.h(5) and r2@req2.h(6). huge.h drags 20 collateral
-/// symbols and tiny.h 13 — the tiny.h tie with jobserver.h's combined count
+/// Live-route fixture: root.cc(1) includes jobserver.h(2), huge.h(3), tiny.h(4),
+/// d3.h(104). `main` justifies all 13 jobserver symbols (past the payload
+/// 12-name cap); those reach r1@req1.h(5) and r2@req2.h(6). `main` also
+/// justifies h000/h001 in huge.h (3) so the huge.h edge becomes E-I4-eligible
+/// (justified>0 and collateral>0); huge.h drags 18 collateral symbols (h002..
+/// h019) and tiny.h 13 — the tiny.h tie with jobserver.h's combined count
 /// pins the source_id tie-break, while huge.h outranks despite its higher id.
-/// The route recomputes via analyze_file_load, so the model needs real
+/// huge.h owns a drop subtree d0.h..d3.h + mid.h(105) with mid.h -> d4..d8
+/// (106..110); the direct root.cc -> d3.h edge makes d3.h the still-reachable
+/// decoy. The route recomputes via analyze_file_load, so the model needs real
 /// file_symbols/edges, not a prebuilt payload.
 fn justification_state() -> Arc<UiState> {
     use std::collections::BTreeMap;
 
     let mut graph = IncludeGraph::new();
-    for (id, path) in [
-        (1u64, "root.cc"),
-        (2, "jobserver.h"),
-        (3, "huge.h"),
-        (4, "tiny.h"),
-        (5, "req1.h"),
-        (6, "req2.h"),
-    ] {
+    let drop_paths: Vec<(u64, String)> = (0..4u64)
+        .map(|i| (101 + i, format!("d{i}.h")))
+        .chain(std::iter::once((105u64, "mid.h".to_string())))
+        .chain((4..9u64).map(|i| (102 + i, format!("d{i}.h"))))
+        .collect();
+    let core_paths: Vec<(u64, std::path::PathBuf)> = vec![
+        (1, "root.cc".into()),
+        (2, "jobserver.h".into()),
+        (3, "huge.h".into()),
+        (4, "tiny.h".into()),
+        (5, "req1.h".into()),
+        (6, "req2.h".into()),
+    ];
+    for (id, path) in core_paths
+        .into_iter()
+        .chain(drop_paths.into_iter().map(|(id, p)| (id, p.into())))
+    {
         graph
             .file_paths
-            .insert(ariadne_repo::FileId(id), std::path::PathBuf::from(path));
+            .insert(ariadne_repo::FileId(id), path);
     }
     let include_edge = |source: u64, destination: u64| ariadne_graph::IncludeEdge {
         source: ariadne_repo::FileId(source),
@@ -348,6 +361,13 @@ fn justification_state() -> Arc<UiState> {
     graph.edges.push(include_edge(1, 2));
     graph.edges.push(include_edge(1, 3));
     graph.edges.push(include_edge(1, 4));
+    graph.edges.push(include_edge(1, 104));
+    for dest in 101..=105 {
+        graph.edges.push(include_edge(3, dest));
+    }
+    for dest in 106..=110 {
+        graph.edges.push(include_edge(105, dest));
+    }
 
     let mut symbols: BTreeMap<ariadne_index::SymbolId, ariadne_graph::ReducedSymbolRecord> =
         BTreeMap::new();
@@ -381,6 +401,8 @@ fn justification_state() -> Arc<UiState> {
     };
     let mut edges: Vec<ariadne_graph::ReducedSemanticEdge> =
         (0..13).map(|i| link("main", &format!("j{i:03}"))).collect();
+    edges.push(link("main", "h000"));
+    edges.push(link("main", "h001"));
     edges.push(link("j000", "r1"));
     edges.push(link("j001", "r2"));
 
@@ -463,19 +485,20 @@ async fn test_justification_route_returns_unbounded_detail() {
     );
 
     let huge = &body["entries"][0]["entry"];
+    assert_eq!(huge["justified_count"], 2);
     assert_eq!(
         huge["collateral_symbols"]
             .as_array()
             .expect("collateral symbols array")
             .len(),
-        20,
-        "collateral names are unbounded too"
+        18,
+        "collateral names are unbounded too (E2 fixture moves h000/h001 to justified)"
     );
     assert_eq!(huge["collateral_truncated"], false);
     assert_eq!(huge["required_headers"], serde_json::json!([]));
 
-    assert_eq!(body["total_justified"], 14);
-    assert_eq!(body["total_collateral"], 33);
+    assert_eq!(body["total_justified"], 16, "13 jobserver + 2 huge + 1 self");
+    assert_eq!(body["total_collateral"], 31, "18 huge + 13 tiny");
 }
 
 #[tokio::test]
@@ -487,10 +510,38 @@ async fn test_justification_route_locks_response_keys() {
         sorted_keys(&body),
         vec!["entries", "target_id", "total_collateral", "total_justified"]
     );
+    // The eligible entry (huge.h: justified>0 and collateral>0, root!=source)
+    // gains the full impact sub-object on the SOURCE row (not the entry).
     assert_eq!(
         sorted_keys(&body["entries"][0]),
-        vec!["entry", "source_id", "source_label"]
+        vec!["entry", "impact", "source_id", "source_label"]
     );
+    assert_eq!(
+        sorted_keys(&body["entries"][0]["impact"]),
+        vec![
+            "dropped_directly",
+            "dropped_from_root",
+            "required_headers",
+            "root_closure_after",
+            "root_closure_before",
+            "root_file_id",
+            "source_file_id",
+            "still_reachable",
+            "symbols_no_longer_parsed",
+        ]
+    );
+    // The payload-only summary shape must NOT leak into the route (E-I4).
+    assert_eq!(
+        sorted_keys(&body["entries"][0]["impact"]["dropped_from_root"][0]),
+        vec!["file_id", "path", "symbol_count"]
+    );
+    // Ineligible entry (jobserver.h: collateral_count 0) omits impact entirely.
+    assert_eq!(
+        sorted_keys(&body["entries"][1]),
+        vec!["entry", "source_id", "source_label"],
+        "ineligible source omits the impact key (skip_serializing_if)"
+    );
+
     assert_eq!(
         sorted_keys(&body["entries"][0]["entry"]),
         vec![
@@ -503,6 +554,59 @@ async fn test_justification_route_locks_response_keys() {
             "required_headers",
         ]
     );
+}
+
+#[tokio::test]
+async fn test_justification_route_impact_is_unbounded_full_lists() {
+    let app = build_router(justification_state());
+    let (_status, _headers, body) =
+        common::request_route(app, "/api/justification?file=1").await;
+
+    // huge.h entry is index 0. Its subtree under drop (dropped_directly) is the
+    // whole {d0,d1,d2,d3,mid,d4,d5,d6,d7,d8} = 10 headers. The sibling edge
+    // root.cc -> d3.h keeps d3 in closure_after, so dropped_from_root drops
+    // d3 (9 headers) while still_reachable keeps only d3.h.
+    let impact = &body["entries"][0]["impact"];
+
+    let basenames = |arr: &serde_json::Value| -> Vec<String> {
+        arr.as_array()
+            .expect("impact list")
+            .iter()
+            .map(|h| h["path"].as_str().expect("path").to_string())
+            .collect()
+    };
+
+    // FULL lists, not capped at 8 (E-I4): 10 dropped_directly survive intact.
+    assert_eq!(basenames(&impact["dropped_directly"]).len(), 10);
+    assert_eq!(basenames(&impact["dropped_directly"])[0], "d0.h");
+    assert_eq!(basenames(&impact["dropped_from_root"]).len(), 9);
+    assert_eq!(basenames(&impact["still_reachable"]), vec!["d3.h"]);
+
+    let dfr = basenames(&impact["dropped_from_root"]);
+    assert!(
+        !dfr.contains(&"d3.h".to_string()),
+        "d3.h survives via the sibling root.cc -> d3.h edge: {dfr:?}"
+    );
+    assert_eq!(
+        impact["dropped_from_root"].as_array().unwrap().len(),
+        9,
+        "route is NOT capped at 8 (contrast the payload summary)"
+    );
+
+    // closure_after = closure_before - dropped_from_root; seed-excluded.
+    let before = impact["root_closure_before"].as_u64().unwrap() as usize;
+    let after = impact["root_closure_after"].as_u64().unwrap() as usize;
+    assert_eq!(
+        after,
+        before - impact["dropped_from_root"].as_array().unwrap().len()
+    );
+    assert_eq!(impact["root_file_id"].as_u64().unwrap(), 1);
+    assert_eq!(impact["source_file_id"].as_u64().unwrap(), 3);
+
+    // The route impact object never carries the payload-only summary keys.
+    assert!(impact.get("dropped_sample").is_none());
+    assert!(impact.get("dropped_sample_truncated").is_none());
+    assert!(impact.get("dropped_from_root_count").is_none());
 }
 
 #[tokio::test]
