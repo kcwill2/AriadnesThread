@@ -1,4 +1,4 @@
-use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
+use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository, RepositoryDiscoveryResult};
 use ariadne_report::{ArtifactManager, RepositoryManifest};
 use std::fs;
 use std::path::PathBuf;
@@ -13,6 +13,13 @@ fn test_m1_repository_discovery_on_basic_fixture() {
         .discover()
         .expect("Repository discovery should succeed");
 
+    assert_discovered_basic_files(&discovery);
+    assert_ownership_counts(&discovery);
+    assert_policy_counts(&discovery);
+    verify_discovery_artifacts(&discovery);
+}
+
+fn assert_discovered_basic_files(discovery: &RepositoryDiscoveryResult) {
     assert_eq!(
         discovery.files.len(),
         5,
@@ -30,7 +37,9 @@ fn test_m1_repository_discovery_on_basic_fixture() {
     assert!(file_paths.contains(&"include/thing_types.h".to_string()));
     assert!(file_paths.contains(&"src/thing.cpp".to_string()));
     assert!(file_paths.contains(&"tests/consumer.cpp".to_string()));
+}
 
+fn assert_ownership_counts(discovery: &RepositoryDiscoveryResult) {
     // Verify Ownership counts
     assert_eq!(
         *discovery
@@ -60,7 +69,9 @@ fn test_m1_repository_discovery_on_basic_fixture() {
             .unwrap_or(&0),
         0
     );
+}
 
+fn assert_policy_counts(discovery: &RepositoryDiscoveryResult) {
     // Verify Policy counts
     assert_eq!(
         *discovery
@@ -83,14 +94,16 @@ fn test_m1_repository_discovery_on_basic_fixture() {
             .unwrap_or(&0),
         0
     );
+}
 
+fn verify_discovery_artifacts(discovery: &RepositoryDiscoveryResult) {
     // Verify Artifact Generation
     let temp_workspace =
         tempfile::tempdir().expect("Should create temp directory for artifact test");
     let artifact_mgr =
         ArtifactManager::init(temp_workspace.path()).expect("Should initialize artifact root");
     let artifact_dir = artifact_mgr
-        .save_repository_artifacts(&discovery, "m1-test-fingerprint")
+        .save_repository_artifacts(discovery, "m1-test-fingerprint")
         .expect("Should save discovery artifacts");
 
     let files_json = artifact_dir.join("files.json");
