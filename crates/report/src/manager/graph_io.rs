@@ -236,9 +236,9 @@ impl ArtifactManager {
 
     pub fn load_callgraph_artifacts(&self) -> Result<ariadne_graph::CallGraph> {
         let bin_path = self.artifact_root.join("callgraph").join("callgraph.bin");
-        let data = fs::read(&bin_path)
+        let binary_payload = fs::read(&bin_path)
             .with_context(|| format!("Failed to read callgraph.bin at {:?}", bin_path))?;
-        Ok(bincode::deserialize(&data)?)
+        Ok(bincode::deserialize(&binary_payload)?)
     }
 
     pub fn load_callgraph_checked(

@@ -91,8 +91,8 @@ impl ArtifactManager {
         };
 
         if bin_path.exists() && bin_path.extension().and_then(|s| s.to_str()) == Some("bin") {
-            let data = fs::read(&bin_path)?;
-            if let Ok(m) = bincode::deserialize(&data) {
+            let binary_payload = fs::read(&bin_path)?;
+            if let Ok(m) = bincode::deserialize(&binary_payload) {
                 return Ok(m);
             }
         }

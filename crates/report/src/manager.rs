@@ -69,9 +69,11 @@ fn unique_tmp(path: &Path) -> PathBuf {
 /// target, then rename over the target so a crash mid-write leaves the
 /// previous artifact intact.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = unique_tmp(path);
-    fs::write(&tmp, bytes).with_context(|| format!("Failed to write temp file at {:?}", tmp))?;
-    fs::rename(&tmp, path).with_context(|| format!("Failed to rename {:?} to {:?}", tmp, path))?;
+    let staged_temp_path = unique_tmp(path);
+    fs::write(&staged_temp_path, bytes)
+        .with_context(|| format!("Failed to write temp file at {:?}", staged_temp_path))?;
+    fs::rename(&staged_temp_path, path)
+        .with_context(|| format!("Failed to rename {:?} to {:?}", staged_temp_path, path))?;
     Ok(())
 }
 
