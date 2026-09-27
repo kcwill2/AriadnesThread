@@ -321,10 +321,7 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(html.contains("status.progress.state === 'ready'"));
 }
 
-#[test]
-fn test_ui_hotspots_panel() {
-    let html = common::page_content();
-
+fn assert_hotspot_panel_markup_and_rendering(html: &str) {
     // Panel, toggle button, and metric selector markup
     assert!(
         html.contains("id=\"hotspotPanel\""),
@@ -352,7 +349,9 @@ fn test_ui_hotspots_panel() {
         html.contains("function renderHotspots"),
         "missing renderHotspots renderer"
     );
+}
 
+fn assert_hotspot_burden_and_list_rules(html: &str) {
     // Collateral burden aggregation must read the full file_collateral map and cache it
     assert!(
         html.contains("function getBurdenMaps"),
@@ -372,7 +371,9 @@ fn test_ui_hotspots_panel() {
         html.contains("selectHotspotRow") && html.contains("selectNode(id)"),
         "hotspot row click must route through selectNode"
     );
+}
 
+fn assert_hotspot_metric_options(html: &str) {
     // All 5 metrics present, collateral burden is default
     assert!(
         html.contains(">Collateral burden<")
@@ -386,9 +387,9 @@ fn test_ui_hotspots_panel() {
         html.contains("value=\"burden\" selected"),
         "collateral burden must be default metric"
     );
+}
 
-    // Older exports without file_collateral degrade to Fan-in with an inline hint
-
+fn assert_hotspot_tour_and_canvas_isolation(html: &str) {
     // First-visit tour must demo the hotspot view and restore state on leave
     assert!(
         html.contains("id: '#hotspotPanel'") && html.contains("Hotspots Triage"),
@@ -402,6 +403,8 @@ fn test_ui_hotspots_panel() {
         html.contains(".hotspot-panel.tour-highlighted-element"),
         "tour highlight must keep the hotspot panel absolutely positioned"
     );
+
+    // Older exports without file_collateral degrade to Fan-in with an inline hint
     assert!(
         html.contains("showing Fan-in instead"),
         "missing Fan-in fallback hint"
@@ -430,6 +433,16 @@ fn test_ui_hotspots_panel() {
         html.contains("hsList.scrollHeight") && html.contains("e.deltaY"),
         "wheel over hotspot panel should scroll the list, then reach the graph view at the edges"
     );
+}
+
+#[test]
+fn test_ui_hotspots_panel() {
+    let html = common::page_content();
+
+    assert_hotspot_panel_markup_and_rendering(html.as_str());
+    assert_hotspot_burden_and_list_rules(html.as_str());
+    assert_hotspot_metric_options(html.as_str());
+    assert_hotspot_tour_and_canvas_isolation(html.as_str());
 }
 
 #[test]
