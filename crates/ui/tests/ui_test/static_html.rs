@@ -738,8 +738,8 @@ fn test_index_markup_has_no_inline_style_or_script_bodies() {
     assert_eq!(inline_script_count, 1, "exactly one inline script body");
     assert_eq!(
         html.matches("<script src=").count(),
-        5,
-        "exactly five classic asset scripts"
+        6,
+        "exactly six classic asset scripts"
     );
 }
 
@@ -749,6 +749,7 @@ fn tag_start_is_asset(tag: &str) -> bool {
         "/app/graph.js",
         "/app/file-view.js",
         "/app/hotspots.js",
+        "/app/preview.js",
         "/app/main.js",
     ]
     .iter()
@@ -765,6 +766,7 @@ fn test_script_tag_order_preserves_original_execution_order() {
         "/app/graph.js",
         "/app/file-view.js",
         "/app/hotspots.js",
+        "/app/preview.js",
         "/app/main.js",
     ];
     let mut pos = 0usize;
@@ -963,6 +965,10 @@ fn test_standalone_export_inlines_all_split_assets() {
     assert!(
         content.contains("function getBurdenMaps"),
         "export must inline hotspots.js"
+    );
+    assert!(
+        content.contains("window.ariadnePreview"),
+        "export must inline preview.js"
     );
     assert!(
         content.contains("function triggerFirstVisitExperience"),
