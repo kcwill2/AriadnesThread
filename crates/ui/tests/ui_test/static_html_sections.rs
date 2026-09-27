@@ -220,3 +220,50 @@ fn test_extraction_impact_preview_overlay() {
         "heat map help text must mention the Preview after extraction overlay"
     );
 }
+
+#[test]
+fn test_preview_marks_are_solid_color_coded() {
+    // The legend card promises color-coded after-state chips; the graph itself
+    // must deliver solid tinted cards, not thin outlines on a muted node.
+    let eliminated = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.preview-eliminated rect");
+    assert!(
+        eliminated.contains("fill: #450a0a"),
+        ".preview-eliminated rect must be tinted solid dark red"
+    );
+    assert!(
+        eliminated.contains("stroke-dasharray: 4 3"),
+        ".preview-eliminated rect must keep the dashed red outline"
+    );
+    assert!(
+        eliminated.contains("drop-shadow(0 0 12px rgba(239, 68, 68"),
+        ".preview-eliminated rect must glow red like the legend chip"
+    );
+    assert!(
+        !eliminated.contains("opacity: 0.55"),
+        ".preview-eliminated must not mute the card; the solid fill is the mark"
+    );
+
+    let still = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.preview-still-reachable rect");
+    assert!(
+        still.contains("fill: #422006"),
+        ".preview-still-reachable rect must be tinted solid dark amber"
+    );
+    assert!(
+        still.contains("stroke-dasharray: 2 3"),
+        ".preview-still-reachable rect must keep the tight amber dash"
+    );
+    assert!(
+        still.contains("drop-shadow(0 0 10px rgba(245, 158, 11"),
+        ".preview-still-reachable rect must glow amber like the legend chip"
+    );
+
+    let kept = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.preview-kept rect");
+    assert!(
+        kept.contains("fill: #052e16"),
+        ".preview-kept rect must be tinted solid dark green"
+    );
+    assert!(
+        kept.contains("drop-shadow(0 0 10px rgba(74, 222, 128"),
+        ".preview-kept rect must glow green like the legend chip"
+    );
+}
