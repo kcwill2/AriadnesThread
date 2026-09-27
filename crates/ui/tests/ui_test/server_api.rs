@@ -298,3 +298,237 @@ async fn test_export_route_returns_503_while_loading() {
     let (status, _headers, _json) = common::request_route(app, "/api/export").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }
+
+fn justification_sym(id: &str, file: u64) -> ariadne_graph::ReducedSymbolRecord {
+    ariadne_graph::ReducedSymbolRecord {
+        id: ariadne_index::SymbolId(id.to_string()),
+        name: id.to_string(),
+        kind: ariadne_index::SymbolKind::Function,
+        defining_file: Some(ariadne_repo::FileId(file)),
+        declarations: vec![],
+        definition: None,
+    }
+}
+
+/// Live-route fixture: root.cc(1) includes jobserver.h(2), huge.h(3), tiny.h(4).
+/// `main` justifies all 13 jobserver symbols (past the payload 12-name cap);
+/// those reach r1@req1.h(5) and r2@req2.h(6). huge.h drags 20 collateral
+/// symbols and tiny.h 13 — the tiny.h tie with jobserver.h's combined count
+/// pins the source_id tie-break, while huge.h outranks despite its higher id.
+/// The route recomputes via analyze_file_load, so the model needs real
+/// file_symbols/edges, not a prebuilt payload.
+fn justification_state() -> Arc<UiState> {
+    use std::collections::BTreeMap;
+
+    let mut graph = IncludeGraph::new();
+    for (id, path) in [
+        (1u64, "root.cc"),
+        (2, "jobserver.h"),
+        (3, "huge.h"),
+        (4, "tiny.h"),
+        (5, "req1.h"),
+        (6, "req2.h"),
+    ] {
+        graph
+            .file_paths
+            .insert(ariadne_repo::FileId(id), std::path::PathBuf::from(path));
+    }
+    let include_edge = |source: u64, destination: u64| ariadne_graph::IncludeEdge {
+        source: ariadne_repo::FileId(source),
+        destination: Some(ariadne_repo::FileId(destination)),
+        context_name: String::new(),
+        source_location: ariadne_graph::SourceLocation { line: 1, column: 1 },
+        kind: ariadne_graph::IncludeKind::Local,
+        raw_path: String::new(),
+        resolved_path: None,
+    };
+    graph.edges.push(include_edge(1, 2));
+    graph.edges.push(include_edge(1, 3));
+    graph.edges.push(include_edge(1, 4));
+
+    let mut symbols: BTreeMap<ariadne_index::SymbolId, ariadne_graph::ReducedSymbolRecord> =
+        BTreeMap::new();
+    let mut file_symbols: BTreeMap<ariadne_repo::FileId, Vec<ariadne_index::SymbolId>> =
+        BTreeMap::new();
+    let mut add_sym = |id: &str, file: u64| {
+        let record = justification_sym(id, file);
+        symbols.insert(record.id.clone(), record);
+        file_symbols
+            .entry(ariadne_repo::FileId(file))
+            .or_default()
+            .push(ariadne_index::SymbolId(id.to_string()));
+    };
+    add_sym("main", 1);
+    for i in 0..13 {
+        add_sym(&format!("j{i:03}"), 2);
+    }
+    for i in 0..20 {
+        add_sym(&format!("h{i:03}"), 3);
+    }
+    for i in 0..13 {
+        add_sym(&format!("t{i:03}"), 4);
+    }
+    add_sym("r1", 5);
+    add_sym("r2", 6);
+
+    let link = |src: &str, dst: &str| ariadne_graph::ReducedSemanticEdge {
+        src_symbol: ariadne_index::SymbolId(src.to_string()),
+        dst_symbol: ariadne_index::SymbolId(dst.to_string()),
+        kind: ariadne_index::DependencyKind::Complete,
+    };
+    let mut edges: Vec<ariadne_graph::ReducedSemanticEdge> =
+        (0..13).map(|i| link("main", &format!("j{i:03}"))).collect();
+    edges.push(link("j000", "r1"));
+    edges.push(link("j001", "r2"));
+
+    let model = ReducedSemanticModel {
+        repo_root: std::path::PathBuf::from("."),
+        symbols,
+        edges,
+        tu_usage: BTreeMap::new(),
+        file_symbols,
+    };
+    Arc::new(UiState::new_loaded(
+        std::path::PathBuf::from("."),
+        graph,
+        model,
+        CallGraph::default(),
+        common::empty_export_payload(),
+    ))
+}
+
+fn entry_ids(body: &serde_json::Value, key: &str) -> Vec<String> {
+    body["entries"]
+        .as_array()
+        .expect("entries must be an array")
+        .iter()
+        .map(|e| e[key].as_str().expect("string field").to_string())
+        .collect()
+}
+
+fn sorted_keys(value: &serde_json::Value) -> Vec<String> {
+    let mut keys: Vec<String> = value
+        .as_object()
+        .expect("expected a JSON object")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[tokio::test]
+async fn test_justification_route_returns_unbounded_detail() {
+    let app = build_router(justification_state());
+    let (status, _headers, body) =
+        common::request_route(app, "/api/justification?file=1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["target_id"], "1");
+
+    assert_eq!(
+        entry_ids(&body, "source_id"),
+        vec!["3", "2", "4", "1"],
+        "entries sort by combined count desc, then source_id asc on the 13-13 tie"
+    );
+    assert_eq!(
+        entry_ids(&body, "source_label"),
+        vec!["huge.h", "jobserver.h", "tiny.h", "root.cc"],
+        "source_label carries the path basename"
+    );
+
+    let job = &body["entries"][1]["entry"];
+    assert_eq!(job["justified_count"], 13);
+    assert_eq!(job["collateral_count"], 0);
+    let names = job["justified_symbols"]
+        .as_array()
+        .expect("justified symbols array");
+    assert_eq!(
+        names.len(),
+        13,
+        "the route must not apply the payload 12-name cap"
+    );
+    assert!(
+        names.iter().any(|n| n == "j012"),
+        "13th justified name survives unbounded: {names:?}"
+    );
+    assert_eq!(job["justified_truncated"], false);
+    assert_eq!(job["collateral_truncated"], false);
+    assert_eq!(
+        job["required_headers"],
+        serde_json::json!(["req1.h", "req2.h"]),
+        "per-entry required headers exclude the source's own basename"
+    );
+
+    let huge = &body["entries"][0]["entry"];
+    assert_eq!(
+        huge["collateral_symbols"]
+            .as_array()
+            .expect("collateral symbols array")
+            .len(),
+        20,
+        "collateral names are unbounded too"
+    );
+    assert_eq!(huge["collateral_truncated"], false);
+    assert_eq!(huge["required_headers"], serde_json::json!([]));
+
+    assert_eq!(body["total_justified"], 14);
+    assert_eq!(body["total_collateral"], 33);
+}
+
+#[tokio::test]
+async fn test_justification_route_locks_response_keys() {
+    let app = build_router(justification_state());
+    let (_status, _headers, body) =
+        common::request_route(app, "/api/justification?file=1").await;
+    assert_eq!(
+        sorted_keys(&body),
+        vec!["entries", "target_id", "total_collateral", "total_justified"]
+    );
+    assert_eq!(
+        sorted_keys(&body["entries"][0]),
+        vec!["collateral_symbols", "entry", "source_id", "source_label"]
+    );
+    assert_eq!(
+        sorted_keys(&body["entries"][0]["entry"]),
+        vec![
+            "collateral_count",
+            "collateral_symbols",
+            "collateral_truncated",
+            "justified_count",
+            "justified_symbols",
+            "justified_truncated",
+            "required_headers",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_justification_route_non_numeric_file_returns_empty_detail() {
+    let app = build_router(justification_state());
+    let (status, _headers, body) =
+        common::request_route(app, "/api/justification?file=abc").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["target_id"], "abc", "the raw file value is echoed back");
+    assert_eq!(body["total_justified"], 0);
+    assert_eq!(body["total_collateral"], 0);
+    assert_eq!(body["entries"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_justification_route_unknown_file_returns_empty_detail() {
+    let app = build_router(justification_state());
+    let (status, _headers, body) =
+        common::request_route(app, "/api/justification?file=999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["target_id"], "999");
+    assert_eq!(body["total_justified"], 0);
+    assert_eq!(body["total_collateral"], 0);
+    assert_eq!(body["entries"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn test_justification_route_requires_file_param() {
+    let app = build_router(justification_state());
+    let (status, _headers, _body) = common::request_route(app, "/api/justification").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
