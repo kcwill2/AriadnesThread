@@ -213,7 +213,12 @@ fn analyze_collateral_opportunities(
     let mut header_collateral_map: HashMap<String, usize> = HashMap::new();
 
     for sym in model.symbols.values() {
-        let lm = load_analyzer.analyze_symbol_load(&sym.name).unwrap();
+        // Sibling convention (commands/analyze.rs sweeps): symbols whose load
+        // metric cannot be resolved (e.g. no defining file) are skipped in
+        // aggregate scans instead of aborting the whole report.
+        let Ok(lm) = load_analyzer.analyze_symbol_load(&sym.name) else {
+            continue;
+        };
         for src in &lm.collateral_sources {
             if let Some(f) = repo_discovery
                 .files
