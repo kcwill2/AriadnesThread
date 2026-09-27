@@ -208,6 +208,46 @@ fn test_ui_heat_map_coloring() {
 }
 
 #[test]
+fn test_ui_heat_tier_outlines_glow() {
+    // Every collateral tier (0..=4), not just tier 4, must paint a visible colored glow.
+    let tiers = [
+        (0, "rgba(56, 189, 248"),
+        (1, "rgba(34, 197, 94"),
+        (2, "rgba(234, 179, 8"),
+        (3, "rgba(249, 115, 22"),
+        (4, "rgba(239, 68, 68"),
+    ];
+    for (tier, rgb) in tiers {
+        let body = css_rule_body(ariadne_ui::STYLES_CSS, &format!(".node-group.heat-glow-{tier} rect"));
+        assert!(
+            body.contains("drop-shadow") && body.contains("stroke-width"),
+            ".node-group.heat-glow-{tier} rect must glow with a thickened outline"
+        );
+        assert!(
+            body.contains(rgb),
+            ".node-group.heat-glow-{tier} rect must glow in the tier color {rgb}"
+        );
+    }
+
+    // The class must be applied at render time, and I5: heat-critical stays.
+    assert!(
+        ariadne_ui::GRAPH_JS.contains("heat-glow-"),
+        "graph.js must apply the heat-glow-<tier> class on collateral nodes"
+    );
+    assert!(
+        ariadne_ui::GRAPH_JS.contains("heat-critical"),
+        "heat-critical must keep being applied (I5)"
+    );
+
+    // The justified ring gets a stronger, locked glow.
+    let justified = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.dep-justified rect");
+    assert!(
+        justified.contains("drop-shadow(0 0 10px rgba(74, 222, 128, 0.75)"),
+        ".node-group.dep-justified rect must use the strengthened 10px green glow"
+    );
+}
+
+#[test]
 fn test_ui_live_mode_fetches_file_collateral() {
     let html = common::page_content();
 
