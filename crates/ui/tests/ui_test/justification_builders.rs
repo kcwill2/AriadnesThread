@@ -4,7 +4,9 @@ use ariadne_graph::{
 };
 use ariadne_index::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_repo::FileId;
-use ariadne_ui::{build_file_justification, GraphExportPayload, SummaryStats};
+use ariadne_ui::{
+    build_file_justification, build_file_justification_detail, GraphExportPayload, SummaryStats,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -470,8 +472,8 @@ fn test_impact_absent_on_ineligible_entries() {
     let root = out.get("1").unwrap();
 
     assert!(
-        root.get("1").expect("self row").impact.is_none(),
-        "root == source never carries impact (E-I3 at the surface)"
+        root.get("1").is_none(),
+        "root.cc self row is dropped by the header-only source filter (E-I9 mirror)"
     );
     assert!(
         root.get("7").expect("collateral-only row").impact.is_none(),
@@ -633,5 +635,142 @@ fn test_impact_summary_serde_key_lock_and_none_omission() {
     assert!(
         none_json.get("impact").is_none(),
         "None impact must be ABSENT from the JSON (skip_serializing_if)"
+    );
+}
+
+// --- Header-only source filter (E-I9 mirror in the UI justification rows) -------------
+
+/// root.cc(1) inspects: jobserver.h(2) justified X + collateral col1;
+/// root.cc(1) self row justified SelfJ + collateral SelfC (compute_load
+/// inserts the root into its own closure); other.cc(9) collateral-only
+/// defining file; onlycol.h(7) collateral-only header (unnecessary include).
+fn mixed_path_fixture() -> (
+    IncludeGraph,
+    ReducedSemanticModel,
+    HashMap<PathBuf, u64>,
+    Vec<LoadMetric>,
+) {
+    let graph = graph_with_paths(&[
+        (1, "root.cc"),
+        (2, "jobserver.h"),
+        (7, "onlycol.h"),
+        (9, "other.cc"),
+    ]);
+    let model = model_with(
+        vec![
+            sym("X", 2),
+            sym("col1", 2),
+            sym("SelfJ", 1),
+            sym("SelfC", 1),
+            sym("OC1", 7),
+            sym("OC2", 7),
+            sym("OtherC", 9),
+        ],
+        vec![],
+    );
+    let metrics = vec![metric_with(
+        "root.cc",
+        vec![
+            source(2, "jobserver.h", vec!["X"]),
+            source(1, "root.cc", vec!["SelfJ"]),
+        ],
+        vec![
+            source(2, "jobserver.h", vec!["col1"]),
+            source(1, "root.cc", vec!["SelfC"]),
+            source(9, "other.cc", vec!["OtherC"]),
+            source(7, "onlycol.h", vec!["OC1", "OC2"]),
+        ],
+    )];
+    let ids = path_to_id(&graph);
+    (graph, model, ids, metrics)
+}
+
+#[test]
+fn test_payload_rows_are_header_files_only() {
+    let (graph, model, ids, metrics) = mixed_path_fixture();
+    let out = build_file_justification(&metrics, &graph, &model, &ids);
+    let root = out.get("1").expect("root present");
+
+    assert!(root.contains_key("2"), "justified+collateral header survives");
+    assert!(
+        root.contains_key("7"),
+        "collateral-only header must survive: it IS the unnecessary-include signal"
+    );
+    assert!(
+        !root.contains_key("1"),
+        "root.cc self row must not pollute the justification list"
+    );
+    assert!(
+        !root.contains_key("9"),
+        "other.cc defining-file row must not pollute the justification list"
+    );
+    assert_eq!(root.len(), 2, "only the two header sources remain");
+}
+
+#[test]
+fn test_detail_rows_are_header_files_only_and_totals_exclude_dropped() {
+    let (graph, model, _ids, metrics) = mixed_path_fixture();
+    let analyzer = ariadne_graph::LoadAnalyzer::new(&graph, &model);
+    let detail =
+        build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
+
+    assert_eq!(
+        detail
+            .entries
+            .iter()
+            .map(|e| e.source_label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["jobserver.h", "onlycol.h"],
+        "combined counts tie at 2, so source_id asc orders jobserver before onlycol"
+    );
+    assert!(
+        !detail
+            .entries
+            .iter()
+            .any(|e| e.source_label.ends_with(".cc") || e.source_id == "1" || e.source_id == "9"),
+        "no .cc source rows may survive: {:?}",
+        detail
+            .entries
+            .iter()
+            .map(|e| (&e.source_id, &e.source_label))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        detail.total_justified, 1,
+        "SelfJ (root.cc self row) must not count"
+    );
+    assert_eq!(
+        detail.total_collateral, 3,
+        "SelfC (root.cc) and OtherC (other.cc) must not count; col1+OC1+OC2 do"
+    );
+}
+
+#[test]
+fn test_collateral_only_header_row_survives_zero_justified_on_both_builders() {
+    let (graph, model, ids, metrics) = mixed_path_fixture();
+    let payload = build_file_justification(&metrics, &graph, &model, &ids);
+    let only_col = payload
+        .get("1")
+        .and_then(|root| root.get("7"))
+        .expect("collateral-only header row must not be filtered for having 0 justified");
+    assert_eq!(only_col.justified_count, 0);
+    assert_eq!(only_col.collateral_count, 2);
+    assert!(only_col.justified_symbols.is_empty());
+    assert_eq!(only_col.collateral_symbols, vec!["OC1", "OC2"]);
+
+    let analyzer = ariadne_graph::LoadAnalyzer::new(&graph, &model);
+    let detail =
+        build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
+    let row = detail
+        .entries
+        .iter()
+        .find(|e| e.source_id == "7")
+        .expect("unnecessary-include row present on the live route too");
+    assert_eq!(row.entry.justified_count, 0);
+    assert_eq!(row.entry.collateral_count, 2);
+    assert!(
+        detail.total_collateral >= 2,
+        "collateral-only row counts toward totals: got {}",
+        detail.total_collateral
     );
 }

@@ -286,19 +286,23 @@ struct SourceSides<'a> {
 }
 
 /// Groups a metric's contributing sources by file id, both sides; shared by
-/// the bounded payload builder and the unbounded route builder.
+/// the bounded payload builder and the unbounded route builder. Mirrors the
+/// E-I9 needs-set rule: only includable headers (`.h`/`.hpp`/`.hxx`) are kept
+/// on either side, so implementation-file rows (including the inspected root
+/// itself) never pollute the justification list. Collateral-only header rows
+/// survive — they ARE the unnecessary-include signal.
 fn collect_source_sides(
     metric: &ariadne_graph::LoadMetric,
 ) -> std::collections::HashMap<u64, SourceSides<'_>> {
     let mut sides: std::collections::HashMap<u64, SourceSides> =
         std::collections::HashMap::new();
     for src in &metric.semantic_sources {
-        if src.symbol_count > 0 {
+        if src.symbol_count > 0 && ariadne_graph::is_includable_header(&src.path) {
             sides.entry(src.file_id.0).or_default().justified = Some(src);
         }
     }
     for src in &metric.collateral_sources {
-        if src.symbol_count > 0 {
+        if src.symbol_count > 0 && ariadne_graph::is_includable_header(&src.path) {
             sides.entry(src.file_id.0).or_default().collateral = Some(src);
         }
     }

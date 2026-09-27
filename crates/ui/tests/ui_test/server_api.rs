@@ -452,13 +452,14 @@ async fn test_justification_route_returns_unbounded_detail() {
 
     assert_eq!(
         entry_ids(&body, "source_id"),
-        vec!["3", "2", "4", "1"],
-        "entries sort by combined count desc, then source_id asc on the 13-13 tie"
+        vec!["3", "2", "4"],
+        "entries sort by combined count desc, then source_id asc on the 13-13 tie; \
+         the root.cc self row is header-filtered out (E-I9 mirror)"
     );
     assert_eq!(
         entry_ids(&body, "source_label"),
-        vec!["huge.h", "jobserver.h", "tiny.h", "root.cc"],
-        "source_label carries the path basename"
+        vec!["huge.h", "jobserver.h", "tiny.h"],
+        "source_label carries the path basename; header sources only"
     );
 
     let job = &body["entries"][1]["entry"];
@@ -497,7 +498,10 @@ async fn test_justification_route_returns_unbounded_detail() {
     assert_eq!(huge["collateral_truncated"], false);
     assert_eq!(huge["required_headers"], serde_json::json!([]));
 
-    assert_eq!(body["total_justified"], 16, "13 jobserver + 2 huge + 1 self");
+    assert_eq!(
+        body["total_justified"], 15,
+        "13 jobserver + 2 huge; the root.cc self row is header-filtered out"
+    );
     assert_eq!(body["total_collateral"], 31, "18 huge + 13 tiny");
 }
 
