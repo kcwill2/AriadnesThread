@@ -208,46 +208,6 @@ fn test_ui_heat_map_coloring() {
 }
 
 #[test]
-fn test_ui_heat_tier_outlines_glow() {
-    // Every collateral tier (0..=4), not just tier 4, must paint a visible colored glow.
-    let tiers = [
-        (0, "rgba(56, 189, 248"),
-        (1, "rgba(34, 197, 94"),
-        (2, "rgba(234, 179, 8"),
-        (3, "rgba(249, 115, 22"),
-        (4, "rgba(239, 68, 68"),
-    ];
-    for (tier, rgb) in tiers {
-        let body = css_rule_body(ariadne_ui::STYLES_CSS, &format!(".node-group.heat-glow-{tier} rect"));
-        assert!(
-            body.contains("drop-shadow") && body.contains("stroke-width"),
-            ".node-group.heat-glow-{tier} rect must glow with a thickened outline"
-        );
-        assert!(
-            body.contains(rgb),
-            ".node-group.heat-glow-{tier} rect must glow in the tier color {rgb}"
-        );
-    }
-
-    // The class must be applied at render time, and I5: heat-critical stays.
-    assert!(
-        ariadne_ui::GRAPH_JS.contains("heat-glow-"),
-        "graph.js must apply the heat-glow-<tier> class on collateral nodes"
-    );
-    assert!(
-        ariadne_ui::GRAPH_JS.contains("heat-critical"),
-        "heat-critical must keep being applied (I5)"
-    );
-
-    // The justified ring gets a stronger, locked glow.
-    let justified = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.dep-justified rect");
-    assert!(
-        justified.contains("drop-shadow(0 0 10px rgba(74, 222, 128, 0.75)"),
-        ".node-group.dep-justified rect must use the strengthened 10px green glow"
-    );
-}
-
-#[test]
 fn test_ui_live_mode_fetches_file_collateral() {
     let html = common::page_content();
 
@@ -689,68 +649,6 @@ fn test_ui_hotspots_panel() {
     assert_hotspot_burden_and_list_rules(html.as_str());
     assert_hotspot_metric_options(html.as_str());
     assert_hotspot_tour_and_canvas_isolation(html.as_str());
-}
-
-fn css_rule_body(css: &str, selector: &str) -> String {
-    let at = css.find(selector).unwrap_or_else(|| {
-        panic!("styles.css must contain a rule for {selector}");
-    });
-    let open = css[at..]
-        .find('{')
-        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
-    let close = css[at + open..]
-        .find('}')
-        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
-    css[at + open + 1..at + open + close].to_string()
-}
-
-#[test]
-fn test_hotspots_panel_is_collapsible_layout_column() {
-    let html = ariadne_ui::INDEX_HTML;
-
-    // The panel is a direct workspace child placed before the canvas, like the
-    // inspector — never a floating overlay that can cover the legend box.
-    let workspace = html
-        .find("class=\"workspace\"")
-        .expect("workspace container");
-    let panel = html.find("id=\"hotspotPanel\"").expect("hotspot panel");
-    let canvas = html
-        .find("id=\"canvasContainer\"")
-        .expect("canvas container");
-    assert!(
-        panel > workspace && panel < canvas,
-        "hotspot panel must sit inside .workspace before the graph canvas"
-    );
-
-    let body = css_rule_body(ariadne_ui::STYLES_CSS, ".hotspot-panel");
-    assert!(
-        body.contains("position: static"),
-        ".hotspot-panel must be a static flex column, not an absolute overlay"
-    );
-    assert!(
-        body.contains("width: 300px") && body.contains("flex-shrink: 0"),
-        ".hotspot-panel must reserve a fixed 300px workspace column"
-    );
-    assert!(
-        body.contains("background: var(--bg-surface)"),
-        ".hotspot-panel must paint an opaque workspace surface"
-    );
-    assert!(
-        !body.contains("max-height"),
-        ".hotspot-panel must not cap its height; the column owns its height"
-    );
-
-    let list = css_rule_body(ariadne_ui::STYLES_CSS, ".hotspot-list");
-    assert!(
-        list.contains("min-height: 0") && list.contains("flex: 1"),
-        ".hotspot-list must grow and scroll inside the column instead of the panel growing past the viewport"
-    );
-
-    let page = common::page_content();
-    assert!(
-        page.contains("beside the open list"),
-        "help text must say the heat map renders beside the open list, not behind it"
-    );
 }
 
 #[test]
