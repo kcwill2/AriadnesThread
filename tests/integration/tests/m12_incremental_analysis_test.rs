@@ -1,7 +1,7 @@
 use std::fs;
 use tempfile::TempDir;
 
-use ariadne_cli::handle_analyze;
+use ariadne_cli::run_incremental_analysis;
 use ariadne_repo::Repository;
 use ariadne_scheduler::incremental::IncrementalAnalyzer;
 
@@ -64,7 +64,7 @@ fn test_m12_incremental_analysis_cold_run() {
     let root = repo_dir.path().to_path_buf();
 
     // First run (Cold Run)
-    let result = handle_analyze(&root).expect("Analyze should succeed");
+    let result = run_incremental_analysis(&root).expect("Analyze should succeed");
 
     assert_eq!(result.stats.reused_tus, 0);
     assert_eq!(result.stats.reanalyzed_tus, 2);
@@ -99,10 +99,10 @@ fn test_m12_incremental_analysis_warm_run() {
     let root = repo_dir.path().to_path_buf();
 
     // First run
-    handle_analyze(&root).unwrap();
+    run_incremental_analysis(&root).unwrap();
 
     // Second run (Warm run)
-    let result = handle_analyze(&root).unwrap();
+    let result = run_incremental_analysis(&root).unwrap();
 
     assert_eq!(result.stats.reused_tus, 2);
     assert_eq!(result.stats.reanalyzed_tus, 0);
@@ -115,7 +115,7 @@ fn test_m12_incremental_analysis_header_modification() {
     let root = repo_dir.path().to_path_buf();
 
     // First run
-    handle_analyze(&root).unwrap();
+    run_incremental_analysis(&root).unwrap();
 
     // Modify common.h (used by tu1 via header_a.h, but not tu2)
     let common_h = root.join("include/common.h");
@@ -124,7 +124,7 @@ fn test_m12_incremental_analysis_header_modification() {
     fs::write(&common_h, content).unwrap();
 
     // Second run
-    let result = handle_analyze(&root).unwrap();
+    let result = run_incremental_analysis(&root).unwrap();
 
     // tu1 should be reanalyzed, tu2 should be reused
     assert_eq!(result.stats.reanalyzed_tus, 1);
@@ -138,7 +138,7 @@ fn test_m12_incremental_analysis_context_invalidation() {
     let root = repo_dir.path().to_path_buf();
 
     // First run
-    handle_analyze(&root).unwrap();
+    run_incremental_analysis(&root).unwrap();
 
     // Modify compilation context by modifying compile_commands.json
     let root_str = root.to_string_lossy().replace("\\", "/");
@@ -160,7 +160,7 @@ fn test_m12_incremental_analysis_context_invalidation() {
     fs::write(root.join("compile_commands.json"), _compile_commands).unwrap();
 
     // Second run
-    let result = handle_analyze(&root).unwrap();
+    let result = run_incremental_analysis(&root).unwrap();
 
     // Context changed, both should be reanalyzed
     assert_eq!(result.stats.reused_tus, 0);

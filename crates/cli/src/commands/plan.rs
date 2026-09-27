@@ -4,7 +4,9 @@ use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
 use std::path::PathBuf;
 
-pub fn handle_plan(repo_path: &PathBuf) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
+pub fn plan_extractions(
+    repo_path: &PathBuf,
+) -> Result<Vec<ariadne_cluster::plan::OptimizationPlan>> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, _closures) = pipeline.get_or_build_include_graph()?;
     let model = pipeline.get_or_build_reduced()?;
@@ -38,13 +40,13 @@ pub fn handle_plan(repo_path: &PathBuf) -> Result<Vec<ariadne_cluster::plan::Opt
     Ok(plans)
 }
 
-pub fn handle_plan_show(repo_path: &PathBuf, id: &str) -> Result<()> {
+pub fn show_optimization_plan(repo_path: &PathBuf, id: &str) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
     let plans = match artifacts.load_plan_artifacts() {
         Ok(p) => p,
-        Err(_) => handle_plan(repo_path)?,
+        Err(_) => plan_extractions(repo_path)?,
     };
 
     if let Some(plan) = plans.iter().find(|p| p.id.0 == id) {

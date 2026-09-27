@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-use ariadne_cli::{handle_analyze_load, handle_compare, handle_measure};
+use ariadne_cli::{analyze_dependency_load, compare_build_measurements, measure_build_performance};
 
 fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
@@ -34,7 +34,8 @@ fn setup_fixture(fixture_name: &str) -> (TempDir, PathBuf) {
 fn test_m11_measurement_collection_succeeds() {
     let (_workspace, repo_path) = setup_fixture("expensive");
 
-    let measurement = handle_measure(&repo_path).expect("Measurement collection should succeed");
+    let measurement =
+        measure_build_performance(&repo_path).expect("Measurement collection should succeed");
 
     // The fixture has consumer1.cpp and consumer2.cpp
     assert_eq!(
@@ -62,7 +63,8 @@ fn test_m11_measurement_collection_succeeds() {
 fn test_m11_metrics_attributed_to_correct_tus() {
     let (_workspace, repo_path) = setup_fixture("expensive");
 
-    let measurement = handle_measure(&repo_path).expect("Measurement collection should succeed");
+    let measurement =
+        measure_build_performance(&repo_path).expect("Measurement collection should succeed");
 
     // Verify each TU has attributed measurements
     for tu in &measurement.tu_measurements {
@@ -87,14 +89,14 @@ fn test_m11_before_after_comparison_calculated_correctly() {
     let heavy_h = after_repo.join("include").join("heavy.h");
     fs::write(&heavy_h, "#pragma once\ninline void heavy_func() {}\n").unwrap();
 
-    let _before_meas = handle_measure(&before_repo).unwrap();
-    let _after_meas = handle_measure(&after_repo).unwrap();
+    let _before_meas = measure_build_performance(&before_repo).unwrap();
+    let _after_meas = measure_build_performance(&after_repo).unwrap();
 
     let before_meas_dir = before_repo.join("artifacts").join("measure");
     let after_meas_dir = after_repo.join("artifacts").join("measure");
 
-    let comparison =
-        handle_compare(&before_meas_dir, &after_meas_dir).expect("Compare should succeed");
+    let comparison = compare_build_measurements(&before_meas_dir, &after_meas_dir)
+        .expect("Compare should succeed");
 
     // Verify deltas
     // Time assertions are flaky in CI, just verify that we got valid measurements
@@ -115,20 +117,20 @@ fn test_m11_structural_and_measured_metrics_correlated_in_report() {
     let (_workspace_after, after_repo) = setup_fixture("expensive");
 
     // Setup analyze load so collateral load is calculated
-    handle_analyze_load(&before_repo, None, None).unwrap();
+    analyze_dependency_load(&before_repo, None, None).unwrap();
 
     let heavy_h = after_repo.join("include").join("heavy.h");
     fs::write(&heavy_h, "#pragma once\ninline void heavy_func() {}\n").unwrap();
 
-    handle_analyze_load(&after_repo, None, None).unwrap();
+    analyze_dependency_load(&after_repo, None, None).unwrap();
 
-    handle_measure(&before_repo).unwrap();
-    handle_measure(&after_repo).unwrap();
+    measure_build_performance(&before_repo).unwrap();
+    measure_build_performance(&after_repo).unwrap();
 
     let before_meas_dir = before_repo.join("artifacts").join("measure");
     let after_meas_dir = after_repo.join("artifacts").join("measure");
 
-    let comparison = handle_compare(&before_meas_dir, &after_meas_dir).unwrap();
+    let comparison = compare_build_measurements(&before_meas_dir, &after_meas_dir).unwrap();
     let report = comparison.format_report();
 
     // Check that the report contains relevant strings for correlated structural/measured metrics

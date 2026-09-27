@@ -1,5 +1,5 @@
 use ariadne_build::BuildDiscoverer;
-use ariadne_cli::handle_build_discover;
+use ariadne_cli::discover_build_contexts;
 use ariadne_repo::Repository;
 use ariadne_report::{ArtifactManager, BuildContextManifest};
 use std::fs;
@@ -143,7 +143,7 @@ fn test_m2_cli_handle_build_discover() {
 
     fs::write(root.join("compile_commands.json"), compile_commands_json).unwrap();
 
-    let res = handle_build_discover(&root.to_path_buf());
+    let res = discover_build_contexts(&root.to_path_buf());
     assert!(res.is_ok(), "handle_build_discover should succeed");
 
     let artifact_manifest = root.join("artifacts/contexts/manifest.json");

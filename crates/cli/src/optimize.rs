@@ -114,7 +114,7 @@ impl EndToEndOptimizer {
         }
     }
 
-    pub fn optimize(&self) -> Result<OptimizationReport> {
+    pub fn optimize_repository(&self) -> Result<OptimizationReport> {
         let mut pipeline = Pipeline::new(&self.repo_path, Some(4))?;
         let repo = pipeline.repo.clone();
         let repo_discovery = pipeline.discovery.clone();
@@ -397,9 +397,9 @@ fn save_optimization_report(repo_root: &Path, report: &OptimizationReport) -> Re
     Ok(())
 }
 
-pub fn handle_optimize(repo_path: &Path) -> Result<OptimizationReport> {
+pub fn run_end_to_end_optimize(repo_path: &Path) -> Result<OptimizationReport> {
     let optimizer = EndToEndOptimizer::new(repo_path);
-    let report = optimizer.optimize()?;
+    let report = optimizer.optimize_repository()?;
     println!("{}", report.format_m14_output());
     Ok(report)
 }

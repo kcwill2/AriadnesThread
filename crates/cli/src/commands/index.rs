@@ -5,7 +5,7 @@ use ariadne_pipeline::{Pipeline, ProgressEvent};
 use ariadne_repo::Repository;
 use std::path::PathBuf;
 
-pub fn handle_index(repo_path: &PathBuf) -> Result<IndexResult> {
+pub fn build_source_index(repo_path: &PathBuf) -> Result<IndexResult> {
     let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(|event| {
         if let ProgressEvent::TuIndex { done, total } = event {
             crate::commands::progress::print_progress(

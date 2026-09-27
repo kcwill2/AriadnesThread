@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-use ariadne_cli::{handle_index, handle_query_deps, handle_query_symbol, handle_query_users};
+use ariadne_cli::{
+    build_source_index, query_symbol_by_name, query_symbol_dependencies, query_symbol_users,
+};
 use ariadne_graph::ReducedSemanticModel;
 
 /// The real reduced-stage fingerprint, so this fixture's reduced artifact
@@ -47,7 +49,7 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     let artifacts_dir = repo_path.join("artifacts/reduced");
 
     // Explicitly rebuild instead of removing directories to avoid Windows os error 5
-    let index_result = handle_index(&repo_path)?;
+    let index_result = build_source_index(&repo_path)?;
     let model = ReducedSemanticModel::reduce(&index_result);
 
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
@@ -96,9 +98,9 @@ fn test_m5_reduced_model_aggregation_and_queries() -> Result<()> {
     );
 
     // 2. Query verification
-    handle_query_symbol(&repo_path, "Thing")?;
-    handle_query_deps(&repo_path, "Thing")?;
-    handle_query_users(&repo_path, "Thing")?;
+    query_symbol_by_name(&repo_path, "Thing")?;
+    query_symbol_dependencies(&repo_path, "Thing")?;
+    query_symbol_users(&repo_path, "Thing")?;
 
     // 3. Artifact verification
     assert!(artifacts_dir.join("symbols.bin").exists());
@@ -124,7 +126,7 @@ fn test_m5_reduced_model_determinism() -> Result<()> {
     let artifacts_dir = repo_path.join("artifacts/reduced");
 
     let run_and_hash = || -> Result<Vec<String>> {
-        let index_result = handle_index(&repo_path)?;
+        let index_result = build_source_index(&repo_path)?;
         let model = ReducedSemanticModel::reduce(&index_result);
 
         let repo = ariadne_repo::Repository::locate(&repo_path)?;

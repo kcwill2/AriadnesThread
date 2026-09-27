@@ -4,7 +4,7 @@ use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
 use std::path::PathBuf;
 
-pub fn handle_measure(repo_path: &PathBuf) -> Result<ariadne_build::BuildMeasurement> {
+pub fn measure_build_performance(repo_path: &PathBuf) -> Result<ariadne_build::BuildMeasurement> {
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
@@ -47,7 +47,7 @@ pub fn handle_measure(repo_path: &PathBuf) -> Result<ariadne_build::BuildMeasure
     Ok(measurement)
 }
 
-pub fn handle_compare(
+pub fn compare_build_measurements(
     before_path: &PathBuf,
     after_path: &PathBuf,
 ) -> Result<ariadne_build::MeasurementComparison> {

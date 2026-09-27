@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
-use ariadne_cli::handle_index;
+use ariadne_cli::build_source_index;
 use ariadne_index::DependencyKind;
 
 #[derive(Deserialize)]
@@ -19,7 +19,7 @@ struct IndexManifest {
 #[test]
 fn test_m4_semantic_indexing() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
-    let result = handle_index(&repo_path)?;
+    let result = build_source_index(&repo_path)?;
 
     assert!(result.total_symbols > 0, "Should have found some symbols");
     assert!(result.total_edges > 0, "Should have found some edges");
@@ -91,7 +91,7 @@ fn test_m4_semantic_critical_patterns() -> Result<()> {
         .to_string(),
     )?;
 
-    let result = handle_index(&repo_path)?;
+    let result = build_source_index(&repo_path)?;
     assert_eq!(result.tu_analyses.len(), 1);
 
     let tu = &result.tu_analyses[0];

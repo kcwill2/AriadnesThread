@@ -66,13 +66,13 @@ fn test_m10_apply_success_path() {
     let dir = setup_fixture();
     let repo_path = dir.path().join("basic");
 
-    let plans = ariadne_cli::handle_plan(&repo_path).unwrap();
+    let plans = ariadne_cli::plan_extractions(&repo_path).unwrap();
     if plans.is_empty() {
         return;
     }
     let plan = &plans[0];
 
-    ariadne_cli::handle_apply(&repo_path, &plan.id.0).unwrap();
+    ariadne_cli::apply_transform_plan(&repo_path, &plan.id.0).unwrap();
 
     let artifacts = ArtifactManager::init(repo_path.clone()).unwrap();
     let tx_dir = artifacts.artifact_root.join("transaction");
@@ -87,7 +87,7 @@ fn test_m10_rollback_identity() {
     let dir = setup_fixture();
     let repo_path = dir.path().join("basic");
 
-    let plans = ariadne_cli::handle_plan(&repo_path).unwrap();
+    let plans = ariadne_cli::plan_extractions(&repo_path).unwrap();
     if plans.is_empty() {
         return;
     }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 use ariadne_build::TranslationUnit;
-use ariadne_cli::handle_production_analyze;
+use ariadne_cli::run_production_scale_analysis;
 use ariadne_repo::FileId;
 use ariadne_scheduler::{
     DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerBackend, WorkerPool, WorkerPoolConfig,
@@ -82,10 +82,12 @@ fn test_m13_determinism_workers_comparison() {
     let root2 = fixture2.path().to_path_buf();
 
     // Run with 2 workers
-    let res_workers_2 = handle_production_analyze(&root1, Some(2)).expect("Analyze with 2 workers");
+    let res_workers_2 =
+        run_production_scale_analysis(&root1, Some(2)).expect("Analyze with 2 workers");
 
     // Run with 8 workers
-    let res_workers_8 = handle_production_analyze(&root2, Some(8)).expect("Analyze with 8 workers");
+    let res_workers_8 =
+        run_production_scale_analysis(&root2, Some(8)).expect("Analyze with 8 workers");
 
     // Assert determinism across different worker counts
     assert_eq!(
@@ -227,7 +229,7 @@ fn test_m13_memory_bounding_and_cli_output() {
     let root = fixture.path().to_path_buf();
 
     let result =
-        handle_production_analyze(&root, Some(4)).expect("Production analyze should succeed");
+        run_production_scale_analysis(&root, Some(4)).expect("Production analyze should succeed");
 
     assert!(
         result.stats.peak_memory_bytes > 0,

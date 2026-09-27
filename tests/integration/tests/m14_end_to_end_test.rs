@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ariadne_cli::handle_optimize;
+use ariadne_cli::run_end_to_end_optimize;
 use ariadne_cli::EndToEndOptimizer;
 use ariadne_repo::Repository;
 use std::env;
@@ -76,7 +76,7 @@ fn test_m14_end_to_end_optimization_flow() -> Result<()> {
     let (_temp, repo_path) = setup_temp_repo("basic")?;
 
     let optimizer = EndToEndOptimizer::new(&repo_path);
-    let report = optimizer.optimize()?;
+    let report = optimizer.optimize_repository()?;
 
     assert!(report.total_files > 0);
     assert!(report.total_tus > 0);
@@ -138,7 +138,7 @@ fn test_m14_rollback_on_failed_validation() -> Result<()> {
 fn test_m14_cli_optimize_output() -> Result<()> {
     let (_temp, repo_path) = setup_temp_repo("basic")?;
 
-    let result = handle_optimize(&repo_path);
+    let result = run_end_to_end_optimize(&repo_path);
     assert!(result.is_ok());
 
     Ok(())

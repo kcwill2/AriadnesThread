@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ariadne_cli::{handle_optimize, EndToEndOptimizer, OptimizationReport};
+use ariadne_cli::{run_end_to_end_optimize, EndToEndOptimizer, OptimizationReport};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -52,7 +52,7 @@ fn list_relative_files(root: &Path) -> Result<Vec<String>> {
 fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
     let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
 
-    let report = EndToEndOptimizer::new(&repo_root).optimize()?;
+    let report = EndToEndOptimizer::new(&repo_root).optimize_repository()?;
 
     assert_eq!(report.total_files, 5);
     assert_eq!(report.total_tus, 2);
@@ -94,7 +94,7 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
 fn optimize_writes_report_artifact_equal_to_returned_report() -> Result<()> {
     let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
 
-    let report = EndToEndOptimizer::new(&repo_root).optimize()?;
+    let report = EndToEndOptimizer::new(&repo_root).optimize_repository()?;
 
     let report_json = fs::read_to_string(
         repo_root
@@ -122,7 +122,7 @@ fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged()
     );
     assert!(!repo_root.join("generated").exists(), "precondition");
 
-    let report = EndToEndOptimizer::new(&repo_root).optimize()?;
+    let report = EndToEndOptimizer::new(&repo_root).optimize_repository()?;
 
     let generated_files = list_relative_files(&repo_root.join("generated"))?;
     assert_eq!(
@@ -161,7 +161,7 @@ fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged()
 fn optimize_missing_repo_path_reports_locate_failure() -> Result<()> {
     let missing = std::env::temp_dir().join("ariadne-m19-does-not-exist-9f3a2b");
     let error = EndToEndOptimizer::new(&missing)
-        .optimize()
+        .optimize_repository()
         .expect_err("optimize on a missing path must fail");
     let message = format!("{error:#}");
     assert!(
@@ -174,10 +174,10 @@ fn optimize_missing_repo_path_reports_locate_failure() -> Result<()> {
 #[test]
 fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<()> {
     let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
-    let direct = EndToEndOptimizer::new(&repo_root).optimize()?;
+    let direct = EndToEndOptimizer::new(&repo_root).optimize_repository()?;
 
     let (_second_guard, second_root) = provision_basic_repo_copy()?;
-    let dispatched = handle_optimize(&second_root)?;
+    let dispatched = run_end_to_end_optimize(&second_root)?;
     let rendered = dispatched.format_m14_output();
 
     assert_eq!(dispatched.total_files, direct.total_files);

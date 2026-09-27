@@ -3,7 +3,7 @@ use anyhow::Result;
 use ariadne_report::ArtifactManager;
 use std::path::PathBuf;
 
-pub fn handle_query_symbol(repo_path: &PathBuf, name: &str) -> Result<()> {
+pub fn query_symbol_by_name(repo_path: &PathBuf, name: &str) -> Result<()> {
     let (_, model) = get_or_build_reduced_model(repo_path)?;
 
     let sym = match model.find_symbol(name) {
@@ -72,7 +72,7 @@ pub fn handle_query_symbol(repo_path: &PathBuf, name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_query_deps(repo_path: &PathBuf, name: &str) -> Result<()> {
+pub fn query_symbol_dependencies(repo_path: &PathBuf, name: &str) -> Result<()> {
     let (_, model) = get_or_build_reduced_model(repo_path)?;
 
     let sym = match model.find_symbol(name) {
@@ -101,7 +101,7 @@ pub fn handle_query_deps(repo_path: &PathBuf, name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_query_users(repo_path: &PathBuf, name: &str) -> Result<()> {
+pub fn query_symbol_users(repo_path: &PathBuf, name: &str) -> Result<()> {
     let (_, model) = get_or_build_reduced_model(repo_path)?;
 
     let sym = match model.find_symbol(name) {

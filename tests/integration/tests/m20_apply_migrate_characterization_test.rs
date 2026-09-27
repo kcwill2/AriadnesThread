@@ -1,5 +1,7 @@
 use anyhow::Result;
-use ariadne_cli::{handle_apply, handle_index, handle_migrate, handle_plan};
+use ariadne_cli::{
+    apply_transform_plan, build_migration_preview, build_source_index, plan_extractions,
+};
 use ariadne_cluster::plan::OptimizationPlan;
 use serde_json::Value;
 use std::fs;
@@ -25,8 +27,8 @@ fn provision_indexed_repo_with_plans() -> Result<(TempDir, PathBuf, Vec<Optimiza
     let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/basic");
     let repo_root = guard.path().join("basic");
     copy_dir_all(&fixture_root, &repo_root)?;
-    handle_index(&repo_root)?;
-    let plans = handle_plan(&repo_root)?;
+    build_source_index(&repo_root)?;
+    let plans = plan_extractions(&repo_root)?;
     Ok((guard, repo_root, plans))
 }
 
@@ -91,7 +93,7 @@ fn migrate_preview_writes_migration_artifacts_without_disk_changes() -> Result<(
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_before = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
 
-    handle_migrate(&repo_root, &plan_id, true)?;
+    build_migration_preview(&repo_root, &plan_id, true)?;
 
     let migration_dir = repo_root.join("artifacts").join("migration");
     assert!(migration_dir.join("preview.bin").exists());
@@ -134,7 +136,7 @@ fn migrate_preview_writes_migration_artifacts_without_disk_changes() -> Result<(
 fn migrate_unknown_plan_id_reports_not_found() -> Result<()> {
     let (_repo_guard, repo_root, _plans) = provision_indexed_repo_with_plans()?;
 
-    let error = handle_migrate(&repo_root, "PLAN-999", true)
+    let error = build_migration_preview(&repo_root, "PLAN-999", true)
         .expect_err("migrating an unknown plan id must fail");
     let message = format!("{error:#}");
     assert!(
@@ -151,7 +153,7 @@ fn migrate_regenerates_missing_plan_artifacts_and_succeeds() -> Result<()> {
 
     fs::remove_dir_all(repo_root.join("artifacts").join("plans"))?;
 
-    handle_migrate(&repo_root, &plan_id, false)?;
+    build_migration_preview(&repo_root, &plan_id, false)?;
 
     assert!(repo_root
         .join("artifacts")
@@ -185,7 +187,7 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
         "precondition: no generated dir"
     );
 
-    handle_apply(&repo_root, &plan_id)?;
+    apply_transform_plan(&repo_root, &plan_id)?;
 
     let transaction_dir = repo_root.join("artifacts").join("transaction");
     let manifest: Value =
@@ -233,8 +235,8 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
 fn apply_unknown_plan_id_reports_not_found() -> Result<()> {
     let (_repo_guard, repo_root, _plans) = provision_indexed_repo_with_plans()?;
 
-    let error =
-        handle_apply(&repo_root, "PLAN-999").expect_err("applying an unknown plan id must fail");
+    let error = apply_transform_plan(&repo_root, "PLAN-999")
+        .expect_err("applying an unknown plan id must fail");
     let message = format!("{error:#}");
     assert!(
         message.contains("Plan PLAN-999 not found"),
@@ -248,14 +250,14 @@ fn apply_and_migrate_missing_repo_path_report_locate_failure() -> Result<()> {
     let missing = std::env::temp_dir().join("ariadne-m20-does-not-exist-7c1d4e");
 
     let apply_error =
-        handle_apply(&missing, "PLAN-001").expect_err("apply on a missing path must fail");
+        apply_transform_plan(&missing, "PLAN-001").expect_err("apply on a missing path must fail");
     let apply_message = format!("{apply_error:#}");
     assert!(
         apply_message.contains("Failed to locate repository path"),
         "unexpected apply error: {apply_message}"
     );
 
-    let migrate_error = handle_migrate(&missing, "PLAN-001", true)
+    let migrate_error = build_migration_preview(&missing, "PLAN-001", true)
         .expect_err("migrate on a missing path must fail");
     let migrate_message = format!("{migrate_error:#}");
     assert!(

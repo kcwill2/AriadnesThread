@@ -3,7 +3,7 @@ use ariadne_pipeline::Pipeline;
 use ariadne_repo::FileId;
 use std::path::PathBuf;
 
-pub fn handle_includes(repo_path: &PathBuf) -> Result<()> {
+pub fn analyze_include_graph(repo_path: &PathBuf) -> Result<()> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, _closures) = pipeline.get_or_build_include_graph()?;
     let report = graph.generate_report();
@@ -36,7 +36,7 @@ pub fn handle_includes(repo_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_includes_explain(repo_path: &PathBuf, file_path: &PathBuf) -> Result<()> {
+pub fn explain_include_graph_for_file(repo_path: &PathBuf, file_path: &PathBuf) -> Result<()> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, _closures) = pipeline.get_or_build_include_graph()?;
 

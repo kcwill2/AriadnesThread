@@ -1,4 +1,4 @@
-use crate::commands::plan::handle_plan;
+use crate::commands::plan::plan_extractions;
 use anyhow::{bail, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_repo::Repository;
@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-pub fn handle_transform_extract(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
+pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
@@ -50,7 +50,7 @@ pub fn handle_transform_extract(repo_path: &PathBuf, plan_id: &str) -> Result<()
     Ok(())
 }
 
-pub fn handle_migrate(repo_path: &PathBuf, plan_id: &str, preview: bool) -> Result<()> {
+pub fn build_migration_preview(repo_path: &PathBuf, plan_id: &str, preview: bool) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
@@ -93,7 +93,7 @@ pub fn handle_migrate(repo_path: &PathBuf, plan_id: &str, preview: bool) -> Resu
     Ok(())
 }
 
-pub fn handle_apply(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
+pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
@@ -135,7 +135,7 @@ fn load_plan_for_action(
 ) -> Result<ariadne_cluster::plan::OptimizationPlan> {
     let plans = artifacts
         .load_plan_artifacts()
-        .or_else(|_| handle_plan(repo_path).map(|_| vec![]))
+        .or_else(|_| plan_extractions(repo_path).map(|_| vec![]))
         .unwrap_or_default();
     let plans = if plans.is_empty() {
         artifacts.load_plan_artifacts()?

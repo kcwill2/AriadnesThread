@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use ariadne_cli::{handle_index, handle_plan, handle_plan_show};
+use ariadne_cli::{build_source_index, plan_extractions, show_optimization_plan};
 use ariadne_cluster::checker::ConstraintChecker;
 use ariadne_cluster::plan::RejectionReason;
 use ariadne_report::ArtifactManager;
@@ -11,10 +11,10 @@ fn test_m7_plan_generation_basic() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
     // Ensure prerequisites are built (index -> reduce)
-    handle_index(&repo_path)?;
+    build_source_index(&repo_path)?;
 
     // Generate plans
-    let plans = handle_plan(&repo_path)?;
+    let plans = plan_extractions(&repo_path)?;
 
     // Validate plan properties for thing.h
     let plan = plans
@@ -48,7 +48,7 @@ fn test_m7_plan_artifacts_and_determinism() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
     let repo = ariadne_repo::Repository::locate(&repo_path)?;
 
-    let plans_first = handle_plan(&repo_path)?;
+    let plans_first = plan_extractions(&repo_path)?;
 
     let artifacts = ArtifactManager::prepare_for_repo(&repo)?;
     let plan_dir = artifacts.artifact_root.join("plans");
@@ -59,7 +59,7 @@ fn test_m7_plan_artifacts_and_determinism() -> Result<()> {
     assert!(plan_dir.join("manifest.json").exists());
 
     // Determinism
-    let plans_second = handle_plan(&repo_path)?;
+    let plans_second = plan_extractions(&repo_path)?;
     assert_eq!(plans_first.len(), plans_second.len());
     for (a, b) in plans_first.iter().zip(plans_second.iter()) {
         assert_eq!(a.id.0, b.id.0);
@@ -75,7 +75,7 @@ fn test_m7_plan_show_formatting() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
 
     // Generate plans to ensure they are created
-    let plans = handle_plan(&repo_path)?;
+    let plans = plan_extractions(&repo_path)?;
 
     // Use a plan that targets a header (has validation_required_tus)
     let plan = plans
@@ -103,7 +103,7 @@ fn test_m7_plan_show_formatting() -> Result<()> {
     }
 
     // handle_plan_show should succeed for this plan's ID
-    handle_plan_show(&repo_path, &plan.id.0)?;
+    show_optimization_plan(&repo_path, &plan.id.0)?;
 
     Ok(())
 }

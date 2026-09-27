@@ -1,4 +1,4 @@
-use ariadne_cli::{build_include_graph, handle_includes, handle_includes_explain};
+use ariadne_cli::{analyze_include_graph, build_include_graph, explain_include_graph_for_file};
 use ariadne_graph::IncludeKind;
 use ariadne_repo::FileId;
 use std::fs;
@@ -137,10 +137,10 @@ fn test_m3_edge_cases_duplicates_system_missing_cycles() {
 #[test]
 fn test_m3_cli_commands() {
     let repo_root = get_basic_fixture_dir();
-    let res = handle_includes(&repo_root);
+    let res = analyze_include_graph(&repo_root);
     assert!(res.is_ok(), "handle_includes should succeed");
 
-    let explain_res = handle_includes_explain(&repo_root, &PathBuf::from("include/thing.h"));
+    let explain_res = explain_include_graph_for_file(&repo_root, &PathBuf::from("include/thing.h"));
     assert!(
         explain_res.is_ok(),
         "handle_includes_explain should succeed"

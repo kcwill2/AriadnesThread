@@ -6,7 +6,9 @@ use ariadne_repo::Repository;
 use ariadne_report::{ArtifactManager, LoadReport};
 use std::path::{Path, PathBuf};
 
-pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::IncrementalAnalysisResult> {
+pub fn run_incremental_analysis(
+    repo_path: &PathBuf,
+) -> Result<ariadne_scheduler::IncrementalAnalysisResult> {
     let repo = Repository::locate(repo_path)?;
     let repo_discovery = repo.discover()?;
     let build_discovery = BuildDiscoverer::new(&repo.root)
@@ -31,7 +33,7 @@ pub fn handle_analyze(repo_path: &PathBuf) -> Result<ariadne_scheduler::Incremen
     Ok(result)
 }
 
-pub fn handle_production_analyze(
+pub fn run_production_scale_analysis(
     repo_path: &PathBuf,
     workers: Option<usize>,
 ) -> Result<ariadne_scheduler::ProductionAnalysisResult> {
@@ -69,7 +71,7 @@ pub fn handle_production_analyze(
     })
 }
 
-pub fn handle_analyze_load(
+pub fn analyze_dependency_load(
     repo_path: &PathBuf,
     symbol: Option<&str>,
     file: Option<&Path>,
@@ -131,7 +133,7 @@ pub fn handle_analyze_load(
     Ok(())
 }
 
-pub fn handle_explain_load(
+pub fn explain_dependency_load(
     repo_path: &PathBuf,
     symbol: Option<&str>,
     file: Option<&Path>,

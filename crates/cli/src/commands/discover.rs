@@ -5,7 +5,7 @@ use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
 use ariadne_report::ArtifactManager;
 use std::path::PathBuf;
 
-pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
+pub fn discover_repository_files(repo_path: &PathBuf) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let discovery = repository.discover()?;
 
@@ -82,7 +82,7 @@ pub fn handle_discover(repo_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_build_discover(repo_path: &PathBuf) -> Result<()> {
+pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let repo_discovery = repository.discover().ok();
 

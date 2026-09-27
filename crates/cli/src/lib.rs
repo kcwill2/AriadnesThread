@@ -248,7 +248,7 @@ pub enum Commands {
     },
 }
 
-pub fn run() -> Result<()> {
+pub fn run_cli() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
@@ -267,18 +267,18 @@ pub fn run() -> Result<()> {
             dispatch_explain(command)?;
         }
         Some(Commands::Discover { repo }) => {
-            handle_discover(&repo)?;
+            discover_repository_files(&repo)?;
         }
         Some(Commands::Build {
             command: BuildSubcommands::Discover { repo },
         }) => {
-            handle_build_discover(&repo)?;
+            discover_build_contexts(&repo)?;
         }
         Some(Commands::Includes { repo, command }) => {
             dispatch_includes(repo, command)?;
         }
         Some(Commands::Index { repo }) => {
-            handle_index(&repo)?;
+            build_source_index(&repo)?;
         }
         Some(Commands::Query { command }) => {
             dispatch_query(command)?;
@@ -294,19 +294,19 @@ pub fn run() -> Result<()> {
             plan,
             preview,
         }) => {
-            handle_migrate(&repo, &plan, preview)?;
+            build_migration_preview(&repo, &plan, preview)?;
         }
         Some(Commands::Apply { repo, plan }) => {
-            handle_apply(&repo, &plan)?;
+            apply_transform_plan(&repo, &plan)?;
         }
         Some(Commands::Measure { repo }) => {
-            handle_measure(&repo)?;
+            measure_build_performance(&repo)?;
         }
         Some(Commands::Compare { before, after }) => {
-            handle_compare(&before, &after)?;
+            compare_build_measurements(&before, &after)?;
         }
         Some(Commands::Optimize { repo }) => {
-            handle_optimize(&repo)?;
+            run_end_to_end_optimize(&repo)?;
         }
         Some(Commands::Ui {
             repo,
@@ -342,16 +342,16 @@ fn dispatch_analyze(
             } else {
                 repo_path
             };
-            handle_analyze_load(&r, symbol.as_deref(), file.as_deref())?;
+            analyze_dependency_load(&r, symbol.as_deref(), file.as_deref())?;
         }
         (None, Some(AnalyzeSubcommands::Load { repo, symbol, file })) => {
-            handle_analyze_load(&repo, symbol.as_deref(), file.as_deref())?;
+            analyze_dependency_load(&repo, symbol.as_deref(), file.as_deref())?;
         }
         (Some(repo_path), None) => {
             if let Some(w) = workers {
-                handle_production_analyze(&repo_path, Some(w))?;
+                run_production_scale_analysis(&repo_path, Some(w))?;
             } else {
-                handle_analyze(&repo_path)?;
+                run_incremental_analysis(&repo_path)?;
             }
         }
         (None, None) => {
@@ -369,7 +369,7 @@ fn dispatch_explain(command: ExplainSubcommands) -> Result<()> {
             file,
             source,
         } => {
-            handle_explain_load(&repo, symbol.as_deref(), file.as_deref(), source.as_deref())?;
+            explain_dependency_load(&repo, symbol.as_deref(), file.as_deref(), source.as_deref())?;
         }
     }
     Ok(())
@@ -378,10 +378,10 @@ fn dispatch_explain(command: ExplainSubcommands) -> Result<()> {
 fn dispatch_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>) -> Result<()> {
     match (repo, command) {
         (_, Some(IncludesSubcommands::Explain { repo, file })) => {
-            handle_includes_explain(&repo, &file)?;
+            explain_include_graph_for_file(&repo, &file)?;
         }
         (Some(repo_path), None) => {
-            handle_includes(&repo_path)?;
+            analyze_include_graph(&repo_path)?;
         }
         (None, None) => {
             bail!("Repository path required for tool includes command");
@@ -393,13 +393,13 @@ fn dispatch_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>
 fn dispatch_query(command: QuerySubcommands) -> Result<()> {
     match command {
         QuerySubcommands::Symbol { repo, name } => {
-            handle_query_symbol(&repo, &name)?;
+            query_symbol_by_name(&repo, &name)?;
         }
         QuerySubcommands::Deps { repo, name } => {
-            handle_query_deps(&repo, &name)?;
+            query_symbol_dependencies(&repo, &name)?;
         }
         QuerySubcommands::Users { repo, name } => {
-            handle_query_users(&repo, &name)?;
+            query_symbol_users(&repo, &name)?;
         }
     }
     Ok(())
@@ -408,10 +408,10 @@ fn dispatch_query(command: QuerySubcommands) -> Result<()> {
 fn dispatch_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> Result<()> {
     match (repo, command) {
         (_, Some(PlanSubcommands::Show { repo, id })) => {
-            handle_plan_show(&repo, &id)?;
+            show_optimization_plan(&repo, &id)?;
         }
         (Some(repo_path), None) => {
-            handle_plan(&repo_path)?;
+            plan_extractions(&repo_path)?;
         }
         (None, None) => {
             bail!("Repository path required for tool plan command");
@@ -423,7 +423,7 @@ fn dispatch_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> Res
 fn dispatch_transform(command: TransformSubcommands) -> Result<()> {
     match command {
         TransformSubcommands::Extract { repo, plan } => {
-            handle_transform_extract(&repo, &plan)?;
+            extract_plan_headers(&repo, &plan)?;
         }
     }
     Ok(())
@@ -653,7 +653,7 @@ mod tests {
         fs::create_dir_all(repo_dir.join("src")).unwrap();
         fs::write(repo_dir.join("ariadne.toml"), "").unwrap();
 
-        let result = handle_measure(&repo_dir);
+        let result = measure_build_performance(&repo_dir);
         assert!(result.is_ok());
 
         let _ = fs::remove_dir_all(temp);
@@ -673,7 +673,7 @@ mod tests {
         let after_dir = temp.join("after");
         fs::create_dir_all(&after_dir).unwrap();
 
-        let result = handle_compare(&before_dir, &after_dir);
+        let result = compare_build_measurements(&before_dir, &after_dir);
         // This will fail because there are no valid measurement artifacts,
         // but for now the command doesn't even exist.
         assert!(result.is_err());
@@ -727,7 +727,7 @@ mod tests {
             .to_path_buf();
         let repo_dir = root.join("tests/fixtures/basic");
 
-        let result = handle_analyze(&repo_dir).unwrap();
+        let result = run_incremental_analysis(&repo_dir).unwrap();
         assert!(result.stats.total_tus > 0 || result.stats.total_tus == 0); // Just check it returned Ok
     }
 
