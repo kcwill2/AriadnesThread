@@ -620,6 +620,16 @@
       gap: 4px;
     }
 
+    details.insp-link-section > summary.link-list-title {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    details.insp-link-section > summary.link-list-title::-webkit-details-marker {
+      display: none;
+    }
+
     .link-item {
       padding: 7px 10px;
       background: rgba(30, 41, 59, 0.6);

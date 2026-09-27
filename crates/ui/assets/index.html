@@ -294,21 +294,21 @@
           <div id="inspProposalCard"></div>
         </div>
 
-        <div>
-          <div class="link-list-title">
+        <details class="insp-link-section" open>
+          <summary class="link-list-title">
             <span id="inspUpstreamTitle">Incoming (Includers / Callers)</span>
             <span id="inspUpstreamCount" style="font-family:monospace;">0</span>
-          </div>
+          </summary>
           <div class="link-list" id="inspUpstreamList"></div>
-        </div>
+        </details>
 
-        <div>
-          <div class="link-list-title">
+        <details class="insp-link-section" open>
+          <summary class="link-list-title">
             <span id="inspDownstreamTitle">Outgoing (Dependencies / Callees)</span>
             <span id="inspDownstreamCount" style="font-family:monospace;">0</span>
-          </div>
+          </summary>
           <div class="link-list" id="inspDownstreamList"></div>
-        </div>
+        </details>
 
         <div class="btn-row">
           <button class="btn-primary" onclick="openSourceDrawer()">
