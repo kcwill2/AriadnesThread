@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        # Legacy 125-warning baseline recorded at f7ace60; flip to
+        # `cargo clippy --workspace --all-targets -- -D warnings` once the
+        # baseline is cleared (tracked follow-up).
+        run: cargo clippy --workspace --all-targets
+
+      - name: Tests
+        # tests/integration is a workspace member, so integration tests are
+        # included in this run.
+        run: cargo test --workspace
+
+      - name: Hygiene gate (R1/R2)
+        run: python tools/hygiene_check.py
+
+      - name: Hygiene gate unit tests
+        run: python tools/hygiene_check_tests.py
