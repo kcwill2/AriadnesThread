@@ -41,7 +41,7 @@ fn check_clang_available() -> bool {
     Command::new("clang").arg("--version").output().is_ok()
 }
 
-fn process_request(req: WorkerRequest) -> WorkerResponse {
+fn run_request_analysis(req: WorkerRequest) -> WorkerResponse {
     if req.action != "analyze" {
         return WorkerResponse {
             status: "error".to_string(),
@@ -116,7 +116,7 @@ fn main() {
     if let Some(path) = cli.file {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(req) = serde_json::from_str::<WorkerRequest>(&content) {
-                let resp = process_request(req);
+                let resp = run_request_analysis(req);
                 println!("{}", serde_json::to_string(&resp).unwrap());
             }
         }
@@ -131,7 +131,7 @@ fn main() {
             }
             match serde_json::from_str::<WorkerRequest>(&line_str) {
                 Ok(req) => {
-                    let resp = process_request(req);
+                    let resp = run_request_analysis(req);
                     let out = serde_json::to_string(&resp).unwrap();
                     println!("{}", out);
                     let _ = io::stdout().flush();
