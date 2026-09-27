@@ -224,6 +224,79 @@ fn test_ui_live_mode_fetches_file_collateral() {
 }
 
 #[test]
+fn test_ui_heat_map_tri_state_justification() {
+    let page = common::page_content();
+
+    // graph.js must consult the per-root justification map on include-tab selection.
+    assert!(
+        ariadne_ui::GRAPH_JS.contains("file_justification"),
+        "graph.js must read graphData.file_justification"
+    );
+
+    // Classification must be a named predicate helper (plan refactor requirement).
+    assert!(
+        ariadne_ui::GRAPH_JS.contains("function classifyDependency("),
+        "missing classifyDependency predicate helper"
+    );
+
+    // Tri-state classes applied to reachable dependencies.
+    assert!(
+        ariadne_ui::GRAPH_JS.contains("dep-justified")
+            && ariadne_ui::GRAPH_JS.contains("dep-mixed"),
+        "missing dep-justified/dep-mixed class application"
+    );
+
+    // CSS rules for the green justified ring and the mixed accent exist in the page.
+    assert!(
+        page.contains(".node-group.dep-justified"),
+        "missing .node-group.dep-justified CSS rule"
+    );
+    assert!(
+        page.contains(".node-group.dep-mixed"),
+        "missing .node-group.dep-mixed CSS rule"
+    );
+
+    // Legend gains a Justified (needed) row driven by justified_count.
+    assert!(
+        ariadne_ui::MAIN_JS.contains("Justified (needed)"),
+        "missing Justified (needed) legend row"
+    );
+    assert!(
+        ariadne_ui::MAIN_JS.contains("justified_count"),
+        "legend must detect justified entries via justified_count"
+    );
+
+    // Live mode must pass file_justification through from /api/export,
+    // mirroring the file_collateral guard above.
+    assert!(
+        ariadne_ui::API_JS.contains("graphData.file_justification ="),
+        "live mode must assign graphData.file_justification"
+    );
+
+    // Collateral heat badges stay unchanged.
+    assert!(
+        page.contains("+${c} col"),
+        "collateral +N col badge must remain intact"
+    );
+}
+
+#[test]
+fn test_ui_justification_fallback_defaults_empty() {
+    // I4 negative lock (string-level, asset test): the file_justification lookup
+    // must default with `|| {}` exactly like file_collateral, so a payload without
+    // the field renders identical to the pre-justification heat map.
+    let graph = ariadne_ui::GRAPH_JS;
+    assert!(
+        graph.contains("graphData.file_collateral || {}"),
+        "file_collateral lookup must keep its || {{}} default"
+    );
+    assert!(
+        graph.contains("graphData.file_justification || {}"),
+        "file_justification lookup must default with || {{}} (I4)"
+    );
+}
+
+#[test]
 fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
     let html = common::page_content();
 
