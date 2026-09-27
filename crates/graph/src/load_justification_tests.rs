@@ -493,3 +493,153 @@ fn test_required_headers_seed_defining_file_dropped_wholesale() {
     assert_eq!(header_rows(&with_seed), vec![("b.h".to_string(), 1)]);
     assert!(with_seed.iter().all(|(id, _, _)| *id != FileId(2)));
 }
+
+// ---- E-I9: needs-sets contain includable headers only ----
+
+// Intent (E-I9, plan 1790521470000): a semantic closure symbol defined in a
+// translation unit (.cpp/.cc) contributes NO include requirement — it is
+// satisfied by a declaration elsewhere or by linking, never by inclusion.
+// S1@seed.h reaches worker.cpp AND a header-only path through b.h;
+// S2@a.h is a seed whose closure re-reaches a.h plus b.h and worker.cpp;
+// S3@seed.h reaches ONLY source defining files.
+fn setup_ei9_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+    let mut ig = IncludeGraph::new();
+    ig.register_file(FileId(1), PathBuf::from("seed.h"));
+    ig.register_file(FileId(2), PathBuf::from("a.h"));
+    ig.register_file(FileId(3), PathBuf::from("b.h"));
+    ig.register_file(FileId(4), PathBuf::from("worker.cpp"));
+    ig.register_file(FileId(5), PathBuf::from("impl.cc"));
+
+    let mut model = ReducedSemanticModel {
+        repo_root: PathBuf::from("/"),
+        symbols: BTreeMap::new(),
+        edges: vec![],
+        tu_usage: BTreeMap::new(),
+        file_symbols: BTreeMap::new(),
+    };
+
+    let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+        let id = SymbolId::new(name);
+        model.symbols.insert(
+            id.clone(),
+            ReducedSymbolRecord {
+                id: id.clone(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(file),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        id
+    };
+
+    let s1 = add_sym(&mut model, "S1", FileId(1));
+    let s3 = add_sym(&mut model, "S3", FileId(1));
+    let s2 = add_sym(&mut model, "S2", FileId(2));
+    let a_loc = add_sym(&mut model, "ALoc", FileId(2));
+    let y = add_sym(&mut model, "Y", FileId(3));
+    let z = add_sym(&mut model, "Z", FileId(3));
+    let w = add_sym(&mut model, "W", FileId(4));
+    let v = add_sym(&mut model, "V", FileId(5));
+
+    let dep = |src: &SymbolId, dst: &SymbolId| ReducedSemanticEdge {
+        src_symbol: src.clone(),
+        dst_symbol: dst.clone(),
+        kind: DependencyKind::Complete,
+    };
+    model.edges = vec![
+        dep(&s1, &w),
+        dep(&s1, &y),
+        dep(&y, &z),
+        dep(&s2, &a_loc),
+        dep(&s2, &y),
+        dep(&s2, &w),
+        dep(&s3, &w),
+        dep(&s3, &v),
+    ];
+
+    (ig, model)
+}
+
+#[test]
+fn test_required_headers_mixed_header_and_source_closure_returns_header_only() {
+    let (ig, model) = setup_ei9_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let rows = analyzer.required_headers_for_symbols(&[SymbolId::new("S1")]);
+
+    // W is defined in worker.cpp: includable via nothing, so only b.h's row
+    // (Y + Z = 2 symbols) may appear.
+    assert_eq!(header_rows(&rows), vec![("b.h".to_string(), 2)]);
+    assert!(
+        rows.iter().all(|(id, _, _)| *id != FileId(4)),
+        "worker.cpp must be absent from needs per E-I9: {:?}",
+        header_rows(&rows)
+    );
+}
+
+#[test]
+fn test_required_headers_source_only_closure_returns_empty() {
+    let (ig, model) = setup_ei9_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let rows = analyzer.required_headers_for_symbols(&[SymbolId::new("S3")]);
+
+    assert!(
+        rows.is_empty(),
+        "a closure reaching only .cpp/.cc defining files needs no includes per E-I9: {:?}",
+        header_rows(&rows)
+    );
+}
+
+#[test]
+fn test_required_headers_seed_exclusion_still_applies_alongside_header_filter() {
+    let (ig, model) = setup_ei9_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    // Seed S2 is defined in a.h; ALoc (non-seed) sits in a.h too (dropped by
+    // the wholesale seed-file exclusion), Y/Z land in b.h, W in worker.cpp.
+    let rows = analyzer.required_headers_for_symbols(&[SymbolId::new("S2")]);
+
+    assert_eq!(header_rows(&rows), vec![("b.h".to_string(), 2)]);
+    assert!(rows.iter().all(|(id, _, _)| *id != FileId(2)));
+    assert!(rows.iter().all(|(id, _, _)| *id != FileId(4)));
+}
+
+#[test]
+fn test_is_includable_header_predicate() {
+    let cases: Vec<(&str, bool)> = vec![
+        ("a.h", true),
+        ("a.hpp", true),
+        ("a.hxx", true),
+        ("inc/util.h", true),
+        // Final component ends in .h, so this IS a header regardless of the
+        // embedded .cpp: e.g. a hand-written header living beside worker.cpp.
+        ("x.cpp.h", true),
+        // Decision, documented here: a file literally named ".h" is treated
+        // as a header — the predicate is ends_with on the file name (same
+        // rule as the dto.rs node-kind check), and ".h" satisfies it.
+        (".h", true),
+        ("a.cc", false),
+        ("a.cpp", false),
+        ("a.c", false),
+        // Template-impl files are deliberately OUT for now — future question.
+        ("a.ipp", false),
+        ("a.inl", false),
+        // Case-sensitive, matching dto.rs kind detection.
+        ("a.H", false),
+        ("a.txt", false),
+        // No final component at all: not includable.
+        ("..", false),
+        ("", false),
+    ];
+    for (name, expected) in cases {
+        assert_eq!(
+            is_includable_header(Path::new(name)),
+            expected,
+            "is_includable_header({name:?})"
+        );
+    }
+}
+
