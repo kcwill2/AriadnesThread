@@ -361,6 +361,7 @@
               }
               const txt = el.querySelector('text');
               if (txt) txt.setAttribute('fill', hc.text);
+              el.classList.add('heat-glow-' + hc.tier);
               if (hc.tier === 4) el.classList.add('heat-critical');
               if (tier === 'mixed') el.classList.add('dep-mixed');
               badge.setAttribute('fill', hc.border);

@@ -430,10 +430,18 @@
       filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
     }
 
+    /* Per-tier heat glow: every collateral tier outlines in its own tier color
+       (equal specificity to the rules above, later source order wins). */
+    .node-group.heat-glow-0 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.85)); }
+    .node-group.heat-glow-1 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.85)); }
+    .node-group.heat-glow-2 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(234, 179, 8, 0.85)); }
+    .node-group.heat-glow-3 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.85)); }
+    .node-group.heat-glow-4 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.9)); }
+
     .node-group.dep-justified rect {
       stroke: #4ade80 !important;
       stroke-width: 2.5px !important;
-      filter: drop-shadow(0 0 8px rgba(74, 222, 128, 0.5));
+      filter: drop-shadow(0 0 10px rgba(74, 222, 128, 0.75));
     }
 
     .node-group.dep-mixed rect {
