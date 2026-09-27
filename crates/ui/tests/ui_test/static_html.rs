@@ -297,6 +297,105 @@ fn test_ui_justification_fallback_defaults_empty() {
 }
 
 #[test]
+fn test_ui_inspector_justification_breakdown() {
+    let page = common::page_content();
+
+    // Live hydrate: on-demand unbounded detail via /api/justification, cached per
+    // node (second selection must not refetch), skipped in the standalone report
+    // via the same __ARIADNE_DATA__ mechanism init() already uses.
+    assert!(
+        ariadne_ui::API_JS.contains("/api/justification?file="),
+        "live mode must fetch /api/justification detail for the selected node"
+    );
+    assert!(
+        ariadne_ui::API_JS.contains("justificationCache[nodeId]"),
+        "justification detail must be cached keyed by nodeId"
+    );
+    assert!(
+        ariadne_ui::API_JS.contains("isStandaloneReport"),
+        "the justification fetch must be gated by the standalone/live check"
+    );
+
+    // Named breakdown renderer with a standalone payload path: it renders from
+    // the capped graphData.file_justification map without any fetch (I5).
+    assert!(
+        page.contains("function renderJustificationBreakdown("),
+        "missing named renderJustificationBreakdown renderer"
+    );
+    assert!(
+        ariadne_ui::API_JS.contains("payloadJustificationRows"),
+        "breakdown must build rows from the capped payload when no live detail"
+    );
+    assert!(
+        ariadne_ui::API_JS.contains("graphData.file_justification"),
+        "standalone payload path must read graphData.file_justification"
+    );
+
+    // New inspector containers: section, row list, and justified/collateral totals.
+    assert!(
+        page.contains("id=\"inspJustificationSection\""),
+        "missing inspJustificationSection container"
+    );
+    assert!(
+        page.contains("id=\"inspJustificationList\""),
+        "missing inspJustificationList row container"
+    );
+    assert!(
+        page.contains("id=\"inspJustificationCount\""),
+        "missing inspJustificationCount totals element"
+    );
+
+    // Tri-state row reading: justified names, required headers, collateral names,
+    // with a '+N more' overflow marker for truncated name lists.
+    assert!(
+        page.contains("just-justified") && page.contains("just-needs") && page.contains("just-collateral"),
+        "missing for/needs/collateral tri-state row parts"
+    );
+    assert!(
+        page.contains("just-more"),
+        "missing +N more truncation overflow marker"
+    );
+
+    // I4 fallback: the platitude is kept but must be guarded so nodes WITH
+    // justification data render the breakdown instead. The breakdown call must
+    // precede the insight fallback inside selectNode.
+    let graph = ariadne_ui::GRAPH_JS;
+    let sel_start = graph
+        .find("function selectNode(")
+        .expect("selectNode function");
+    let body_end = graph
+        .find("function recordCrumb(")
+        .expect("recordCrumb function");
+    assert!(sel_start < body_end);
+    let body = &graph[sel_start..body_end];
+    assert!(
+        body.contains("renderJustificationBreakdown(id"),
+        "selectNode must call the breakdown renderer for the selected node"
+    );
+    assert!(
+        body.contains("&& !justificationShown"),
+        "the high-fan-out platitude branch must be guarded by justification data"
+    );
+    let platitude = graph
+        .find("Consider header extraction")
+        .expect("platitude must remain in the fallback path");
+    assert!(
+        platitude > sel_start && platitude < body_end,
+        "platitude must stay inside the selectNode insight fallback"
+    );
+    assert!(
+        graph.find("renderJustificationBreakdown(id").unwrap() < platitude,
+        "breakdown render must run before the insight fallback in selectNode order"
+    );
+
+    // Help text must describe the inspector breakdown.
+    assert!(
+        page.contains("Include Justification breakdown"),
+        "legend help text must mention the inspector Include Justification breakdown"
+    );
+}
+
+#[test]
 fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
     let html = common::page_content();
 
