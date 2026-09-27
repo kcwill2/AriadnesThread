@@ -293,11 +293,11 @@ impl Pipeline {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?;
-                let res = rt.block_on(analyzer.analyze())?;
-                let production = res.stats;
+                let analysis_result = rt.block_on(analyzer.analyze())?;
+                let production = analysis_result.stats;
                 let reuse =
                     IncrementalStats::calculate(production.reused_tus, production.reanalyzed_tus);
-                (res.index_result, reuse, Some(production))
+                (analysis_result.index_result, reuse, Some(production))
             }
             None => {
                 let (index_result, stats) = self.rebuild_index_single_threaded()?;
