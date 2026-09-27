@@ -112,6 +112,8 @@
                 graphData.file_justification = p.file_justification || {};
                 graphData.extraction_proposals = p.extraction_proposals || [];
               }
+              // Payload swap: drop per-node /api/justification detail cached against the previous build.
+              justificationCache = {};
               applyLoadedData();
             }
           }
@@ -124,7 +126,7 @@
     // Inspector include-justification breakdown: live mode hydrates the unbounded
     // /api/justification detail (cached per node so reselecting never refetches);
     // standalone reports render from the capped export payload only (I5).
-    const justificationCache = {};
+    let justificationCache = {};
 
     function isStandaloneReport() {
       return Boolean(window.__ARIADNE_DATA__ && window.__ARIADNE_DATA__.include_graph);
