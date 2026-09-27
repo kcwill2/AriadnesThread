@@ -71,6 +71,27 @@ pub struct CollateralResponse {
     pub transitive_collateral: std::collections::HashMap<String, usize>,
 }
 
+/// Symbol-attributed split of one include edge (root file -> source header):
+/// which symbols justify the edge and which ride along as collateral payload.
+/// Name lists are capped per I3; `justified_count`/`collateral_count` stay the
+/// raw uncapped counts and match `file_collateral` (same LoadMetric source).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JustificationEntry {
+    pub justified_symbols: Vec<String>,
+    pub collateral_symbols: Vec<String>,
+    pub justified_count: usize,
+    pub collateral_count: usize,
+    pub justified_truncated: bool,
+    pub collateral_truncated: bool,
+    pub required_headers: Vec<String>,
+}
+
+/// Bounded payload caps (I3): contributor entries per root, symbol names per
+/// side per entry, required-header basenames per entry.
+const JUSTIFICATION_MAX_SOURCES: usize = 16;
+const JUSTIFICATION_MAX_NAMES: usize = 12;
+const JUSTIFICATION_MAX_HEADERS: usize = 8;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphExportPayload {
     pub repo_name: String,
@@ -81,6 +102,153 @@ pub struct GraphExportPayload {
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub file_collateral:
         std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub file_justification: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, JustificationEntry>,
+    >,
+}
+
+/// Maps `root FileId -> source FileId -> per-edge justification`, keyed like
+/// `file_collateral`. Sources are ranked `(combined count desc, FileId asc)`
+/// and capped (I3); symbol names are sorted by SymbolId then capped, with the
+/// missing-from-model fallback to the id string.
+pub fn build_file_justification(
+    file_metrics: &[ariadne_graph::LoadMetric],
+    include_graph: &ariadne_graph::IncludeGraph,
+    model: &ariadne_graph::ReducedSemanticModel,
+    path_to_id: &std::collections::HashMap<std::path::PathBuf, u64>,
+) -> std::collections::HashMap<
+    String,
+    std::collections::HashMap<String, JustificationEntry>,
+> {
+    let analyzer = ariadne_graph::LoadAnalyzer::new(include_graph, model);
+    let mut out: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, JustificationEntry>,
+    > = std::collections::HashMap::new();
+    for metric in file_metrics {
+        let Some(root_id) = metric
+            .target_file
+            .as_ref()
+            .and_then(|p| path_to_id.get(p))
+        else {
+            continue;
+        };
+        let mut sides: std::collections::HashMap<u64, SourceSides> =
+            std::collections::HashMap::new();
+        for src in &metric.semantic_sources {
+            if src.symbol_count > 0 {
+                sides.entry(src.file_id.0).or_default().justified = Some(src);
+            }
+        }
+        for src in &metric.collateral_sources {
+            if src.symbol_count > 0 {
+                sides.entry(src.file_id.0).or_default().collateral = Some(src);
+            }
+        }
+        if sides.is_empty() {
+            continue;
+        }
+        let combined = |id: &u64| -> usize {
+            let s = &sides[id];
+            s.justified.map_or(0, |x| x.symbol_count) + s.collateral.map_or(0, |x| x.symbol_count)
+        };
+        let mut ranked: Vec<u64> = sides.keys().copied().collect();
+        ranked.sort_by(|a, b| combined(b).cmp(&combined(a)).then(a.cmp(b)));
+
+        let mut per_root = std::collections::HashMap::new();
+        for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
+            let s = &sides[&id];
+            let (justified_symbols, justified_truncated) =
+                justification_names(s.justified, model);
+            let (collateral_symbols, collateral_truncated) =
+                justification_names(s.collateral, model);
+            let required_headers = s
+                .justified
+                .map(|j| justification_required_headers(&analyzer, &j.symbols, &j.path))
+                .unwrap_or_default();
+            per_root.insert(
+                id.to_string(),
+                JustificationEntry {
+                    justified_symbols,
+                    collateral_symbols,
+                    justified_count: s.justified.map_or(0, |x| x.symbol_count),
+                    collateral_count: s.collateral.map_or(0, |x| x.symbol_count),
+                    justified_truncated,
+                    collateral_truncated,
+                    required_headers,
+                },
+            );
+        }
+        if !per_root.is_empty() {
+            out.insert(root_id.to_string(), per_root);
+        }
+    }
+    out
+}
+
+#[derive(Default)]
+struct SourceSides<'a> {
+    justified: Option<&'a ariadne_graph::ContributingSource>,
+    collateral: Option<&'a ariadne_graph::ContributingSource>,
+}
+
+/// Names for one side: sorted by SymbolId, capped (I3), missing symbols fall
+/// back to their SymbolId string.
+fn justification_names(
+    side: Option<&ariadne_graph::ContributingSource>,
+    model: &ariadne_graph::ReducedSemanticModel,
+) -> (Vec<String>, bool) {
+    let Some(side) = side else {
+        return (Vec::new(), false);
+    };
+    let mut ids: Vec<&ariadne_index::SymbolId> = side.symbols.iter().collect();
+    ids.sort();
+    let truncated = ids.len() > JUSTIFICATION_MAX_NAMES;
+    let names = ids
+        .into_iter()
+        .take(JUSTIFICATION_MAX_NAMES)
+        .map(|id| {
+            model
+                .symbols
+                .get(id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| id.0.clone())
+        })
+        .collect();
+    (names, truncated)
+}
+
+/// Basename required-header set for one edge's justified symbols: the source
+/// header's own basename never appears, results are sorted and capped.
+fn justification_required_headers(
+    analyzer: &ariadne_graph::LoadAnalyzer,
+    justified: &[ariadne_index::SymbolId],
+    source_path: &std::path::Path,
+) -> Vec<String> {
+    if justified.is_empty() {
+        return Vec::new();
+    }
+    let excluded = path_basename(source_path);
+    let mut headers: Vec<String> = analyzer
+        .required_headers_for_symbols(justified)
+        .into_iter()
+        .map(|(_, path, _)| path_basename(&path))
+        .filter(|name| *name != excluded)
+        .collect();
+    headers.sort();
+    headers.dedup();
+    headers.truncate(JUSTIFICATION_MAX_HEADERS);
+    headers
+}
+
+/// Mirrors the graph crate's basename fallback for paths without a final
+/// component (e.g. `..`).
+fn path_basename(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 pub fn build_include_elements(

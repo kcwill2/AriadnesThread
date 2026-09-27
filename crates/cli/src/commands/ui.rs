@@ -106,7 +106,14 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let cycles = include_graph.detect_cycles();
     let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
 
-    let file_collateral = build_file_collateral(&include_graph, &load_report.file_metrics);
+    let path_to_id = build_path_to_id(&include_graph);
+    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
+    let file_justification = ariadne_ui::build_file_justification(
+        &load_report.file_metrics,
+        &include_graph,
+        &reduced_model,
+        &path_to_id,
+    );
 
     let payload = GraphExportPayload {
         repo_name: pipeline
@@ -126,6 +133,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
             cycle_count: report.cycle_count,
         },
         file_collateral,
+        file_justification,
     };
 
     let status = stage_status_from_pipeline(&pipeline);
@@ -139,17 +147,21 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     })
 }
 
-/// Map each target file (by numeric FileId) to the symbol counts contributed
-/// by its collateral sources, keeping only files with non-zero contributors.
-fn build_file_collateral(
-    include_graph: &ariadne_graph::IncludeGraph,
-    file_metrics: &[ariadne_graph::LoadMetric],
-) -> HashMap<String, HashMap<String, usize>> {
-    let path_to_id: HashMap<PathBuf, u64> = include_graph
+/// Shared path→numeric-FileId lookup used by every per-file payload builder.
+fn build_path_to_id(include_graph: &ariadne_graph::IncludeGraph) -> HashMap<PathBuf, u64> {
+    include_graph
         .file_paths
         .iter()
         .map(|(id, path)| (path.clone(), id.0))
-        .collect();
+        .collect()
+}
+
+/// Map each target file (by numeric FileId) to the symbol counts contributed
+/// by its collateral sources, keeping only files with non-zero contributors.
+fn build_file_collateral(
+    path_to_id: &HashMap<PathBuf, u64>,
+    file_metrics: &[ariadne_graph::LoadMetric],
+) -> HashMap<String, HashMap<String, usize>> {
     let mut file_collateral: HashMap<String, HashMap<String, usize>> = HashMap::new();
     for metric in file_metrics {
         let Some(path) = metric.target_file.as_ref().and_then(|p| path_to_id.get(p)) else {

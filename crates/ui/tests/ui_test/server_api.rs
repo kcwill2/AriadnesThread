@@ -33,6 +33,7 @@ async fn test_server_routes() {
                 cycle_count: 0,
             },
             file_collateral: std::collections::HashMap::new(),
+            file_justification: std::collections::HashMap::new(),
         },
     ));
 
@@ -90,6 +91,7 @@ async fn test_async_ui_state_loading() {
                 cycle_count: 0,
             },
             file_collateral: HashMap::new(),
+            file_justification: HashMap::new(),
         });
         *state.include_graph.write().unwrap() = Some(IncludeGraph::new());
         *state.reduced_model.write().unwrap() = Some(ReducedSemanticModel {
@@ -148,6 +150,7 @@ async fn test_server_index_route() {
                 cycle_count: 0,
             },
             file_collateral: std::collections::HashMap::new(),
+            file_justification: std::collections::HashMap::new(),
         },
     ));
 

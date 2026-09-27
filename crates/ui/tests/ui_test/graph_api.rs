@@ -36,6 +36,7 @@ async fn test_server_traversal_routes() {
                 cycle_count: 0,
             },
             file_collateral: std::collections::HashMap::new(),
+            file_justification: std::collections::HashMap::new(),
         },
     ));
 
@@ -152,6 +153,7 @@ async fn test_search_advanced_queries_and_dto_paths() {
                 cycle_count: 0,
             },
             file_collateral: std::collections::HashMap::new(),
+            file_justification: std::collections::HashMap::new(),
         },
     ));
 
@@ -192,6 +194,7 @@ async fn test_server_collateral_endpoint() {
                 cycle_count: 0,
             },
             file_collateral,
+            file_justification: HashMap::new(),
         },
     ));
 

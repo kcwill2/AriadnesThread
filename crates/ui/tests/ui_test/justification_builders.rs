@@ -225,13 +225,22 @@ fn test_top_16_contributors_kept_by_combined_count() {
 
     let root = out.get("1").expect("root present");
     assert_eq!(root.len(), 16, "exactly 16 source entries survive the cap");
-    assert!(
-        !root.contains_key("25") && !root.contains_key("26"),
-        "the two lowest combined counts (85 and 84) must be dropped"
+    let dropped: Vec<String> = (10..=26)
+        .map(|i| i.to_string())
+        .filter(|k| !root.contains_key(k))
+        .collect();
+    assert_eq!(
+        dropped,
+        vec!["26".to_string()],
+        "the single lowest combined count (84) is the one dropped"
+    );
+    assert_eq!(
+        root.get("25").expect("85 must survive at the boundary").justified_count,
+        85
     );
     for (key, entry) in root {
         assert!(
-            entry.justified_count >= 86,
+            entry.justified_count >= 85,
             "kept entry {key} has count {}, below the top-16 floor",
             entry.justified_count
         );

@@ -32,6 +32,7 @@ pub fn empty_export_payload() -> GraphExportPayload {
             cycle_count: 0,
         },
         file_collateral: HashMap::new(),
+        file_justification: HashMap::new(),
     }
 }
 
