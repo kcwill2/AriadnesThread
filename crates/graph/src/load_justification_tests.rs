@@ -290,3 +290,206 @@ fn test_old_load_metric_json_without_semantic_sources_deserializes() {
         PathBuf::from("HugeThirdParty.h")
     );
 }
+
+// ---- required_headers_for_symbols (projection API) ----
+
+// Seeds S1, S2 and the isolated Lonely live in seed.h; S1 requires X1, X2
+// (a.h) and X1 in turn requires Y1; S2 requires Y1 (b.h). The seeds' own
+// defining file must never be reported as a required header.
+fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+    let mut ig = IncludeGraph::new();
+    ig.register_file(FileId(1), PathBuf::from("seed.h"));
+    ig.register_file(FileId(2), PathBuf::from("a.h"));
+    ig.register_file(FileId(3), PathBuf::from("b.h"));
+
+    let mut model = ReducedSemanticModel {
+        repo_root: PathBuf::from("/"),
+        symbols: BTreeMap::new(),
+        edges: vec![],
+        tu_usage: BTreeMap::new(),
+        file_symbols: BTreeMap::new(),
+    };
+
+    let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+        let id = SymbolId::new(name);
+        model.symbols.insert(
+            id.clone(),
+            ReducedSymbolRecord {
+                id: id.clone(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(file),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        id
+    };
+
+    let s1 = add_sym(&mut model, "S1", FileId(1));
+    let s2 = add_sym(&mut model, "S2", FileId(1));
+    add_sym(&mut model, "Lonely", FileId(1));
+    let x1 = add_sym(&mut model, "X1", FileId(2));
+    let x2 = add_sym(&mut model, "X2", FileId(2));
+    let y1 = add_sym(&mut model, "Y1", FileId(3));
+
+    let dep = |src: &SymbolId, dst: &SymbolId| ReducedSemanticEdge {
+        src_symbol: src.clone(),
+        dst_symbol: dst.clone(),
+        kind: DependencyKind::Complete,
+    };
+    model.edges = vec![
+        dep(&s1, &x1),
+        dep(&s1, &x2),
+        dep(&x1, &y1),
+        dep(&s2, &y1),
+    ];
+
+    (ig, model)
+}
+
+// z.h is registered before b.h so graph insertion order contradicts the
+// `(count desc, path asc)` contract; both contribute exactly one symbol.
+fn setup_tiebreak_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+    let mut ig = IncludeGraph::new();
+    ig.register_file(FileId(1), PathBuf::from("main.h"));
+    ig.register_file(FileId(2), PathBuf::from("z.h"));
+    ig.register_file(FileId(3), PathBuf::from("b.h"));
+
+    let mut model = ReducedSemanticModel {
+        repo_root: PathBuf::from("/"),
+        symbols: BTreeMap::new(),
+        edges: vec![],
+        tu_usage: BTreeMap::new(),
+        file_symbols: BTreeMap::new(),
+    };
+
+    let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+        let id = SymbolId::new(name);
+        model.symbols.insert(
+            id.clone(),
+            ReducedSymbolRecord {
+                id: id.clone(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(file),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        id
+    };
+
+    let m = add_sym(&mut model, "M", FileId(1));
+    let z = add_sym(&mut model, "Z", FileId(2));
+    let b = add_sym(&mut model, "B", FileId(3));
+
+    let dep = |src: &SymbolId, dst: &SymbolId| ReducedSemanticEdge {
+        src_symbol: src.clone(),
+        dst_symbol: dst.clone(),
+        kind: DependencyKind::Complete,
+    };
+    model.edges = vec![dep(&m, &z), dep(&m, &b)];
+
+    (ig, model)
+}
+
+fn header_rows(rows: &[(FileId, PathBuf, usize)]) -> Vec<(String, usize)> {
+    rows.iter()
+        .map(|(_, path, count)| {
+            (
+                path.file_name().unwrap().to_string_lossy().to_string(),
+                *count,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn test_required_headers_combines_two_seed_closures_excluding_seed_file() {
+    let (ig, model) = setup_required_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let rows =
+        analyzer.required_headers_for_symbols(&[SymbolId::new("S1"), SymbolId::new("S2")]);
+
+    assert_eq!(
+        header_rows(&rows),
+        vec![("a.h".to_string(), 2), ("b.h".to_string(), 1)]
+    );
+    assert_eq!(rows[0].0, FileId(2));
+    assert_eq!(rows[1].0, FileId(3));
+    assert!(rows.iter().all(|(id, _, _)| *id != FileId(1)));
+}
+
+#[test]
+fn test_required_headers_empty_input_returns_empty() {
+    let (ig, model) = setup_required_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+    assert!(analyzer.required_headers_for_symbols(&[]).is_empty());
+}
+
+#[test]
+fn test_required_headers_isolated_seed_returns_empty() {
+    let (ig, model) = setup_required_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+    let rows = analyzer.required_headers_for_symbols(&[SymbolId::new("Lonely")]);
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn test_required_headers_unknown_symbols_ignored() {
+    let (ig, model) = setup_required_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    assert!(analyzer
+        .required_headers_for_symbols(&[SymbolId::new("NoSuchSymbol"), SymbolId::new("AlsoMissing")])
+        .is_empty());
+
+    let known_only = analyzer.required_headers_for_symbols(&[SymbolId::new("S1")]);
+    assert_eq!(
+        header_rows(&known_only),
+        vec![("a.h".to_string(), 2), ("b.h".to_string(), 1)]
+    );
+    let mixed = analyzer.required_headers_for_symbols(&[
+        SymbolId::new("NoSuchSymbol"),
+        SymbolId::new("S1"),
+    ]);
+    assert_eq!(mixed, known_only);
+}
+
+#[test]
+fn test_required_headers_deterministic_and_path_tiebreak() {
+    let (ig, model) = setup_required_fixture();
+    let seeds = [SymbolId::new("S1"), SymbolId::new("S2")];
+    let first = LoadAnalyzer::new(&ig, &model).required_headers_for_symbols(&seeds);
+    let second = LoadAnalyzer::new(&ig, &model).required_headers_for_symbols(&seeds);
+    assert_eq!(first, second);
+
+    let (ig2, model2) = setup_tiebreak_fixture();
+    let rows = LoadAnalyzer::new(&ig2, &model2).required_headers_for_symbols(&[SymbolId::new("M")]);
+    assert_eq!(
+        header_rows(&rows),
+        vec![("b.h".to_string(), 1), ("z.h".to_string(), 1)]
+    );
+}
+
+#[test]
+fn test_required_headers_seed_defining_file_dropped_wholesale() {
+    let (ig, model) = setup_required_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let baseline = analyzer.required_headers_for_symbols(&[SymbolId::new("S1")]);
+    assert_eq!(
+        header_rows(&baseline),
+        vec![("a.h".to_string(), 2), ("b.h".to_string(), 1)]
+    );
+
+    // Adding X1 (defined in a.h) as a seed drops a.h wholesale, even though
+    // the non-seed closure symbol X2 is still defined there: exclusion is
+    // per seed defining-file, not per symbol.
+    let with_seed =
+        analyzer.required_headers_for_symbols(&[SymbolId::new("S1"), SymbolId::new("X1")]);
+    assert_eq!(header_rows(&with_seed), vec![("b.h".to_string(), 1)]);
+    assert!(with_seed.iter().all(|(id, _, _)| *id != FileId(2)));
+}
