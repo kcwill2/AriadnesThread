@@ -455,4 +455,103 @@ mod tests {
         assert!(formatted.contains("Committed:\n    7 transformations"));
         assert!(formatted.contains("Residual collateral load:\n    8241 symbols"));
     }
+
+    #[test]
+    fn test_collateral_opportunities_skip_symbols_without_defining_file() {
+        // Regression lock for 161f028: analyze_symbol_load legitimately errors
+        // for symbols with defining_file: None; the scan must skip them and
+        // keep aggregating the rest instead of panicking on unwrap.
+        use ariadne_graph::{IncludeEdge, IncludeKind, ReducedSymbolRecord, SourceLocation};
+        use ariadne_index::types::{SymbolId, SymbolKind};
+        use ariadne_repo::{
+            FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
+            RepositoryDiscoveryResult,
+        };
+
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(1), PathBuf::from("Thing.h"));
+        graph.register_file(FileId(2), PathBuf::from("graphics.h"));
+        graph.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
+        let link = |source: FileId, destination: FileId, raw_path: &str| IncludeEdge {
+            source,
+            destination: Some(destination),
+            context_name: String::new(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: raw_path.to_string(),
+            resolved_path: Some(PathBuf::from(raw_path)),
+        };
+        graph.add_edge(link(FileId(1), FileId(2), "graphics.h"));
+        graph.add_edge(link(FileId(2), FileId(3), "HugeThirdParty.h"));
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+        };
+        let mut add_symbol = |model: &mut ReducedSemanticModel,
+                              name: &str,
+                              kind: SymbolKind,
+                              defining_file: Option<FileId>| {
+            let id = SymbolId::new(name);
+            model.symbols.insert(
+                id.clone(),
+                ReducedSymbolRecord {
+                    id: id.clone(),
+                    name: name.to_string(),
+                    kind,
+                    defining_file,
+                    declarations: vec![],
+                    definition: None,
+                },
+            );
+            if let Some(file) = defining_file {
+                model.file_symbols.entry(file).or_default().push(id);
+            }
+        };
+        // Ghost sorts first in the BTreeMap, so the loop reaches the Err arm
+        // before any well-formed symbol is aggregated.
+        add_symbol(&mut model, "Ghost", SymbolKind::Function, None);
+        add_symbol(&mut model, "HugeThing", SymbolKind::Class, Some(FileId(3)));
+        add_symbol(&mut model, "Thing", SymbolKind::Class, Some(FileId(1)));
+
+        let file_record = |id: FileId, name: &str| FileRecord {
+            id,
+            path: PathBuf::from(name),
+            canonical_path: PathBuf::from(name),
+            kind: FileKind::Header,
+            size: 1,
+            content_hash: String::new(),
+            ownership: FileOwnership::Repository,
+            optimization_policy: OptimizationPolicy::Optimizable,
+        };
+        let repo_discovery = RepositoryDiscoveryResult {
+            root: PathBuf::from("/"),
+            files: vec![
+                file_record(FileId(1), "Thing.h"),
+                file_record(FileId(2), "graphics.h"),
+                file_record(FileId(3), "HugeThirdParty.h"),
+            ],
+            ownership_summary: HashMap::new(),
+            policy_summary: HashMap::new(),
+        };
+
+        let opportunities = analyze_collateral_opportunities(
+            &graph,
+            &model,
+            graph.compute_closures(),
+            &repo_discovery,
+        );
+
+        assert_eq!(
+            opportunities,
+            vec![CollateralOpportunity {
+                header_name: "HugeThirdParty.h".to_string(),
+                collateral_symbols: 1,
+            }],
+            "Ghost (defining_file: None) must contribute nothing while Thing's collateral aggregation is unaffected"
+        );
+    }
 }
