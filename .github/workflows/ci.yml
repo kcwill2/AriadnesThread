@@ -35,7 +35,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Hygiene gate (R1/R2)
-        run: python tools/hygiene_check.py
+        run: python3 tools/hygiene_check.py
 
       - name: Hygiene gate unit tests
-        run: python tools/hygiene_check_tests.py
+        run: python3 tools/hygiene_check_tests.py
