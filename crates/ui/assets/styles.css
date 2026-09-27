@@ -1144,13 +1144,16 @@
     }
 
     /* E3: after-extraction preview overlay. These compose with (not replace) the
-       C1 heat/tri-state classes, so the underlying tiers stay readable. */
+       C1 heat/tri-state classes, so the underlying tiers stay readable. The marks
+       are solid color-coded after-state fills with glow, matching the legend card
+       chips (red eliminated / amber still-reachable / green kept). These rules sit
+       after the heat-glow rules so they win the equal-specificity cascade. */
     .node-group.preview-eliminated rect {
+      fill: #450a0a;
       stroke: #ef4444 !important;
       stroke-width: 2.5px !important;
       stroke-dasharray: 4 3;
-      opacity: 0.55;
-      filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
+      filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.9));
     }
 
     /* SVG2 text-decoration: line-through is supported in current browsers; if a
@@ -1161,15 +1164,18 @@
     }
 
     .node-group.preview-kept rect {
+      fill: #052e16;
       stroke: #4ade80 !important;
       stroke-width: 2.5px !important;
-      opacity: 1;
+      filter: drop-shadow(0 0 10px rgba(74, 222, 128, 0.85));
     }
 
     .node-group.preview-still-reachable rect {
+      fill: #422006;
       stroke: #f59e0b !important;
       stroke-width: 2.5px !important;
       stroke-dasharray: 2 3;
+      filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.85));
     }
 
     .just-preview-btn {
