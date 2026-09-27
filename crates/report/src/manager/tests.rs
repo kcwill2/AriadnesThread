@@ -248,6 +248,7 @@ fn test_save_and_load_load_artifacts() {
             collateral_symbols: vec![],
             collateral_sources: vec![],
             largest_collateral_source: None,
+            semantic_sources: vec![],
         }],
         file_metrics: vec![],
     };

@@ -16,12 +16,16 @@ fn path_basename(path: &Path) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CollateralSource {
+pub struct ContributingSource {
     pub file_id: FileId,
     pub path: PathBuf,
     pub symbol_count: usize,
     pub symbols: Vec<SymbolId>,
 }
+
+/// Collateral sources are contributing sources on the unused side of the
+/// include-closure split; the alias keeps existing consumers unchanged.
+pub type CollateralSource = ContributingSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoadMetric {
@@ -35,6 +39,8 @@ pub struct LoadMetric {
     pub collateral_symbols: Vec<SymbolId>,
     pub collateral_sources: Vec<CollateralSource>,
     pub largest_collateral_source: Option<CollateralSource>,
+    #[serde(default)]
+    pub semantic_sources: Vec<ContributingSource>,
 }
 
 impl LoadMetric {
@@ -199,6 +205,41 @@ impl<'a> LoadAnalyzer<'a> {
         visited
     }
 
+    /// Groups symbols by defining file into contributor entries, applying the
+    /// shared `(symbol_count desc, path asc)` ordering contract.
+    fn contributing_sources(&self, symbols: &[SymbolId]) -> Vec<ContributingSource> {
+        let mut by_file: HashMap<FileId, Vec<SymbolId>> = HashMap::new();
+        for sym in symbols {
+            if let Some(record) = self.model.symbols.get(sym) {
+                if let Some(f) = record.defining_file {
+                    by_file.entry(f).or_default().push(sym.clone());
+                }
+            }
+        }
+
+        let mut sources: Vec<ContributingSource> = by_file
+            .into_iter()
+            .map(|(file_id, syms)| ContributingSource {
+                path: self
+                    .include_graph
+                    .file_paths
+                    .get(&file_id)
+                    .cloned()
+                    .unwrap_or_else(|| PathBuf::from("unknown")),
+                file_id,
+                symbol_count: syms.len(),
+                symbols: syms,
+            })
+            .collect();
+
+        sources.sort_by(|a, b| {
+            b.symbol_count
+                .cmp(&a.symbol_count)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        sources
+    }
+
     fn compute_load(
         &self,
         target_name: String,
@@ -218,52 +259,23 @@ impl<'a> LoadAnalyzer<'a> {
             }
         }
 
-        let mut collateral_symbols = Vec::new();
-        let mut col_by_file: HashMap<FileId, Vec<SymbolId>> = HashMap::new();
-
-        for sym in &physical_symbols {
-            if !semantic_closure.contains(sym) {
-                collateral_symbols.push(sym.clone());
-                if let Some(record) = self.model.symbols.get(sym) {
-                    if let Some(f) = record.defining_file {
-                        col_by_file.entry(f).or_default().push(sym.clone());
-                    }
-                }
-            }
-        }
-
-        let mut collateral_sources = Vec::new();
-        for (f_id, syms) in col_by_file {
-            let path = self
-                .include_graph
-                .file_paths
-                .get(&f_id)
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("unknown"));
-            collateral_sources.push(CollateralSource {
-                file_id: f_id,
-                path,
-                symbol_count: syms.len(),
-                symbols: syms,
-            });
-        }
-
-        collateral_sources.sort_by(|a, b| {
-            b.symbol_count
-                .cmp(&a.symbol_count)
-                .then_with(|| a.path.cmp(&b.path))
-        });
-
-        let largest_collateral_source = collateral_sources.first().cloned();
-
+        let mut collateral_symbols: Vec<SymbolId> = physical_symbols
+            .iter()
+            .filter(|s| !semantic_closure.contains(s))
+            .cloned()
+            .collect();
         let mut semantic_sym_vec: Vec<SymbolId> = physical_symbols
             .iter()
             .filter(|s| semantic_closure.contains(s))
             .cloned()
             .collect();
 
-        semantic_sym_vec.sort();
         collateral_symbols.sort();
+        semantic_sym_vec.sort();
+
+        let collateral_sources = self.contributing_sources(&collateral_symbols);
+        let largest_collateral_source = collateral_sources.first().cloned();
+        let semantic_sources = self.contributing_sources(&semantic_sym_vec);
 
         Ok(LoadMetric {
             target_name,
@@ -276,6 +288,7 @@ impl<'a> LoadAnalyzer<'a> {
             collateral_symbols,
             collateral_sources,
             largest_collateral_source,
+            semantic_sources,
         })
     }
 
