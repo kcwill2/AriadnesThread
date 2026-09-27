@@ -70,8 +70,7 @@ async fn test_server_traversal_routes() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
-#[tokio::test]
-async fn test_search_advanced_queries_and_dto_paths() {
+fn given_mock_search_graphs() -> (IncludeGraph, CallGraph, ReducedSemanticModel) {
     // We will build a UI state with some mock elements to test search and DTO builder
     let mut include_graph = IncludeGraph::new();
     let file1 = ariadne_repo::FileId(1);
@@ -109,6 +108,24 @@ async fn test_search_advanced_queries_and_dto_paths() {
         file_symbols: std::collections::BTreeMap::new(),
     };
 
+    (include_graph, call_graph, reduced_model)
+}
+
+async fn assert_search_query_matches(app: axum::Router, uri: &str, query_kind: &str) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
+    assert!(!items.is_empty(), "Expected {} match", query_kind);
+}
+
+#[tokio::test]
+async fn test_search_advanced_queries_and_dto_paths() {
+    let (include_graph, call_graph, reduced_model) = given_mock_search_graphs();
+
     let include_elements =
         build_include_elements(&include_graph, &std::collections::HashMap::new(), &[]);
     let call_elements = build_call_elements(&call_graph);
@@ -140,44 +157,9 @@ async fn test_search_advanced_queries_and_dto_paths() {
 
     let app = build_router(state);
 
-    // Test wildcard
-    let req = Request::builder()
-        .uri("/api/graph/search?q=*test*")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
-    assert!(!items.is_empty(), "Expected wildcard match");
-
-    // Test regex
-    let req = Request::builder()
-        .uri("/api/graph/search?q=/^test/")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
-    assert!(!items.is_empty(), "Expected regex match");
-
-    // Test path
-    let req = Request::builder()
-        .uri("/api/graph/search?q=include/")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let items: Vec<ariadne_ui::SearchResultItem> = serde_json::from_slice(&body).unwrap();
-    assert!(!items.is_empty(), "Expected path match");
+    assert_search_query_matches(app.clone(), "/api/graph/search?q=*test*", "wildcard").await;
+    assert_search_query_matches(app.clone(), "/api/graph/search?q=/^test/", "regex").await;
+    assert_search_query_matches(app, "/api/graph/search?q=include/", "path").await;
 }
 
 #[tokio::test]
