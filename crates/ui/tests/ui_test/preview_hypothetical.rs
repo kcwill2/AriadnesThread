@@ -331,3 +331,28 @@ fn test_proposed_visual_css() {
         ".preview-slim-edge must stay visible under edges-has-selection dimming"
     );
 }
+
+#[test]
+fn test_help_text_describes_the_proposed_preview_affordances() {
+    let html = ariadne_ui::INDEX_HTML;
+    let help_at = html
+        .find("Collateral Heat Map")
+        .expect("heat map help paragraph must exist");
+    let help_end = html[help_at..]
+        .find("</p>")
+        .expect("unterminated help paragraph")
+        + help_at;
+    let help = &html[help_at..help_end];
+
+    for phrase in [
+        "PROPOSED",
+        "placeholder name",
+        "hypothetical",
+        "slimmed consumer edge",
+    ] {
+        assert!(
+            help.contains(phrase),
+            "the Collateral Heat Map help text must explain the proposed-header preview affordance ({phrase})"
+        );
+    }
+}
