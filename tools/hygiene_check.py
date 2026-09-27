@@ -20,8 +20,9 @@ R2_SCANNED_SUFFIXES = frozenset({".rs", ".py", ".html", ".js"})
 PRUNED_DIR_NAMES = frozenset({"target", "node_modules", "__pycache__"})
 
 # R2 allow list — the ONLY entry: repo-root report.html is a generated pipeline
-# report artifact (1343 lines), explicitly out of scope per the code-hygiene
-# refactor plan. Do not add entries without updating that plan.
+# report artifact whose size varies between pipeline runs, explicitly out of
+# scope per the code-hygiene refactor plan. Do not add entries without
+# updating that plan.
 ALLOWED_LONG_FILES = frozenset({"report.html"})
 
 FunctionSpan = namedtuple("FunctionSpan", "line name length")
@@ -32,7 +33,8 @@ RUST_CHAR_LITERAL = re.compile(
 BYTE_CHAR_LITERAL = re.compile(
     r"b'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[nrt0'\\])|[^\\'\n])'"
 )
-RUST_FUNCTION_NAME = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)")
+RUST_FUNCTION_NAME = re.compile(r"\s*(r#)?([A-Za-z_][A-Za-z0-9_]*)")
+RUST_SIGNATURE_START = re.compile(r"\s*[<(]")
 PYTHON_STRING_OPEN = re.compile(r"[rbufRBUF]{0,2}(?P<quote>'''|\"\"\"|\"|')")
 PYTHON_FUNCTION_NAME = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -45,15 +47,25 @@ class ParseError(Exception):
 
 
 def find_rust_functions(text: str):
-    return _RustFunctionFinder().find(text.splitlines())
+    return _RustFunctionFinder().find(split_physical_lines(text))
 
 
 def find_python_functions(text: str):
-    return _PythonFunctionFinder().find(text.splitlines())
+    return _PythonFunctionFinder().find(split_physical_lines(text))
+
+
+PHYSICAL_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+
+
+def split_physical_lines(text: str):
+    lines = PHYSICAL_LINE_BREAK.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def physical_line_count(text: str) -> int:
-    return len(text.splitlines())
+    return len(split_physical_lines(text))
 
 
 def _is_word_character(char: str) -> bool:
@@ -68,9 +80,13 @@ def _rust_fn_keyword_at(line: str, position: int) -> bool:
     return not _is_word_character(before) and not _is_word_character(after)
 
 
-def _rust_function_name(line: str, keyword_position: int) -> str:
-    match = RUST_FUNCTION_NAME.match(line, keyword_position + 2)
-    return match.group(1) if match else "anonymous"
+def _rust_definition_name_at(line: str, position: int) -> Optional[str]:
+    if not _rust_fn_keyword_at(line, position):
+        return None
+    name = RUST_FUNCTION_NAME.match(line, position + 2)
+    if name is None or RUST_SIGNATURE_START.match(line, name.end()) is None:
+        return None
+    return (name.group(1) or "") + name.group(2)
 
 
 def _raw_string_length(line: str, position: int):
@@ -108,7 +124,7 @@ def _rust_char_or_lifetime_end(line: str, position: int) -> Optional[int]:
 
 
 def _advance_rust_code(line: str, position: int, state, events) -> int:
-    if _rust_fn_keyword_at(line, position):
+    if _rust_definition_name_at(line, position) is not None:
         events.append(("fn", position))
     char = line[position]
     following = line[position + 1] if position + 1 < len(line) else ""
@@ -227,12 +243,15 @@ class _RustFunctionFinder:
             self._handle_close(line_number)
 
     def _handle_fn(self, position: int, line: str, line_number: int):
+        name = _rust_definition_name_at(line, position)
+        if name is None:
+            return
         if self._start is not None:
             if self._opened:
                 return
             self._finish(self._start)
         self._start = line_number
-        self._name = _rust_function_name(line, position)
+        self._name = name
         self._opened = False
         self._balance = 0
 
@@ -282,6 +301,7 @@ class _PythonLineFacts:
     code_indent: Optional[int]
     masked: bool
     blank: bool
+    paren_delta: int
 
 
 def _skip_single_quoted(line: str, position: int, quote: str) -> int:
@@ -301,7 +321,7 @@ def _advance_python_string(line: str, position: int, state) -> int:
     if match is None:
         return position + 1
     quote = match.group("quote")
-    after_prefix = position + match.end()
+    after_prefix = match.end()
     if len(quote) != 3:
         return _skip_single_quoted(line, after_prefix, quote)
     closing = line.find(quote, after_prefix)
@@ -328,19 +348,28 @@ def _python_line_facts(line: str, state) -> _PythonLineFacts:
     if state.triple_delimiter is not None:
         closing = line.find(state.triple_delimiter)
         if closing < 0:
-            return _PythonLineFacts(None, None, True, blank)
+            return _PythonLineFacts(None, None, True, blank, 0)
         state.triple_delimiter = None
-        position = closing + 3
+        # The line that closes a triple-quoted string is part of the string
+        # token, not a code-state line: its indentation must not terminate an
+        # enclosing def measurement even when the closer sits at column 0.
+        return _PythonLineFacts(None, None, True, blank, 0)
     def_name = None
+    paren_delta = 0
     while position < len(line):
         char = line[position]
         if char == "#":
             break
         if def_name is None:
             def_name = _python_def_name(line, position)
+        if char == "(":
+            paren_delta += 1
+        elif char == ")":
+            paren_delta -= 1
         position = _advance_python_string(line, position, state)
     indent = len(line) - len(line.lstrip())
-    return _PythonLineFacts(def_name, None if blank else indent, False, blank)
+    return _PythonLineFacts(def_name, None if blank else indent, False, blank,
+                            paren_delta)
 
 
 class _PythonFunctionFinder:
@@ -351,6 +380,7 @@ class _PythonFunctionFinder:
         self._name = ""
         self._indent = 0
         self._last_content = 0
+        self._paren_depth = 0
 
     def find(self, lines):
         for index, line in enumerate(lines, start=1):
@@ -364,7 +394,8 @@ class _PythonFunctionFinder:
     def _consume(self, facts: _PythonLineFacts, line_number: int):
         if self._start is None:
             if facts.first_def_name is not None and facts.code_indent is not None:
-                self._begin(facts.first_def_name, facts.code_indent, line_number)
+                self._begin(facts.first_def_name, facts.code_indent,
+                            line_number, facts.paren_delta)
             return
         if facts.masked:
             if not facts.blank:
@@ -372,18 +403,25 @@ class _PythonFunctionFinder:
             return
         if facts.blank:
             return
+        if self._paren_depth:
+            self._paren_depth += facts.paren_delta
+            self._last_content = line_number
+            return
         if facts.code_indent > self._indent:
             self._last_content = line_number
             return
         self._finish()
         if facts.first_def_name is not None and facts.code_indent is not None:
-            self._begin(facts.first_def_name, facts.code_indent, line_number)
+            self._begin(facts.first_def_name, facts.code_indent, line_number,
+                        facts.paren_delta)
 
-    def _begin(self, name: str, indent: int, line_number: int):
+    def _begin(self, name: str, indent: int, line_number: int,
+               paren_delta: int = 0):
         self._start = line_number
         self._name = name
         self._indent = indent
         self._last_content = line_number
+        self._paren_depth = paren_delta if paren_delta > 0 else 0
 
     def _finish(self):
         self._finished.append(
@@ -391,6 +429,7 @@ class _PythonFunctionFinder:
         )
         self._start = None
         self._name = ""
+        self._paren_depth = 0
 
 
 def _pruned_directory(name: str) -> bool:
@@ -418,11 +457,13 @@ def _r2_entry(relative: str, text: str):
 
 
 def _r1_entries(relative: str, suffix: str, text: str, errors):
-    finder = {".rs": find_rust_functions, ".py": find_python_functions}.get(
-        suffix.lower()
-    )
-    if finder is None:
+    language = {
+        ".rs": ("fn", find_rust_functions),
+        ".py": ("def", find_python_functions),
+    }.get(suffix.lower())
+    if language is None:
         return []
+    kind, finder = language
     try:
         spans = finder(text)
     except ParseError as failure:
@@ -431,7 +472,7 @@ def _r1_entries(relative: str, suffix: str, text: str, errors):
         return []
     return [
         (relative, 1, span.line,
-         f"{relative}:{span.line}: R1 fn `{span.name}` is {span.length} "
+         f"{relative}:{span.line}: R1 {kind} `{span.name}` is {span.length} "
          f"lines (> {R1_LIMIT_LINES})")
         for span in spans
         if span.length > R1_LIMIT_LINES

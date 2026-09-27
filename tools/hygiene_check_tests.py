@@ -329,6 +329,128 @@ class PythonFunctionLengthTests(unittest.TestCase):
                          span_tuples(hygiene_check.find_python_functions(text)))
 
 
+class CodeReviewerRejectionTests(unittest.TestCase):
+    def test_blocker1_fn_type_parameter_in_signature_does_not_split_measurement(self):
+        text = joined(
+            "fn transform(",
+            "    value: u32,",
+            "    cb: fn(u32) -> u32,",
+            ") -> u32 {",
+            *["    step();"] * 100,
+            "}",
+        )
+        self.assertEqual([(1, "transform", 105)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_blocker1_capital_box_dyn_fn_type_control_not_a_definition(self):
+        text = joined(
+            "fn apply(factory: Box<dyn Fn(u32) -> u32>) -> u32 {",
+            "    factory(3)",
+            "}",
+        )
+        self.assertEqual([(1, "apply", 3)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_blocker1_nested_fn_folding_control(self):
+        text = joined(
+            "fn outer() {",
+            "    fn inner() {",
+            "        helper();",
+            "    }",
+            "    after();",
+            "}",
+        )
+        self.assertEqual([(1, "outer", 6)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_blocker1_raw_identifier_fn_expression_cannot_start_measurement(self):
+        text = joined(
+            "fn target(x: u32) -> u32 { x }",
+            "const CALLBACK: fn(u32) -> u32 = r#fn;",
+            "fn invoke(v: u32) -> u32 { CALLBACK(v) }",
+        )
+        self.assertEqual([(1, "target", 1), (3, "invoke", 1)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_blocker2_wrapped_def_signature_counts_full_body(self):
+        wrapped = joined(
+            "def big(",
+            "    alpha: int,",
+            "    beta: int,",
+            ") -> str:",
+            *["    step()"] * 101,
+        )
+        self.assertEqual([(1, "big", 105)],
+                         span_tuples(hygiene_check.find_python_functions(wrapped)))
+        clean = joined(
+            "def big(",
+            "    alpha: int,",
+            "    beta: int,",
+            ") -> str:",
+            *["    step()"] * 96,
+        )
+        self.assertEqual([(1, "big", 100)],
+                         span_tuples(hygiene_check.find_python_functions(clean)))
+
+    def test_blocker3_column_zero_string_close_keeps_body_in_measurement(self):
+        text = joined(
+            "def big():",
+            '    text = """',
+            *["filler"] * 97,
+            '"""',
+            "    step()",
+            "    done()",
+        )
+        self.assertEqual([(1, "big", 102)],
+                         span_tuples(hygiene_check.find_python_functions(text)))
+
+    def test_blocker3_real_dedent_after_string_close_still_terminates(self):
+        text = joined(
+            "def outer():",
+            '    text = """',
+            "filler",
+            '"""',
+            "    done()",
+            "def sibling():",
+            "    pass",
+        )
+        self.assertEqual([(1, "outer", 5), (6, "sibling", 2)],
+                         span_tuples(hygiene_check.find_python_functions(text)))
+
+    def test_blocker4_python_pseudo_breaks_count_as_one_physical_line(self):
+        odd = "stuff\x0csep\u2028tail"
+        with tempfile.TemporaryDirectory() as root:
+            for physical in (1000, 1001):
+                lines = (["TEXT = r\"\"\"", odd]
+                         + ["filler"] * (physical - 4)
+                         + ["\"\"\"", "TAIL = 1"])
+                write_file(root, f"size{physical}.py", "\n".join(lines) + "\n")
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(1, exit_code)
+        self.assertEqual(["size1001.py: R2 1001 lines > 1000"],
+                         stdout.splitlines())
+
+    def test_blocker4_rust_pseudo_breaks_do_not_pad_fn_length(self):
+        odd = "sep\u2028sep\u2028sep"
+
+        def rust_text(step_count):
+            return joined(
+                "fn padded() {",
+                '    let t = r"""',
+                odd,
+                '    """;',
+                *["    step();"] * step_count,
+                "}",
+            )
+
+        self.assertEqual([(1, "padded", 100)],
+                         span_tuples(hygiene_check.find_rust_functions(
+                             rust_text(95))))
+        self.assertEqual([(1, "padded", 101)],
+                         span_tuples(hygiene_check.find_rust_functions(
+                             rust_text(96))))
+
+
 class CliContractTests(unittest.TestCase):
     def test_clean_tree_exits_zero_without_output(self):
         with tempfile.TemporaryDirectory() as root:
@@ -350,7 +472,7 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertEqual(
             [
-                "scripts/tool.py:1: R1 fn `execute` is 101 lines (> 100)",
+                "scripts/tool.py:1: R1 def `execute` is 101 lines (> 100)",
                 "src/big.rs:1: R1 fn `run_migration` is 101 lines (> 100)",
                 "web/page.html: R2 1001 lines > 1000",
             ],
