@@ -1200,3 +1200,47 @@
       border-color: var(--cyan);
     }
 
+    /* E3 hypothetical affordance: the after-extraction overlay is a modelled
+       after-state, so the canvas frames itself in amber dashed and a banner
+       labels the view. Appended after the E3 preview block; .preview-banner
+       z-index 30 stacks above .legend-box (25). The banner is inert chrome,
+       so it never intercepts pan/zoom or node hit-testing. */
+    .preview-banner {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(69, 26, 3, 0.92);
+      border: 1px dashed #f59e0b;
+      border-radius: 6px;
+      color: #fbbf24;
+      font-family: monospace;
+      font-size: 11px;
+      white-space: nowrap;
+      z-index: 30;
+      pointer-events: none;
+    }
+
+    .preview-banner[hidden] {
+      display: none;
+    }
+
+    .preview-banner-glyph {
+      color: #f59e0b;
+    }
+
+    #canvasContainer.preview-hypothetical {
+      outline: 1px dashed rgba(245, 158, 11, 0.55);
+      outline-offset: -3px;
+    }
+
+    .just-preview-btn-active {
+      border-color: #f59e0b;
+      color: #fbbf24;
+      background: rgba(69, 26, 3, 0.55);
+    }
+

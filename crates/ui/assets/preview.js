@@ -92,7 +92,7 @@
       const hidden = full ? 0 : dropped - (impact.dropped_sample || []).length;
       const moreNote = hidden > 0 ? ` <span class="just-more">+${hidden} more eliminated</span>` : '';
       const sampleNote = full ? '' : ' <span class="just-more">(names capped to a sample)</span>';
-      document.getElementById('legendViewLabel').textContent = 'After extraction';
+      document.getElementById('legendViewLabel').textContent = '\u26A0 After extraction';
       const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
         + `After extraction: closure ${impact.root_closure_before || 0} &rarr; ${impact.root_closure_after || 0}`
         + ` &middot; ${dropped} headers dropped${moreNote}${sampleNote}`
@@ -126,6 +126,24 @@
       }
     }
 
+    // The after-state is a hypothesis, not the current graph: frame the whole
+    // canvas in amber dashed and raise the banner on top of it.
+    function previewShowHypothetical() {
+      const banner = document.getElementById('previewBanner');
+      if (banner) banner.hidden = false;
+      const container = document.getElementById('canvasContainer');
+      if (container) container.classList.add('preview-hypothetical');
+    }
+
+    // Buttons arrive through innerHTML re-renders, so bookkeeping is a sweep of
+    // the live DOM, not a stored element: null deactivates every button.
+    function previewActivateButton(btn) {
+      document.querySelectorAll('.just-preview-btn').forEach(other => {
+        other.classList.remove('just-preview-btn-active');
+      });
+      if (btn) btn.classList.add('just-preview-btn-active');
+    }
+
     function clearPreview() {
       previewActiveKey = null;
       const layer = previewNodesLayer();
@@ -134,6 +152,11 @@
           el.classList.remove('preview-eliminated', 'preview-kept', 'preview-still-reachable');
         });
       }
+      const banner = document.getElementById('previewBanner');
+      if (banner) banner.hidden = true;
+      const container = document.getElementById('canvasContainer');
+      if (container) container.classList.remove('preview-hypothetical');
+      previewActivateButton(null);
       if (previewLegendShown) {
         previewLegendShown = false;
         previewRestoreGraphLegend();
@@ -142,7 +165,7 @@
 
     // rootId must equal the current selection: the preview frames the edge FROM the
     // consumer being inspected. Re-clicking the same pair toggles the overlay off.
-    async function applyPreview(rootId, sourceId) {
+    async function applyPreview(rootId, sourceId, triggerBtn) {
       const root = String(rootId);
       const source = String(sourceId);
       const key = root + '|' + source;
@@ -155,6 +178,8 @@
       previewActiveKey = key;
       previewMarkNodes(root, source, resolved.full, resolved.impact);
       previewPaintLegend(resolved.full, resolved.impact);
+      previewShowHypothetical();
+      previewActivateButton(triggerBtn || null);
     }
 
     // Buttons arrive through innerHTML re-renders, so listeners bind after each
@@ -165,7 +190,7 @@
       container.querySelectorAll('.just-preview-btn').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          window.ariadnePreview.applyPreview(btn.dataset.previewRoot, btn.dataset.previewSource);
+          window.ariadnePreview.applyPreview(btn.dataset.previewRoot, btn.dataset.previewSource, btn);
         });
       });
     }
