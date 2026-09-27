@@ -580,3 +580,9 @@ mod characterization;
 #[cfg(test)]
 #[path = "load_justification_tests.rs"]
 mod justification;
+
+/// Extraction-impact suite: locks the drop-set semantics of
+/// `extraction_impact` (Pass E, plan 1790521470000).
+#[cfg(test)]
+#[path = "load_impact_tests.rs"]
+mod impact;
