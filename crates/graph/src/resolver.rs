@@ -131,44 +131,8 @@ impl<'a> IncludeResolver<'a> {
         let source_dir = source_rel_path.parent().unwrap_or_else(|| Path::new(""));
         let include_raw = Path::new(&directive.raw_path);
 
-        let mut candidate_paths = Vec::new();
-
-        // 1. If non-angled (`"..."`), check source directory first
-        if !directive.is_angled {
-            candidate_paths.push(source_dir.join(include_raw));
-        }
-
-        // 2. Check compilation context user include dirs
-        if let Some(ctx) = self.context {
-            for inc_dir in &ctx.include_dirs {
-                let candidate = if inc_dir.is_absolute() {
-                    if let Ok(rel) = inc_dir.strip_prefix(self.repo_root) {
-                        rel.join(include_raw)
-                    } else {
-                        inc_dir.join(include_raw)
-                    }
-                } else {
-                    inc_dir.join(include_raw)
-                };
-                candidate_paths.push(candidate);
-            }
-        }
-
-        // 3. Check compilation context system include dirs
-        if let Some(ctx) = self.context {
-            for sys_dir in &ctx.system_include_dirs {
-                let candidate = if sys_dir.is_absolute() {
-                    if let Ok(rel) = sys_dir.strip_prefix(self.repo_root) {
-                        rel.join(include_raw)
-                    } else {
-                        sys_dir.join(include_raw)
-                    }
-                } else {
-                    sys_dir.join(include_raw)
-                };
-                candidate_paths.push(candidate);
-            }
-        }
+        let candidate_paths =
+            self.collect_include_candidates(source_dir, include_raw, directive.is_angled);
 
         // Search in repository discovery
         let mut resolved_dest: Option<FileId> = None;
@@ -222,6 +186,56 @@ impl<'a> IncludeResolver<'a> {
             raw_path: directive.raw_path.clone(),
             resolved_path,
         }
+    }
+
+    /// Ordered include search paths for one directive: source dir first for
+    /// quoted includes, then compilation-context user and system include dirs.
+    fn collect_include_candidates(
+        &self,
+        source_dir: &Path,
+        include_raw: &Path,
+        is_angled: bool,
+    ) -> Vec<PathBuf> {
+        let mut candidate_paths = Vec::new();
+
+        // 1. If non-angled (`"..."`), check source directory first
+        if !is_angled {
+            candidate_paths.push(source_dir.join(include_raw));
+        }
+
+        // 2. Check compilation context user include dirs
+        if let Some(ctx) = self.context {
+            for inc_dir in &ctx.include_dirs {
+                let candidate = if inc_dir.is_absolute() {
+                    if let Ok(rel) = inc_dir.strip_prefix(self.repo_root) {
+                        rel.join(include_raw)
+                    } else {
+                        inc_dir.join(include_raw)
+                    }
+                } else {
+                    inc_dir.join(include_raw)
+                };
+                candidate_paths.push(candidate);
+            }
+        }
+
+        // 3. Check compilation context system include dirs
+        if let Some(ctx) = self.context {
+            for sys_dir in &ctx.system_include_dirs {
+                let candidate = if sys_dir.is_absolute() {
+                    if let Ok(rel) = sys_dir.strip_prefix(self.repo_root) {
+                        rel.join(include_raw)
+                    } else {
+                        sys_dir.join(include_raw)
+                    }
+                } else {
+                    sys_dir.join(include_raw)
+                };
+                candidate_paths.push(candidate);
+            }
+        }
+
+        candidate_paths
     }
 
     /// Resolves all includes in a file given its content and relative path.
