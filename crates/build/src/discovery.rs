@@ -283,7 +283,10 @@ fn is_compilation_flag(s: &str) -> bool {
 fn take_compiler_executable(iter: &mut ArgCursor<'_>) -> String {
     if let Some(first) = iter.peek() {
         if !is_compilation_flag(first) {
-            return iter.next().unwrap().clone();
+            return iter
+                .next()
+                .expect("peeked Some: next() on the same cursor cannot be None")
+                .clone();
         }
     }
     "cl.exe".to_string()
@@ -297,7 +300,9 @@ fn take_prefixed_value(arg: &str, prefixes: &[&str], iter: &mut ArgCursor<'_>) -
     let value = if arg.len() > prefix.len() {
         arg[prefix.len()..].to_string()
     } else if iter.peek().is_some() {
-        iter.next().unwrap().clone()
+        iter.next()
+            .expect("peeked Some: next() on the same cursor cannot be None")
+            .clone()
     } else {
         String::new()
     };
