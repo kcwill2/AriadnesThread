@@ -430,6 +430,16 @@
       filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
     }
 
+    .node-group.dep-justified rect {
+      stroke: #4ade80 !important;
+      stroke-width: 2.5px !important;
+      filter: drop-shadow(0 0 8px rgba(74, 222, 128, 0.5));
+    }
+
+    .node-group.dep-mixed rect {
+      filter: drop-shadow(-3px 0 0 #4ade80);
+    }
+
     .heat-badge {
       font-size: 9px;
       font-family: monospace;

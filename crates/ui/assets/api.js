@@ -53,6 +53,7 @@
                 if (exportRes && exportRes.ok) {
                   const exportPayload = await exportRes.json();
                   graphData.file_collateral = exportPayload.file_collateral || {};
+                  graphData.file_justification = exportPayload.file_justification || {};
                 }
 
                 updateProgress(100, 'Rendering visualization... 100%');
@@ -107,6 +108,7 @@
               if (exportRes && exportRes.ok) {
                 const p = await exportRes.json();
                 graphData.file_collateral = p.file_collateral || {};
+                graphData.file_justification = p.file_justification || {};
               }
               applyLoadedData();
             }

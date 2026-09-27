@@ -8,7 +8,8 @@
         symbol_graph: [],
         call_graph: [],
         stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
-        file_collateral: {}
+        file_collateral: {},
+        file_justification: {}
       };
     let activeNodes = [];
     let activeEdges = [];
@@ -100,12 +101,19 @@
       { color: '#ef4444', label: 'Critical Collateral' },
     ];
 
-    function updateHeatLegend(targetLabel, depCount, totalCollateral) {
+    function updateHeatLegend(targetLabel, depCount, totalCollateral, justificationMap) {
       document.getElementById('legendViewLabel').textContent = 'Heat Map';
       const legendList = document.getElementById('legendItems');
       const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
         + `${depCount} dep(s) · ${totalCollateral} symbols</div>`;
-      legendList.innerHTML = summary + HEAT_LEGEND.map(item => `
+      const hasJustified = Object.values(justificationMap || {})
+        .some(j => j && (j.justified_count || 0) > 0);
+      const justifiedRow = hasJustified ? `
+        <div class="legend-row">
+          <div class="legend-color" style="background:#4ade80;"></div>
+          <span>Justified (needed)</span>
+        </div>` : '';
+      legendList.innerHTML = summary + justifiedRow + HEAT_LEGEND.map(item => `
         <div class="legend-row">
           <div class="legend-color" style="background:${item.color};"></div>
           <span>${item.label}</span>

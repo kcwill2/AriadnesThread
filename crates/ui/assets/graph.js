@@ -322,6 +322,7 @@
       if (currentTab === 'include' && selectedNodeId) {
         const reachableDependencies = computeFullDependencies(selectedNodeId);
         const collateralMap = (graphData.file_collateral || {})[selectedNodeId] || {};
+        const justificationMap = (graphData.file_justification || {})[selectedNodeId] || {};
         const depCollaterals = [...reachableDependencies].map(id => collateralMap[id] || 0);
         const maxCollateral = depCollaterals.length > 0 ? Math.max(...depCollaterals) : 0;
         let totalCollateral = depCollaterals.reduce((s, c) => s + c, 0);
@@ -339,21 +340,30 @@
             el.appendChild(badge);
           } else if (reachableDependencies.has(nid)) {
             const c = collateralMap[nid] || 0;
-            const hc = getHeatColor(c, maxCollateral);
-            const rect = el.querySelector('rect');
-            if (rect) {
-              rect.setAttribute('fill', hc.bg);
-              rect.setAttribute('stroke', hc.border);
-            }
-            const txt = el.querySelector('text');
-            if (txt) txt.setAttribute('fill', hc.text);
-            if (hc.tier === 4) el.classList.add('heat-critical');
+            const j = justificationMap[nid];
+            const tier = classifyDependency(nid, c, j);
             const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             badge.setAttribute('class', 'heat-badge');
             badge.setAttribute('x', '32');
             badge.setAttribute('y', '36');
-            badge.setAttribute('fill', hc.border);
-            badge.textContent = `+${c} col`;
+            if (tier === 'justified') {
+              el.classList.add('dep-justified');
+              badge.setAttribute('fill', '#4ade80');
+              badge.textContent = `${j.justified_count || 0} sym`;
+            } else {
+              const hc = getHeatColor(c, maxCollateral);
+              const rect = el.querySelector('rect');
+              if (rect) {
+                rect.setAttribute('fill', hc.bg);
+                rect.setAttribute('stroke', hc.border);
+              }
+              const txt = el.querySelector('text');
+              if (txt) txt.setAttribute('fill', hc.text);
+              if (hc.tier === 4) el.classList.add('heat-critical');
+              if (tier === 'mixed') el.classList.add('dep-mixed');
+              badge.setAttribute('fill', hc.border);
+              badge.textContent = `+${c} col`;
+            }
             el.appendChild(badge);
           } else {
             el.classList.add('faded');
@@ -368,10 +378,23 @@
         });
 
         const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
-        updateHeatLegend(rootNode ? rootNode.label : selectedNodeId, reachableDependencies.size, totalCollateral);
+        updateHeatLegend(rootNode ? rootNode.label : selectedNodeId, reachableDependencies.size, totalCollateral, justificationMap);
       } else {
         restoreStandardLegend();
       }
+    }
+
+    // Tri-state classification of a reachable include dependency against the
+    // per-source justification entry j (undefined when the payload has no entry).
+    // Returns 'justified' | 'mixed' | 'collateral' | 'neutral'.
+    function classifyDependency(depId, collateralCount, j) {
+      if (!j) return 'neutral';
+      const justified = j.justified_count || 0;
+      const collateral = j.collateral_count || 0;
+      if (justified > 0 && collateral === 0) return 'justified';
+      if (justified > 0 && collateral > 0) return 'mixed';
+      if (justified === 0 && collateral > 0) return 'collateral';
+      return 'neutral';
     }
 
     // BFS over the full (unfiltered) edge dataset to find all outgoing include deps.
