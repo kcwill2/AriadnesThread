@@ -451,6 +451,51 @@ class CodeReviewerRejectionTests(unittest.TestCase):
                              rust_text(96))))
 
 
+class BodyLineBracketDepthTests(unittest.TestCase):
+    def test_p7_body_line_bracket_with_column_zero_argument_flags_true_length(self):
+        text = joined(
+            "def f():",
+            "    x = call(",
+            "column_zero_argument,",
+            "    )",
+            *["    step()"] * 97,
+        )
+        self.assertEqual([(1, "f", 101)],
+                         span_tuples(hygiene_check.find_python_functions(text)))
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "p7.py", text)
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(1, exit_code)
+        self.assertEqual(["p7.py:1: R1 def `f` is 101 lines (> 100)"],
+                         stdout.splitlines())
+
+    def test_p7_control_wrapped_signature_still_measures_without_double_count(self):
+        text = joined(
+            "def big(",
+            "    alpha: int,",
+            ") -> str:",
+            *["    step()"] * 96,
+        )
+        self.assertEqual([(1, "big", 99)],
+                         span_tuples(hygiene_check.find_python_functions(text)))
+
+    def test_p7_body_line_bracket_def_at_exactly_100_lines_stays_clean(self):
+        text = joined(
+            "def f():",
+            "    x = call(",
+            "column_zero_argument,",
+            "    )",
+            *["    step()"] * 96,
+        )
+        self.assertEqual([(1, "f", 100)],
+                         span_tuples(hygiene_check.find_python_functions(text)))
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "clean_p7.py", text)
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(0, exit_code)
+        self.assertEqual("", stdout)
+
+
 class CliContractTests(unittest.TestCase):
     def test_clean_tree_exits_zero_without_output(self):
         with tempfile.TemporaryDirectory() as root:

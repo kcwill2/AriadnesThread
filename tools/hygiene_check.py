@@ -403,8 +403,12 @@ class _PythonFunctionFinder:
             return
         if facts.blank:
             return
-        if self._paren_depth:
-            self._paren_depth += facts.paren_delta
+        # Accumulate bracket depth on every code line, not only while already
+        # inside brackets: a bracket opened on a body line must keep the def
+        # open even when a continuation line sits at column 0.
+        in_bracket = self._paren_depth > 0
+        self._paren_depth = max(0, self._paren_depth + facts.paren_delta)
+        if in_bracket or self._paren_depth > 0:
             self._last_content = line_number
             return
         if facts.code_indent > self._indent:
