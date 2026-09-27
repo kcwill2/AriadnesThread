@@ -486,7 +486,7 @@ async fn test_justification_route_locks_response_keys() {
     );
     assert_eq!(
         sorted_keys(&body["entries"][0]),
-        vec!["collateral_symbols", "entry", "source_id", "source_label"]
+        vec!["entry", "source_id", "source_label"]
     );
     assert_eq!(
         sorted_keys(&body["entries"][0]["entry"]),

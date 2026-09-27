@@ -1,6 +1,6 @@
 use crate::dto::{
-    CollateralResponse, CytoscapeElement, EntrypointsResponse, GraphExportPayload, PathQuery,
-    SearchQuery, SearchResultItem, TraverseQuery,
+    CollateralResponse, CytoscapeElement, EntrypointsResponse, FileJustificationResponse,
+    GraphExportPayload, PathQuery, SearchQuery, SearchResultItem, TraverseQuery,
 };
 use ariadne_graph::traversal::TraversalDirection;
 use ariadne_index::SymbolId;
@@ -92,6 +92,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/graph/entrypoints", get(api_graph_entrypoints))
         .route("/api/graph/search", get(api_graph_search))
         .route("/api/graph/collateral", get(api_graph_collateral))
+        .route("/api/justification", get(api_justification))
         .route("/api/source", get(api_source))
         .route("/api/export", get(api_export))
         .layer(CorsLayer::permissive())
@@ -626,4 +627,52 @@ pub async fn api_graph_collateral(
         direct_collateral,
         transitive_collateral,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct JustificationQuery {
+    pub file: String,
+}
+
+/// Live-mode on-demand detail: full unbounded justification for one file,
+/// recomputed per request like `/api/graph/collateral`. Unparseable or
+/// unknown file ids mirror the collateral tolerance: 200 with empty detail.
+pub async fn api_justification(
+    State(state): State<Arc<UiState>>,
+    Query(query): Query<JustificationQuery>,
+) -> Result<Json<FileJustificationResponse>, axum::http::StatusCode> {
+    let mut response = FileJustificationResponse {
+        target_id: query.file.clone(),
+        total_justified: 0,
+        total_collateral: 0,
+        entries: Vec::new(),
+    };
+
+    if let Ok(file_id_num) = query.file.parse::<u64>() {
+        let file_id = ariadne_repo::FileId(file_id_num);
+
+        let inc_g = read_state(&state.include_graph);
+        let reduced = read_state(&state.reduced_model);
+
+        let inc_g_ref = inc_g
+            .as_ref()
+            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+        let reduced_ref = reduced
+            .as_ref()
+            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
+        let analyzer = ariadne_graph::LoadAnalyzer::new(inc_g_ref, reduced_ref);
+        if let Some(path) = inc_g_ref.file_paths.get(&file_id) {
+            if let Ok(metric) = analyzer.analyze_file_load(path) {
+                response = crate::dto::build_file_justification_detail(
+                    &query.file,
+                    &metric,
+                    &analyzer,
+                    reduced_ref,
+                );
+            }
+        }
+    }
+
+    Ok(Json(response))
 }

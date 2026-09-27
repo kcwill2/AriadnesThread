@@ -86,8 +86,27 @@ pub struct JustificationEntry {
     pub required_headers: Vec<String>,
 }
 
+/// One unbounded contributor row of the live `/api/justification` route.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceJustification {
+    pub source_id: String,
+    pub source_label: String,
+    pub entry: JustificationEntry,
+}
+
+/// Full per-file justification detail served by `/api/justification` (I3:
+/// caps exist only in the export payload; this route is the unbounded twin).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileJustificationResponse {
+    pub target_id: String,
+    pub total_justified: usize,
+    pub total_collateral: usize,
+    pub entries: Vec<SourceJustification>,
+}
+
 /// Bounded payload caps (I3): contributor entries per root, symbol names per
-/// side per entry, required-header basenames per entry.
+/// side per entry, required-header basenames per entry. The live route passes
+/// `usize::MAX` instead of these values to stay unbounded.
 const JUSTIFICATION_MAX_SOURCES: usize = 16;
 const JUSTIFICATION_MAX_NAMES: usize = 12;
 const JUSTIFICATION_MAX_HEADERS: usize = 8;
@@ -135,38 +154,29 @@ pub fn build_file_justification(
         else {
             continue;
         };
-        let mut sides: std::collections::HashMap<u64, SourceSides> =
-            std::collections::HashMap::new();
-        for src in &metric.semantic_sources {
-            if src.symbol_count > 0 {
-                sides.entry(src.file_id.0).or_default().justified = Some(src);
-            }
-        }
-        for src in &metric.collateral_sources {
-            if src.symbol_count > 0 {
-                sides.entry(src.file_id.0).or_default().collateral = Some(src);
-            }
-        }
+        let sides = collect_source_sides(metric);
         if sides.is_empty() {
             continue;
         }
-        let combined = |id: &u64| -> usize {
-            let s = &sides[id];
-            s.justified.map_or(0, |x| x.symbol_count) + s.collateral.map_or(0, |x| x.symbol_count)
-        };
-        let mut ranked: Vec<u64> = sides.keys().copied().collect();
-        ranked.sort_by(|a, b| combined(b).cmp(&combined(a)).then(a.cmp(b)));
+        let ranked = rank_source_ids(&sides);
 
         let mut per_root = std::collections::HashMap::new();
         for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
             let s = &sides[&id];
             let (justified_symbols, justified_truncated) =
-                justification_names(s.justified, model);
+                justification_names(s.justified, model, JUSTIFICATION_MAX_NAMES);
             let (collateral_symbols, collateral_truncated) =
-                justification_names(s.collateral, model);
+                justification_names(s.collateral, model, JUSTIFICATION_MAX_NAMES);
             let required_headers = s
                 .justified
-                .map(|j| justification_required_headers(&analyzer, &j.symbols, &j.path))
+                .map(|j| {
+                    justification_required_headers(
+                        &analyzer,
+                        &j.symbols,
+                        &j.path,
+                        JUSTIFICATION_MAX_HEADERS,
+                    )
+                })
                 .unwrap_or_default();
             per_root.insert(
                 id.to_string(),
@@ -194,21 +204,110 @@ struct SourceSides<'a> {
     collateral: Option<&'a ariadne_graph::ContributingSource>,
 }
 
-/// Names for one side: sorted by SymbolId, capped (I3), missing symbols fall
-/// back to their SymbolId string.
+/// Groups a metric's contributing sources by file id, both sides; shared by
+/// the bounded payload builder and the unbounded route builder.
+fn collect_source_sides(
+    metric: &ariadne_graph::LoadMetric,
+) -> std::collections::HashMap<u64, SourceSides<'_>> {
+    let mut sides: std::collections::HashMap<u64, SourceSides> =
+        std::collections::HashMap::new();
+    for src in &metric.semantic_sources {
+        if src.symbol_count > 0 {
+            sides.entry(src.file_id.0).or_default().justified = Some(src);
+        }
+    }
+    for src in &metric.collateral_sources {
+        if src.symbol_count > 0 {
+            sides.entry(src.file_id.0).or_default().collateral = Some(src);
+        }
+    }
+    sides
+}
+
+/// Contributor ids ordered `(combined count desc, id asc)` per I6.
+fn rank_source_ids(sides: &std::collections::HashMap<u64, SourceSides<'_>>) -> Vec<u64> {
+    let combined = |id: &u64| -> usize {
+        let s = &sides[id];
+        s.justified.map_or(0, |x| x.symbol_count) + s.collateral.map_or(0, |x| x.symbol_count)
+    };
+    let mut ranked: Vec<u64> = sides.keys().copied().collect();
+    ranked.sort_by(|a, b| combined(b).cmp(&combined(a)).then(a.cmp(b)));
+    ranked
+}
+
+/// Unbounded justification detail for one root file, served by the live
+/// `/api/justification` route: every contributing source, full symbol-name
+/// lists (truncation flags stay false), per-entry required headers with the
+/// source's own basename excluded. Same ranking contract as the payload (I6).
+pub fn build_file_justification_detail(
+    target_id: &str,
+    metric: &ariadne_graph::LoadMetric,
+    analyzer: &ariadne_graph::LoadAnalyzer,
+    model: &ariadne_graph::ReducedSemanticModel,
+) -> FileJustificationResponse {
+    let sides = collect_source_sides(metric);
+    let ranked = rank_source_ids(&sides);
+    let mut entries = Vec::with_capacity(ranked.len());
+    let mut total_justified = 0usize;
+    let mut total_collateral = 0usize;
+    for id in ranked {
+        let s = &sides[&id];
+        let justified_count = s.justified.map_or(0, |x| x.symbol_count);
+        let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
+        let source_label = s
+            .justified
+            .or(s.collateral)
+            .map(|src| path_basename(&src.path))
+            .unwrap_or_default();
+        let (justified_symbols, justified_truncated) =
+            justification_names(s.justified, model, usize::MAX);
+        let (collateral_symbols, collateral_truncated) =
+            justification_names(s.collateral, model, usize::MAX);
+        let required_headers = s
+            .justified
+            .map(|j| justification_required_headers(analyzer, &j.symbols, &j.path, usize::MAX))
+            .unwrap_or_default();
+        total_justified += justified_count;
+        total_collateral += collateral_count;
+        entries.push(SourceJustification {
+            source_id: id.to_string(),
+            source_label,
+            entry: JustificationEntry {
+                justified_symbols,
+                collateral_symbols,
+                justified_count,
+                collateral_count,
+                justified_truncated,
+                collateral_truncated,
+                required_headers,
+            },
+        });
+    }
+    FileJustificationResponse {
+        target_id: target_id.to_string(),
+        total_justified,
+        total_collateral,
+        entries,
+    }
+}
+
+/// Names for one side: sorted by SymbolId, capped at `max_names` (I3 payload
+/// caps; the live route passes `usize::MAX`), missing symbols fall back to
+/// their SymbolId string.
 fn justification_names(
     side: Option<&ariadne_graph::ContributingSource>,
     model: &ariadne_graph::ReducedSemanticModel,
+    max_names: usize,
 ) -> (Vec<String>, bool) {
     let Some(side) = side else {
         return (Vec::new(), false);
     };
     let mut ids: Vec<&ariadne_index::SymbolId> = side.symbols.iter().collect();
     ids.sort();
-    let truncated = ids.len() > JUSTIFICATION_MAX_NAMES;
+    let truncated = ids.len() > max_names;
     let names = ids
         .into_iter()
-        .take(JUSTIFICATION_MAX_NAMES)
+        .take(max_names)
         .map(|id| {
             model
                 .symbols
@@ -221,11 +320,13 @@ fn justification_names(
 }
 
 /// Basename required-header set for one edge's justified symbols: the source
-/// header's own basename never appears, results are sorted and capped.
+/// header's own basename never appears, results are sorted and capped at
+/// `max_headers` (the live route passes `usize::MAX`).
 fn justification_required_headers(
     analyzer: &ariadne_graph::LoadAnalyzer,
     justified: &[ariadne_index::SymbolId],
     source_path: &std::path::Path,
+    max_headers: usize,
 ) -> Vec<String> {
     if justified.is_empty() {
         return Vec::new();
@@ -239,7 +340,7 @@ fn justification_required_headers(
         .collect();
     headers.sort();
     headers.dedup();
-    headers.truncate(JUSTIFICATION_MAX_HEADERS);
+    headers.truncate(max_headers);
     headers
 }
 
