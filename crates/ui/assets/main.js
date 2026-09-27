@@ -9,7 +9,8 @@
         call_graph: [],
         stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
         file_collateral: {},
-        file_justification: {}
+        file_justification: {},
+        extraction_proposals: []
       };
     let activeNodes = [];
     let activeEdges = [];

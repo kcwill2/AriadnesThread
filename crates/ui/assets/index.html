@@ -227,6 +227,10 @@
         </div>
         <div class="hotspot-hint" id="hotspotHint"></div>
         <div class="hotspot-list" id="hotspotList"></div>
+        <div id="proposedExtractionsSection" style="display:none;">
+          <div class="link-list-title" style="color:var(--amber);">&#128161; Proposed extractions</div>
+          <div class="extraction-list" id="proposedExtractionsList"></div>
+        </div>
       </div>
     </div>
 
@@ -283,6 +287,11 @@
             <span id="inspJustificationCount" style="font-family:monospace;">0 justified &middot; 0 collateral</span>
           </div>
           <div class="link-list" id="inspJustificationList" style="max-height:220px;overflow-y:auto;"></div>
+        </div>
+
+        <div id="inspProposalSection" style="display:none;">
+          <div class="link-list-title" style="color:var(--amber);">&#128161; Proposed Extraction</div>
+          <div id="inspProposalCard"></div>
         </div>
 
         <div>
@@ -399,7 +408,7 @@
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
           <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden. The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along.</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
-          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list.</p>
+          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
         </div>
         <div id="helpTab-recipes" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">How-To Recipes</h4>

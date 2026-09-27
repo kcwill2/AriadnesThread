@@ -225,6 +225,7 @@
     }
 
     function renderHotspots() {
+      syncExtractionProposalSurfaces();
       const panel = document.getElementById('hotspotPanel');
       if (!hotspotOpen || !panel || currentTab !== 'include') return;
 
@@ -265,6 +266,50 @@
 
     function selectHotspotRow(id) {
       selectNode(id);
+    }
+
+    // === PROPOSED EXTRACTIONS (payload D1 data; one builder for both surfaces) ===
+    // Card renderer shared by the hotspot panel list and the inspector tie-in
+    // (api.js renderInspectorProposalCard). Payload order is already sorted
+    // (delta desc, plan_id asc) per D1, so render it as-is; never re-sort here.
+    function renderExtractionProposalCard(p) {
+      const headers = (p.required_headers || []).map(escapeHtml).join(', ');
+      const names = (p.symbol_names || []).map(escapeHtml).join(', ');
+      const hidden = (p.total_symbols || 0) - (p.symbol_names || []).length;
+      const more = hidden > 0 ? ` <span class="just-more">+${hidden} more</span>` : '';
+      const needs = headers ? ` needs: ${headers}` : '';
+      return `
+        <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${escapeHtml(p.problem || '')}">
+          <div class="extraction-title">${escapeHtml(p.target_file || String(p.target_file_id))}</div>
+          <div class="extraction-delta">${p.collateral_load_before || 0} &rarr; ${p.collateral_load_after || 0} collateral</div>
+          <div class="extraction-names">${names || '<em>no symbol names</em>'}${more}</div>
+          <div class="extraction-row"><span class="just-tag just-needs">needs</span>${needs || '<em>none</em>'}</div>
+          <div class="extraction-row"><span class="just-tag">${p.consumer_tu_count || 0} TU(s)</span><span class="just-tag">${escapeHtml(p.risk || '')}</span></div>
+        </div>`;
+    }
+
+    // Section lives and dies with the payload: absent/empty extraction_proposals
+    // hides the whole section (I4), byte-identical to pre-D2 output.
+    let extractionProposalsSource = null;
+    function renderProposalsSection() {
+      const section = document.getElementById('proposedExtractionsSection');
+      if (!section) return;
+      const proposals = graphData.extraction_proposals || [];
+      if (proposals.length === 0) {
+        section.style.display = 'none';
+        extractionProposalsSource = null;
+        return;
+      }
+      if (extractionProposalsSource === proposals) return;
+      document.getElementById('proposedExtractionsList').innerHTML =
+        proposals.map(renderExtractionProposalCard).join('');
+      extractionProposalsSource = proposals;
+      section.style.display = 'block';
+    }
+
+    function syncExtractionProposalSurfaces() {
+      renderProposalsSection();
+      renderInspectorProposalCard(selectedNodeId);
     }
 
     function openHotspots() {

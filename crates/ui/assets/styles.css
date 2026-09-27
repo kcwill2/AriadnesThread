@@ -838,6 +838,54 @@
       gap: 4px;
     }
 
+    /* PROPOSED EXTRACTION CARDS (shared by hotspot panel and inspector) */
+    .extraction-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    .extraction-card {
+      padding: 7px 10px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--amber);
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .extraction-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-light);
+      border-left-color: var(--amber);
+    }
+
+    .extraction-title {
+      font-weight: 700;
+      color: var(--amber);
+    }
+
+    .extraction-delta {
+      color: var(--text-sub);
+      margin: 2px 0;
+    }
+
+    .extraction-names {
+      margin-bottom: 2px;
+    }
+
+    .extraction-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
     .hotspot-row {
       display: grid;
       grid-template-columns: 16px 1fr auto;

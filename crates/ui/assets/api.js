@@ -54,6 +54,7 @@
                   const exportPayload = await exportRes.json();
                   graphData.file_collateral = exportPayload.file_collateral || {};
                   graphData.file_justification = exportPayload.file_justification || {};
+                  graphData.extraction_proposals = exportPayload.extraction_proposals || [];
                 }
 
                 updateProgress(100, 'Rendering visualization... 100%');
@@ -109,6 +110,7 @@
                 const p = await exportRes.json();
                 graphData.file_collateral = p.file_collateral || {};
                 graphData.file_justification = p.file_justification || {};
+                graphData.extraction_proposals = p.extraction_proposals || [];
               }
               applyLoadedData();
             }
@@ -212,6 +214,24 @@
       const collateralSection = document.getElementById('inspCollateralSection');
       if (collateralSection) collateralSection.style.display = 'none';
       return true;
+    }
+
+    // Inspector tie-in (D2): when the selected node is a proposal target, show the
+    // matching card built by hotspots.js' shared renderExtractionProposalCard (I5).
+    // No match — or empty/absent extraction_proposals — hides the section entirely (I4).
+    function renderInspectorProposalCard(nodeId) {
+      const section = document.getElementById('inspProposalSection');
+      if (!section) return;
+      const proposals = graphData.extraction_proposals || [];
+      const match = nodeId !== null && nodeId !== undefined
+        ? proposals.find(p => String(p.target_file_id) === String(nodeId))
+        : null;
+      if (!match) {
+        section.style.display = 'none';
+        return;
+      }
+      document.getElementById('inspProposalCard').innerHTML = renderExtractionProposalCard(match);
+      section.style.display = 'block';
     }
 
 // Client-side traversal, shortest path and entrypoints modals.
