@@ -197,7 +197,34 @@ impl<'a> ProductionAnalyzer<'a> {
 
         let index_result = IndexResult::new(self.repo.root.clone(), completed_analyses);
 
-        let stats = ProductionAnalysisStats {
+        let stats = self.build_analysis_stats(
+            total_tus,
+            progress_completed,
+            total_semantic_edges,
+            peak_mem,
+            elapsed,
+            reused,
+            reanalyzed,
+        );
+
+        Ok(ProductionAnalysisResult {
+            reduced_model,
+            index_result,
+            stats,
+        })
+    }
+
+    fn build_analysis_stats(
+        &self,
+        total_tus: usize,
+        progress_completed: usize,
+        total_semantic_edges: usize,
+        peak_mem: u64,
+        elapsed: Duration,
+        reused: usize,
+        reanalyzed: usize,
+    ) -> ProductionAnalysisStats {
+        ProductionAnalysisStats {
             total_tus,
             num_workers: self.num_workers,
             progress_completed,
@@ -207,13 +234,7 @@ impl<'a> ProductionAnalyzer<'a> {
             elapsed,
             reused_tus: reused,
             reanalyzed_tus: reanalyzed,
-        };
-
-        Ok(ProductionAnalysisResult {
-            reduced_model,
-            index_result,
-            stats,
-        })
+        }
     }
 }
 
