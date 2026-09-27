@@ -47,6 +47,70 @@ fn test_inspector_link_sections_are_collapsible() {
     }
 }
 
+fn css_rule_body(css: &str, selector: &str) -> String {
+    let at = css.find(selector).unwrap_or_else(|| {
+        panic!("styles.css must contain a rule for {selector}");
+    });
+    let open = css[at..]
+        .find('{')
+        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
+    let close = css[at + open..]
+        .find('}')
+        .unwrap_or_else(|| panic!("unterminated rule block for {selector}"));
+    css[at + open + 1..at + open + close].to_string()
+}
+
+#[test]
+fn test_justification_section_fills_vertical_space() {
+    let css = ariadne_ui::STYLES_CSS;
+    let html = ariadne_ui::INDEX_HTML;
+    let api = ariadne_ui::API_JS;
+
+    let body = css_rule_body(css, ".inspector-body");
+    assert!(
+        body.contains("flex-direction: column"),
+        ".inspector-body must lay its sections out as a flex column"
+    );
+
+    let section = css_rule_body(css, "#inspJustificationSection");
+    assert!(
+        section.contains("flex: 1") && section.contains("flex-direction: column"),
+        "#inspJustificationSection must grow (flex: 1 ...) as a flex column to fill free vertical space"
+    );
+    assert!(
+        section.contains("min-height: 0"),
+        "#inspJustificationSection needs min-height: 0 so the inner list can scroll inside it"
+    );
+
+    let list = css_rule_body(css, "#inspJustificationList");
+    assert!(
+        list.contains("flex: 1") && list.contains("overflow-y: auto"),
+        "#inspJustificationList must flex-grow and scroll inside the grown section area"
+    );
+
+    assert!(
+        !html.contains("max-height:220px"),
+        "index.html must not cap the justification list at 220px; the CSS flex story owns its height"
+    );
+
+    let fn_start = api
+        .find("function renderJustificationBreakdown")
+        .expect("renderJustificationBreakdown missing from api.js");
+    let fn_end = api[fn_start..]
+        .find("\n    function ")
+        .map(|offset| fn_start + offset)
+        .unwrap_or(api.len());
+    let render_fn = &api[fn_start..fn_end];
+    assert!(
+        render_fn.contains("style.display = 'flex'"),
+        "the justification section show toggle must use display 'flex' so the CSS column layout applies"
+    );
+    assert!(
+        !render_fn.contains("style.display = 'block'"),
+        "the justification section must not fall back to display 'block' when shown"
+    );
+}
+
 // E3 lands preview.js as a NEW split asset. Read it straight from disk so this
 // test compiles before the lib.rs constant exists: the red run must fail on
 // missing markers/registration, never on a compile error.

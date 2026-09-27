@@ -216,7 +216,7 @@
       list.innerHTML = rows.map((row, i) => justificationRowHtml(row, i === 0, nodeId)).join('');
       if (window.bindPreviewControls) window.bindPreviewControls(list);
       document.getElementById('inspJustificationCount').textContent = justificationTotals(rows, detail);
-      section.style.display = 'block';
+      section.style.display = 'flex';
       const collateralSection = document.getElementById('inspCollateralSection');
       if (collateralSection) collateralSection.style.display = 'none';
       return true;
