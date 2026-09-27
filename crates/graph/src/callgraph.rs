@@ -244,7 +244,7 @@ impl CallGraph {
                 .iter()
                 .enumerate()
                 .min_by(|(_, a), (_, b)| a.cmp(b))
-                .unwrap()
+                .expect("cycles are pushed as path[idx..] slices, which are never empty")
                 .0;
             cycle.rotate_left(min_idx);
         }
