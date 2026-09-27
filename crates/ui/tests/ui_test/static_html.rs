@@ -802,6 +802,104 @@ async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
 }
 
 #[test]
+fn test_ui_extraction_proposal_cards() {
+    let page = common::page_content();
+
+    // One shared card builder serves both surfaces (plan D2 refactor rule).
+    // It must NOT live in graph.js (R2 headroom constraint).
+    assert!(
+        page.contains("function renderExtractionProposalCard("),
+        "missing shared renderExtractionProposalCard builder"
+    );
+    assert!(
+        !ariadne_ui::GRAPH_JS.contains("renderExtractionProposalCard"),
+        "graph.js must stay untouched: the proposal renderer belongs to hotspots/api"
+    );
+
+    // Hotspots panel section: sibling AFTER the ranking list.
+    assert!(
+        page.contains("id=\"proposedExtractionsSection\""),
+        "missing proposedExtractionsSection container"
+    );
+    assert!(
+        page.contains("id=\"proposedExtractionsList\""),
+        "missing proposedExtractionsList container"
+    );
+    let ranking = ariadne_ui::INDEX_HTML
+        .find("id=\"hotspotList\"")
+        .expect("hotspot ranking list");
+    let proposals = ariadne_ui::INDEX_HTML
+        .find("id=\"proposedExtractionsSection\"")
+        .expect("proposed extractions section");
+    assert!(
+        ranking < proposals,
+        "Proposed extractions section must sit after the hotspot ranking list"
+    );
+
+    // Inspector tie-in section + card slot.
+    assert!(
+        page.contains("id=\"inspProposalSection\""),
+        "missing inspProposalSection container"
+    );
+    assert!(
+        page.contains("id=\"inspProposalCard\""),
+        "missing inspProposalCard slot"
+    );
+
+    // Live mode wires proposals from /api/export exactly like file_justification (C1),
+    // and the inspector resolves the selected node via target_file_id.
+    assert!(
+        ariadne_ui::API_JS.contains("graphData.extraction_proposals ="),
+        "live mode must assign graphData.extraction_proposals"
+    );
+    assert!(
+        ariadne_ui::API_JS.contains("target_file_id"),
+        "inspector tie-in must match proposals via target_file_id"
+    );
+
+    // Card content: before/after collateral delta, TU count, needs row, +N more overflow.
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("collateral_load_before")
+            && ariadne_ui::HOTSPOTS_JS.contains("collateral_load_after"),
+        "card must render the before/after collateral delta"
+    );
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("consumer_tu_count"),
+        "card must render the consumer TU count"
+    );
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("just-needs"),
+        "card must render the required-headers needs row"
+    );
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("just-more"),
+        "card must render the +N more symbol overflow marker"
+    );
+
+    // Card click selects the target file through the hotspot-row entry point.
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("selectHotspotRow('"),
+        "card click must reuse the hotspot row selection entry point"
+    );
+
+    // I4 fallback (string-level): defaulted access + zero-length hide.
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("graphData.extraction_proposals || []"),
+        "proposals access must default with || [] (I4)"
+    );
+    assert!(
+        ariadne_ui::HOTSPOTS_JS.contains("proposals.length === 0"),
+        "empty proposals must hide the section entirely (I4)"
+    );
+
+    // Help text must mention the new section.
+    assert!(
+        ariadne_ui::INDEX_HTML.contains("Proposed extractions section"),
+        "Hotspots help text must mention the Proposed extractions section"
+    );
+}
+
+#[test]
 fn test_standalone_export_inlines_all_split_assets() {
     let temp_dir = tempfile::tempdir().unwrap();
     let out_path = temp_dir.path().join("standalone.html");
