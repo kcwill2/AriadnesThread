@@ -33,6 +33,7 @@ pub fn empty_export_payload() -> GraphExportPayload {
         },
         file_collateral: HashMap::new(),
         file_justification: HashMap::new(),
+        extraction_proposals: vec![],
     }
 }
 

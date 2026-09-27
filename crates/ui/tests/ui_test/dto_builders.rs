@@ -44,6 +44,7 @@ fn test_export_html() {
         },
         file_collateral: std::collections::HashMap::new(),
         file_justification: std::collections::HashMap::new(),
+        extraction_proposals: vec![],
     };
     let template = "<html><body>/*__ARIADNE_DATA__*/</body></html>";
     let temp_dir = tempfile::tempdir().unwrap();
@@ -70,6 +71,7 @@ fn test_export_html_empty_template_uses_index() {
         },
         file_collateral: std::collections::HashMap::new(),
         file_justification: std::collections::HashMap::new(),
+        extraction_proposals: vec![],
     };
     let temp_dir = tempfile::tempdir().unwrap();
     let out_path = temp_dir.path().join("out2.html");
@@ -165,6 +167,7 @@ fn test_file_collateral_dto_serialization() {
         },
         file_collateral,
         file_justification: HashMap::new(),
+        extraction_proposals: vec![],
     };
 
     let serialized = serde_json::to_string(&payload).unwrap();

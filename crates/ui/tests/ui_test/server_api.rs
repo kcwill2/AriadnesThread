@@ -34,6 +34,7 @@ async fn test_server_routes() {
             },
             file_collateral: std::collections::HashMap::new(),
             file_justification: std::collections::HashMap::new(),
+            extraction_proposals: vec![],
         },
     ));
 
@@ -92,6 +93,7 @@ async fn test_async_ui_state_loading() {
             },
             file_collateral: HashMap::new(),
             file_justification: HashMap::new(),
+            extraction_proposals: vec![],
         });
         *state.include_graph.write().unwrap() = Some(IncludeGraph::new());
         *state.reduced_model.write().unwrap() = Some(ReducedSemanticModel {
@@ -151,6 +153,7 @@ async fn test_server_index_route() {
             },
             file_collateral: std::collections::HashMap::new(),
             file_justification: std::collections::HashMap::new(),
+            extraction_proposals: vec![],
         },
     ));
 

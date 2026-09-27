@@ -111,6 +111,33 @@ const JUSTIFICATION_MAX_SOURCES: usize = 16;
 const JUSTIFICATION_MAX_NAMES: usize = 12;
 const JUSTIFICATION_MAX_HEADERS: usize = 8;
 
+/// Extraction-proposal payload caps (I3/I8): top proposals per payload,
+/// symbol names per proposal (I6: sorted by SymbolId before capping; the UI
+/// infers truncation from `symbol_names.len() < total_symbols`), required
+/// header basenames per proposal. Name/header caps reuse the justification
+/// caps.
+pub const EXTRACTION_PROPOSAL_MAX: usize = 12;
+pub const EXTRACTION_PROPOSAL_MAX_NAMES: usize = JUSTIFICATION_MAX_NAMES;
+pub const EXTRACTION_PROPOSAL_MAX_HEADERS: usize = JUSTIFICATION_MAX_HEADERS;
+
+/// One Conservative extraction proposal shown in both surfaces (I5/I8):
+/// plain display data only — the cluster crate's `OptimizationPlan` never
+/// crosses into the ui crate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractionProposalDto {
+    pub plan_id: String,
+    pub target_file: String,
+    pub target_file_id: String,
+    pub problem: String,
+    pub collateral_load_before: usize,
+    pub collateral_load_after: usize,
+    pub symbol_names: Vec<String>,
+    pub total_symbols: usize,
+    pub required_headers: Vec<String>,
+    pub consumer_tu_count: usize,
+    pub risk: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphExportPayload {
     pub repo_name: String,
@@ -126,6 +153,10 @@ pub struct GraphExportPayload {
         String,
         std::collections::HashMap<String, JustificationEntry>,
     >,
+    /// Conservative extraction proposals (top 12 by collateral delta, I3/I8);
+    /// absent from the JSON when empty, so older payloads round-trip (I2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extraction_proposals: Vec<ExtractionProposalDto>,
 }
 
 /// Maps `root FileId -> source FileId -> per-edge justification`, keyed like

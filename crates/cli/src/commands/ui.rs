@@ -114,6 +114,12 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         &reduced_model,
         &path_to_id,
     );
+    let extraction_proposals = build_extraction_proposals(
+        &include_graph,
+        &reduced_model,
+        &pipeline.discovery.files,
+        &translation_unit_file_ids(&pipeline.build),
+    );
 
     let payload = GraphExportPayload {
         repo_name: pipeline
@@ -134,6 +140,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         },
         file_collateral,
         file_justification,
+        extraction_proposals,
     };
 
     let status = stage_status_from_pipeline(&pipeline);
@@ -178,6 +185,104 @@ fn build_file_collateral(
         }
     }
     file_collateral
+}
+
+fn translation_unit_file_ids(
+    build: &ariadne_build::BuildDiscoveryResult,
+) -> Vec<ariadne_repo::FileId> {
+    build
+        .translation_units
+        .iter()
+        .map(|tu| tu.file_id)
+        .collect()
+}
+
+/// Conservative extraction proposals for the payload (I8): runs the same
+/// planner as `tool optimize` and applies the identical Conservative filter
+/// as `plan_safe_extractions`; display-only, no behavior coupling.
+fn build_extraction_proposals(
+    include_graph: &ariadne_graph::IncludeGraph,
+    reduced_model: &ariadne_graph::ReducedSemanticModel,
+    discovery_files: &[ariadne_repo::FileRecord],
+    tu_file_ids: &[ariadne_repo::FileId],
+) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    let planner = ariadne_cluster::planner::OptimizationPlanner::new(
+        include_graph,
+        reduced_model,
+        discovery_files,
+        tu_file_ids,
+    );
+    conservative_proposals(planner.plan())
+}
+
+/// Pure filter/sort/cap stage (I6: `(delta desc, plan_id asc)`; I3: top 12),
+/// kept separate from the planner so the ordering contract is testable
+/// without planner machinery.
+fn conservative_proposals(
+    plans: Vec<ariadne_cluster::plan::OptimizationPlan>,
+) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    let mut ranked: Vec<_> = plans
+        .into_iter()
+        .filter(|p| matches!(p.risk, ariadne_cluster::plan::RiskLevel::Conservative))
+        .collect();
+    ranked.sort_by(|a, b| {
+        proposal_delta(b)
+            .cmp(&proposal_delta(a))
+            .then(a.id.0.cmp(&b.id.0))
+    });
+    ranked
+        .into_iter()
+        .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX)
+        .map(|p| extraction_proposal_dto(&p))
+        .collect()
+}
+
+fn proposal_delta(plan: &ariadne_cluster::plan::OptimizationPlan) -> usize {
+    plan.collateral_load_before
+        .saturating_sub(plan.collateral_load_after)
+}
+
+fn extraction_proposal_dto(
+    plan: &ariadne_cluster::plan::OptimizationPlan,
+) -> ariadne_ui::ExtractionProposalDto {
+    let total_symbols = plan.proposed_extractions.len();
+    let mut extractions: Vec<&ariadne_cluster::plan::ProposedExtraction> =
+        plan.proposed_extractions.iter().collect();
+    extractions.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
+    let symbol_names: Vec<String> = extractions
+        .into_iter()
+        .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX_NAMES)
+        .map(|e| e.symbol_name.clone())
+        .collect();
+    let mut required_headers: Vec<String> = plan
+        .optimization_frontier
+        .iter()
+        .map(|p| proposal_basename(p))
+        .collect();
+    required_headers.sort();
+    required_headers.dedup();
+    required_headers.truncate(ariadne_ui::EXTRACTION_PROPOSAL_MAX_HEADERS);
+    ariadne_ui::ExtractionProposalDto {
+        plan_id: plan.id.0.clone(),
+        target_file: proposal_basename(&plan.target_file),
+        target_file_id: plan.target_file_id.0.to_string(),
+        problem: plan.problem.clone(),
+        collateral_load_before: plan.collateral_load_before,
+        collateral_load_after: plan.collateral_load_after,
+        symbol_names,
+        total_symbols,
+        required_headers,
+        consumer_tu_count: plan.validation_required_tus.len(),
+        risk: plan.risk.to_string(),
+    }
+}
+
+/// Basename with the graph crate's whole-path fallback for component-less
+/// paths (mirrors dto.rs `path_basename`).
+fn proposal_basename(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 /// Swap a freshly built snapshot into live UI state. The stale payload keeps

@@ -113,6 +113,7 @@ fn empty_payload(file_justification: HashMap<String, HashMap<String, ariadne_ui:
         },
         file_collateral: HashMap::new(),
         file_justification,
+        extraction_proposals: vec![],
     }
 }
 

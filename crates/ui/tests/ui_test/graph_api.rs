@@ -37,6 +37,7 @@ async fn test_server_traversal_routes() {
             },
             file_collateral: std::collections::HashMap::new(),
             file_justification: std::collections::HashMap::new(),
+            extraction_proposals: vec![],
         },
     ));
 
@@ -154,6 +155,7 @@ async fn test_search_advanced_queries_and_dto_paths() {
             },
             file_collateral: std::collections::HashMap::new(),
             file_justification: std::collections::HashMap::new(),
+            extraction_proposals: vec![],
         },
     ));
 
@@ -195,6 +197,7 @@ async fn test_server_collateral_endpoint() {
             },
             file_collateral,
             file_justification: HashMap::new(),
+            extraction_proposals: vec![],
         },
     ));
 
