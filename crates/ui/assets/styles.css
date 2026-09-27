@@ -411,7 +411,7 @@
     .node-group.selected rect {
       stroke: var(--cyan) !important;
       stroke-width: 2.5px;
-      filter: drop-shadow(0 0 14px var(--cyan-glow));
+      filter: drop-shadow(0 0 14px var(--cyan-glow)) !important;
     }
 
     .node-group.faded {
@@ -427,11 +427,13 @@
     }
 
     .node-group.heat-critical rect {
-      filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.8));
+      /* legacy tier-4 alias: rendered by .node-group.heat-glow-4 below; class stays applied by graph.js for structural locks */
     }
 
     /* Per-tier heat glow: every collateral tier outlines in its own tier color
-       (equal specificity to the rules above, later source order wins). */
+       (equal specificity to the rules above, later source order wins).
+       dep-mixed nodes intentionally show the flat green side-marker below
+       instead of the tier glow, as their mixed split is the message. */
     .node-group.heat-glow-0 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.85)); }
     .node-group.heat-glow-1 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.85)); }
     .node-group.heat-glow-2 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(234, 179, 8, 0.85)); }

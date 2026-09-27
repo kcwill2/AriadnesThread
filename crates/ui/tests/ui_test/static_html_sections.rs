@@ -306,6 +306,33 @@ fn test_ui_heat_tier_outlines_glow() {
         justified.contains("drop-shadow(0 0 10px rgba(74, 222, 128, 0.75)"),
         ".node-group.dep-justified rect must use the strengthened 10px green glow"
     );
+
+    // Cascade ownership: .heat-glow-4 is the effective tier-4 renderer. The legacy
+    // .heat-critical rect rule keeps the selector (structural lock + graph.js class)
+    // but must not declare a competing filter, and must sit BEFORE the glow-4 rule.
+    let critical_at = ariadne_ui::STYLES_CSS
+        .find(".node-group.heat-critical rect")
+        .expect("heat-critical rule must remain in styles.css");
+    let glow4_at = ariadne_ui::STYLES_CSS
+        .find(".node-group.heat-glow-4 rect")
+        .expect("heat-glow-4 rule must exist");
+    assert!(
+        critical_at < glow4_at,
+        ".node-group.heat-glow-4 rect must come after .node-group.heat-critical rect so it wins the equal-specificity cascade"
+    );
+    let critical = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.heat-critical rect");
+    assert!(
+        !critical.contains("filter"),
+        ".node-group.heat-critical rect must carry no filter declaration; .heat-glow-4 owns tier-4 rendering"
+    );
+
+    // The selected ring must win over any co-applied heat glow by specificity of
+    // declaration, not by source order luck.
+    let selected = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.selected rect");
+    assert!(
+        selected.contains("filter: drop-shadow(0 0 14px var(--cyan-glow)) !important"),
+        ".node-group.selected rect must guarantee the cyan ring with !important regardless of co-applied heat glows"
+    );
 }
 
 #[test]
