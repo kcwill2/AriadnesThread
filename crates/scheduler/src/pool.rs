@@ -71,10 +71,63 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
         }
 
         // Spawn workers
+        let handles =
+            self.spawn_queue_drain_workers(num_workers, repo_root, &queue_mutex, &retries, &tx);
+        drop(tx); // drop main sender so rx terminates when workers are done
+
+        let mut results = Vec::new();
+        let mut fatal_error = None;
+        let mut approx_mem: u64 = 1024 * 1024; // Base memory estimate: 1 MB
+
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                Ok(analysis) => {
+                    // Estimate memory footprint per analysis
+                    let sym_bytes = (analysis.symbols.len() * 128) as u64;
+                    let edge_bytes = (analysis.edges.len() * 64) as u64;
+                    approx_mem = approx_mem.saturating_add(sym_bytes + edge_bytes + 512);
+                    self.peak_memory_bytes
+                        .fetch_max(approx_mem, Ordering::Relaxed);
+                    results.push(analysis);
+                }
+                Err(e) => {
+                    if fatal_error.is_none() {
+                        fatal_error = Some(e);
+                    }
+                }
+            }
+        }
+
+        for h in handles {
+            let _ = h.await;
+        }
+
+        // Restore any remaining queue items
+        let remaining_q = queue_mutex.lock().await;
+        *queue = (*remaining_q).clone();
+
+        if let Some(err) = fatal_error {
+            return Err(err);
+        }
+
+        Ok(results)
+    }
+
+    /// Each worker pops tasks until the shared queue drains, requeuing failed
+    /// tasks while its retry budget lasts and surfacing one fatal pool error
+    /// once a task exhausts its retries.
+    fn spawn_queue_drain_workers(
+        &self,
+        num_workers: usize,
+        repo_root: &Path,
+        queue_mutex: &Arc<Mutex<PrioritizedTuQueue>>,
+        retries: &Arc<Mutex<HashMap<usize, usize>>>,
+        tx: &tokio::sync::mpsc::Sender<Result<TuAnalysis>>,
+    ) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
         for _ in 0..num_workers {
-            let q = Arc::clone(&queue_mutex);
-            let retries_map = Arc::clone(&retries);
+            let q = Arc::clone(queue_mutex);
+            let retries_map = Arc::clone(retries);
             let backend = Arc::clone(&self.backend);
             let root = repo_root.to_path_buf();
             let tx_worker = tx.clone();
@@ -121,44 +174,7 @@ impl<B: WorkerBackend + 'static> WorkerPool<B> {
             });
             handles.push(handle);
         }
-        drop(tx); // drop main sender so rx terminates when workers are done
-
-        let mut results = Vec::new();
-        let mut fatal_error = None;
-        let mut approx_mem: u64 = 1024 * 1024; // Base memory estimate: 1 MB
-
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                Ok(analysis) => {
-                    // Estimate memory footprint per analysis
-                    let sym_bytes = (analysis.symbols.len() * 128) as u64;
-                    let edge_bytes = (analysis.edges.len() * 64) as u64;
-                    approx_mem = approx_mem.saturating_add(sym_bytes + edge_bytes + 512);
-                    self.peak_memory_bytes
-                        .fetch_max(approx_mem, Ordering::Relaxed);
-                    results.push(analysis);
-                }
-                Err(e) => {
-                    if fatal_error.is_none() {
-                        fatal_error = Some(e);
-                    }
-                }
-            }
-        }
-
-        for h in handles {
-            let _ = h.await;
-        }
-
-        // Restore any remaining queue items
-        let remaining_q = queue_mutex.lock().await;
-        *queue = (*remaining_q).clone();
-
-        if let Some(err) = fatal_error {
-            return Err(err);
-        }
-
-        Ok(results)
+        handles
     }
 }
 
