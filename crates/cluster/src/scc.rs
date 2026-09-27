@@ -60,10 +60,24 @@ fn strongconnect<'a>(
         for w in neighbors {
             if !indices.contains_key(w) {
                 strongconnect(w, adj, index, indices, lowlink, on_stack, stack, sccs);
-                let new_lowlink = min(*lowlink.get(v).unwrap(), *lowlink.get(w).unwrap());
+                let new_lowlink = min(
+                    *lowlink
+                        .get(v)
+                        .expect("strongconnect inserts v's lowlink on entry"),
+                    *lowlink
+                        .get(w)
+                        .expect("recursed w has its lowlink set by its own strongconnect"),
+                );
                 lowlink.insert(v, new_lowlink);
             } else if on_stack.contains(w) {
-                let new_lowlink = min(*lowlink.get(v).unwrap(), *indices.get(w).unwrap());
+                let new_lowlink = min(
+                    *lowlink
+                        .get(v)
+                        .expect("strongconnect inserts v's lowlink on entry"),
+                    *indices
+                        .get(w)
+                        .expect("on_stack membership implies indices contains w"),
+                );
                 lowlink.insert(v, new_lowlink);
             }
         }
@@ -72,7 +86,9 @@ fn strongconnect<'a>(
     if lowlink.get(v) == indices.get(v) {
         let mut scc = Vec::new();
         loop {
-            let w = stack.pop().unwrap();
+            let w = stack
+                .pop()
+                .expect("v is on the stack until popped here, so the stack is non-empty");
             on_stack.remove(w);
             scc.push(w.clone());
             if w == v {

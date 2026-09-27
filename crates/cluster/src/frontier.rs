@@ -52,7 +52,9 @@ impl FrontierAnalyzer {
         let mut curr = collateral_file;
         while curr != start_file {
             path.push(curr);
-            curr = *parents.get(&curr).unwrap();
+            curr = *parents
+                .get(&curr)
+                .expect("BFS records a parent for every visited node before start_file");
         }
         path.push(start_file);
         path.reverse(); // start_file -> ... -> collateral_file
