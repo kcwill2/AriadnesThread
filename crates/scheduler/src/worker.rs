@@ -116,14 +116,14 @@ impl ClangWorkerBackend {
         }
 
         for bin in candidate_paths {
-            let res = std::process::Command::new(&bin)
+            let worker_command_output = std::process::Command::new(&bin)
                 .arg("--file")
                 .arg(req_path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn();
-            if res.is_ok() {
-                child_res = res;
+            if worker_command_output.is_ok() {
+                child_res = worker_command_output;
                 break;
             }
         }

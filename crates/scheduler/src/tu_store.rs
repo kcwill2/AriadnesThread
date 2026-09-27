@@ -372,8 +372,8 @@ mod tests {
         // ghost.h missing: dest resolves nowhere, fingerprint still stable.
         let ctx = make_ctx(root);
         let tu = tu_for(root, "a.cpp");
-        let res = compute_tu_closure(&tu, root, &ctx, CURRENT_ANALYSIS_VERSION);
-        assert!(res.is_ok());
+        let closure_result = compute_tu_closure(&tu, root, &ctx, CURRENT_ANALYSIS_VERSION);
+        assert!(closure_result.is_ok());
     }
 
     #[test]
