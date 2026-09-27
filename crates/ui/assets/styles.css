@@ -1244,3 +1244,45 @@
       background: rgba(69, 26, 3, 0.55);
     }
 
+    /* E3 proposed-header visualization: the extraction result appears as a
+       violet dashed hypothetical card with dashed proposed edges, and the real
+       consumer edge is re-tagged as the slim edge. Appended after every heat
+       and selection rule so equal-specificity rivals (.edges-has-selection
+       .edge-path, .edge-path.edge-leaving, node rect fills) lose the cascade. */
+    .node-group.preview-proposed-node {
+      pointer-events: none;
+    }
+
+    .node-group.preview-proposed-node rect {
+      fill: rgba(30, 27, 75, 0.85);
+      stroke: #a78bfa;
+      stroke-dasharray: 5 4;
+    }
+
+    .node-group.preview-proposed-node circle {
+      fill: #a78bfa;
+    }
+
+    .node-group.preview-proposed-node text {
+      fill: #e9d5ff;
+    }
+
+    .preview-proposed-badge {
+      letter-spacing: 0.5px;
+    }
+
+    .edge-path.preview-proposed-edge {
+      stroke: #a78bfa;
+      stroke-width: 1.6px;
+      stroke-dasharray: 6 4;
+      opacity: 0.9;
+      fill: none;
+      pointer-events: none;
+    }
+
+    .edge-path.preview-slim-edge {
+      stroke: #fbbf24 !important;
+      stroke-dasharray: 7 5;
+      opacity: 1 !important;
+    }
+

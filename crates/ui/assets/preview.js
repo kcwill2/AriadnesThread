@@ -92,7 +92,8 @@
       const hidden = full ? 0 : dropped - (impact.dropped_sample || []).length;
       const moreNote = hidden > 0 ? ` <span class="just-more">+${hidden} more eliminated</span>` : '';
       const sampleNote = full ? '' : ' <span class="just-more">(names capped to a sample)</span>';
-      document.getElementById('legendViewLabel').textContent = '\u26A0 After extraction';
+      document.getElementById('legendViewLabel').textContent =
+        '\u26A0 After extraction: Proposed header (placeholder name), proposed edges';
       const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
         + `After extraction: closure ${impact.root_closure_before || 0} &rarr; ${impact.root_closure_after || 0}`
         + ` &middot; ${dropped} headers dropped${moreNote}${sampleNote}`
@@ -107,7 +108,12 @@
           <div class="legend-color" style="background:${item[0]};"></div>
           <span>${item[1]}</span>
         </div>`).join('');
-      document.getElementById('legendItems').innerHTML = summary + rows;
+      const proposalRow = `
+        <div class="legend-row">
+          <div class="legend-color" style="background:transparent;border:1px dashed #a78bfa;"></div>
+          <span>Proposed header (placeholder name)</span>
+        </div>`;
+      document.getElementById('legendItems').innerHTML = summary + rows + proposalRow;
       previewLegendShown = true;
     }
 
@@ -151,6 +157,14 @@
         layer.querySelectorAll('.node-group').forEach(el => {
           el.classList.remove('preview-eliminated', 'preview-kept', 'preview-still-reachable');
         });
+        layer.querySelectorAll('[data-preview-synthetic="1"]').forEach(el => el.remove());
+      }
+      const edgesLayer = document.getElementById('edgesLayer');
+      if (edgesLayer) {
+        edgesLayer.querySelectorAll('[data-preview-synthetic="1"]').forEach(el => el.remove());
+        edgesLayer.querySelectorAll('.preview-slim-edge').forEach(el => {
+          el.classList.remove('preview-slim-edge');
+        });
       }
       const banner = document.getElementById('previewBanner');
       if (banner) banner.hidden = true;
@@ -177,9 +191,127 @@
       clearPreview();
       previewActiveKey = key;
       previewMarkNodes(root, source, resolved.full, resolved.impact);
+      const proposal = previewInjectProposedNode(root, source);
+      previewInjectProposedEdges(proposal, resolved.full, resolved.impact);
       previewPaintLegend(resolved.full, resolved.impact);
       previewShowHypothetical();
       previewActivateButton(triggerBtn || null);
+    }
+
+    function previewFindNode(id) {
+      return tabAllNodes.find(node => String(node.id) === String(id));
+    }
+
+    // Mirrors renderSvg's card label rule: 17 chars, then ".." on 15.
+    function previewTruncatedCardLabel(label) {
+      return label.length > 17 ? label.substring(0, 15) + '..' : label;
+    }
+
+    // Placeholder naming follows the planner convention {}_extracted.h
+    // (crates/cluster/src/planner.rs): split the stem at the LAST dot, and a
+    // dotless basename keeps its whole name as the stem.
+    function previewProposedFilename(sourceNode) {
+      const base = previewBasename((sourceNode && (sourceNode.path || sourceNode.label)) || '');
+      const dot = base.lastIndexOf('.');
+      const stem = dot > 0 ? base.substring(0, dot) : base;
+      return `${stem}_extracted.h`;
+    }
+
+    // Same bezier family as renderEdge: horizontal control offsets that bow
+    // the curve toward the destination anchor.
+    function previewProposedEdgePath(startX, startY, endX, endY) {
+      const bend = Math.max(40, (endX - startX) * 0.5);
+      return `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`;
+    }
+
+    // The extraction result gets a node: a violet dashed card mirroring the
+    // real card geometry, parked on the root->source lane. I3: it is synthetic
+    // chrome (no data-node-id, pointer-events: none via CSS), never selectable.
+    // Returns the card origin plus endpoint nodes for edge anchoring, or null.
+    function previewInjectProposedNode(rootId, sourceId) {
+      const layer = previewNodesLayer();
+      const root = tabAllNodes.find(node => String(node.id) === String(rootId));
+      const source = tabAllNodes.find(node => String(node.id) === String(sourceId));
+      if (!layer || !source) return null;
+      const rootRight = root ? { x: root.x + 160, y: root.y + 21 } : null;
+      const sourceLeft = { x: source.x, y: source.y + 21 };
+      const anchorsClose = !rootRight ||
+        Math.hypot(sourceLeft.x - rootRight.x, sourceLeft.y - rootRight.y) < 60;
+      const nodeX = anchorsClose ? source.x - 95 : (rootRight.x + sourceLeft.x) / 2 - 85;
+      const nodeY = anchorsClose ? source.y - 55 : (rootRight.y + sourceLeft.y) / 2 - 21;
+
+      const card = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      card.setAttribute('class', 'node-group preview-proposed-node');
+      card.setAttribute('transform', `translate(${nodeX}, ${nodeY})`);
+      card.setAttribute('data-preview-synthetic', '1');
+      const hint = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      hint.textContent = 'Proposed header (hypothetical placeholder name)';
+      card.appendChild(hint);
+
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('width', '170');
+      rect.setAttribute('height', '42');
+      card.appendChild(rect);
+
+      const pill = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      pill.setAttribute('cx', '18');
+      pill.setAttribute('cy', '21');
+      pill.setAttribute('r', '5');
+      card.appendChild(pill);
+
+      const label = previewTruncatedCardLabel(previewProposedFilename(source));
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', '32');
+      text.setAttribute('y', '25');
+      text.setAttribute('font-size', '11');
+      text.setAttribute('font-family', 'monospace');
+      text.setAttribute('font-weight', '600');
+      text.textContent = label;
+      card.appendChild(text);
+
+      if (label.length <= 14) {
+        const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        badge.setAttribute('class', 'preview-proposed-badge');
+        badge.setAttribute('x', '140');
+        badge.setAttribute('y', '12');
+        badge.setAttribute('font-size', '7');
+        badge.setAttribute('fill', '#a78bfa');
+        badge.textContent = 'PROPOSED';
+        card.appendChild(badge);
+      }
+      layer.appendChild(card);
+      return { x: nodeX, y: nodeY, root: root, source: source };
+    }
+
+    // Proposed edges: root -> proposed header always; full payloads also fan
+    // the proposed header out to each required header (capped, unknown ids
+    // skipped). The real root->source edge gets the amber slim-edge treatment.
+    function previewInjectProposedEdges(proposal, full, impact) {
+      const edgesLayer = document.getElementById('edgesLayer');
+      if (!edgesLayer || !proposal) return;
+      const root = proposal.root;
+      const source = proposal.source;
+      const addEdge = (startX, startY, endX, endY) => {
+        const edge = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        edge.setAttribute('d', previewProposedEdgePath(startX, startY, endX, endY));
+        edge.setAttribute('class', 'edge-path preview-proposed-edge');
+        edge.setAttribute('marker-end', 'url(#arrow-proposed)');
+        edge.setAttribute('data-preview-synthetic', '1');
+        edgesLayer.appendChild(edge);
+      };
+
+      if (root) addEdge(root.x + 160, root.y + 20, proposal.x, proposal.y + 20);
+      if (root && full) {
+        (impact.required_headers || []).slice(0, 16).forEach(header => {
+          const needed = previewFindNode(header.file_id);
+          if (needed) addEdge(proposal.x + 160, proposal.y + 20, needed.x, needed.y + 20);
+        });
+      }
+      if (root) {
+        const slimEdge = edgesLayer.querySelector(
+          `.edge-path[data-edge-source="${root.id}"][data-edge-target="${source.id}"]`);
+        if (slimEdge) slimEdge.classList.add('preview-slim-edge');
+      }
     }
 
     // Buttons arrive through innerHTML re-renders, so listeners bind after each
