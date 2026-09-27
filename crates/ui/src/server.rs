@@ -106,6 +106,7 @@ async fn api_index() -> axum::response::Response {
         .header(axum::http::header::CACHE_CONTROL, "no-store")
         .header(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .body(axum::body::Body::from(crate::INDEX_HTML))
+        // R5: infallible — static status/body pair
         .unwrap()
 }
 
@@ -117,6 +118,7 @@ fn ui_asset(content: &'static str, content_type: &'static str) -> axum::response
         .header(axum::http::header::CACHE_CONTROL, "no-store")
         .header(axum::http::header::CONTENT_TYPE, content_type)
         .body(axum::body::Body::from(content))
+        // R5: infallible — static status/body pair
         .unwrap()
 }
 
@@ -535,9 +537,19 @@ async fn api_graph_search(
 
                     if is_match(label, path) {
                         results.push(SearchResultItem {
-                            id: el.data.get("id").unwrap().as_str().unwrap().to_string(),
+                            id: el
+                                .data
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
                             label: label.to_string(),
-                            kind: el.data.get("kind").unwrap().as_str().unwrap().to_string(),
+                            kind: el
+                                .data
+                                .get("kind")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
                             graph_type: graph_type.to_string(),
                         });
                     }

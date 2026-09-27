@@ -561,6 +561,51 @@ async fn test_graph_search_locks_result_item_shape_and_skips_edges() {
 }
 
 #[tokio::test]
+async fn test_graph_search_degenerate_node_data_yields_empty_id_and_kind() {
+    // Pass 4 D2: production dto builders always emit string id/kind, but the
+    // handler must stay total on degenerate data: missing or non-string id/kind
+    // keys yield "" result fields (the closure's unwrap_or_default convention
+    // for label/path), never a panic.
+    let mut payload = common::empty_export_payload();
+    payload.include_graph.push(ariadne_ui::CytoscapeElement {
+        data: serde_json::json!({ "label": "ghost.h" }),
+        classes: None,
+    });
+    payload.include_graph.push(ariadne_ui::CytoscapeElement {
+        data: serde_json::json!({ "id": 42, "label": "numid.h", "kind": true }),
+        classes: None,
+    });
+    let app = build_router(common::ready_state(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        CallGraph::default(),
+        payload,
+    ));
+
+    let (status, _headers, body) =
+        common::request_route(app, "/api/graph/search?q=.h&graph_type=include").await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        2,
+        "degenerate nodes are still searched and returned"
+    );
+    assert_eq!(items[0]["id"], "");
+    assert_eq!(items[0]["kind"], "");
+    assert_eq!(items[0]["label"], "ghost.h");
+    assert_eq!(
+        items[1]["id"], "",
+        "non-string id falls back to empty string"
+    );
+    assert_eq!(
+        items[1]["kind"], "",
+        "non-string kind falls back to empty string"
+    );
+    assert_eq!(items[1]["label"], "numid.h");
+}
+
+#[tokio::test]
 async fn test_graph_search_respects_limit_param_and_default_limit() {
     let app = build_router(fixture_sample_state());
     let (status, _headers, all) =
