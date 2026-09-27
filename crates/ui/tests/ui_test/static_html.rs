@@ -396,6 +396,40 @@ fn test_ui_inspector_justification_breakdown() {
 }
 
 #[test]
+fn test_ui_justification_cache_reset_on_live_refresh() {
+    // Reviewer remediation: /api/justification detail is cached per node, but the
+    // live refresh swaps the graphData payload fields in place. The cache must be
+    // reset with the payload, otherwise reselecting a previously-viewed node
+    // renders pre-rebuild breakdowns after a rebuild.
+    let api = ariadne_ui::API_JS;
+    let live = api
+        .find("function startLiveRefresh(")
+        .expect("startLiveRefresh function");
+    let standalone = api
+        .find("function isStandaloneReport(")
+        .expect("isStandaloneReport function");
+    assert!(live < standalone);
+    let body = &api[live..standalone];
+    let payload = body
+        .find("graphData.extraction_proposals =")
+        .expect("live refresh must reassign the export payload");
+    let reset = body
+        .find("justificationCache = {};")
+        .expect("live refresh must reset the per-node justification cache");
+    let render = body
+        .find("applyLoadedData()")
+        .expect("live refresh must re-render after the payload swap");
+    assert!(
+        reset > payload,
+        "cache reset must follow the payload reassignment"
+    );
+    assert!(
+        reset < render,
+        "cache reset must precede the re-render after the payload swap"
+    );
+}
+
+#[test]
 fn test_ui_inspector_collateral_breakdown_and_path_illumination() {
     let html = common::page_content();
 
