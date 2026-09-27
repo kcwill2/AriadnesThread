@@ -1,0 +1,292 @@
+use super::*;
+use crate::reduced::{ReducedSemanticEdge, ReducedSymbolRecord};
+use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
+use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
+use ariadne_repo::FileId;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
+
+// Thing.h semantically needs Helper symbols (via Thing) and Base symbols,
+// while HugeThirdParty symbols (dragged in by Helper.h) stay unused.
+// Semantic side: Thing.h, Helper.h, Base.h groups. Collateral side: HugeThirdParty.h.
+fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+    let mut ig = IncludeGraph::new();
+    ig.register_file(FileId(1), PathBuf::from("Thing.h"));
+    ig.register_file(FileId(2), PathBuf::from("Helper.h"));
+    ig.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
+    ig.register_file(FileId(4), PathBuf::from("Base.h"));
+
+    let include = |ig: &mut IncludeGraph, from: FileId, to: FileId, name: &str| {
+        ig.add_edge(IncludeEdge {
+            source: from,
+            destination: Some(to),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: name.to_string(),
+            resolved_path: Some(PathBuf::from(name)),
+        });
+    };
+    include(&mut ig, FileId(1), FileId(2), "Helper.h");
+    include(&mut ig, FileId(1), FileId(4), "Base.h");
+    include(&mut ig, FileId(2), FileId(3), "HugeThirdParty.h");
+
+    let mut model = ReducedSemanticModel {
+        repo_root: PathBuf::from("/"),
+        symbols: BTreeMap::new(),
+        edges: vec![],
+        tu_usage: BTreeMap::new(),
+        file_symbols: BTreeMap::new(),
+    };
+
+    let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+        let id = SymbolId::new(name);
+        model.symbols.insert(
+            id.clone(),
+            ReducedSymbolRecord {
+                id: id.clone(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(file),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        id
+    };
+
+    let thing = add_sym(&mut model, "Thing", FileId(1));
+    let helper_fn = add_sym(&mut model, "HelperFn", FileId(2));
+    let helper_fn2 = add_sym(&mut model, "HelperFn2", FileId(2));
+    let helper_util = add_sym(&mut model, "HelperUtil", FileId(2));
+    let base_struct = add_sym(&mut model, "BaseStruct", FileId(4));
+    add_sym(&mut model, "HugeThing", FileId(3));
+    add_sym(&mut model, "HugeOther", FileId(3));
+
+    model.file_symbols.insert(FileId(1), vec![thing.clone()]);
+    model.file_symbols.insert(
+        FileId(2),
+        vec![helper_fn.clone(), helper_fn2.clone(), helper_util.clone()],
+    );
+    model
+        .file_symbols
+        .insert(FileId(3), vec![SymbolId::new("HugeThing"), SymbolId::new("HugeOther")]);
+    model
+        .file_symbols
+        .insert(FileId(4), vec![base_struct.clone()]);
+
+    let dep = |src: &SymbolId, dst: &SymbolId| ReducedSemanticEdge {
+        src_symbol: src.clone(),
+        dst_symbol: dst.clone(),
+        kind: DependencyKind::Complete,
+    };
+    model.edges = vec![
+        dep(&thing, &helper_fn),
+        dep(&helper_fn, &helper_fn2),
+        dep(&thing, &helper_util),
+        dep(&thing, &base_struct),
+    ];
+
+    (ig, model)
+}
+
+fn source_names(sources: &[CollateralSource]) -> Vec<(String, usize)> {
+    sources
+        .iter()
+        .map(|s| {
+            (
+                s.path.file_name().unwrap().to_string_lossy().to_string(),
+                s.symbol_count,
+            )
+        })
+        .collect()
+}
+
+fn symbol_names(symbols: &[SymbolId]) -> Vec<String> {
+    let mut names: Vec<String> = symbols.iter().map(|id| id.0.clone()).collect();
+    names.sort();
+    names
+}
+
+fn symbol_name_set(sources: &[CollateralSource]) -> HashSet<String> {
+    sources
+        .iter()
+        .flat_map(|s| s.symbols.iter().map(|id| id.0.clone()))
+        .collect()
+}
+
+#[test]
+fn test_semantic_sources_grouped_by_defining_file_sorted() {
+    let (ig, model) = setup_justification_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let metric = analyzer
+        .analyze_file_load(Path::new("Thing.h"))
+        .expect("analyze_file_load failed");
+
+    // (symbol_count desc, path asc): Helper.h 3, then Base.h 1 before Thing.h 1.
+    assert_eq!(
+        source_names(&metric.semantic_sources),
+        vec![
+            ("Helper.h".to_string(), 3),
+            ("Base.h".to_string(), 1),
+            ("Thing.h".to_string(), 1),
+        ]
+    );
+    assert_eq!(
+        symbol_names(&metric.semantic_sources[0].symbols),
+        vec!["HelperFn", "HelperFn2", "HelperUtil"]
+    );
+
+    // Each justified symbol appears exactly once across all groups.
+    let mut flat: Vec<String> = metric
+        .semantic_sources
+        .iter()
+        .flat_map(|s| s.symbols.iter().map(|id| id.0.clone()))
+        .collect();
+    let total = flat.len();
+    flat.sort();
+    flat.dedup();
+    assert_eq!(total, 5);
+    assert_eq!(flat.len(), 5);
+    assert_eq!(
+        HashSet::from_iter(flat),
+        ["Thing", "HelperFn", "HelperFn2", "HelperUtil", "BaseStruct"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<HashSet<String>>()
+    );
+}
+
+#[test]
+fn test_partition_invariant_i1_semantic_plus_collateral() {
+    let (ig, model) = setup_justification_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let metric = analyzer
+        .analyze_file_load(Path::new("Thing.h"))
+        .expect("analyze_file_load failed");
+
+    let sem_sum: usize = metric
+        .semantic_sources
+        .iter()
+        .map(|s| s.symbol_count)
+        .sum();
+    let col_sum: usize = metric
+        .collateral_sources
+        .iter()
+        .map(|s| s.symbol_count)
+        .sum();
+    assert_eq!(sem_sum + col_sum, metric.include_load);
+
+    let sem_set = symbol_name_set(&metric.semantic_sources);
+    let col_set = symbol_name_set(&metric.collateral_sources);
+    let physical: HashSet<String> = [
+        "Thing",
+        "HelperFn",
+        "HelperFn2",
+        "HelperUtil",
+        "BaseStruct",
+        "HugeThing",
+        "HugeOther",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let union: HashSet<String> = sem_set.union(&col_set).cloned().collect();
+    assert_eq!(union, physical);
+    assert!(sem_set.is_disjoint(&col_set));
+
+    assert_eq!(
+        sem_set,
+        metric
+            .semantic_symbols
+            .iter()
+            .map(|id| id.0.clone())
+            .collect::<HashSet<String>>()
+    );
+    assert_eq!(
+        col_set,
+        metric
+            .collateral_symbols
+            .iter()
+            .map(|id| id.0.clone())
+            .collect::<HashSet<String>>()
+    );
+}
+
+#[test]
+fn test_semantic_sources_populated_for_symbol_load() {
+    let (ig, model) = setup_justification_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+
+    let metric = analyzer
+        .analyze_symbol_load("Thing")
+        .expect("analyze_symbol_load failed");
+
+    assert_eq!(
+        source_names(&metric.semantic_sources),
+        vec![
+            ("Helper.h".to_string(), 3),
+            ("Base.h".to_string(), 1),
+            ("Thing.h".to_string(), 1),
+        ]
+    );
+    let sem_sum: usize = metric
+        .semantic_sources
+        .iter()
+        .map(|s| s.symbol_count)
+        .sum();
+    let col_sum: usize = metric
+        .collateral_sources
+        .iter()
+        .map(|s| s.symbol_count)
+        .sum();
+    assert_eq!(sem_sum + col_sum, metric.include_load);
+}
+
+#[test]
+fn test_semantic_sources_deterministic_across_runs() {
+    let (ig, model) = setup_justification_fixture();
+
+    let first = LoadAnalyzer::new(&ig, &model)
+        .analyze_file_load(Path::new("Thing.h"))
+        .expect("first run failed");
+    let second = LoadAnalyzer::new(&ig, &model)
+        .analyze_file_load(Path::new("Thing.h"))
+        .expect("second run failed");
+
+    assert_eq!(first.semantic_sources, second.semantic_sources);
+}
+
+#[test]
+fn test_old_load_metric_json_without_semantic_sources_deserializes() {
+    // I2 back-compat: artifacts written before semantic_sources existed must
+    // still deserialize, with the new field defaulting to empty.
+    let json = r#"{
+        "target_name": "Thing",
+        "target_file": "Thing.h",
+        "semantic_load": 1,
+        "include_load": 2,
+        "collateral_load": 1,
+        "total_load": 2,
+        "semantic_symbols": ["Thing"],
+        "collateral_symbols": ["HugeThing"],
+        "collateral_sources": [
+            {"file_id": 3, "path": "HugeThirdParty.h", "symbol_count": 1, "symbols": ["HugeThing"]}
+        ],
+        "largest_collateral_source": {
+            "file_id": 3, "path": "HugeThirdParty.h", "symbol_count": 1, "symbols": ["HugeThing"]
+        }
+    }"#;
+
+    let metric: LoadMetric = serde_json::from_str(json).expect("old JSON must deserialize");
+    assert_eq!(metric.target_name, "Thing");
+    assert!(metric.semantic_sources.is_empty());
+    assert_eq!(metric.collateral_sources.len(), 1);
+    assert_eq!(metric.collateral_sources[0].file_id, FileId(3));
+    assert_eq!(
+        metric.collateral_sources[0].path,
+        PathBuf::from("HugeThirdParty.h")
+    );
+}

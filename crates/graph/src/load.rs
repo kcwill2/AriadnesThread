@@ -499,3 +499,9 @@ impl<'a> LoadAnalyzer<'a> {
 #[cfg(test)]
 #[path = "load_characterization_tests.rs"]
 mod characterization;
+
+/// Justification suite: locks the semantic (used-symbol) side of the
+/// include-closure split as grouped per-source contributions.
+#[cfg(test)]
+#[path = "load_justification_tests.rs"]
+mod justification;
