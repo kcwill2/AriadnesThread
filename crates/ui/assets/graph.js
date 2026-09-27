@@ -665,14 +665,13 @@
       }
 
       container.addEventListener('mousedown', e => {
-        if (e.target.closest('.node-group') || e.target.closest('.hotspot-panel')) return;
+        if (e.target.closest('.node-group')) return;
         isDragging = true;
         dragStartX = e.clientX - panX;
         dragStartY = e.clientY - panY;
       });
 
       container.addEventListener('click', e => {
-        if (e.target.closest('.hotspot-panel')) return;
         if (!e.target.closest('.node-group') && dragStartX === e.clientX - panX && dragStartY === e.clientY - panY) {
           selectedNodeId = null;
           renderThreadBar();
@@ -690,15 +689,6 @@
       window.addEventListener('mouseup', () => { isDragging = false; });
 
       container.addEventListener('wheel', e => {
-        // Over the hotspot panel: scroll the list while it can absorb the delta,
-        // otherwise (edges, non-scrollable, header) let the wheel drive the graph view.
-        if (e.target.closest('.hotspot-panel')) {
-          const hsList = document.getElementById('hotspotList');
-          const scrollable = hsList && hsList.scrollHeight - hsList.clientHeight > 1;
-          const atTop = hsList.scrollTop <= 0;
-          const atBottom = hsList.scrollTop + hsList.clientHeight >= hsList.scrollHeight - 1;
-          if (scrollable && ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom))) return;
-        }
         e.preventDefault();
         const zoomDelta = e.deltaY < 0 ? 1.1 : 0.9;
         const newScale = Math.min(2.5, Math.max(0.2, zoomScale * zoomDelta));

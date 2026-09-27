@@ -804,21 +804,17 @@
       border-radius: 2px;
     }
 
-    /* HOTSPOTS PANEL */
+    /* HOTSPOTS PANEL — workspace column (never an overlay over the legend) */
     .hotspot-panel {
-      position: absolute;
-      top: 16px;
-      left: 16px;
+      position: static;
       width: 300px;
-      max-height: calc(100% - 40px);
-      background: rgba(17, 24, 39, 0.92);
-      backdrop-filter: blur(8px);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      flex-shrink: 0;
+      height: 100%;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      border-radius: 0;
       padding: 10px 12px;
       font-size: 11px;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-      z-index: 25;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -856,6 +852,8 @@
     }
 
     .hotspot-list {
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -1135,10 +1133,6 @@
       outline: 2px solid var(--cyan) !important;
       box-shadow: 0 0 25px rgba(56, 189, 248, 0.7) !important;
       border-radius: 6px;
-    }
-
-    .hotspot-panel.tour-highlighted-element {
-      position: absolute !important;
     }
 
     /* E3: after-extraction preview overlay. These compose with (not replace) the

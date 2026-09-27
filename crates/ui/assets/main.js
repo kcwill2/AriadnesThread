@@ -189,7 +189,7 @@
       { id: '.toolbar', title: 'Direction & Degree Navigation', text: 'Control Direction (Dependencies -> vs Consumers <-), step Degree (-/+), or use ALL-WITH-CAP to expand safely up to the node cap limit.' },
       { id: '#ariadneThread', title: 'Pathfinder & Breadcrumbs', text: 'Use Pathfinder for shortest paths and Ariadne\'s Thread to navigate your breadcrumb history.' },
       { id: '.inspector', title: 'Collateral Heat Map', text: 'Select a header to calculate collateral load. Dependencies are colored by heat tier (Cold to Red). Click a contributor to illuminate the include path.' },
-      { id: '#hotspotPanel', title: 'Hotspots Triage', text: 'Open 🔥 Hotspots to rank the worst-offender files by collateral burden, fan-in/out, closure, or cycle participation. Click a row to select the file and see its heat map live behind the list.',
+      { id: '#hotspotPanel', title: 'Hotspots Triage', text: 'Open 🔥 Hotspots to rank the worst-offender files by collateral burden, fan-in/out, closure, or cycle participation. Click a row to select the file and see its heat map live beside the list.',
         enter() {
           if (currentTab !== 'include') switchTab('include');
           if (!hotspotOpen) tourOpenedHotspots = true;

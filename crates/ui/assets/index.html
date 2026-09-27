@@ -177,6 +177,27 @@
 
   <!-- WORKSPACE BODY -->
   <div class="workspace">
+    <!-- HOTSPOTS PANEL (include tab) -->
+    <div class="hotspot-panel" id="hotspotPanel" style="display:none;">
+      <div class="hotspot-head">
+        <span class="hotspot-title">&#128293; Hotspots</span>
+        <select class="select-dark" id="hotspotMetric" onchange="renderHotspots()" style="font-size:11px; padding:2px 4px;">
+          <option value="burden" selected>Collateral burden</option>
+          <option value="fanin">Fan-in</option>
+          <option value="fanout">Fan-out</option>
+          <option value="closure">Closure burden</option>
+          <option value="cycle">Cycle participation</option>
+        </select>
+        <button class="hotspot-close" onclick="closeHotspots()" title="Close">&#10005;</button>
+      </div>
+      <div class="hotspot-hint" id="hotspotHint"></div>
+      <div class="hotspot-list" id="hotspotList"></div>
+      <div id="proposedExtractionsSection" style="display:none;">
+        <div class="link-list-title" style="color:var(--amber);">&#128161; Proposed extractions</div>
+        <div class="extraction-list" id="proposedExtractionsList"></div>
+      </div>
+    </div>
+
     <!-- GRAPH CANVAS -->
     <div class="canvas-container" id="canvasContainer">
       <svg id="graphSvg" class="graph-svg">
@@ -210,27 +231,6 @@
           <span id="legendViewLabel" style="font-weight:400;color:var(--text-sub);">Include Graph</span>
         </div>
         <div id="legendItems"></div>
-      </div>
-
-      <!-- HOTSPOTS PANEL (include tab) -->
-      <div class="hotspot-panel" id="hotspotPanel" style="display:none;">
-        <div class="hotspot-head">
-          <span class="hotspot-title">&#128293; Hotspots</span>
-          <select class="select-dark" id="hotspotMetric" onchange="renderHotspots()" style="font-size:11px; padding:2px 4px;">
-            <option value="burden" selected>Collateral burden</option>
-            <option value="fanin">Fan-in</option>
-            <option value="fanout">Fan-out</option>
-            <option value="closure">Closure burden</option>
-            <option value="cycle">Cycle participation</option>
-          </select>
-          <button class="hotspot-close" onclick="closeHotspots()" title="Close">&#10005;</button>
-        </div>
-        <div class="hotspot-hint" id="hotspotHint"></div>
-        <div class="hotspot-list" id="hotspotList"></div>
-        <div id="proposedExtractionsSection" style="display:none;">
-          <div class="link-list-title" style="color:var(--amber);">&#128161; Proposed extractions</div>
-          <div class="extraction-list" id="proposedExtractionsList"></div>
-        </div>
       </div>
     </div>
 
@@ -408,7 +408,7 @@
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
           <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden. The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along. With Preview after extraction (on justification rows and proposal cards) the map marks what the selected file would stop including (red dashed), what still arrives via other paths (amber dashed), and what the slim edge keeps (green).</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
-          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
+          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live beside the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
         </div>
         <div id="helpTab-recipes" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">How-To Recipes</h4>
