@@ -146,7 +146,9 @@ impl ShardedReducer {
         };
 
         for handle in handles {
-            let part = handle.await.unwrap();
+            let part = handle
+                .await
+                .expect("a panicked/cancelled partition task leaves no complete shard to merge");
             merged.symbols.extend(part.symbols);
             for (k, v) in part.raw_edges {
                 match merged.raw_edges.get(&k) {
