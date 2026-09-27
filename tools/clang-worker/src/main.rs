@@ -117,6 +117,7 @@ fn main() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(req) = serde_json::from_str::<WorkerRequest>(&content) {
                 let resp = run_request_analysis(req);
+                // R5: infallible — serialization of locally constructed types
                 println!("{}", serde_json::to_string(&resp).unwrap());
             }
         }
@@ -132,6 +133,7 @@ fn main() {
             match serde_json::from_str::<WorkerRequest>(&line_str) {
                 Ok(req) => {
                     let resp = run_request_analysis(req);
+                    // R5: infallible — serialization of locally constructed types
                     let out = serde_json::to_string(&resp).unwrap();
                     println!("{}", out);
                     let _ = io::stdout().flush();
@@ -142,6 +144,7 @@ fn main() {
                         analysis: None,
                         message: Some(format!("Invalid JSON request: {}", e)),
                     };
+                    // R5: infallible — serialization of locally constructed types
                     println!("{}", serde_json::to_string(&resp).unwrap());
                     let _ = io::stdout().flush();
                 }
