@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use ariadne_index::types::{DeclId, DependencyKind, IndexResult, SymbolId, SymbolKind};
+use ariadne_index::types::{
+    DeclId, DependencyKind, IndexResult, SemanticEdge, SymbolId, SymbolKind, SymbolRecord,
+};
 use ariadne_repo::FileId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,70 +56,15 @@ impl ReducedSemanticModel {
         for tu in &index_result.tu_analyses {
             let tu_file = tu.tu_file_id;
 
-            // Symbols
-            for sym in &tu.symbols {
-                let entry = symbols
-                    .entry(sym.id.clone())
-                    .or_insert_with(|| ReducedSymbolRecord {
-                        id: sym.id.clone(),
-                        name: sym.name.clone(),
-                        kind: sym.kind,
-                        defining_file: None,
-                        declarations: Vec::new(),
-                        definition: None,
-                    });
+            Self::merge_tu_symbols(
+                &mut symbols,
+                &mut tu_usage,
+                &mut file_symbols,
+                tu_file,
+                &tu.symbols,
+            );
 
-                for decl in &sym.declarations {
-                    if !entry.declarations.contains(decl) {
-                        entry.declarations.push(decl.clone());
-                    }
-                }
-                // Sort to maintain determinism
-                entry.declarations.sort();
-
-                if let Some(def) = &sym.definition {
-                    if entry.definition.is_none() {
-                        entry.definition = Some(def.clone());
-                        entry.defining_file = Some(sym.owning_file); // Owning file is the defining file usually
-                    } else if entry.kind != SymbolKind::Class
-                        && entry.kind != SymbolKind::Struct
-                        && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct)
-                    {
-                        // Class/Struct definitions take precedence over function definitions (like constructors)
-                        entry.definition = Some(def.clone());
-                        entry.defining_file = Some(sym.owning_file);
-                        entry.kind = sym.kind;
-                    }
-                }
-
-                tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
-                file_symbols
-                    .entry(sym.owning_file)
-                    .or_default()
-                    .insert(sym.id.clone());
-            }
-
-            // Edges
-            for edge in &tu.edges {
-                tu_usage
-                    .entry(edge.src_symbol.clone())
-                    .or_default()
-                    .insert(tu_file);
-                tu_usage
-                    .entry(edge.dst_symbol.clone())
-                    .or_default()
-                    .insert(tu_file);
-
-                let key = (edge.src_symbol.clone(), edge.dst_symbol.clone());
-                match raw_edges.get(&key) {
-                    Some(&DependencyKind::Complete) => {
-                        // Complete wins, do nothing
-                    }
-                    _ => {
-                        raw_edges.insert(key, edge.kind);
-                    }
-                }
-            }
+            Self::merge_tu_edges(&mut tu_usage, &mut raw_edges, tu_file, &tu.edges);
 
             // References
             for ref_item in &tu.references {
@@ -157,6 +104,86 @@ impl ReducedSemanticModel {
             edges,
             tu_usage: tu_usage_vec,
             file_symbols: file_symbols_vec,
+        }
+    }
+
+    /// Symbols
+    fn merge_tu_symbols(
+        symbols: &mut BTreeMap<SymbolId, ReducedSymbolRecord>,
+        tu_usage: &mut BTreeMap<SymbolId, BTreeSet<FileId>>,
+        file_symbols: &mut BTreeMap<FileId, BTreeSet<SymbolId>>,
+        tu_file: FileId,
+        records: &[SymbolRecord],
+    ) {
+        for sym in records {
+            let entry = symbols
+                .entry(sym.id.clone())
+                .or_insert_with(|| ReducedSymbolRecord {
+                    id: sym.id.clone(),
+                    name: sym.name.clone(),
+                    kind: sym.kind,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                });
+
+            for decl in &sym.declarations {
+                if !entry.declarations.contains(decl) {
+                    entry.declarations.push(decl.clone());
+                }
+            }
+            // Sort to maintain determinism
+            entry.declarations.sort();
+
+            if let Some(def) = &sym.definition {
+                if entry.definition.is_none() {
+                    entry.definition = Some(def.clone());
+                    entry.defining_file = Some(sym.owning_file); // Owning file is the defining file usually
+                } else if entry.kind != SymbolKind::Class
+                    && entry.kind != SymbolKind::Struct
+                    && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct)
+                {
+                    // Class/Struct definitions take precedence over function definitions (like constructors)
+                    entry.definition = Some(def.clone());
+                    entry.defining_file = Some(sym.owning_file);
+                    entry.kind = sym.kind;
+                }
+            }
+
+            tu_usage.entry(sym.id.clone()).or_default().insert(tu_file);
+            file_symbols
+                .entry(sym.owning_file)
+                .or_default()
+                .insert(sym.id.clone());
+        }
+    }
+
+    /// Edges
+    fn merge_tu_edges(
+        tu_usage: &mut BTreeMap<SymbolId, BTreeSet<FileId>>,
+        raw_edges: &mut BTreeMap<(SymbolId, SymbolId), DependencyKind>,
+        tu_file: FileId,
+        edges: &[SemanticEdge],
+    ) {
+        for edge in edges {
+            tu_usage
+                .entry(edge.src_symbol.clone())
+                .or_default()
+                .insert(tu_file);
+            tu_usage
+                .entry(edge.dst_symbol.clone())
+                .or_default()
+                .insert(tu_file);
+
+            let key = (edge.src_symbol.clone(), edge.dst_symbol.clone());
+            match raw_edges.get(&key) {
+                Some(&DependencyKind::Complete) => {
+                    // Complete wins, do nothing
+                }
+                _ => {
+                    raw_edges.insert(key, edge.kind);
+                }
+            }
         }
     }
 
