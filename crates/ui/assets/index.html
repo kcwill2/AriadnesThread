@@ -277,6 +277,14 @@
           <div class="link-list" id="inspCollateralList" style="max-height:160px;overflow-y:auto;"></div>
         </div>
 
+        <div id="inspJustificationSection" style="display:none;">
+          <div class="link-list-title">
+            <span style="color:var(--green);">Include Justification</span>
+            <span id="inspJustificationCount" style="font-family:monospace;">0 justified &middot; 0 collateral</span>
+          </div>
+          <div class="link-list" id="inspJustificationList" style="max-height:220px;overflow-y:auto;"></div>
+        </div>
+
         <div>
           <div class="link-list-title">
             <span id="inspUpstreamTitle">Incoming (Includers / Callers)</span>
@@ -389,7 +397,7 @@
           <p><strong>Edges:</strong> Complete dependencies are solid, incomplete (forward declarations) are dashed.</p>
           <p><strong>Closure:</strong> Number of transitive dependencies.</p>
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
-          <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden.</p>
+          <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Justified dependencies (needed for your symbols) render green-outlined; heat colors continue to mark collateral burden. The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along.</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
           <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live behind the open list.</p>
         </div>

@@ -119,6 +119,101 @@
       setTimeout(loop, 2000);
     }
 
+    // Inspector include-justification breakdown: live mode hydrates the unbounded
+    // /api/justification detail (cached per node so reselecting never refetches);
+    // standalone reports render from the capped export payload only (I5).
+    const justificationCache = {};
+
+    function isStandaloneReport() {
+      return Boolean(window.__ARIADNE_DATA__ && window.__ARIADNE_DATA__.include_graph);
+    }
+
+    function fetchJustificationDetail(nodeId) {
+      if (isStandaloneReport()) return Promise.resolve(null);
+      if (justificationCache[nodeId]) return Promise.resolve(justificationCache[nodeId]);
+      return fetch('/api/justification?file=' + encodeURIComponent(nodeId))
+        .then(res => (res && res.ok) ? res.json() : null)
+        .catch(() => null)
+        .then(detail => {
+          if (detail) justificationCache[nodeId] = detail;
+          return detail;
+        });
+    }
+
+    function justificationCombined(row) {
+      return (row.entry.justified_count || 0) + (row.entry.collateral_count || 0);
+    }
+
+    function justificationBasename(id) {
+      const node = tabAllNodes.find(n => n.id === id);
+      const path = String(node ? (node.path || node.label) : id).replace(/\\/g, '/');
+      return path.substring(path.lastIndexOf('/') + 1) || id;
+    }
+
+    // Payload path: capped export entries, re-sorted per I6 (combined desc, id asc).
+    function payloadJustificationRows(nodeId) {
+      const map = (graphData.file_justification || {})[nodeId] || {};
+      return Object.keys(map)
+        .map(id => ({ id, label: justificationBasename(id), entry: map[id] }))
+        .sort((a, b) => justificationCombined(b) - justificationCombined(a) || Number(a.id) - Number(b.id))
+        .slice(0, 16);
+    }
+
+    function justificationSidePart(tag, tagClass, names, truncated, count) {
+      if (!count && names.length === 0) return '';
+      const hidden = count - names.length;
+      const more = truncated && hidden > 0 ? `<span class="just-more">+${hidden} more</span>` : '';
+      const text = names.length ? escapeHtml(names.join(', ')) + more : '<em>none</em>';
+      return `<div class="just-part"><span class="just-tag ${tagClass}">${tag}</span><span>${text}</span></div>`;
+    }
+
+    function justificationNeedsPart(headers) {
+      if (!headers || headers.length === 0) return '';
+      return `<div class="just-part"><span class="just-tag just-needs">needs</span><span>${escapeHtml(headers.join(', '))}</span></div>`;
+    }
+
+    function justificationRowHtml(row, expanded) {
+      const e = row.entry;
+      const body = [
+        justificationSidePart('for', 'just-justified', e.justified_symbols || [], e.justified_truncated, e.justified_count || 0),
+        justificationNeedsPart(e.required_headers),
+        justificationSidePart('collateral', 'just-collateral', e.collateral_symbols || [], e.collateral_truncated, e.collateral_count || 0),
+      ].join('');
+      const summary = `<summary><span style="color:var(--cyan);">${escapeHtml(row.label || row.id)}</span>`
+        + `<span style="color:var(--text-sub);">${e.justified_count || 0} sym · ${e.collateral_count || 0} col</span></summary>`;
+      return `<details class="link-item just-row"${expanded ? ' open' : ''}>${summary}<div class="just-body">${body || '<div class="just-part">No symbol names recorded.</div>'}</div></details>`;
+    }
+
+    function justificationTotals(rows, detail) {
+      if (detail) return `${detail.total_justified || 0} justified · ${detail.total_collateral || 0} collateral`;
+      let justified = 0;
+      let collateral = 0;
+      rows.forEach(r => {
+        justified += r.entry.justified_count || 0;
+        collateral += r.entry.collateral_count || 0;
+      });
+      return `${justified} justified · ${collateral} collateral`;
+    }
+
+    function renderJustificationBreakdown(nodeId, detail) {
+      const section = document.getElementById('inspJustificationSection');
+      if (!section) return false;
+      const rows = (detail && Array.isArray(detail.entries))
+        ? detail.entries.slice(0, 16).map(e => ({ id: String(e.source_id), label: e.source_label, entry: e.entry }))
+        : payloadJustificationRows(nodeId);
+      if (rows.length === 0) {
+        section.style.display = 'none';
+        return false;
+      }
+      document.getElementById('inspJustificationList').innerHTML =
+        rows.map((row, i) => justificationRowHtml(row, i === 0)).join('');
+      document.getElementById('inspJustificationCount').textContent = justificationTotals(rows, detail);
+      section.style.display = 'block';
+      const collateralSection = document.getElementById('inspCollateralSection');
+      if (collateralSection) collateralSection.style.display = 'none';
+      return true;
+    }
+
 // Client-side traversal, shortest path and entrypoints modals.
     function clientTraverseNeighborhood(id) { setHops(1); }
     function clientShortestPath(from, to) {

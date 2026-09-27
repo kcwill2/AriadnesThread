@@ -638,6 +638,67 @@
       border-color: var(--border-light);
     }
 
+    details.just-row {
+      display: block;
+      padding: 0;
+    }
+
+    details.just-row > summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    details.just-row > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.just-row[open] > summary {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .just-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 6px 10px 8px;
+      line-height: 1.45;
+    }
+
+    .just-part {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+    }
+
+    .just-tag {
+      flex: 0 0 auto;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .just-justified {
+      color: var(--green);
+    }
+
+    .just-needs {
+      color: var(--cyan);
+    }
+
+    .just-collateral {
+      color: var(--amber);
+    }
+
+    .just-more {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
     .btn-row {
       display: flex;
       gap: 8px;

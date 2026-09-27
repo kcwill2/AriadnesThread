@@ -435,17 +435,39 @@
 
       document.getElementById('inspDegree').textContent = String(upstream.length + downstream.length);
 
-      // Recommendations
+      // Include justification breakdown replaces the generic advice when the
+      // payload has data for this node; live mode hydrates the unbounded detail.
+      let justificationShown = false;
+      if (currentTab === 'include') {
+        justificationShown = renderJustificationBreakdown(id, null);
+        if (!isStandaloneReport()) {
+          fetchJustificationDetail(id).then(detail => {
+            if (detail && selectedNodeId === id && currentTab === 'include') {
+              renderJustificationBreakdown(id, detail);
+            }
+          });
+        }
+      } else {
+        const justSection = document.getElementById('inspJustificationSection');
+        if (justSection) justSection.style.display = 'none';
+      }
+
+      // Recommendations — with justification data the breakdown below supersedes
+      // the high-fan-out platitude; cycle/stable messages stay unchanged.
       const insight = document.getElementById('inspInsight');
       const insightText = document.getElementById('inspInsightText');
       if (node.is_cycle) {
         insight.style.borderColor = 'rgba(239, 68, 68, 0.4)';
         insight.style.background = 'rgba(239, 68, 68, 0.1)';
         insightText.textContent = `Circular dependency detected involving ${node.label}. Breaking this cycle eliminates compile-time ordering hazards.`;
-      } else if (downstream.length > 4) {
+      } else if (downstream.length > 4 && !justificationShown) {
         insight.style.borderColor = 'rgba(251, 146, 60, 0.3)';
         insight.style.background = 'rgba(251, 146, 60, 0.1)';
         insightText.textContent = `High fan-out (${downstream.length} dependencies). Consider header extraction or forward declaration to reduce collateral load.`;
+      } else if (downstream.length > 4) {
+        insight.style.borderColor = 'rgba(251, 146, 60, 0.3)';
+        insight.style.background = 'rgba(251, 146, 60, 0.1)';
+        insightText.textContent = `High fan-out (${downstream.length} dependencies). See the Include Justification breakdown below for what each dependency is needed for.`;
       } else {
         insight.style.borderColor = 'rgba(56, 189, 248, 0.3)';
         insight.style.background = 'rgba(56, 189, 248, 0.08)';
@@ -483,7 +505,7 @@
       // Populate Collateral Breakdown
       const collateralSection = document.getElementById('inspCollateralSection');
       const collateralList = document.getElementById('inspCollateralList');
-      if (currentTab === 'include') {
+      if (currentTab === 'include' && !justificationShown) {
         const reachableDeps = computeFullDependencies(id);
         const collateralMap = (graphData.file_collateral || {})[id] || {};
         const entries = [...reachableDeps].map(depId => {
@@ -626,6 +648,8 @@
       document.getElementById('inspDownstreamList').innerHTML = '';
       const collateralSection = document.getElementById('inspCollateralSection');
       if (collateralSection) collateralSection.style.display = 'none';
+      const justSection = document.getElementById('inspJustificationSection');
+      if (justSection) justSection.style.display = 'none';
     }
 
     // Canvas panning and zooming
