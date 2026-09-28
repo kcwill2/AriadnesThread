@@ -224,8 +224,33 @@
       return `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`;
     }
 
+    // Layered and grid gutters (~70px) can never fit a 170x42 card between
+    // two cards, so the proposal parks below the source column: one row pitch
+    // down per step until its AABB clears every RENDERED card (activeNodes —
+    // tabAllNodes keeps stale coordinates for filtered-out nodes), then, if
+    // the step budget runs out, below the whole layout.
+    function previewProposedRectCollides(candidateX, candidateY, renderedNodes) {
+      return renderedNodes.some(node =>
+        candidateX < node.x + 170 && candidateX + 170 > node.x &&
+        candidateY < node.y + 42 && candidateY + 42 > node.y);
+    }
+
+    function previewResolveProposedPosition(source, renderedNodes) {
+      const x = source.x;
+      let y = source.y + 72;
+      let steps = 0;
+      while (steps < 8 && previewProposedRectCollides(x, y, renderedNodes)) {
+        y += 72;
+        steps += 1;
+      }
+      if (previewProposedRectCollides(x, y, renderedNodes)) {
+        return { x: x, y: Math.max(...renderedNodes.map(node => node.y)) + 72 };
+      }
+      return { x: x, y: y };
+    }
+
     // The extraction result gets a node: a violet dashed card mirroring the
-    // real card geometry, parked on the root->source lane. I3: it is synthetic
+    // real card geometry, parked below the source column. I3: it is synthetic
     // chrome (no data-node-id, pointer-events: none via CSS), never selectable.
     // Returns the card origin plus endpoint nodes for edge anchoring, or null.
     function previewInjectProposedNode(rootId, sourceId) {
@@ -233,16 +258,11 @@
       const root = tabAllNodes.find(node => String(node.id) === String(rootId));
       const source = tabAllNodes.find(node => String(node.id) === String(sourceId));
       if (!layer || !source) return null;
-      const rootRight = root ? { x: root.x + 160, y: root.y + 21 } : null;
-      const sourceLeft = { x: source.x, y: source.y + 21 };
-      const anchorsClose = !rootRight ||
-        Math.hypot(sourceLeft.x - rootRight.x, sourceLeft.y - rootRight.y) < 60;
-      const nodeX = anchorsClose ? source.x - 95 : (rootRight.x + sourceLeft.x) / 2 - 85;
-      const nodeY = anchorsClose ? source.y - 55 : (rootRight.y + sourceLeft.y) / 2 - 21;
+      const origin = previewResolveProposedPosition(source, activeNodes);
 
       const card = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       card.setAttribute('class', 'node-group preview-proposed-node');
-      card.setAttribute('transform', `translate(${nodeX}, ${nodeY})`);
+      card.setAttribute('transform', `translate(${origin.x}, ${origin.y})`);
       card.setAttribute('data-preview-synthetic', '1');
       const hint = document.createElementNS('http://www.w3.org/2000/svg', 'title');
       hint.textContent = 'Proposed header (hypothetical placeholder name)';
@@ -280,7 +300,7 @@
       badge.textContent = 'PROPOSED';
       card.appendChild(badge);
       layer.appendChild(card);
-      return { x: nodeX, y: nodeY, root: root, source: source };
+      return { x: origin.x, y: origin.y, root: root, source: source };
     }
 
     // Proposed edges: root -> proposed header always; full payloads also fan

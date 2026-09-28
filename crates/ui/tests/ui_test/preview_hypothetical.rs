@@ -388,3 +388,53 @@ fn test_help_text_describes_the_proposed_preview_affordances() {
         );
     }
 }
+
+#[test]
+fn test_proposed_card_placements_below_source_column() {
+    let preview = ariadne_ui::PREVIEW_JS;
+
+    // Midpoint placement is structurally impossible in the layered layout
+    // (170px cards, ~70px gutters) - the collision-descending below-column
+    // placement replaces it entirely.
+    assert!(
+        !preview.contains("anchorsClose") && !preview.contains("/ 2 - 85")
+            && !preview.contains("Math.hypot"),
+        "preview.js must not keep any midpoint/fallback-midpoint placement path"
+    );
+
+    let collides = preview_fn_source(preview, "function previewProposedRectCollides");
+    assert!(
+        collides.contains("170") && collides.contains("42"),
+        "the collision test must be a plain AABB over the rendered 170x42 card rects"
+    );
+
+    let place = preview_fn_source(preview, "function previewResolveProposedPosition");
+    assert!(
+        place.contains("source.x"),
+        "the proposed card must start in the source's own column (same x)"
+    );
+    assert!(
+        place.contains("source.y + 72") || place.contains("+ 72;"),
+        "the proposed card must start one 72px row pitch below the source"
+    );
+    assert!(
+        place.contains("previewProposedRectCollides(") && place.contains("< 8"),
+        "placement must descend 72px steps while colliding, capped at 8 steps"
+    );
+    assert!(
+        place.contains("Math.max") && place.contains("+ 72"),
+        "after the descent budget placement must fall back to max(rendered y) + 72 \
+         at the source column - a band below the whole layout"
+    );
+
+    let inject = preview_fn_source(preview, "function previewInjectProposedNode");
+    assert!(
+        inject.contains("previewResolveProposedPosition(source, activeNodes)"),
+        "collision tests must run against the RENDERED cards (activeNodes), not \
+         tabAllNodes with stale coordinates"
+    );
+    assert!(
+        inject.contains("return null") && inject.contains("!source"),
+        "previewInjectProposedNode must skip injection when the source is unresolvable"
+    );
+}
