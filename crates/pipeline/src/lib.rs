@@ -9,17 +9,20 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult};
 use ariadne_graph::{
-    build_include_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer,
+    build_include_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric,
     ReducedSemanticModel,
 };
 use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
-use ariadne_repo::{Repository, RepositoryDiscoveryResult};
+use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
     analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir,
@@ -134,7 +137,7 @@ pub struct Pipeline {
     index_cache: Option<IndexResult>,
     reduced_cache: Option<ReducedSemanticModel>,
     callgraph_cache: Option<CallGraph>,
-    load_cache: Option<LoadReport>,
+    load_cache: Option<Arc<LoadReport>>,
 }
 
 impl Pipeline {
@@ -461,7 +464,7 @@ impl Pipeline {
 
         if self.manager.stage_is_fresh("load", &self.fps.load) {
             if let Ok(loaded) = self.manager.load_load_checked(&self.fps.load) {
-                self.load_cache = Some(loaded);
+                self.load_cache = Some(Arc::new(loaded));
                 self.stats.record(STAGE_LOAD, StageReuse::Loaded);
                 return Ok(());
             }
@@ -472,39 +475,52 @@ impl Pipeline {
         let (graph, closures) = self.cached_include_graph()?;
         let reduced = self.cached_reduced()?;
 
+        // Phase 4 (plans/LoadPerfImprovements): both analysis loops are
+        // CPU-bound and independent per item, so they run under rayon with
+        // `par_iter().filter_map().collect()`, which preserves the
+        // sequential item order element-for-element. ONE memoized
+        // `LoadAnalyzer` is shared via `&` across all workers (it is
+        // `Send + Sync` — compile-asserted in the graph crate) so the
+        // append-only semantic-closure memo keeps warming across seeds;
+        // building an analyzer per item would lose that cross-seed reuse.
+        //
+        // Deliberate deviation from the plan: there is NO cargo feature
+        // flag for parallel vs sequential. A flag would ship a default
+        // path that no CI run ever exercises; instead the `workers` knob
+        // (already the parallelism control for the index stage) selects
+        // the pool size, and the test
+        // `test_load_report_matches_sequential_reference` locks the
+        // parallel output against an in-test sequential reference.
         let analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
-        let mut symbol_metrics = Vec::new();
-        for sym_record in reduced.symbols.values() {
-            if let Ok(metric) = analyzer.analyze_symbol_load(&sym_record.name) {
-                symbol_metrics.push(metric);
-            }
-        }
-
-        let mut file_metrics = Vec::new();
         let total_files = reduced.file_symbols.len();
-        for (i, file_id) in reduced.file_symbols.keys().enumerate() {
-            self.notify(&ProgressEvent::CollateralFile {
-                done: i,
-                total: total_files,
-            });
-            if let Some(path) = graph.file_paths.get(file_id) {
-                if let Ok(metric) = analyzer.analyze_file_load(path) {
-                    file_metrics.push(metric);
-                }
-            }
-        }
+        let repository_root = self.repo.root.clone();
+        // take/restore the callback around the parallel section, mirroring
+        // `rebuild_index_single_threaded`; the Mutex lets every worker share
+        // one `FnMut` sink and guards are only held for a single event.
+        let progress = Mutex::new(self.progress.take());
+        let completed_files = AtomicUsize::new(0);
+
+        let report = self.run_on_configured_pool(|| LoadReport {
+            repository_root,
+            symbol_metrics: collect_symbol_metrics(&analyzer, &reduced),
+            file_metrics: collect_file_metrics(
+                &analyzer,
+                &graph,
+                &reduced,
+                total_files,
+                &progress,
+                &completed_files,
+            ),
+        })?;
+
+        self.progress = progress.into_inner().unwrap_or_else(|err| err.into_inner());
         self.notify(&ProgressEvent::CollateralFile {
             done: total_files,
             total: total_files,
         });
 
-        let report = LoadReport {
-            repository_root: self.repo.root.clone(),
-            symbol_metrics,
-            file_metrics,
-        };
         self.manager.save_load_artifacts(&report, &self.fps.load)?;
-        self.load_cache = Some(report.clone());
+        self.load_cache = Some(Arc::new(report));
         self.stats.record(STAGE_LOAD, StageReuse::Rebuilt);
         Ok(())
     }
@@ -512,6 +528,29 @@ impl Pipeline {
     pub fn get_or_build_load(&mut self) -> Result<LoadReport> {
         self.ensure_load()?;
         self.cached_load()
+    }
+
+    /// Runs `work` on a rayon-managed thread set honoring the `workers`
+    /// knob: `Some(n)` builds a scoped pool of exactly `n` threads and
+    /// `install`s the work into it; `None` runs it inline, letting the
+    /// `par_iter` calls inside use the global pool. Same knob the index
+    /// stage already uses — the deliberate no-feature-flag design is
+    /// documented at the call site in `ensure_load`.
+    fn run_on_configured_pool<T, F>(&self, work: F) -> Result<T>
+    where
+        T: Send,
+        F: FnOnce() -> T + Send,
+    {
+        match self.workers {
+            Some(num_threads) => {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(num_threads.max(1))
+                    .build()
+                    .map_err(|err| anyhow!("failed to build rayon thread pool: {err}"))?;
+                Ok(pool.install(work))
+            }
+            None => Ok(work()),
+        }
     }
 
     fn cached_include_graph(
@@ -541,275 +580,70 @@ impl Pipeline {
     }
 
     fn cached_load(&self) -> Result<LoadReport> {
-        self.load_cache
-            .clone()
-            .context("load stage cache must exist after ensure_load")
+        let report = self
+            .load_cache
+            .as_ref()
+            .context("load stage cache must exist after ensure_load")?;
+        Ok(Arc::unwrap_or_clone(Arc::clone(report)))
     }
+}
+
+/// Parallel, order-preserving symbol metric pass for `ensure_load`. The
+/// BTreeMap `.values()` view is materialized into a `Vec` first (b-tree
+/// value iterators are not rayon parallel iterators); rayon's
+/// `par_iter().filter_map().collect()` then yields the same vector — and
+/// the same order — as the old sequential loop.
+fn collect_symbol_metrics(
+    analyzer: &LoadAnalyzer<'_>,
+    reduced: &ReducedSemanticModel,
+) -> Vec<LoadMetric> {
+    let symbol_names: Vec<String> = reduced
+        .symbols
+        .values()
+        .map(|record| record.name.clone())
+        .collect();
+    symbol_names
+        .par_iter()
+        .filter_map(|name| analyzer.analyze_symbol_load(name).ok())
+        .collect()
+}
+
+/// Parallel, order-preserving file metric pass for `ensure_load`. Each
+/// worker emits one `CollateralFile` progress event after its file
+/// completes; `done` comes from `AtomicUsize::fetch_add`, so the values
+/// stay unique (0..total-1) while event arrival may interleave — the UI
+/// only reads done/total. The `done == total` completion event is the
+/// caller's. `completed` is incremented once per file id (matching the
+/// sequential `enumerate`), even when the id has no registered path.
+fn collect_file_metrics(
+    analyzer: &LoadAnalyzer<'_>,
+    graph: &IncludeGraph,
+    reduced: &ReducedSemanticModel,
+    total_files: usize,
+    progress: &Mutex<Option<ProgressCb>>,
+    completed: &AtomicUsize,
+) -> Vec<LoadMetric> {
+    let file_ids: Vec<FileId> = reduced.file_symbols.keys().copied().collect();
+    file_ids
+        .par_iter()
+        .map(|&file_id| {
+            let metric = graph
+                .file_paths
+                .get(&file_id)
+                .and_then(|path| analyzer.analyze_file_load(path).ok());
+            let done = completed.fetch_add(1, Ordering::SeqCst);
+            if let Some(cb) = progress.lock().unwrap().as_mut() {
+                cb(&ProgressEvent::CollateralFile {
+                    done,
+                    total: total_files,
+                });
+            }
+            metric
+        })
+        .flatten()
+        .collect()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn setup_repo() -> TempDir {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join("include")).unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("include/common.h"), "struct Common { int id; };").unwrap();
-        fs::write(
-            root.join("include/header_a.h"),
-            "#include \"common.h\"\nstruct ThingA { Common c; };",
-        )
-        .unwrap();
-        fs::write(
-            root.join("include/header_b.h"),
-            "struct ThingB { double x; };",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src/tu1.cpp"),
-            "#include \"header_a.h\"\nvoid use_a(ThingA a) {}",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src/tu2.cpp"),
-            "#include \"header_b.h\"\nvoid use_b(ThingB b) {}",
-        )
-        .unwrap();
-
-        let root_str = root.to_string_lossy().replace('\\', "/");
-        let compile_commands = format!(
-            r#"[
-    {{ "directory": "{root_str}", "command": "clang++ -Iinclude -c src/tu1.cpp", "file": "src/tu1.cpp" }},
-    {{ "directory": "{root_str}", "command": "clang++ -Iinclude -c src/tu2.cpp", "file": "src/tu2.cpp" }}
-]"#,
-            root_str = root_str
-        );
-        fs::write(root.join("compile_commands.json"), compile_commands).unwrap();
-        dir
-    }
-
-    #[test]
-    fn test_cold_then_warm_all_stages() {
-        let dir = setup_repo();
-        let root = dir.path().to_path_buf();
-
-        // Cold run: everything rebuilds and persists.
-        let mut cold = Pipeline::new(&root, None).unwrap();
-        cold.ensure_index().unwrap();
-        cold.ensure_include_graph().unwrap();
-        cold.ensure_reduced().unwrap();
-        cold.ensure_callgraph().unwrap();
-        cold.ensure_load().unwrap();
-        assert_eq!(cold.stats.reanalyzed_tus, 2);
-        assert_eq!(cold.stats.reused_tus, 0);
-        for stage in [
-            STAGE_INCLUDE_GRAPH,
-            STAGE_INDEX,
-            STAGE_REDUCED,
-            STAGE_CALLGRAPH,
-            STAGE_LOAD,
-        ] {
-            assert_eq!(cold.stats.stage_reuse(stage), Some(StageReuse::Rebuilt));
-        }
-
-        // Warm run: every stage loads, zero re-parses.
-        let mut warm = Pipeline::new(&root, None).unwrap();
-        warm.ensure_index().unwrap();
-        warm.ensure_include_graph().unwrap();
-        warm.ensure_reduced().unwrap();
-        warm.ensure_callgraph().unwrap();
-        warm.ensure_load().unwrap();
-        assert_eq!(
-            warm.stats.reused_tus, 0,
-            "loaded index means zero parse work"
-        );
-        assert_eq!(warm.stats.reanalyzed_tus, 0);
-        for stage in [
-            STAGE_INCLUDE_GRAPH,
-            STAGE_INDEX,
-            STAGE_REDUCED,
-            STAGE_CALLGRAPH,
-            STAGE_LOAD,
-        ] {
-            assert_eq!(
-                warm.stats.stage_reuse(stage),
-                Some(StageReuse::Loaded),
-                "stage {} should load warm",
-                stage
-            );
-        }
-    }
-
-    #[test]
-    fn test_header_edit_invalidates_dependents_only() {
-        let dir = setup_repo();
-        let root = dir.path().to_path_buf();
-
-        let mut cold = Pipeline::new(&root, None).unwrap();
-        cold.ensure_index().unwrap();
-        cold.ensure_include_graph().unwrap();
-        cold.ensure_reduced().unwrap();
-
-        // Edit common.h: tu1 depends on it via header_a.h, tu2 does not.
-        fs::write(
-            root.join("include/common.h"),
-            "struct Common { int id; int extra; };",
-        )
-        .unwrap();
-
-        let mut next = Pipeline::new(&root, None).unwrap();
-        next.ensure_index().unwrap();
-        next.ensure_include_graph().unwrap();
-        assert_eq!(next.stats.reanalyzed_tus, 1, "only tu1 should re-parse");
-        assert_eq!(next.stats.reused_tus, 1, "tu2 shard stays valid");
-        assert_eq!(
-            next.stats.stage_reuse(STAGE_INDEX),
-            Some(StageReuse::Rebuilt)
-        );
-        assert_eq!(
-            next.stats.stage_reuse(STAGE_INCLUDE_GRAPH),
-            Some(StageReuse::Rebuilt)
-        );
-    }
-
-    #[test]
-    fn test_corrupt_artifact_is_not_trusted() {
-        let dir = setup_repo();
-        let root = dir.path().to_path_buf();
-
-        let mut cold = Pipeline::new(&root, None).unwrap();
-        cold.ensure_index().unwrap();
-
-        // Corrupt the fingerprint in the index manifest.
-        let manifest_path = root.join("artifacts").join("index").join("manifest.json");
-        let manifest: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
-        let mut corrupt = manifest.as_object().unwrap().clone();
-        corrupt.insert(
-            "input_fingerprint".into(),
-            serde_json::Value::String("0".repeat(64)),
-        );
-        fs::write(
-            &manifest_path,
-            serde_json::to_string_pretty(&corrupt).unwrap(),
-        )
-        .unwrap();
-
-        let mut next = Pipeline::new(&root, None).unwrap();
-        next.ensure_index().unwrap();
-        assert_eq!(
-            next.stats.stage_reuse(STAGE_INDEX),
-            Some(StageReuse::Rebuilt)
-        );
-        // The rebuilt index artifact is valid again for subsequent runs.
-        let mut after = Pipeline::new(&root, None).unwrap();
-        after.ensure_index().unwrap();
-        assert_eq!(
-            after.stats.stage_reuse(STAGE_INDEX),
-            Some(StageReuse::Loaded)
-        );
-    }
-
-    #[test]
-    fn test_production_stats_captured_only_on_workers_rebuild() {
-        let dir = setup_repo();
-        let root = dir.path().to_path_buf();
-
-        let mut cold = Pipeline::new(&root, Some(2)).unwrap();
-        cold.ensure_index().unwrap();
-        let captured = cold
-            .production_stats
-            .clone()
-            .expect("workers run captures real stats");
-        assert_eq!(captured.total_tus, 2);
-        assert_eq!(captured.progress_completed, 2);
-        assert_eq!(captured.progress_total, 2);
-        assert!(captured.peak_memory_bytes > 0);
-
-        // Warm run: the index stage loads, no worker run measured anything.
-        let mut warm = Pipeline::new(&root, Some(2)).unwrap();
-        warm.ensure_index().unwrap();
-        assert_eq!(
-            warm.stats.stage_reuse(STAGE_INDEX),
-            Some(StageReuse::Loaded)
-        );
-        assert!(
-            warm.production_stats.is_none(),
-            "loaded stage must not invent measurements"
-        );
-    }
-
-    #[test]
-    fn test_rehash_inputs_matches_pipeline_fps_without_side_effects() {
-        let dir = setup_repo();
-        let root = dir.path().to_path_buf();
-
-        let expected = Pipeline::new(&root, None).unwrap().fps.clone();
-        assert_eq!(Pipeline::rehash_inputs(&root).unwrap(), expected);
-
-        // Pure check: no artifact open/save side effects.
-        fs::remove_dir_all(root.join("artifacts")).unwrap();
-        let rehashed = Pipeline::rehash_inputs(&root).unwrap();
-        assert_eq!(rehashed, expected);
-        assert!(!root.join("artifacts").exists());
-
-        fs::write(root.join("include/header_b.h"), "struct ThingB { int x; };").unwrap();
-        assert_ne!(Pipeline::rehash_inputs(&root).unwrap(), expected);
-    }
-
-    #[test]
-    fn test_run_stats_format_summary() {
-        let mut stats = RunStats::default();
-        stats.record(STAGE_INDEX, StageReuse::Rebuilt);
-        stats.record(STAGE_REDUCED, StageReuse::Loaded);
-        stats.record(STAGE_INCLUDE_GRAPH, StageReuse::Loaded);
-        stats.reused_tus = 4;
-        stats.reanalyzed_tus = 1;
-        let summary = stats.format_summary();
-        assert_eq!(
-            summary,
-            "4 TUs reused, 1 reanalyzed; stages loaded: reduced, include-graph; rebuilt: index"
-        );
-    }
-
-    fn assert_missing_cache_error<T>(result: Result<T>, expected: &str) {
-        match result {
-            Ok(_) => panic!("expected missing-cache error, got Ok"),
-            Err(err) => assert!(
-                err.to_string().contains(expected),
-                "error message {err} missing {expected:?}"
-            ),
-        }
-    }
-
-    #[test]
-    fn test_missing_stage_cache_returns_error_not_panic() {
-        let dir = setup_repo();
-        let pipeline = Pipeline::new(dir.path(), None).unwrap();
-
-        assert_missing_cache_error(
-            pipeline.cached_include_graph(),
-            "include stage cache must exist",
-        );
-        assert_missing_cache_error(pipeline.cached_index(), "index stage cache must exist");
-        assert_missing_cache_error(pipeline.cached_reduced(), "reduced stage cache must exist");
-        assert_missing_cache_error(
-            pipeline.cached_callgraph(),
-            "callgraph stage cache must exist",
-        );
-        assert_missing_cache_error(pipeline.cached_load(), "load stage cache must exist");
-    }
-
-    #[test]
-    fn test_hash_helper_consistency() {
-        // The contexts fingerprint material must be order-stable.
-        assert_eq!(
-            ariadne_index::hash_parts(&["a", "b"]),
-            ariadne_index::hash_parts(&["a", "b"])
-        );
-    }
-}
+#[path = "pipeline_tests.rs"]
+mod pipeline_tests;
