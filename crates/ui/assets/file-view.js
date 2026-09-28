@@ -39,6 +39,8 @@
 
       drawer.style.setProperty('--source-panel-w', sourcePanelWidth + 'px');
       drawer.classList.add('open');
+      const restoreTab = document.getElementById('sourceRestoreTab');
+      if (restoreTab) restoreTab.hidden = true;
       document.getElementById('drawerTitle').textContent = node.path || node.label;
       document.getElementById('drawerLine').textContent = 'Loading...';
 
@@ -66,6 +68,15 @@
 
     function closeSourceDrawer() {
       document.getElementById('sourceDrawer').classList.remove('open');
+      const restoreTab = document.getElementById('sourceRestoreTab');
+      if (restoreTab) restoreTab.hidden = false;
+    }
+
+    function restoreSourceDrawer() {
+      const drawer = document.getElementById('sourceDrawer');
+      if (drawer) drawer.classList.add('open');
+      const restoreTab = document.getElementById('sourceRestoreTab');
+      if (restoreTab) restoreTab.hidden = true;
     }
 
     function renderSourceCode(code) {

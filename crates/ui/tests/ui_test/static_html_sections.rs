@@ -204,14 +204,16 @@ fn test_extraction_impact_preview_overlay() {
         "proposal cards need the selection-aware preview control"
     );
 
-    // graph.js gains only the clear-on-rerender hook (E-I6).
+    // graph.js gained the clear-on-rerender hook (E-I6) plus the verdict-spine
+    // machinery (plan 1790573049166); the cap keeps real headroom under the
+    // 1000-line hygiene ceiling so future features still fit.
     assert!(
         ariadne_ui::GRAPH_JS.contains("ariadnePreview.clearPreview()"),
         "graph.js must clear the preview when the selection re-renders"
     );
     assert!(
-        ariadne_ui::GRAPH_JS.lines().count() <= 960,
-        "graph.js must stay within the E-I6 line budget (cap 960)"
+        ariadne_ui::GRAPH_JS.lines().count() <= 990,
+        "graph.js must stay within the spine-plan line budget (cap 990)"
     );
 
     // Help text describes the overlay in the heat map legend region.
@@ -269,69 +271,57 @@ fn test_preview_marks_are_solid_color_coded() {
 }
 
 #[test]
-fn test_ui_heat_tier_outlines_glow() {
-    // Every collateral tier (0..=4), not just tier 4, must paint a visible colored glow.
-    let tiers = [
-        (0, "rgba(56, 189, 248"),
-        (1, "rgba(34, 197, 94"),
-        (2, "rgba(234, 179, 8"),
-        (3, "rgba(249, 115, 22"),
-        (4, "rgba(239, 68, 68"),
-    ];
-    for (tier, rgb) in tiers {
-        let body = css_rule_body(ariadne_ui::STYLES_CSS, &format!(".node-group.heat-glow-{tier} rect"));
+fn test_ui_heat_tier_outlines_are_flat() {
+    // Plan 1790573049166: every collateral tier (0..=4) thickens its tier stroke
+    // but stays FLAT — colored glows were deleted and glow is reserved for
+    // selection/root (cyan). The verdict channel is the spine, not the outline.
+    for tier in 0..=4 {
+        let body = css_rule_body(ariadne_ui::STYLES_CSS, &format!(".node-group.heat-tier-{tier} rect"));
         assert!(
-            body.contains("drop-shadow") && body.contains("stroke-width"),
-            ".node-group.heat-glow-{tier} rect must glow with a thickened outline"
+            body.contains("stroke-width"),
+            ".node-group.heat-tier-{tier} rect must thicken the tier stroke"
         );
         assert!(
-            body.contains(rgb),
-            ".node-group.heat-glow-{tier} rect must glow in the tier color {rgb}"
+            !body.contains("filter"),
+            ".node-group.heat-tier-{tier} rect must carry no glow filter"
         );
     }
 
     // The class must be applied at render time, and I5: heat-critical stays.
     assert!(
-        ariadne_ui::GRAPH_JS.contains("heat-glow-"),
-        "graph.js must apply the heat-glow-<tier> class on collateral nodes"
+        ariadne_ui::GRAPH_JS.contains("heat-tier-"),
+        "graph.js must apply the heat-tier-<tier> class on collateral nodes"
     );
     assert!(
         ariadne_ui::GRAPH_JS.contains("heat-critical"),
         "heat-critical must keep being applied (I5)"
     );
 
-    // The justified ring gets a stronger, locked glow.
-    let justified = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.dep-justified rect");
-    assert!(
-        justified.contains("drop-shadow(0 0 10px rgba(74, 222, 128, 0.75)"),
-        ".node-group.dep-justified rect must use the strengthened 10px green glow"
-    );
-
-    // Cascade ownership: .heat-glow-4 is the effective tier-4 renderer. The legacy
+    // Cascade ownership: .heat-tier-4 is the effective tier-4 renderer. The legacy
     // .heat-critical rect rule keeps the selector (structural lock + graph.js class)
-    // but must not declare a competing filter, and must sit BEFORE the glow-4 rule.
+    // but must not declare a competing filter, and must sit BEFORE the tier-4 rule.
     let critical_at = ariadne_ui::STYLES_CSS
         .find(".node-group.heat-critical rect")
         .expect("heat-critical rule must remain in styles.css");
-    let glow4_at = ariadne_ui::STYLES_CSS
-        .find(".node-group.heat-glow-4 rect")
-        .expect("heat-glow-4 rule must exist");
+    let tier4_at = ariadne_ui::STYLES_CSS
+        .find(".node-group.heat-tier-4 rect")
+        .expect("heat-tier-4 rule must exist");
     assert!(
-        critical_at < glow4_at,
-        ".node-group.heat-glow-4 rect must come after .node-group.heat-critical rect so it wins the equal-specificity cascade"
+        critical_at < tier4_at,
+        ".node-group.heat-tier-4 rect must come after .node-group.heat-critical rect so it wins the equal-specificity cascade"
     );
     let critical = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.heat-critical rect");
     assert!(
         !critical.contains("filter"),
-        ".node-group.heat-critical rect must carry no filter declaration; .heat-glow-4 owns tier-4 rendering"
+        ".node-group.heat-critical rect must carry no filter declaration; .heat-tier-4 owns tier-4 rendering"
     );
 
-    // The selected ring must win over any co-applied heat glow by specificity of
+    // The selected ring must win over any co-applied heat tier by specificity of
     // declaration, not by source order luck.
     let selected = css_rule_body(ariadne_ui::STYLES_CSS, ".node-group.selected rect");
     assert!(
         selected.contains("filter: drop-shadow(0 0 14px var(--cyan-glow)) !important"),
-        ".node-group.selected rect must guarantee the cyan ring with !important regardless of co-applied heat glows"
+        ".node-group.selected rect must guarantee the cyan ring with !important regardless of co-applied heat tiers"
     );
 }
 
@@ -355,8 +345,8 @@ fn test_hotspots_panel_is_collapsible_layout_column() {
         ".hotspot-panel must be a static flex column, not an absolute overlay"
     );
     assert!(
-        body.contains("width: 300px") && body.contains("flex-shrink: 0"),
-        ".hotspot-panel must reserve a fixed 300px workspace column"
+        body.contains("width: 400px") && body.contains("flex-shrink: 0"),
+        ".hotspot-panel must reserve a fixed 400px workspace column"
     );
     assert!(
         body.contains("background: var(--bg-surface)"),
@@ -377,5 +367,379 @@ fn test_hotspots_panel_is_collapsible_layout_column() {
     assert!(
         page.contains("beside the open list"),
         "help text must say the heat map renders beside the open list, not behind it"
+    );
+}
+
+#[test]
+fn test_inspector_panel_is_wider_and_collapsible() {
+    let css = ariadne_ui::STYLES_CSS;
+    let html = ariadne_ui::INDEX_HTML;
+    let main = ariadne_ui::MAIN_JS;
+
+    let inspector = css_rule_body(css, ".inspector");
+    assert!(
+        inspector.contains("width: 440px") && inspector.contains("flex-shrink: 0"),
+        ".inspector must reserve a fixed 440px workspace column"
+    );
+
+    assert!(
+        html.contains("id=\"inspectorPanel\""),
+        "the inspector aside must carry id=\"inspectorPanel\" so it can be shown and hidden"
+    );
+    assert!(
+        html.contains("id=\"btnInspector\""),
+        "the toolbar must carry a persistent btnInspector toggle"
+    );
+    assert!(
+        html.contains("onclick=\"toggleInspector()\""),
+        "the inspector collapse/toggle controls must call toggleInspector()"
+    );
+
+    // The ✕ collapse control must live in the inspector head itself, wired to
+    // toggleInspector() — not be satisfiable by the toolbar button alone.
+    let head_at = html
+        .find("class=\"inspector-head\"")
+        .expect("inspector-head region must exist in index.html");
+    let head_end = head_at
+        + html[head_at..]
+            .find("</div>")
+            .expect("inspector-head must close before the inspector body");
+    let head_region = &html[head_at..head_end];
+    let collapse_at = head_region
+        .find("class=\"inspector-collapse\"")
+        .expect("inspector-head must contain a .inspector-collapse control");
+    let collapse_btn_at = head_region[..collapse_at]
+        .rfind("<button")
+        .expect("the .inspector-collapse class must be declared on a <button> element");
+    let collapse_tag_end = head_region[collapse_btn_at..]
+        .find('>')
+        .expect("the collapse button tag must close");
+    let collapse_btn_tag = &head_region[collapse_btn_at..collapse_btn_at + collapse_tag_end];
+    assert!(
+        collapse_btn_tag.contains("onclick=\"toggleInspector()\""),
+        "the .inspector-collapse button in inspector-head must be wired to toggleInspector()"
+    );
+
+    // The inspector starts expanded, so the toolbar toggle must start active.
+    let btn_at = html
+        .find("id=\"btnInspector\"")
+        .expect("btnInspector toolbar toggle must exist");
+    let btn_tag_start = html[..btn_at]
+        .rfind("<button")
+        .expect("the btnInspector id must sit on a <button> element");
+    let btn_tag_end = btn_at
+        + html[btn_at..]
+            .find('>')
+            .expect("the btnInspector tag must close");
+    let btn_tag = &html[btn_tag_start..btn_tag_end];
+    assert!(
+        btn_tag.contains("class=\"btn-secondary active\""),
+        "#btnInspector must carry the active class initially because the inspector starts expanded"
+    );
+
+    for marker in [
+        "function toggleInspector(",
+        "function collapseInspector(",
+        "function expandInspector(",
+    ] {
+        assert!(
+            main.contains(marker),
+            "main.js must declare the inspector toggle helper {marker}"
+        );
+    }
+
+    // The tour spotlights '.inspector' by measuring it, so the highlight path
+    // must expand a collapsed inspector before resolving the target element.
+    let guard_at = main
+        .find("step.id === '.inspector'")
+        .expect("the tour highlight path must guard the '.inspector' step target");
+    let guard_window = &main[guard_at..guard_at + 240];
+    assert!(
+        guard_window.contains("expandInspector("),
+        "the '.inspector' tour guard must call expandInspector() before measuring a hidden panel"
+    );
+
+    let collapse = css_rule_body(css, ".inspector-collapse");
+    assert!(
+        collapse.contains("cursor: pointer"),
+        ".inspector-collapse must advertise itself as clickable (cursor: pointer)"
+    );
+}
+
+fn js_fn_body(src: &str, signature: &str) -> String {
+    let start = src
+        .find(signature)
+        .unwrap_or_else(|| panic!("missing JS function declaration: {signature}"));
+    let open = src[start..]
+        .find('{')
+        .unwrap_or_else(|| panic!("unterminated body for {signature}"));
+    let mut depth = 0usize;
+    let chars: Vec<char> = src[start + open..].chars().collect();
+    let mut end = chars.len();
+    for (index, ch) in chars.iter().enumerate() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = index + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    chars[..end].iter().collect()
+}
+
+#[test]
+fn test_collapsed_panels_offer_edge_restore_tabs() {
+    let css = ariadne_ui::STYLES_CSS;
+    let html = ariadne_ui::INDEX_HTML;
+    let main = ariadne_ui::MAIN_JS;
+    let file_view = ariadne_ui::FILE_VIEW_JS;
+
+    // Both restore tabs must live inside the canvas container, hidden while
+    // their panel is open, each wired to its own panel's restore entry point.
+    let canvas_at = html
+        .find("id=\"canvasContainer\"")
+        .expect("canvas container must exist");
+    let aside_at = html
+        .find("<aside class=\"inspector\"")
+        .expect("the inspector aside must sit after the canvas container");
+    let canvas_region = &html[canvas_at..aside_at];
+    for (tab_id, wiring) in [
+        ("inspectorRestoreTab", "onclick=\"expandInspector()\""),
+        ("sourceRestoreTab", "onclick=\"restoreSourceDrawer()\""),
+    ] {
+        let id_at = canvas_region
+            .find(&format!("id=\"{tab_id}\""))
+            .unwrap_or_else(|| panic!("{tab_id} must live inside the canvas container"));
+        let tag_start = canvas_region[..id_at]
+            .rfind("<button")
+            .unwrap_or_else(|| panic!("{tab_id} must sit on a <button> element"));
+        let tag_end = id_at
+            + canvas_region[id_at..]
+                .find('>')
+                .unwrap_or_else(|| panic!("the {tab_id} tag must close"));
+        let tab_tag = &canvas_region[tag_start..tag_end];
+        assert!(
+            tab_tag.contains("class=\"panel-restore-tab\""),
+            "{tab_id} must share the shared .panel-restore-tab styling"
+        );
+        assert!(
+            tab_tag.contains(wiring),
+            "{tab_id} must be wired to {wiring} in the markup itself"
+        );
+        assert!(
+            tab_tag.contains("hidden"),
+            "{tab_id} must start hidden while its panel is open"
+        );
+    }
+
+    // The tabs dock to the canvas' right edge; the canvas owns the frame.
+    let tab_rule = css_rule_body(css, ".panel-restore-tab");
+    assert!(
+        tab_rule.contains("position: absolute") && tab_rule.contains("right: 0"),
+        ".panel-restore-tab must dock to the canvas' right edge"
+    );
+    assert!(
+        tab_rule.contains("writing-mode: vertical-rl"),
+        ".panel-restore-tab must read vertically so it stays a slim edge tab"
+    );
+    assert!(
+        tab_rule.contains("cursor: pointer"),
+        ".panel-restore-tab must advertise itself as clickable"
+    );
+    let canvas_rule = css_rule_body(css, ".canvas-container");
+    assert!(
+        canvas_rule.contains("position: relative"),
+        ".canvas-container must be position: relative so the restore tabs dock to it"
+    );
+
+    // Reveal/hide behavior lives inside the four panel functions themselves.
+    let collapse_inspector = js_fn_body(main, "function collapseInspector(");
+    assert!(
+        collapse_inspector.contains("inspectorRestoreTab")
+            && collapse_inspector.contains("hidden = false"),
+        "collapseInspector must reveal #inspectorRestoreTab"
+    );
+    let expand_inspector = js_fn_body(main, "function expandInspector(");
+    assert!(
+        expand_inspector.contains("inspectorRestoreTab")
+            && expand_inspector.contains("hidden = true"),
+        "expandInspector must hide #inspectorRestoreTab"
+    );
+    assert!(
+        file_view.contains("function restoreSourceDrawer("),
+        "file-view.js must declare restoreSourceDrawer for the source restore tab"
+    );
+    let close_drawer = js_fn_body(file_view, "function closeSourceDrawer(");
+    assert!(
+        close_drawer.contains("sourceRestoreTab") && close_drawer.contains("hidden = false"),
+        "closeSourceDrawer must reveal #sourceRestoreTab"
+    );
+    let restore_drawer = js_fn_body(file_view, "function restoreSourceDrawer(");
+    assert!(
+        restore_drawer.contains("sourceRestoreTab") && restore_drawer.contains("hidden = true"),
+        "restoreSourceDrawer must hide #sourceRestoreTab"
+    );
+    assert!(
+        restore_drawer.contains("classList.add('open')"),
+        "restoreSourceDrawer must reopen the drawer in place without reloading its content"
+    );
+}
+
+#[test]
+fn test_clear_selection_button_in_toolbar() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    let btn_at = html
+        .find("id=\"btnClearSelection\"")
+        .expect("the toolbar must carry an explicit btnClearSelection button");
+    assert!(
+        html.contains("onclick=\"clearSelection()\""),
+        "the clear selection button must be wired to clearSelection()"
+    );
+
+    // It sits immediately after #btnInspector in the same toolbar-left group,
+    // with no other button wedged between them.
+    let inspector_at = html
+        .find("id=\"btnInspector\"")
+        .expect("btnInspector toolbar toggle must exist");
+    let layout_at = html
+        .find("id=\"layoutSelect\"")
+        .expect("the layout select must exist after the toolbar buttons");
+    assert!(
+        inspector_at < btn_at && btn_at < layout_at,
+        "btnClearSelection must live between btnInspector and the layout control in toolbar-left"
+    );
+    let inspector_tag_end = inspector_at
+        + html[inspector_at..]
+            .find('>')
+            .expect("the btnInspector tag must close");
+    let clear_tag_start = html[..btn_at]
+        .rfind("<button")
+        .expect("the btnClearSelection id must sit on a <button> element");
+    assert!(
+        !html[inspector_tag_end..clear_tag_start].contains("<button"),
+        "btnClearSelection must be the button immediately after btnInspector"
+    );
+}
+
+#[test]
+fn test_clear_selection_button_starts_hidden() {
+    let html = ariadne_ui::INDEX_HTML;
+
+    let btn_at = html
+        .find("id=\"btnClearSelection\"")
+        .expect("btnClearSelection must exist in the toolbar");
+    let tag_start = html[..btn_at]
+        .rfind("<button")
+        .expect("the btnClearSelection id must sit on a <button> element");
+    let tag_end = btn_at
+        + html[btn_at..]
+            .find('>')
+            .expect("the btnClearSelection tag must close");
+    let btn_tag = &html[tag_start..tag_end];
+    assert!(
+        btn_tag.contains("class=\"btn-secondary\""),
+        "btnClearSelection must share the secondary toolbar button styling"
+    );
+    assert!(
+        btn_tag.contains("display:none"),
+        "btnClearSelection must start hidden because the app boots with no selection"
+    );
+}
+
+#[test]
+fn test_clear_selection_resets_state_and_rerenders() {
+    let graph = ariadne_ui::GRAPH_JS;
+
+    let body = js_fn_body(graph, "function clearSelection(");
+    assert!(
+        body.contains("selectedNodeId = null"),
+        "clearSelection must clear selectedNodeId"
+    );
+    assert!(
+        body.contains("clearInspector()"),
+        "clearSelection must fully clear the inspector on clear"
+    );
+    assert!(
+        body.contains("renderSvg()"),
+        "clearSelection must re-render the SVG so fading and selection visuals reset"
+    );
+    assert!(
+        body.contains("renderThreadBar()"),
+        "clearSelection must refresh the breadcrumb bar"
+    );
+    assert!(
+        body.contains("renderHotspots()"),
+        "clearSelection must re-render hotspots without re-filtering"
+    );
+    // Regression guard: filterAndExpandSubgraph's tail falls back to
+    // selectNode(activeNodes[0]) when nothing is selected, so routing the
+    // clear through it would instantly re-select a seed node and undo the clear.
+    // Clear must mirror the Esc path: preserve the current subgraph view.
+    assert!(
+        !body.contains("filterAndExpandSubgraph"),
+        "clearSelection must not call filterAndExpandSubgraph: its auto-select \
+         fallback re-picks a seed node and defeats the clear"
+    );
+}
+
+#[test]
+fn test_canvas_background_click_no_longer_clears_selection() {
+    let graph = ariadne_ui::GRAPH_JS;
+
+    // Accidental clears (a mis-drag that lands as a click on empty canvas) are
+    // replaced by the explicit Clear Selection button and Esc. Pan/zoom stay.
+    let panzoom = js_fn_body(graph, "function setupCanvasPanZoom(");
+    assert!(
+        !panzoom.contains("selectedNodeId = null"),
+        "the canvas container must no longer clear the selection on background click"
+    );
+    assert!(
+        !panzoom.contains("addEventListener('click'"),
+        "setupCanvasPanZoom must carry no click listener once background clearing is gone"
+    );
+    assert!(
+        panzoom.contains("addEventListener('mousedown'") && panzoom.contains("addEventListener('wheel'"),
+        "pan (mousedown) and zoom (wheel) must survive the click-listener removal"
+    );
+}
+
+#[test]
+fn test_tour_canvas_step_advises_clear_button() {
+    let main = ariadne_ui::MAIN_JS;
+
+    let step_at = main
+        .find("id: '#canvasContainer'")
+        .expect("the tour must keep its canvas step");
+    let step_end = step_at
+        + main[step_at..]
+            .find('\n')
+            .expect("the canvas tour step must end at a line break");
+    let step = &main[step_at..step_end];
+    assert!(
+        !step.contains("Click the empty background"),
+        "the canvas tour step must not teach the removed background-click clear"
+    );
+    assert!(
+        step.contains("Clear Selection") && step.contains("Esc"),
+        "the canvas tour step must point to the Clear Selection button and Esc"
+    );
+}
+
+#[test]
+fn test_render_svg_syncs_clear_selection_button() {
+    let graph = ariadne_ui::GRAPH_JS;
+
+    // Visibility rides the render path itself, not selectNode/clear callers,
+    // so every path that changes selection keeps the button honest.
+    let render = js_fn_body(graph, "function renderSvg(");
+    assert!(
+        render.contains("btnClearSelection"),
+        "renderSvg must toggle #btnClearSelection visibility from selectedNodeId"
     );
 }

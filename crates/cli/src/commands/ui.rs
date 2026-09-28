@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
+use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,50 +53,179 @@ fn stage_status_from_pipeline(pipeline: &Pipeline) -> StageStatus {
     }
 }
 
-type ProgressFn = Arc<dyn Fn(usize, &str, &str) + Send + Sync>;
+/// One progress update: which `[k/5]` step produced it (passed explicitly,
+/// never parsed back out of the phase string), the global pipeline percent
+/// (what the web `UiState` stores) and the display strings.
+#[derive(Debug, Clone)]
+pub struct ProgressReport {
+    pub stage: usize,
+    pub percent: usize,
+    pub phase: &'static str,
+    pub message: String,
+}
+
+type ProgressFn = Arc<dyn Fn(ProgressReport) + Send + Sync>;
+
+fn stage_report(
+    stage: usize,
+    percent: usize,
+    phase: &'static str,
+    message: &str,
+) -> ProgressReport {
+    ProgressReport {
+        stage,
+        percent,
+        phase,
+        message: message.to_string(),
+    }
+}
+
+const ARTIFACTS_PHASE: &str = "[1/5] Loading artifacts...";
+const TU_INDEX_PHASE: &str = "[2/5] Indexing translation units...";
+const REDUCTION_PHASE: &str = "[3/5] Reducing semantic model...";
+const CALL_GRAPH_PHASE: &str = "[4/5] Building call graph...";
+const COLLATERAL_PHASE: &str = "[5/5] Analyzing collateral...";
+const STAGES_PER_RUN: usize = 5;
+/// Stage 5 reserves 95→100 for payload assembly; the assembly milestone
+/// finalizes the step-5 terminal bar at 100%.
+const COLLATERAL_MAPPED_PERCENT: usize = 95;
+/// Terminal milestone after payload assembly, before the build returns.
+/// `swap_into_state` separately marks the web state "Ready".
+const PAYLOAD_ASSEMBLED_PERCENT: usize = 100;
+
+/// Stage k of 5 owns the percent span `[(k-1)*20, k*20]`.
+fn stage_start_percent(stage: usize) -> usize {
+    (stage - 1) * 20
+}
+
+fn stage_end_percent(stage: usize) -> usize {
+    stage * 20
+}
+
+/// Project a global pipeline percent onto the step's own 0..=100 scale for
+/// per-step terminal bars. Clamped at both ends.
+fn step_percent(stage: usize, global_percent: usize) -> usize {
+    let lower = stage_start_percent(stage);
+    let span = stage_end_percent(stage) - lower;
+    let within = global_percent.saturating_sub(lower);
+    (within * 100 / span).min(100)
+}
+
+fn tu_index_percent(done: usize, total: usize) -> usize {
+    let (lower, upper) = (stage_start_percent(2), stage_end_percent(2));
+    if total == 0 {
+        return lower;
+    }
+    (lower + (upper - lower) * done / total).min(upper)
+}
+
+fn collateral_file_percent(done: usize, total: usize) -> usize {
+    let (lower, upper) = (stage_start_percent(5), COLLATERAL_MAPPED_PERCENT);
+    if total == 0 {
+        return lower;
+    }
+    (lower + (upper - lower) * done / total).min(upper)
+}
+
+/// Drive the five artifact-backed stages, emitting start/end milestones that
+/// keep every percent inside the span owned by its `[k/5]` step label.
+fn run_pipeline_stages(
+    pipeline: &mut Pipeline,
+    progress: &ProgressFn,
+) -> Result<ariadne_graph::ReducedSemanticModel> {
+    progress(stage_report(
+        1,
+        stage_start_percent(1),
+        ARTIFACTS_PHASE,
+        "Hashing sources",
+    ));
+    pipeline.ensure_include_graph()?;
+    progress(stage_report(
+        1,
+        stage_end_percent(1),
+        ARTIFACTS_PHASE,
+        "Include graph ready",
+    ));
+
+    progress(stage_report(
+        2,
+        stage_start_percent(2),
+        TU_INDEX_PHASE,
+        "Parsing sources",
+    ));
+    pipeline.ensure_index()?;
+    progress(stage_report(
+        2,
+        stage_end_percent(2),
+        TU_INDEX_PHASE,
+        "Index complete",
+    ));
+
+    progress(stage_report(
+        3,
+        stage_start_percent(3),
+        REDUCTION_PHASE,
+        "Deduplicating",
+    ));
+    let reduced_model = pipeline.get_or_build_reduced()?;
+    progress(stage_report(
+        3,
+        stage_end_percent(3),
+        REDUCTION_PHASE,
+        "Model reduced",
+    ));
+
+    progress(stage_report(
+        4,
+        stage_start_percent(4),
+        CALL_GRAPH_PHASE,
+        "Constructing",
+    ));
+    pipeline.ensure_callgraph()?;
+    progress(stage_report(
+        4,
+        stage_end_percent(4),
+        CALL_GRAPH_PHASE,
+        "Call graph ready",
+    ));
+
+    progress(stage_report(
+        5,
+        stage_start_percent(5),
+        COLLATERAL_PHASE,
+        "Load analysis",
+    ));
+    pipeline.ensure_load()?;
+    progress(stage_report(
+        5,
+        COLLATERAL_MAPPED_PERCENT,
+        COLLATERAL_PHASE,
+        "Collateral mapped",
+    ));
+    Ok(reduced_model)
+}
 
 /// Run every pipeline stage (loading artifact-backed stages when their input
 /// fingerprint is fresh) and assemble the UI payload from the results.
 fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
     let cb_progress = progress.clone();
     let progress_cb = move |event: &ProgressEvent| match event {
-        ProgressEvent::TuIndex { done, total } => {
-            let percent = 20 + if *total > 0 { 35 * done / total } else { 35 };
-            (cb_progress)(
-                percent,
-                "[2/5] Indexing translation units...",
-                &format!("{}/{} TUs", done, total),
-            );
-        }
-        ProgressEvent::CollateralFile { done, total } => {
-            let percent = 80 + if *total > 0 { 15 * done / total } else { 15 };
-            (cb_progress)(
-                percent,
-                "[5/5] Analyzing collateral...",
-                &format!("{}/{} files", done, total),
-            );
-        }
+        ProgressEvent::TuIndex { done, total } => (cb_progress)(stage_report(
+            2,
+            tu_index_percent(*done, *total),
+            TU_INDEX_PHASE,
+            &format!("{}/{} TUs", done, total),
+        )),
+        ProgressEvent::CollateralFile { done, total } => (cb_progress)(stage_report(
+            5,
+            collateral_file_percent(*done, *total),
+            COLLATERAL_PHASE,
+            &format!("{}/{} files", done, total),
+        )),
     };
     let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
 
-    progress(5, "[1/5] Loading artifacts...", "Hashing sources");
-    pipeline.ensure_include_graph()?;
-    progress(10, "[1/5] Include graph...", "Graph ready");
-
-    progress(20, "[2/5] Indexing translation units...", "Parsing sources");
-    pipeline.ensure_index()?;
-    progress(55, "[2/5] Indexing translation units...", "Index complete");
-
-    progress(60, "[3/5] Reducing semantic model...", "Deduplicating");
-    let reduced_model = pipeline.get_or_build_reduced()?;
-    progress(65, "[3/5] Reducing semantic model...", "Model reduced");
-
-    progress(70, "[4/5] Building call graph...", "Constructing");
-    pipeline.ensure_callgraph()?;
-
-    progress(80, "[5/5] Analyzing collateral...", "Load analysis");
-    pipeline.ensure_load()?;
-    progress(95, "[5/5] Analyzing collateral...", "Mapping collateral");
+    let reduced_model = run_pipeline_stages(&mut pipeline, &progress)?;
 
     let graph = pipeline.get_or_build_include_graph()?;
     let (include_graph, closures) = graph;
@@ -144,6 +274,12 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     };
 
     let status = stage_status_from_pipeline(&pipeline);
+    progress(stage_report(
+        5,
+        PAYLOAD_ASSEMBLED_PERCENT,
+        COLLATERAL_PHASE,
+        "Payload assembled",
+    ));
     Ok(UiBuildResult {
         include_graph,
         reduced_model,
@@ -223,7 +359,10 @@ fn conservative_proposals(
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
     let mut ranked: Vec<_> = plans
         .into_iter()
-        .filter(|p| matches!(p.risk, ariadne_cluster::plan::RiskLevel::Conservative))
+        .filter(|p| {
+            matches!(p.risk, ariadne_cluster::plan::RiskLevel::Conservative)
+                && p.collateral_load_before != p.collateral_load_after
+        })
         .collect();
     ranked.sort_by(|a, b| {
         proposal_delta(b)
@@ -257,6 +396,7 @@ fn extraction_proposal_dto(
     let mut required_headers: Vec<String> = plan
         .optimization_frontier
         .iter()
+        .filter(|p| *p != &plan.target_file)
         .map(|p| proposal_basename(p))
         .collect();
     required_headers.sort();
@@ -342,7 +482,18 @@ fn spawn_watcher(
                     write_state(&state.stage_status).rebuilding = true;
                     // Exactly one pipeline build serves the new fingerprints
                     // and the payload; its own fps replace the rehashed ones.
-                    let quiet: ProgressFn = Arc::new(|_percent, _phase, _message| ());
+                    // One plain line per report: this thread shares stdout
+                    // with live server logs, so no `\r` redraws here.
+                    let quiet: ProgressFn = Arc::new(|report: ProgressReport| {
+                        println!(
+                            "[refresh {}/{} {:>3}%] {} {} (background refresh)",
+                            report.stage,
+                            STAGES_PER_RUN,
+                            report.percent,
+                            strip_stage_prefix(report.phase),
+                            report.message
+                        );
+                    });
                     match build_ui_payload(&repo, quiet) {
                         Ok(out) => {
                             let new_fps = swap_into_state(&state, out);
@@ -361,6 +512,40 @@ fn spawn_watcher(
     });
 }
 
+/// Live per-step terminal bar renderer. TerminalStepBars is Send + Sync, so
+/// the closure satisfies ProgressFn's Send + Sync bound and may move into
+/// spawn_blocking; dropping the closure at the end of the build also drops
+/// the guard, which commits any bar line left open by a failed build.
+fn make_bar_progress() -> ProgressFn {
+    let bars = TerminalStepBars::new();
+    Arc::new(move |report: ProgressReport| {
+        let step = step_percent(report.stage, report.percent);
+        bars.render(
+            report.stage,
+            STAGES_PER_RUN,
+            report.phase,
+            step,
+            &report.message,
+        );
+    })
+}
+
+/// Boot progress for the interactive server: mirrors the global percent into
+/// web `UiState` (browser bar unchanged) and drives the live per-step bar.
+fn make_boot_progress(state: Arc<UiState>) -> ProgressFn {
+    let bar = make_bar_progress();
+    Arc::new(move |report: ProgressReport| {
+        {
+            let mut p = write_state(&state.progress);
+            p.state = "loading".to_string();
+            p.phase = report.phase.to_string();
+            p.message = report.message.clone();
+            p.percent = report.percent;
+        }
+        bar(report);
+    })
+}
+
 pub async fn run_ui(
     repo_opt: Option<PathBuf>,
     port: u16,
@@ -375,10 +560,7 @@ pub async fn run_ui(
     };
 
     if let Some(path) = export_opt {
-        let export_progress: ProgressFn = Arc::new(|percent, phase, message| {
-            println!("[{:>3}%] {} {}", percent, phase, message);
-        });
-        let out = build_ui_payload(&repo_path, export_progress)?;
+        let out = build_ui_payload(&repo_path, make_bar_progress())?;
         println!(
             "{} TUs reused, {} reanalyzed; stages: {}",
             out.status.reused_tus,
@@ -410,16 +592,7 @@ pub async fn run_ui(
         let boot_repo = repo_path.clone();
         let (fps_tx, fps_rx) = tokio::sync::oneshot::channel();
 
-        let boot_progress: ProgressFn = {
-            let st = boot_state.clone();
-            Arc::new(move |percent, phase, message| {
-                let mut p = write_state(&st.progress);
-                p.state = "loading".to_string();
-                p.phase = phase.to_string();
-                p.message = message.to_string();
-                p.percent = percent;
-            })
-        };
+        let boot_progress = make_boot_progress(boot_state.clone());
 
         tokio::task::spawn_blocking(move || match build_ui_payload(&boot_repo, boot_progress) {
             Ok(out) => {
@@ -427,6 +600,10 @@ pub async fn run_ui(
                 let _ = fps_tx.send(Some(fps));
             }
             Err(e) => {
+                // `build_ui_payload` consumed the progress Arc, so its
+                // TerminalStepBars guard has already dropped and committed
+                // any half-drawn bar line; anything printed from here on,
+                // including this error report, starts on a fresh line.
                 let mut p = write_state(&boot_state.progress);
                 p.state = "error".to_string();
                 p.message = e.to_string();
@@ -467,6 +644,154 @@ mod tests {
         let index_code = include_str!("index.rs");
         assert!(index_code.contains("ProgressEvent::TuIndex"));
         assert!(index_code.contains("print_progress"));
+    }
+}
+
+#[cfg(test)]
+mod progress_contract_tests {
+    use super::{
+        collateral_file_percent, stage_end_percent, stage_start_percent, step_percent,
+        tu_index_percent, ARTIFACTS_PHASE, CALL_GRAPH_PHASE, COLLATERAL_MAPPED_PERCENT,
+        COLLATERAL_PHASE, REDUCTION_PHASE, STAGES_PER_RUN, TU_INDEX_PHASE,
+    };
+    use std::collections::HashMap;
+
+    const POINTS_PER_STAGE: usize = 100 / STAGES_PER_RUN;
+
+    /// The ordered static milestones exactly as `build_ui_payload` emits them,
+    /// built from the same constants and helpers the real code path calls.
+    /// Stage 5's milestone set is {80 start, 80–95 event span, 95 "Collateral
+    /// mapped", 100 payload finalization}, all within [80, 100].
+    fn emitted_milestones() -> Vec<(usize, &'static str)> {
+        vec![
+            (stage_start_percent(1), ARTIFACTS_PHASE),
+            (stage_end_percent(1), ARTIFACTS_PHASE),
+            (stage_start_percent(2), TU_INDEX_PHASE),
+            (stage_end_percent(2), TU_INDEX_PHASE),
+            (stage_start_percent(3), REDUCTION_PHASE),
+            (stage_end_percent(3), REDUCTION_PHASE),
+            (stage_start_percent(4), CALL_GRAPH_PHASE),
+            (stage_end_percent(4), CALL_GRAPH_PHASE),
+            (stage_start_percent(5), COLLATERAL_PHASE),
+            (COLLATERAL_MAPPED_PERCENT, COLLATERAL_PHASE),
+            (100, COLLATERAL_PHASE),
+        ]
+    }
+
+    fn stage_number_of(phase: &str) -> usize {
+        phase
+            .as_bytes()
+            .get(1)
+            .and_then(|byte| (*byte as char).to_digit(10))
+            .unwrap_or_else(|| panic!("milestone phase must carry a [k/5] label: {phase:?}"))
+            as usize
+    }
+
+    #[test]
+    fn test_stage_milestones_match_step_labels() {
+        let milestones = emitted_milestones();
+        for pair in milestones.windows(2) {
+            assert!(
+                pair[0].0 <= pair[1].0,
+                "percent must be monotonic, got {} before {}",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+        for (percent, phase) in &milestones {
+            let stage = stage_number_of(phase);
+            let lower = (stage - 1) * POINTS_PER_STAGE;
+            let upper = stage * POINTS_PER_STAGE;
+            assert!(
+                (lower..=upper).contains(percent),
+                "milestone {phase} at {percent}% escapes its [{lower}, {upper}] span"
+            );
+        }
+        // The contract table must not be fiction: the payload-assembly
+        // milestone that finalizes step 5 at 100% must really be emitted.
+        // Built via format! so this test's own source cannot match itself.
+        let assembled_needle = format!("Payload {}", "assembled");
+        assert!(
+            include_str!("ui.rs").contains(assembled_needle.as_str()),
+            "step 5 must finalize with a 100% payload-assembly milestone"
+        );
+    }
+
+    #[test]
+    fn test_step_percent_maps_stage_span_onto_zero_hundred() {
+        assert_eq!(step_percent(1, 0), 0);
+        assert_eq!(step_percent(1, 10), 50);
+        assert_eq!(step_percent(1, 20), 100);
+        assert_eq!(step_percent(2, 20), 0, "stage start is step start");
+        assert_eq!(step_percent(2, 30), 50, "stage midpoint is 50% of the step");
+        assert_eq!(step_percent(2, 40), 100, "stage end is step end");
+        assert_eq!(step_percent(5, 80), 0);
+        assert_eq!(step_percent(5, 90), 50);
+        assert_eq!(step_percent(5, 100), 100);
+        assert_eq!(step_percent(2, 5), 0, "clamped below own span");
+        assert_eq!(step_percent(2, 95), 100, "clamped above own span");
+        assert_eq!(step_percent(5, 120), 100, "clamped past 100");
+    }
+
+    #[test]
+    fn test_tu_index_events_stay_in_stage_two_span() {
+        assert_eq!(tu_index_percent(0, 0), 20, "empty TU set must sit at stage start");
+        assert_eq!(tu_index_percent(0, 7), 20);
+        assert_eq!(tu_index_percent(7, 7), 40);
+        let mut previous = tu_index_percent(0, 9);
+        for done in 1..=9 {
+            let percent = tu_index_percent(done, 9);
+            assert!((20..=40).contains(&percent), "{done}/9 mapped to {percent}%");
+            assert!(percent >= previous, "percent regressed at {done}/9");
+            previous = percent;
+        }
+    }
+
+    #[test]
+    fn test_collateral_events_stay_in_stage_five_span() {
+        assert_eq!(
+            collateral_file_percent(0, 0),
+            80,
+            "empty collateral set must sit at stage start"
+        );
+        assert_eq!(collateral_file_percent(0, 7), 80);
+        assert_eq!(collateral_file_percent(7, 7), 95);
+        let mut previous = collateral_file_percent(0, 9);
+        for done in 1..=9 {
+            let percent = collateral_file_percent(done, 9);
+            assert!((80..=95).contains(&percent), "{done}/9 mapped to {percent}%");
+            assert!(percent >= previous, "percent regressed at {done}/9");
+            previous = percent;
+        }
+    }
+
+    #[test]
+    fn test_phase_label_stable_within_stage() {
+        let mut phase_by_stage: HashMap<usize, &str> = HashMap::new();
+        for (_, phase) in emitted_milestones() {
+            let stage = stage_number_of(phase);
+            if let Some(previous) = phase_by_stage.insert(stage, phase) {
+                assert_eq!(
+                    previous, phase,
+                    "stage {stage} milestones disagree: {previous:?} vs {phase:?}"
+                );
+            }
+        }
+        let ui_code = include_str!("ui.rs");
+        for stage in 1..=STAGES_PER_RUN {
+            let prefix = format!("[{stage}/5]");
+            let tail = &phase_by_stage[&stage][prefix.len()..];
+            let mut haystack = ui_code;
+            while let Some(index) = haystack.find(&prefix) {
+                let rest = &haystack[index + prefix.len()..];
+                assert!(
+                    rest.starts_with(tail),
+                    "stage {stage} emits an inconsistent phase label near: {:?}",
+                    &rest[..rest.len().min(32)]
+                );
+                haystack = rest;
+            }
+        }
     }
 }
 
@@ -621,5 +946,43 @@ mod builder_tests {
         };
         let out = build_extraction_proposals(&IncludeGraph::new(), &model, &[], &[]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_zero_collateral_proposals_are_filtered() {
+        let out = conservative_proposals(vec![
+            plan_with("PLAN-001", 100, 100, RiskLevel::Conservative),
+            plan_with("PLAN-002", 200, 50, RiskLevel::Conservative),
+            plan_with("PLAN-003", 300, 300, RiskLevel::Conservative),
+            plan_with("PLAN-004", 400, 40, RiskLevel::Conservative),
+        ]);
+        let ids: Vec<&str> = out.iter().map(|p| p.plan_id.as_str()).collect();
+        assert_eq!(ids, vec!["PLAN-004", "PLAN-002"]);
+        assert!(
+            out.iter().all(|p| p.collateral_load_before != p.collateral_load_after),
+            "Zero-collateral proposals (before == after) must be filtered out"
+        );
+    }
+
+    #[test]
+    fn test_self_reference_removed_from_required_headers() {
+        let mut plan = plan_with("PLAN-001", 300, 40, RiskLevel::Conservative);
+        plan.target_file = PathBuf::from("include/graph.h");
+        plan.optimization_frontier = vec![
+            PathBuf::from("include/graph.h"),
+            PathBuf::from("inc/graphics.h"),
+            PathBuf::from("inc/config.h"),
+        ];
+        let out = conservative_proposals(vec![plan]);
+        assert_eq!(out.len(), 1);
+        let dto = &out[0];
+        assert_eq!(
+            dto.required_headers,
+            vec!["config.h".to_string(), "graphics.h".to_string()]
+        );
+        assert!(
+            !dto.required_headers.contains(&"graph.h".to_string()),
+            "Target file should not appear in its own required_headers"
+        );
     }
 }

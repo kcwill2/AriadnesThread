@@ -10,6 +10,13 @@ use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+pub fn is_header_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext, "h" | "hpp" | "hxx" | "hh" | "inl"))
+        .unwrap_or(false)
+}
+
 pub struct OptimizationPlanner<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
@@ -107,8 +114,13 @@ impl<'a> OptimizationPlanner<'a> {
     }
 
     fn sorted_header_ids(&self) -> Vec<FileId> {
-        let mut sorted_headers: Vec<FileId> =
-            self.include_graph.file_paths.keys().copied().collect();
+        let mut sorted_headers: Vec<FileId> = self
+            .include_graph
+            .file_paths
+            .iter()
+            .filter(|(_, path)| is_header_file(path))
+            .map(|(id, _)| *id)
+            .collect();
         sorted_headers.sort();
         sorted_headers
     }

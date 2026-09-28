@@ -315,3 +315,23 @@ fn plan_validation_required_tus_lists_consumer_paths() {
         vec![PathBuf::from("main.cpp")]
     );
 }
+
+#[test]
+fn test_planner_only_considers_header_files() {
+    let plans = PlannerFixture::new()
+        .header(FileId(1), "start.h", OptimizationPolicy::Optimizable)
+        .header(FileId(2), "col.h", OptimizationPolicy::Optimizable)
+        .translation_unit(FileId(3), "impl.cc")
+        .includes(FileId(1), FileId(2))
+        .includes(FileId(3), FileId(1))
+        .defines(FileId(2), "sym_1")
+        .depends("sym_1", "sym_1")
+        .plan();
+
+    // Only header files should have proposals, not .cc files
+    let target_files: Vec<_> = plans.iter().map(|p| p.target_file.clone()).collect();
+    assert!(
+        !target_files.iter().any(|p| p.to_string_lossy().ends_with(".cc")),
+        "Implementation files should not have extraction proposals"
+    );
+}

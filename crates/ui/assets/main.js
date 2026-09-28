@@ -36,6 +36,9 @@
     let hotspotBurdenCache = null;      // { burden: {dep: symbols}, affected: {dep: rootCount} }
     let hotspotBurdenSource = null;     // file_collateral object the cache was built from
 
+    // Node Inspector panel (workspace column, collapsible)
+    let inspectorOpen = true;
+
     // Viewport transform
     let panX = 40;
     let panY = 40;
@@ -102,24 +105,116 @@
       { color: '#ef4444', label: 'Critical Collateral' },
     ];
 
+    // Edge verdict story: root-relative verdict helpers. Null when the payload
+    // has no entry — absence of data must never render a "0 used" claim.
+    function classifyEdgeVerdict(entry) {
+      if (!entry) return null;
+      const j = entry.justified_count || 0;
+      const c = entry.collateral_count || 0;
+      if (j > 0 && c === 0) return 'justified';
+      if (j > 0 && c > 0) return 'partial';
+      if (j === 0 && c > 0) return 'unused';
+      return null;
+    }
+
+    function verdictBadgeText(tier, entry) {
+      const j = (entry && entry.justified_count) || 0;
+      const c = (entry && entry.collateral_count) || 0;
+      if (tier === 'justified') return `${j}/${j} used`;
+      if (tier === 'mixed') return `${j}/${j + c} used`;
+      return `0/${c} used`;
+    }
+
+    function verdictTooltipText(rootLabel, depLabel, tier, j, c) {
+      if (tier === 'justified') {
+        return `${rootLabel} uses ${j} of ${j} symbols from ${depLabel} — needed `
+          + '(green spine: every supplied symbol is used).';
+      }
+      if (tier === 'mixed' || tier === 'partial') {
+        return `${rootLabel} uses ${j} of ${j + c} symbols from ${depLabel} `
+          + '(amber spine: partly needed).';
+      }
+      if (tier === 'collateral' || tier === 'unused') {
+        return `${rootLabel} uses 0 of ${c} symbols from ${depLabel}. `
+          + 'Nothing here is needed (red spine) — this include is droppable or slimmable. '
+          + 'AT graphs project includes only; system/stdlib headers are not analyzed or counted.';
+      }
+      return '';
+    }
+
+    function appendVerdictTip(el, rootLabel, depLabel, verdict, entry) {
+      const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      tip.textContent = verdictTooltipText(rootLabel, depLabel, verdict,
+        (entry && entry.justified_count) || 0, (entry && entry.collateral_count) || 0);
+      el.appendChild(tip);
+    }
+
+    // Node-card legend rows: teach the spine vocabulary. Gated exactly like
+    // the arrow rows so the legend never promises a spine the payload cannot show.
+    function verdictCardLegendRows(hasJustifiedVerdict, hasUnusedVerdict) {
+      const justifiedRow = hasJustifiedVerdict ? `
+        <div class="legend-row">
+          <div class="legend-card spine-justified"></div>
+          <span>Card: every symbol used — needed</span>
+        </div>` : '';
+      const partlyRow = `
+        <div class="legend-row">
+          <div class="legend-card spine-mixed"></div>
+          <span>Card: partly needed</span>
+        </div>`;
+      const unusedRow = hasUnusedVerdict ? `
+        <div class="legend-row">
+          <div class="legend-card spine-unused"></div>
+          <span>Card: supplies nothing — this include can go</span>
+        </div>` : '';
+      const noSpineRow = `
+        <div class="legend-row">
+          <div class="legend-card spine-none"></div>
+          <span>No spine — no verdict data</span>
+        </div>`;
+      return justifiedRow + partlyRow + unusedRow + noSpineRow;
+    }
+
     function updateHeatLegend(targetLabel, depCount, totalCollateral, justificationMap) {
       document.getElementById('legendViewLabel').textContent = 'Heat Map';
       const legendList = document.getElementById('legendItems');
       const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
         + `${depCount} dep(s) · ${totalCollateral} symbols</div>`;
-      const hasJustified = Object.values(justificationMap || {})
-        .some(j => j && (j.justified_count || 0) > 0);
-      const justifiedRow = hasJustified ? `
+      const verdictTiers = new Set(Object.values(justificationMap || {}).map(j => classifyEdgeVerdict(j)));
+      const hasJustifiedVerdict = verdictTiers.has('justified');
+      const hasUnusedVerdict = verdictTiers.has('unused');
+      const greenRow = hasJustifiedVerdict ? `
         <div class="legend-row">
-          <div class="legend-color" style="background:#4ade80;"></div>
-          <span>Justified (needed)</span>
+          <div class="legend-line edge-style-justified"></div>
+          <span>Needed by selected file</span>
         </div>` : '';
-      legendList.innerHTML = summary + justifiedRow + HEAT_LEGEND.map(item => `
+      const amberRow = `
+        <div class="legend-row">
+          <div class="legend-line edge-style-partial"></div>
+          <span>Partly needed (J/T used) or no verdict data</span>
+        </div>`;
+      const redRow = hasUnusedVerdict ? `
+        <div class="legend-row">
+          <div class="legend-line edge-style-unused"></div>
+          <span>Unused include (red dashed) — this arrow can go</span>
+        </div>` : '';
+      const contextRow = `
+        <div class="legend-row">
+          <div class="legend-line edge-style-context"></div>
+          <span>Between two dependencies — context only</span>
+        </div>`;
+      const cardRows = verdictCardLegendRows(hasJustifiedVerdict, hasUnusedVerdict);
+      const heatHeader = `<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">`
+        + `Card fill = collateral weight</div>`;
+      const footnote = `<div style="font-size:9px;color:var(--text-muted);margin-top:6px;">`
+        + `Verdicts relative to selected file · system headers not analyzed</div>`;
+      legendList.innerHTML = summary + greenRow + amberRow + redRow + contextRow + cardRows
+        + heatHeader + HEAT_LEGEND.map(item => `
         <div class="legend-row">
           <div class="legend-color" style="background:${item.color};"></div>
           <span>${item.label}</span>
         </div>
-      `).join('');
+      `).join('') + footnote;
     }
 
     function restoreStandardLegend() {
@@ -182,13 +277,39 @@
     // Start
     init();
 
+    // === NODE INSPECTOR SHOW/HIDE (mirrors the hotspots pattern) ===
+    function collapseInspector() {
+      inspectorOpen = false;
+      const panel = document.getElementById('inspectorPanel');
+      if (panel) panel.style.display = 'none';
+      const btn = document.getElementById('btnInspector');
+      if (btn) btn.classList.remove('active');
+      const restoreTab = document.getElementById('inspectorRestoreTab');
+      if (restoreTab) restoreTab.hidden = false;
+    }
+
+    function expandInspector() {
+      inspectorOpen = true;
+      const panel = document.getElementById('inspectorPanel');
+      if (panel) panel.style.display = '';
+      const btn = document.getElementById('btnInspector');
+      if (btn) btn.classList.add('active');
+      const restoreTab = document.getElementById('inspectorRestoreTab');
+      if (restoreTab) restoreTab.hidden = true;
+    }
+
+    function toggleInspector() {
+      if (inspectorOpen) collapseInspector();
+      else expandInspector();
+    }
+
     // === ONBOARDING & HELP ===
     const tourSteps = [
       { id: '#tabInclude', title: 'Graph Perspectives', text: 'Switch between Include, Symbol, and Call graphs to analyze your codebase from different angles.' },
-      { id: '#canvasContainer', title: 'Interactive Canvas & Selection', text: 'Pan, zoom, and click nodes to explore dependencies. Click the empty background or press Esc to clear fading and selection.' },
+      { id: '#canvasContainer', title: 'Interactive Canvas & Selection', text: 'Pan, zoom, and click nodes to explore dependencies. Use the Clear Selection button in the toolbar or press Esc to clear fading and selection.' },
       { id: '.toolbar', title: 'Direction & Degree Navigation', text: 'Control Direction (Dependencies -> vs Consumers <-), step Degree (-/+), or use ALL-WITH-CAP to expand safely up to the node cap limit.' },
       { id: '#ariadneThread', title: 'Pathfinder & Breadcrumbs', text: 'Use Pathfinder for shortest paths and Ariadne\'s Thread to navigate your breadcrumb history.' },
-      { id: '.inspector', title: 'Collateral Heat Map', text: 'Select a header to calculate collateral load. Dependencies are colored by heat tier (Cold to Red). Click a contributor to illuminate the include path.' },
+      { id: '.inspector', title: 'Collateral Heat Map', text: 'Select a header to calculate collateral load. Card fill shows the heat tier (Cold to Red); the left spine states the verdict: green every symbol used, amber partly needed, red supplies nothing. Click a contributor to illuminate the include path.' },
       { id: '#hotspotPanel', title: 'Hotspots Triage', text: 'Open 🔥 Hotspots to rank the worst-offender files by collateral burden, fan-in/out, closure, or cycle participation. Click a row to select the file and see its heat map live beside the list.',
         enter() {
           if (currentTab !== 'include') switchTab('include');
@@ -238,6 +359,10 @@
       }
 
       if (step.enter) step.enter();
+
+      if (step.id === '.inspector' && !inspectorOpen) {
+        expandInspector();
+      }
 
       const targetEl = document.querySelector(step.id);
       if (targetEl) {

@@ -66,10 +66,6 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
                 collateral_symbols: 9,
             },
             ariadne_cli::CollateralOpportunity {
-                header_name: "thing.cpp".to_string(),
-                collateral_symbols: 6,
-            },
-            ariadne_cli::CollateralOpportunity {
                 header_name: "thing.h".to_string(),
                 collateral_symbols: 1,
             },
@@ -78,14 +74,14 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
                 collateral_symbols: 1,
             },
         ],
-        "opportunities must stay sorted by descending collateral symbols, then name"
+        "opportunities must stay sorted by descending collateral symbols, then name, and only include header files"
     );
-    assert_eq!(report.safe_plans_available, 3);
+    assert_eq!(report.safe_plans_available, 1);
     assert_eq!(report.affected_consumer_files, 2);
     assert_eq!(report.validation_total_tus, 2);
     assert_eq!(report.validation_passed_tus, 2);
     assert!(report.build_passed);
-    assert_eq!(report.committed_transformations, 3);
+    assert_eq!(report.committed_transformations, 1);
     assert_eq!(report.residual_collateral_load, 9);
     Ok(())
 }
@@ -132,15 +128,8 @@ fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged()
             "include/Thing_Thing_extracted.h",
             "include/Thing_extracted.h",
             "include/Thing_get_id_extracted.h",
-            "src/ThingConfig_extracted.h",
-            "src/Thing_Thing_extracted.h",
-            "src/Thing_extracted.h",
-            "src/Thing_get_id_extracted.h",
-            "tests/ThingConfig_extracted.h",
-            "tests/Thing_extracted.h",
-            "tests/main_extracted.h",
         ],
-        "every plan's extracted headers land under repo/generated/<target dir>/, even for plans with zero consumers"
+        "all conservative plans produce extracted headers in generated/; only validated ones commit"
     );
 
     let consumer_after = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
@@ -152,7 +141,7 @@ fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged()
          name (thing.h) — latent vacuous-rewrite bug, characterization only"
     );
     assert_eq!(thing_impl_before, thing_impl_after);
-    assert_eq!(report.committed_transformations, 3);
+    assert_eq!(report.committed_transformations, 1);
     assert_eq!(report.affected_consumer_files, 2);
     Ok(())
 }
@@ -184,6 +173,12 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
     assert_eq!(dispatched.total_tus, direct.total_tus);
     assert_eq!(dispatched.total_symbols, direct.total_symbols);
     assert_eq!(dispatched.total_semantic_edges, direct.total_semantic_edges);
+    // Both should only include header file opportunities now
+    assert_eq!(
+        dispatched.collateral_opportunities.len(),
+        3,
+        "Three header files have collateral opportunities"
+    );
     assert_eq!(
         dispatched.collateral_opportunities,
         direct.collateral_opportunities
@@ -210,11 +205,11 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
 
     assert!(rendered.contains("Repository:\n    5 files\n    2 translation units"));
     assert!(rendered.contains("Analysis:\n    7 symbols\n    19 semantic edges"));
-    assert!(rendered.contains("Plan:\n    3 safe transformations available"));
+    assert!(rendered.contains("Plan:\n    1 safe transformations available"));
     assert!(rendered.contains("Preview:\n    2 consumer files affected"));
     assert!(rendered.contains("Validation:\n    2 / 2 affected TUs passed"));
     assert!(rendered.contains("Build:\n    PASS"));
-    assert!(rendered.contains("Committed:\n    3 transformations"));
+    assert!(rendered.contains("Committed:\n    1 transformations"));
     assert!(rendered.contains("Residual collateral load:\n    9 symbols"));
     Ok(())
 }

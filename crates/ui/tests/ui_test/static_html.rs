@@ -157,7 +157,7 @@ fn test_ui_noticeable_fading_elements() {
     assert!(html.contains(".node-group.heat-root"));
 
     // Assert INDEX_HTML contains logic applying faded to non-dependencies when a node is selected in the include graph,
-    // and clearing faded on canvas click or Esc.
+    // and clearing faded via the Clear Selection button or Esc.
     assert!(html.contains("currentTab === 'include'") && html.contains("selectedNodeId"));
     assert!(html.contains("reachableDependencies.add") || html.contains("reachableDependencies"));
     assert!(html.contains("faded"));
@@ -239,27 +239,27 @@ fn test_ui_heat_map_tri_state_justification() {
         "missing classifyDependency predicate helper"
     );
 
-    // Tri-state classes applied to reachable dependencies.
+    // Tri-state verdicts render as the left verdict spine on reachable
+    // dependencies (plan 1790573049166; replaces the old outline overrides).
     assert!(
-        ariadne_ui::GRAPH_JS.contains("dep-justified")
-            && ariadne_ui::GRAPH_JS.contains("dep-mixed"),
-        "missing dep-justified/dep-mixed class application"
+        ariadne_ui::GRAPH_JS.contains("appendVerdictSpine("),
+        "missing verdict spine class application"
     );
 
-    // CSS rules for the green justified ring and the mixed accent exist in the page.
+    // CSS rules for the spine verdict colors exist in the page.
     assert!(
-        page.contains(".node-group.dep-justified"),
-        "missing .node-group.dep-justified CSS rule"
+        page.contains(".verdict-spine.justified"),
+        "missing .verdict-spine.justified CSS rule"
     );
     assert!(
-        page.contains(".node-group.dep-mixed"),
-        "missing .node-group.dep-mixed CSS rule"
+        page.contains(".verdict-spine.mixed") && page.contains(".verdict-spine.unused"),
+        "missing .verdict-spine.mixed/.unused CSS rules"
     );
 
-    // Legend gains a Justified (needed) row driven by justified_count.
+    // Legend gains the green verdict row driven by the justification entries.
     assert!(
-        ariadne_ui::MAIN_JS.contains("Justified (needed)"),
-        "missing Justified (needed) legend row"
+        ariadne_ui::MAIN_JS.contains("Needed by selected file"),
+        "missing Needed-by-selected-file legend row"
     );
     assert!(
         ariadne_ui::MAIN_JS.contains("justified_count"),
@@ -631,7 +631,7 @@ fn assert_hotspot_tour_and_canvas_isolation(html: &str) {
     // Panel no longer lives inside the canvas, so canvas handlers must drop the obsolete guards.
     assert!(
         !ariadne_ui::GRAPH_JS.contains("closest('.hotspot-panel')"),
-        "canvas mousedown/click/wheel handlers must no longer special-case a panel that is outside the canvas"
+        "canvas mousedown/wheel handlers must no longer special-case a panel that is outside the canvas"
     );
 
     // Wheel fallback is dead once the panel owns its own column (native scrolling takes over).
@@ -690,7 +690,7 @@ fn test_breadcrumbs_render_in_thread_bar() {
         "filter fallback auto-select must skip crumb recording"
     );
 
-    // Clearing the selection re-renders the bar (background click, Escape, search)
+    // Clearing the selection re-renders the bar (Clear Selection button, Escape, search)
     assert!(
         html.matches("renderThreadBar()").count() >= 5,
         "selection-clear paths must refresh the breadcrumb bar"
@@ -905,7 +905,7 @@ fn test_ui_extraction_proposal_cards() {
         "card must render the consumer TU count"
     );
     assert!(
-        ariadne_ui::HOTSPOTS_JS.contains("just-needs"),
+        ariadne_ui::HOTSPOTS_JS.contains("extraction-row") && ariadne_ui::HOTSPOTS_JS.contains("extracted symbols need"),
         "card must render the required-headers needs row"
     );
     assert!(

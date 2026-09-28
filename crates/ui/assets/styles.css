@@ -427,28 +427,31 @@
     }
 
     .node-group.heat-critical rect {
-      /* legacy tier-4 alias: rendered by .node-group.heat-glow-4 below; class stays applied by graph.js for structural locks */
+      /* legacy tier-4 alias: rendered by .node-group.heat-tier-4 below; class stays applied by graph.js for structural locks */
     }
 
-    /* Per-tier heat glow: every collateral tier outlines in its own tier color
-       (equal specificity to the rules above, later source order wins).
-       dep-mixed nodes intentionally show the flat green side-marker below
-       instead of the tier glow, as their mixed split is the message. */
-    .node-group.heat-glow-0 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.85)); }
-    .node-group.heat-glow-1 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.85)); }
-    .node-group.heat-glow-2 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(234, 179, 8, 0.85)); }
-    .node-group.heat-glow-3 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.85)); }
-    .node-group.heat-glow-4 rect { stroke-width: 2.5px; filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.9)); }
+    /* Per-tier heat outline: flat tier stroke on every collateral tier,
+       justified included. The verdict rides the spine below; glow is
+       reserved for selection/root. */
+    .node-group.heat-tier-0 rect { stroke-width: 2.5px; }
+    .node-group.heat-tier-1 rect { stroke-width: 2.5px; }
+    .node-group.heat-tier-2 rect { stroke-width: 2.5px; }
+    .node-group.heat-tier-3 rect { stroke-width: 2.5px; }
+    .node-group.heat-tier-4 rect { stroke-width: 2.5px; }
 
-    .node-group.dep-justified rect {
-      stroke: #4ade80 !important;
-      stroke-width: 2.5px !important;
-      filter: drop-shadow(0 0 10px rgba(74, 222, 128, 0.75));
+    /* Verdict spine: inset flag bar stating how needed a dependency is;
+       the flat card fill owns collateral weight. Later source order than
+       the tier rules so the flat reset wins the equal-specificity cascade
+       on the spine rect itself. */
+    .node-group rect.verdict-spine {
+      rx: 2px;
+      ry: 2px;
+      stroke-width: 0;
+      filter: none;
     }
-
-    .node-group.dep-mixed rect {
-      filter: drop-shadow(-3px 0 0 #4ade80);
-    }
+    .verdict-spine.justified { fill: var(--green); }
+    .verdict-spine.mixed { fill: var(--amber); }
+    .verdict-spine.unused { fill: #ef4444; }
 
     .heat-badge {
       font-size: 9px;
@@ -499,9 +502,24 @@
       filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.4));
     }
 
+    /* Edge verdict story: root-relative arrow verdicts. Appended after
+       .edge-path.edge-leaving (equal-spec !important rivals resolve by order)
+       and before the E3 preview block so preview rules still win. */
+    .edge-path.edge-justified {
+      stroke: var(--green) !important;
+      filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.4));
+    }
+
+    .edge-path.edge-unused {
+      stroke: #ef4444 !important;
+      stroke-width: 2px !important;
+      stroke-dasharray: 6 4;
+      filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.4));
+    }
+
     /* INSPECTOR SIDEBAR */
     .inspector {
-      width: 340px;
+      width: 440px;
       background: var(--bg-surface);
       border-left: 1px solid var(--border);
       display: flex;
@@ -527,6 +545,48 @@
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .inspector-collapse {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 4px;
+    }
+
+    .inspector-collapse:hover {
+      color: var(--text-main);
+    }
+
+    /* RIGHT-EDGE RESTORE TABS — the discoverable way back for collapsed panels */
+    .panel-restore-tab {
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      writing-mode: vertical-rl;
+      padding: 10px 4px;
+      background: var(--bg-sub);
+      border: 1px solid var(--border);
+      border-left: 0;
+      border-radius: 6px 0 0 6px;
+      color: var(--text-sub);
+      cursor: pointer;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      z-index: 15;
+    }
+
+    .panel-restore-tab:hover {
+      color: var(--text-main);
+      background: var(--bg-surface);
+    }
+
+    /* Two collapsed panels show both tabs side by side without overlap. */
+    #sourceRestoreTab {
+      right: 26px;
     }
 
     .inspector-body {
@@ -814,10 +874,36 @@
       border-radius: 2px;
     }
 
+    .legend-line {
+      width: 12px;
+      border-top: 2px solid;
+      height: 0;
+    }
+    .legend-line.edge-style-justified { border-top-color: #4ade80; }
+    .legend-line.edge-style-unused { border-top: 2px dashed #ef4444; }
+    .legend-line.edge-style-partial { border-top: 2px solid var(--amber); }
+    .legend-line.edge-style-context { border-top: 2px solid #475569; }
+
+    /* Mini node-card swatch for the heat legend: card-shaped chip whose left
+       border carries the verdict spine color, mirroring the canvas cards. */
+    .legend-card {
+      width: 14px;
+      height: 9px;
+      border-radius: 3px;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-left: 3px solid transparent;
+      flex-shrink: 0;
+    }
+    .legend-card.spine-justified { border-left-color: var(--green); }
+    .legend-card.spine-mixed { border-left-color: var(--amber); }
+    .legend-card.spine-unused { border-left-color: #ef4444; }
+    .legend-card.spine-none { border-left-color: transparent; }
+
     /* HOTSPOTS PANEL — workspace column (never an overlay over the legend) */
     .hotspot-panel {
       position: static;
-      width: 300px;
+      width: 400px;
       flex-shrink: 0;
       height: 100%;
       background: var(--bg-surface);
@@ -1149,7 +1235,7 @@
        C1 heat/tri-state classes, so the underlying tiers stay readable. The marks
        are solid color-coded after-state fills with glow, matching the legend card
        chips (red eliminated / amber still-reachable / green kept). These rules sit
-       after the heat-glow rules so they win the equal-specificity cascade. */
+       after the heat-tier rules so they win the equal-specificity cascade. */
     .node-group.preview-eliminated rect {
       fill: #450a0a;
       stroke: #ef4444 !important;
@@ -1236,6 +1322,12 @@
     #canvasContainer.preview-hypothetical {
       outline: 1px dashed rgba(245, 158, 11, 0.55);
       outline-offset: -3px;
+    }
+
+    /* The preview overlays already own the cards; verdict spines would only
+       restate the pre-extraction verdict, so they are hidden while previewing. */
+    .preview-hypothetical .verdict-spine {
+      display: none;
     }
 
     .just-preview-btn-active {

@@ -9,6 +9,8 @@ Date: 2026-09-24 · Baseline: `664e014` + uncommitted WIP · `cargo check --work
 
 **Confirmed:** reference second language = **Scala**. The tree is already partly prepared: `crates/lang` (untracked WIP) contains unit-tested plugin traits (`LanguagePlugin`, `LanguageRegistry`, `LanguageDetector`, `DependencyResolver`, `SemanticAnalyzer`, `SourceExtractor`, `DependencyRewriter`, `CompilerValidator`, `ClusteringConstraints`), and `crates/repo/src/types.rs` already has `FileKind::{ScalaSource, ScalaScript, BuildDefinition}` plus `SourceLanguage { Cpp, Scala, Other }` / `from_file_kind` / `FileKind::language()`.
 
+**Architectural refinement:** Rename "Include Graph" to "Import Graph" since superfluous imports affect Java, Scala, and other languages, not just C++. This makes the architecture truly language-agnostic and relevant for all modern languages with import systems.
+
 **Assumptions (correct any of these — they are restated as decision points in §8):**
 
 | # | Assumption | Why it is safe to start here |

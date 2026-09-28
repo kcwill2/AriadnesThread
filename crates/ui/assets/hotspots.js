@@ -280,7 +280,7 @@
       const names = (p.symbol_names || []).map(escapeHtml).join(', ');
       const hidden = (p.total_symbols || 0) - (p.symbol_names || []).length;
       const more = hidden > 0 ? ` <span class="just-more">+${hidden} more</span>` : '';
-      const needs = headers ? ` needs: ${headers}` : '';
+      const needs = headers ? headers : '<em>no additional headers</em>';
       const previewRoot = selectedNodeId === null || selectedNodeId === undefined ? null : String(selectedNodeId);
       const previewable = previewRoot !== null && window.ariadnePreview
         && window.ariadnePreview.hasImpact(previewRoot, String(p.target_file_id));
@@ -289,10 +289,10 @@
         : '';
       return `
         <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${escapeHtml(p.problem || '')}">
-          <div class="extraction-title">${escapeHtml(p.target_file || String(p.target_file_id))}</div>
+          <div class="extraction-title">Extract the following symbols from ${escapeHtml(p.target_file || String(p.target_file_id))}</div>
           <div class="extraction-delta">${p.collateral_load_before || 0} &rarr; ${p.collateral_load_after || 0} collateral</div>
-          <div class="extraction-names">${names || '<em>no symbol names</em>'}${more}</div>
-          <div class="extraction-row"><span class="just-tag just-needs">needs</span>${needs || '<em>none</em>'}</div>
+          <div class="extraction-names"><strong>Symbols:</strong> ${names || '<em>no symbol names</em>'}${more}</div>
+          <div class="extraction-row"><span class="just-tag">extracted symbols need</span>${needs}</div>
           <div class="extraction-row"><span class="just-tag">${p.consumer_tu_count || 0} TU(s)</span><span class="just-tag">${escapeHtml(p.risk || '')}</span></div>
           ${previewBtn}
         </div>`;

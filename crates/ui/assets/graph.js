@@ -199,6 +199,9 @@
       // E3: every re-render (new selection, Esc, filters) drops preview state; the overlay returns only by explicit click.
       if (window.ariadnePreview) window.ariadnePreview.clearPreview();
 
+      const clearBtn = document.getElementById('btnClearSelection');
+      if (clearBtn) clearBtn.style.display = selectedNodeId ? 'inline-block' : 'none';
+
       if (selectedNodeId) {
         edgesLayer.classList.add('edges-has-selection');
       } else {
@@ -328,6 +331,9 @@
         const depCollaterals = [...reachableDependencies].map(id => collateralMap[id] || 0);
         const maxCollateral = depCollaterals.length > 0 ? Math.max(...depCollaterals) : 0;
         let totalCollateral = depCollaterals.reduce((s, c) => s + c, 0);
+        const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+        const rootLabel = rootNode ? rootNode.label : selectedNodeId;
+        const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
 
         nodesLayer.querySelectorAll('.node-group').forEach(el => {
           const nid = el.dataset.nodeId;
@@ -344,30 +350,16 @@
             const c = collateralMap[nid] || 0;
             const j = justificationMap[nid];
             const tier = classifyDependency(nid, c, j);
+            const hc = styleDependencyCard(el, tier, c, maxCollateral);
             const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             badge.setAttribute('class', 'heat-badge');
             badge.setAttribute('x', '32');
             badge.setAttribute('y', '36');
-            if (tier === 'justified') {
-              el.classList.add('dep-justified');
-              badge.setAttribute('fill', '#4ade80');
-              badge.textContent = `${j.justified_count || 0} sym`;
-            } else {
-              const hc = getHeatColor(c, maxCollateral);
-              const rect = el.querySelector('rect');
-              if (rect) {
-                rect.setAttribute('fill', hc.bg);
-                rect.setAttribute('stroke', hc.border);
-              }
-              const txt = el.querySelector('text');
-              if (txt) txt.setAttribute('fill', hc.text);
-              el.classList.add('heat-glow-' + hc.tier);
-              if (hc.tier === 4) el.classList.add('heat-critical');
-              if (tier === 'mixed') el.classList.add('dep-mixed');
-              badge.setAttribute('fill', hc.border);
-              badge.textContent = `+${c} col`;
-            }
+            badge.setAttribute('fill', verdictBadgeColor(tier, hc.border));
+            badge.textContent = tier === 'neutral' ? `+${c} col` : verdictBadgeText(tier, j);
             el.appendChild(badge);
+            const verdict = classifyEdgeVerdict(j);
+            if (verdict) appendVerdictTip(el, rootLabel, nodeLabel(nid), verdict, j);
           } else {
             el.classList.add('faded');
           }
@@ -377,11 +369,25 @@
           const src = el.dataset.edgeSource;
           if (!reachableDependencies.has(src) && src !== selectedNodeId) {
             el.classList.add('faded');
+          } else if (src === selectedNodeId && !el.classList.contains('cycle-edge')) {
+            // Edge verdict story: tri-color the root's direct outgoing edges.
+            const dst = el.dataset.edgeTarget;
+            const entry = dst !== src ? justificationMap[dst] : null;
+            const verdict = classifyEdgeVerdict(entry);
+            if (verdict === 'justified') {
+              el.classList.add('edge-justified');
+              el.setAttribute('marker-end', 'url(#arrow-entering)');
+            } else if (verdict === 'partial') {
+              el.classList.add('edge-partial');
+            } else if (verdict === 'unused') {
+              el.classList.add('edge-unused');
+              el.setAttribute('marker-end', 'url(#arrow-unused)');
+              appendVerdictTip(el, rootLabel, nodeLabel(dst), 'unused', entry);
+            }
           }
         });
 
-        const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
-        updateHeatLegend(rootNode ? rootNode.label : selectedNodeId, reachableDependencies.size, totalCollateral, justificationMap);
+        updateHeatLegend(rootLabel, reachableDependencies.size, totalCollateral, justificationMap);
       } else {
         restoreStandardLegend();
       }
@@ -398,6 +404,49 @@
       if (justified > 0 && collateral > 0) return 'mixed';
       if (justified === 0 && collateral > 0) return 'collateral';
       return 'neutral';
+    }
+
+    // Verdict spine: flat inset flag bar on the card's left edge (same idiom
+    // as the extraction-card border-left); neutral deps carry no spine.
+    function appendVerdictSpine(el, tier) {
+      const spineClass = tier === 'justified' ? 'justified'
+        : tier === 'mixed' ? 'mixed'
+        : tier === 'collateral' ? 'unused' : null;
+      if (!spineClass) return;
+      const spine = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      spine.setAttribute('class', `verdict-spine ${spineClass}`);
+      spine.setAttribute('x', '0');
+      spine.setAttribute('y', '6');
+      spine.setAttribute('width', '4');
+      spine.setAttribute('height', '30');
+      spine.setAttribute('rx', '2');
+      el.appendChild(spine);
+    }
+
+    // Heat fill/stroke applies to EVERY reachable dep incl. justified (j>0,
+    // c=0 lands in the cool tier); flat tier stroke, verdict on the spine.
+    function styleDependencyCard(el, tier, collateral, maxCollateral) {
+      const hc = getHeatColor(collateral, maxCollateral);
+      const rect = el.querySelector('rect');
+      if (rect) {
+        rect.setAttribute('fill', hc.bg);
+        rect.setAttribute('stroke', hc.border);
+      }
+      const label = el.querySelector('text');
+      if (label) label.setAttribute('fill', hc.text);
+      el.classList.add('heat-tier-' + hc.tier);
+      if (hc.tier === 4) el.classList.add('heat-critical');
+      appendVerdictSpine(el, tier);
+      return hc;
+    }
+
+    // Badge text mirrors the spine verdict color; the neutral +N col badge
+    // keeps the tier border color.
+    function verdictBadgeColor(tier, tierColor) {
+      if (tier === 'justified') return 'var(--green)';
+      if (tier === 'mixed') return 'var(--amber)';
+      if (tier === 'collateral') return 'var(--red)';
+      return tierColor;
     }
 
     // BFS over the full (unfiltered) edge dataset to find all outgoing include deps.
@@ -655,6 +704,15 @@
       if (justSection) justSection.style.display = 'none';
     }
 
+    function clearSelection() {
+      if (!selectedNodeId) return;
+      selectedNodeId = null;
+      clearInspector();
+      renderSvg();
+      renderThreadBar();
+      renderHotspots();
+    }
+
     // Canvas panning and zooming
     function setupCanvasPanZoom() {
       const container = document.getElementById('canvasContainer');
@@ -670,14 +728,6 @@
         isDragging = true;
         dragStartX = e.clientX - panX;
         dragStartY = e.clientY - panY;
-      });
-
-      container.addEventListener('click', e => {
-        if (!e.target.closest('.node-group') && dragStartX === e.clientX - panX && dragStartY === e.clientY - panY) {
-          selectedNodeId = null;
-          renderThreadBar();
-          filterAndExpandSubgraph();
-        }
       });
 
       window.addEventListener('mousemove', e => {

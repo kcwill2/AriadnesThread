@@ -96,7 +96,7 @@ use std::path::{Path, PathBuf};
 
 use ariadne_build::{BuildDiscoveryResult, BuildMeasurer};
 use ariadne_cluster::plan::{OptimizationPlan, RiskLevel};
-use ariadne_cluster::planner::OptimizationPlanner;
+use ariadne_cluster::planner::{OptimizationPlanner, is_header_file};
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadAnalyzer, ReducedSemanticModel};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
@@ -238,6 +238,7 @@ fn analyze_collateral_opportunities(
 
     let mut collateral_opportunities: Vec<CollateralOpportunity> = header_collateral_map
         .into_iter()
+        .filter(|(header_name, _)| is_header_file(std::path::Path::new(header_name)))
         .map(|(header_name, collateral_symbols)| CollateralOpportunity {
             header_name,
             collateral_symbols,

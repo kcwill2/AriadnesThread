@@ -7,7 +7,8 @@
         "serve"
       ],
       "cwd": "C:\\Users\\Kurt\\Code\\AriadnesThread",
-      "type": "stdio"
+      "type": "stdio",
+      "disabled": true
     }
   }
 }

@@ -86,7 +86,7 @@ fn migrate_preview_writes_migration_artifacts_without_disk_changes() -> Result<(
     let (_repo_guard, repo_root, plans) = provision_indexed_repo_with_plans()?;
     let plan_id = plan_id_targeting_thing_header(&plans);
     assert_eq!(
-        plan_id, "PLAN-002",
+        plan_id, "PLAN-001",
         "thing.h plan id is stable across fresh runs"
     );
 
