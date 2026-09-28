@@ -235,13 +235,45 @@ fn test_proposed_header_node_construction() {
         "applyPreview must inject the proposed node"
     );
 
+    // SF-1: the badge shares no row with the label (y=12 vs baseline y=25), so
+    // a length threshold only makes it a dead branch — it must always render.
+    assert!(
+        !inject.contains("label.length"),
+        "the PROPOSED badge must render unconditionally, not gated on label length (SF-1)"
+    );
+    let badge_x_at = inject
+        .find("badge.setAttribute('x', '")
+        .expect("the badge must set an explicit x inside the 170px card (N3)");
+    let badge_x: i32 = inject[badge_x_at + "badge.setAttribute('x', '".len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .expect("badge x must be numeric");
+    // 8 chars at ~4.2px each in 7px monospace ≈ 34px; right edge must sit at
+    // least 6px inside the card border: x <= 170 - 6 - 34 = 130.
+    assert!(
+        badge_x <= 170 - 6 - 34,
+        "the PROPOSED badge must end at least 6px inside the card (x={badge_x} <= 130, N3)"
+    );
+    assert!(
+        !ariadne_ui::STYLES_CSS.contains("letter-spacing: 0.5"),
+        "badge letter-spacing must be dropped so PROPOSED fits the card (N3)"
+    );
+
     assert!(
         preview.contains("Proposed header (placeholder name)"),
         "the legend must explain the proposed header row"
     );
+    // N4: the swatch row already names the proposed header; the view label is
+    // the short hypothetical warning, nothing more.
     assert!(
-        preview.contains("Proposed header (placeholder name), proposed edges"),
-        "the hypothetical affordance must name the violet dashed proposed header"
+        preview.contains("\\u26A0 After extraction (hypothetical)"),
+        "the legend view label must be the short hypothetical warning (N4)"
+    );
+    assert!(
+        !preview.contains("proposed edges'),"),
+        "the view label must not re-list the proposed edges (N4)"
     );
     assert!(
         preview.contains("background:transparent;border:1px dashed #a78bfa"),

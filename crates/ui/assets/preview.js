@@ -93,7 +93,7 @@
       const moreNote = hidden > 0 ? ` <span class="just-more">+${hidden} more eliminated</span>` : '';
       const sampleNote = full ? '' : ' <span class="just-more">(names capped to a sample)</span>';
       document.getElementById('legendViewLabel').textContent =
-        '\u26A0 After extraction: Proposed header (placeholder name), proposed edges';
+        '\u26A0 After extraction (hypothetical)';
       const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
         + `After extraction: closure ${impact.root_closure_before || 0} &rarr; ${impact.root_closure_after || 0}`
         + ` &middot; ${dropped} headers dropped${moreNote}${sampleNote}`
@@ -269,16 +269,16 @@
       text.textContent = label;
       card.appendChild(text);
 
-      if (label.length <= 14) {
-        const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        badge.setAttribute('class', 'preview-proposed-badge');
-        badge.setAttribute('x', '140');
-        badge.setAttribute('y', '12');
-        badge.setAttribute('font-size', '7');
-        badge.setAttribute('fill', '#a78bfa');
-        badge.textContent = 'PROPOSED';
-        card.appendChild(badge);
-      }
+      // Badge and label live on separate rows (y=12 vs baseline y=25), so it
+      // always renders; x keeps its ~34px width 8px inside the 170px card.
+      const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      badge.setAttribute('class', 'preview-proposed-badge');
+      badge.setAttribute('x', '128');
+      badge.setAttribute('y', '12');
+      badge.setAttribute('font-size', '7');
+      badge.setAttribute('fill', '#a78bfa');
+      badge.textContent = 'PROPOSED';
+      card.appendChild(badge);
       layer.appendChild(card);
       return { x: nodeX, y: nodeY, root: root, source: source };
     }

@@ -1267,10 +1267,6 @@
       fill: #e9d5ff;
     }
 
-    .preview-proposed-badge {
-      letter-spacing: 0.5px;
-    }
-
     .edge-path.preview-proposed-edge {
       stroke: #a78bfa;
       stroke-width: 1.6px;
