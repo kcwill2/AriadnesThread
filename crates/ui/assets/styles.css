@@ -18,6 +18,33 @@
       --amber: #fb923c;
       --red: #ef4444;
     }
+    /* SCROLLBARS — themed chrome so scroll regions match the dark panels
+       instead of showing native light scrollbars. `transparent` track keeps
+       panel background; thumb uses border-light so it reads on every surface. */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-light) transparent;
+    }
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-light);
+      border-radius: 5px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-sub);
+      background-clip: content-box;
+    }
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
     * {
       box-sizing: border-box;
       margin: 0;
@@ -90,7 +117,7 @@
     /* VIEW SWITCHER TABS */
     .tabs {
       display: flex;
-      background: #1e293b;
+      background: var(--bg-card);
       padding: 3px;
       border-radius: 8px;
       border: 1px solid var(--border);
@@ -229,7 +256,7 @@
 
     .stat-badge {
       padding: 4px 8px;
-      background: #1e293b;
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 5px;
       font-size: 11px;
@@ -266,7 +293,7 @@
 
     .btn-export {
       padding: 6px 12px;
-      background: #1e293b;
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--text-main);
@@ -280,7 +307,7 @@
     }
 
     .btn-export:hover {
-      background: #334155;
+      background: var(--border-light);
     }
 
     /* SUB TOOLBAR */
@@ -318,6 +345,16 @@
       border-radius: 5px;
       font-size: 11px;
       outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .select-dark:hover {
+      border-color: var(--border-light);
+    }
+
+    .select-dark:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 1px var(--cyan);
     }
 
     .btn-toggle-group {
@@ -339,7 +376,7 @@
     }
 
     .btn-toggle-group button.active {
-      background: #334155;
+      background: var(--border-light);
       color: var(--cyan);
       font-weight: 600;
     }
@@ -358,7 +395,7 @@
 
     .btn-icon:hover {
       color: var(--text-main);
-      background: #334155;
+      background: var(--border-light);
     }
 
     /* MAIN WORKSPACE */
@@ -841,7 +878,7 @@
     }
 
     .btn-secondary:hover {
-      background: #334155;
+      background: var(--border-light);
     }
 
     /* FLOATING LEGEND */
@@ -1024,7 +1061,7 @@
     }
 
     .hotspot-row:hover {
-      background: #1e293b;
+      background: var(--bg-card);
     }
 
     .hotspot-row.active {
@@ -1085,7 +1122,7 @@
     /* RIGHT SOURCE PANEL (collapsible + resizable) */
     .drawer {
       width: 0;
-      background: #0d1117;
+      background: var(--bg-canvas);
       border-left: 1px solid var(--border-light);
       display: flex;
       flex-direction: column;
@@ -1122,7 +1159,7 @@
 
     .drawer-header {
       height: 32px;
-      background: #161b22;
+      background: var(--bg-sub);
       border-bottom: 1px solid var(--border);
       padding: 0 16px;
       display: flex;
@@ -1140,7 +1177,7 @@
       font-size: 12px;
       line-height: 1.5;
       color: #e2e8f0;
-      background: #0d1117;
+      background: var(--bg-canvas);
     }
 
     .code-line {
@@ -1180,7 +1217,7 @@
     }
     .thread-item {
       padding: 4px 10px;
-      background: #1e293b;
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
       font-size: 11px;
