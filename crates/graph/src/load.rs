@@ -3,9 +3,14 @@ use anyhow::{anyhow, Result};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+// Only the test-only BFS counter touches atomics; the import stays
+// `cfg(test)` so release builds emit no unused-import warning.
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Renders a path's final component, falling back to the full path for names
 /// without one (e.g. `..`), mirroring `format_summary`'s file_name fallback.
@@ -124,11 +129,60 @@ impl LoadExplanation {
     }
 }
 
+/// Thread-safe (`Send + Sync`) so the pipeline can share ONE memoized
+/// analyzer across rayon workers (plan LoadPerfImprovements Phase 4).
+/// Contention-free reads (plan LoadPerfImprovements Phase 5): `closures`
+/// and `symbol_adjacency` are `OnceLock`s — after initialization every
+/// access is a plain shared reference with NO lock held, so BFS traversals
+/// never serialize on an adjacency mutex; `semantic_closure_cache` keeps a
+/// short `Mutex` only around map lookup/insert, and cache hits hand out an
+/// `Arc` refcount bump instead of cloning the whole closure set. The
+/// `Mutex` poisoning via `.unwrap()` is acceptable because poisoning
+/// requires a prior panic while holding that same lock, which already
+/// aborts the run. No lock is ever held while acquiring another
+/// (`OnceLock::get_or_init` for `symbol_adjacency` is invoked OUTSIDE any
+/// other guard, and the `semantic_closure_cache` guard ends before the
+/// miss-path BFS starts), so the caches cannot deadlock, and no guard
+/// crosses a rayon job boundary.
 pub struct LoadAnalyzer<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
-    closures: RefCell<Option<HashMap<FileId, IncludeClosure>>>,
-    symbol_adjacency: RefCell<Option<HashMap<SymbolId, Vec<SymbolId>>>>,
+    closures: OnceLock<HashMap<FileId, IncludeClosure>>,
+    symbol_adjacency: OnceLock<HashMap<SymbolId, Vec<SymbolId>>>,
+    /// Append-only memo of single-seed semantic closures, keyed by seed.
+    /// `LoadAnalyzer` never mutates `model` or `include_graph` after
+    /// construction, so a closure computed once can never go stale: entries
+    /// are permanent and NO invalidation logic is required. Memory grows by
+    /// one `Arc<HashSet<SymbolId>>` per distinct seed ever queried; the Arc
+    /// makes concurrent cache hits a refcount bump instead of a full
+    /// `HashSet` clone.
+    semantic_closure_cache: Mutex<HashMap<SymbolId, Arc<HashSet<SymbolId>>>>,
+    /// Append-only memo of the physical symbol expansion of a SINGLE
+    /// def-file — the union of `model.file_symbols` over the file's
+    /// transitive includes (seed included). Like the semantic memo, the
+    /// inputs (include closures, reduced model) are immutable after
+    /// construction, so entries are permanent and need no invalidation;
+    /// `compute_load`'s `def_files.len() == 1` fast path borrows the `Arc`
+    /// instead of re-cloning thousands of `SymbolId`s per call. Multi-file
+    /// def-file sets (none in practice) use the non-memoized path. Memory
+    /// grows by one `Arc<HashSet<SymbolId>>` per distinct def-file ever
+    /// queried, mirroring the semantic memo's per-seed growth.
+    physical_expansion_cache: Mutex<HashMap<FileId, Arc<HashSet<SymbolId>>>>,
+    /// Test-only tally of real per-def-file physical expansions (transitive
+    /// include closure unioned into `model.file_symbols`) executed by this
+    /// analyzer; the memo under test must serve repeats without a new
+    /// expansion. Absent from release builds entirely, mirroring
+    /// `semantic_bfs_traversals`.
+    #[cfg(test)]
+    physical_expansions: AtomicUsize,
+    /// Test-only tally of actual semantic-closure BFS traversals executed by
+    /// this analyzer. Instrumented per analyzer (not a global counter) so
+    /// parallel test threads cannot observe each other's traversals; absent
+    /// from release builds entirely. Atomic (not `Cell`) because the struct
+    /// must be `Sync` so the pipeline can share one analyzer across rayon
+    /// workers.
+    #[cfg(test)]
+    semantic_bfs_traversals: AtomicUsize,
 }
 
 /// One header row in an `ExtractionImpact` list. `symbol_count` is the total
@@ -172,8 +226,14 @@ impl<'a> LoadAnalyzer<'a> {
         Self {
             include_graph,
             model,
-            closures: RefCell::new(None),
-            symbol_adjacency: RefCell::new(None),
+            closures: OnceLock::new(),
+            symbol_adjacency: OnceLock::new(),
+            semantic_closure_cache: Mutex::new(HashMap::new()),
+            physical_expansion_cache: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            physical_expansions: AtomicUsize::new(0),
+            #[cfg(test)]
+            semantic_bfs_traversals: AtomicUsize::new(0),
         }
     }
 
@@ -187,8 +247,14 @@ impl<'a> LoadAnalyzer<'a> {
         Self {
             include_graph,
             model,
-            closures: RefCell::new(Some(closures)),
-            symbol_adjacency: RefCell::new(None),
+            closures: OnceLock::from(closures),
+            symbol_adjacency: OnceLock::new(),
+            semantic_closure_cache: Mutex::new(HashMap::new()),
+            physical_expansion_cache: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            physical_expansions: AtomicUsize::new(0),
+            #[cfg(test)]
+            semantic_bfs_traversals: AtomicUsize::new(0),
         }
     }
 
@@ -215,8 +281,9 @@ impl<'a> LoadAnalyzer<'a> {
     }
 
     fn get_transitive_includes(&self, file_id: FileId) -> HashSet<FileId> {
-        let mut guard = self.closures.borrow_mut();
-        let closures = guard.get_or_insert_with(|| self.include_graph.compute_closures());
+        let closures = self
+            .closures
+            .get_or_init(|| self.include_graph.compute_closures());
         let mut all = HashSet::new();
         all.insert(file_id);
         if let Some(closure) = closures.get(&file_id) {
@@ -225,9 +292,57 @@ impl<'a> LoadAnalyzer<'a> {
         all
     }
 
+    /// Semantic closure of `start_symbols`, served per seed from
+    /// `semantic_closure_cache`. Reachability is seed-local, so
+    /// `closure({a, b}) == closure({a}) ∪ closure({b})`: the union of the
+    /// per-seed results equals the old single multi-seed BFS exactly, seeds
+    /// included (an unknown/edgeless seed yields the singleton `{itself}`).
+    /// The single-seed case copies the memoized set once; multi-seed calls
+    /// union the Arc contents into the owned result.
     fn get_semantic_closure_of_symbols(&self, start_symbols: &[SymbolId]) -> HashSet<SymbolId> {
-        let mut guard = self.symbol_adjacency.borrow_mut();
-        let adjacency = guard.get_or_insert_with(|| {
+        if let [only_seed] = start_symbols {
+            return (*self.cached_single_seed_closure(only_seed)).clone();
+        }
+        let mut visited = HashSet::new();
+        for seed in start_symbols {
+            visited.extend(self.cached_single_seed_closure(seed).iter().cloned());
+        }
+        visited
+    }
+
+    /// Single-seed semantic closure, memoized in `semantic_closure_cache`:
+    /// the cache `lock()` guard ends at the end of the lookup statement, so
+    /// the miss-path insert lock never overlaps another lock. Hits clone
+    /// only the `Arc` (refcount bump), never the closure set itself.
+    fn cached_single_seed_closure(&self, seed: &SymbolId) -> Arc<HashSet<SymbolId>> {
+        let memoized = self
+            .semantic_closure_cache
+            .lock()
+            .unwrap()
+            .get(seed)
+            .cloned();
+        if let Some(closure) = memoized {
+            return closure;
+        }
+        let closure = Arc::new(self.compute_single_seed_closure(seed));
+        self.semantic_closure_cache
+            .lock()
+            .unwrap()
+            .insert(seed.clone(), Arc::clone(&closure));
+        closure
+    }
+
+    /// One BFS traversal from a single seed over the lazily built
+    /// `symbol_adjacency`. Seeds are always inserted into `visited`, so an
+    /// unknown symbol yields exactly `{seed}` — the behavior the cache
+    /// memoizes bit-for-bit. `OnceLock::get_or_init` builds the map at most
+    /// once and afterwards hands out a plain `&` — no lock is held during
+    /// the traversal, so concurrent cache-miss BFS runs in parallel.
+    fn compute_single_seed_closure(&self, seed: &SymbolId) -> HashSet<SymbolId> {
+        #[cfg(test)]
+        self.record_semantic_bfs_traversal();
+
+        let adjacency = self.symbol_adjacency.get_or_init(|| {
             let mut adj: HashMap<SymbolId, Vec<SymbolId>> = HashMap::new();
             for edge in &self.model.edges {
                 adj.entry(edge.src_symbol.clone())
@@ -238,23 +353,58 @@ impl<'a> LoadAnalyzer<'a> {
         });
 
         let mut visited = HashSet::new();
-        let mut stack = Vec::new();
-        for s in start_symbols {
-            stack.push(s.clone());
-            visited.insert(s.clone());
-        }
+        visited.insert(seed.clone());
+        let mut stack = vec![seed.clone()];
 
         while let Some(current) = stack.pop() {
             if let Some(nexts) = adjacency.get(&current) {
                 for next in nexts {
-                    if !visited.contains(next) {
-                        visited.insert(next.clone());
+                    if visited.insert(next.clone()) {
                         stack.push(next.clone());
                     }
                 }
             }
         }
         visited
+    }
+
+    /// Test-only: counts each semantic-closure BFS traversal actually run by
+    /// this analyzer. Gated behind `cfg(test)` so release builds pay nothing.
+    #[cfg(test)]
+    fn record_semantic_bfs_traversal(&self) {
+        self.semantic_bfs_traversals.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Test-only: tally of semantic-closure BFS traversals run so far.
+    #[cfg(test)]
+    fn semantic_bfs_traversal_count(&self) -> usize {
+        self.semantic_bfs_traversals.load(Ordering::Relaxed)
+    }
+
+    /// Test-only: counts each real physical expansion executed by this
+    /// analyzer (a per-def-file cache miss, or a multi-def-file expansion
+    /// that is never memoized). Gated behind `cfg(test)`.
+    #[cfg(test)]
+    fn record_physical_expansion(&self) {
+        self.physical_expansions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Test-only: tally of real physical expansions run so far.
+    #[cfg(test)]
+    fn physical_expansion_count(&self) -> usize {
+        self.physical_expansions.load(Ordering::Relaxed)
+    }
+
+    /// Test-only: number of memoized single-seed semantic closures.
+    #[cfg(test)]
+    fn semantic_closure_cache_len(&self) -> usize {
+        self.semantic_closure_cache.lock().unwrap().len()
+    }
+
+    /// Test-only: number of memoized single-def-file physical expansions.
+    #[cfg(test)]
+    fn physical_expansion_cache_len(&self) -> usize {
+        self.physical_expansion_cache.lock().unwrap().len()
     }
 
     /// Groups symbols by defining file into contributor entries, applying the
@@ -340,10 +490,11 @@ impl<'a> LoadAnalyzer<'a> {
 
     /// Strict include closure of a file: transitive includes WITHOUT the file
     /// itself, served from the shared `closures` cache (real edges only).
+    /// The OnceLock guard is never held across derived work — the returned
+    /// `&HashMap` is a plain shared borrow.
     fn strict_closure(&self, file_id: FileId) -> HashSet<FileId> {
-        let mut guard = self.closures.borrow_mut();
-        let closures = guard.get_or_insert_with(|| self.include_graph.compute_closures());
-        closures
+        self.closures
+            .get_or_init(|| self.include_graph.compute_closures())
             .get(&file_id)
             .map(|c| c.transitive_includes.iter().copied().collect())
             .unwrap_or_default()
@@ -454,22 +605,17 @@ impl<'a> LoadAnalyzer<'a> {
         let root_after = self.override_closure(root, source, &required_set);
         let root_closure_after = root_after.len().saturating_sub(1);
         let root_before = self.strict_closure(root);
-        let dropped_from_root: HashSet<FileId> = root_before
-            .difference(&root_after)
-            .copied()
-            .collect();
+        let dropped_from_root: HashSet<FileId> =
+            root_before.difference(&root_after).copied().collect();
         let still_reachable: HashSet<FileId> = dropped_directly
             .difference(&dropped_from_root)
             .copied()
             .collect();
 
-        let partition_union: HashSet<FileId> = dropped_from_root
-            .union(&still_reachable)
-            .copied()
-            .collect();
+        let partition_union: HashSet<FileId> =
+            dropped_from_root.union(&still_reachable).copied().collect();
         debug_assert!(
-            partition_union == dropped_directly
-                && dropped_from_root.is_disjoint(&still_reachable),
+            partition_union == dropped_directly && dropped_from_root.is_disjoint(&still_reachable),
             "E-I1: dropped_directly must partition into dropped_from_root ⊎ still_reachable"
         );
 
@@ -487,16 +633,19 @@ impl<'a> LoadAnalyzer<'a> {
         })
     }
 
-    fn compute_load(
-        &self,
-        target_name: String,
-        target_file: Option<PathBuf>,
-        def_files: HashSet<FileId>,
-        semantic_closure: HashSet<SymbolId>,
-    ) -> Result<LoadMetric> {
+    /// Physical expansion of a def-file set: the union of
+    /// `model.file_symbols` over each def-file's transitive includes (the
+    /// seed files included), exactly as `compute_load` used to build it
+    /// inline. Each call is one REAL expansion and counts on the test-only
+    /// `physical_expansions` tally; the single-file memo below decides how
+    /// often this runs.
+    fn expand_physical_symbols(&self, def_files: &HashSet<FileId>) -> HashSet<SymbolId> {
+        #[cfg(test)]
+        self.record_physical_expansion();
+
         let mut physical_include_files = HashSet::new();
         for f in def_files {
-            physical_include_files.extend(self.get_transitive_includes(f));
+            physical_include_files.extend(self.get_transitive_includes(*f));
         }
 
         let mut physical_symbols = HashSet::new();
@@ -505,6 +654,65 @@ impl<'a> LoadAnalyzer<'a> {
                 physical_symbols.extend(syms.iter().cloned());
             }
         }
+        physical_symbols
+    }
+
+    /// Single-def-file physical expansion, memoized in
+    /// `physical_expansion_cache`: the `lock()` guard ends at the end of the
+    /// lookup statement, and the miss-path expansion (which touches the
+    /// `closures` OnceLock) runs outside every guard — the same append-only
+    /// pattern as `cached_single_seed_closure`, so cache hits are an `Arc`
+    /// refcount bump and the caches cannot deadlock.
+    fn cached_physical_expansion(&self, file_id: FileId) -> Arc<HashSet<SymbolId>> {
+        let memoized = self
+            .physical_expansion_cache
+            .lock()
+            .unwrap()
+            .get(&file_id)
+            .cloned();
+        if let Some(expansion) = memoized {
+            return expansion;
+        }
+        let expansion = Arc::new(self.expand_physical_symbols(&HashSet::from([file_id])));
+        self.physical_expansion_cache
+            .lock()
+            .unwrap()
+            .insert(file_id, Arc::clone(&expansion));
+        expansion
+    }
+
+    /// The semantic closure is consumed by reference: every caller either
+    /// owns a freshly built set or borrows the memoized `Arc` in
+    /// `analyze_symbol_load`, and this pass only ever queries `contains`,
+    /// so the closure set is never cloned just to be read here.
+    fn compute_load(
+        &self,
+        target_name: String,
+        target_file: Option<PathBuf>,
+        def_files: HashSet<FileId>,
+        semantic_closure: &HashSet<SymbolId>,
+    ) -> Result<LoadMetric> {
+        // Single-def-file fast path (both public analyzers always hit it):
+        // borrow the memoized physical-expansion `Arc` instead of re-unioning
+        // the def-file's whole include-closure symbol set (~thousands of
+        // `SymbolId` string clones per call). Multi-file def-file sets (none
+        // in practice) keep the old non-memoized expansion, so every metric
+        // is computed from the identical element set either way.
+        let memoized: Option<Arc<HashSet<SymbolId>>> = match def_files.len() {
+            1 => def_files
+                .iter()
+                .next()
+                .map(|&f| self.cached_physical_expansion(f)),
+            _ => None,
+        };
+        let expanded: HashSet<SymbolId>;
+        let physical_symbols: &HashSet<SymbolId> = match &memoized {
+            Some(expansion) => expansion,
+            None => {
+                expanded = self.expand_physical_symbols(&def_files);
+                &expanded
+            }
+        };
 
         let mut collateral_symbols: Vec<SymbolId> = physical_symbols
             .iter()
@@ -554,7 +762,11 @@ impl<'a> LoadAnalyzer<'a> {
             .ok_or_else(|| anyhow!("No defining file for symbol"))?;
         let target_file_path = self.include_graph.file_paths.get(&def_file).cloned();
 
-        let semantic_closure = self.get_semantic_closure_of_symbols(&[sym_id]);
+        // Hot path: borrow the memoized `Arc` closure directly — the
+        // pipeline's per-symbol pass calls this once per symbol, and
+        // cloning the whole closure set per call was the dominant
+        // cache-hit cost the Arc memo exists to remove.
+        let semantic_closure = self.cached_single_seed_closure(&sym_id);
 
         let mut def_files = HashSet::new();
         def_files.insert(def_file);
@@ -563,7 +775,7 @@ impl<'a> LoadAnalyzer<'a> {
             record.name.clone(),
             target_file_path,
             def_files,
-            semantic_closure,
+            &semantic_closure,
         )
     }
 
@@ -590,7 +802,7 @@ impl<'a> LoadAnalyzer<'a> {
         let mut def_files = HashSet::new();
         def_files.insert(file_id);
 
-        self.compute_load(target_name, target_file, def_files, semantic_closure)
+        self.compute_load(target_name, target_file, def_files, &semantic_closure)
     }
 
     fn find_shortest_include_path(&self, start: FileId, end: FileId) -> Option<Vec<FileId>> {
@@ -771,3 +983,9 @@ mod justification;
 #[cfg(test)]
 #[path = "load_impact_tests.rs"]
 mod impact;
+
+/// Load-performance suite: locks per-seed semantic-closure memoization
+/// (BFS-run counts and cold-vs-warm equivalence, plan LoadPerfImprovements).
+#[cfg(test)]
+#[path = "load_perf_tests.rs"]
+mod perf;

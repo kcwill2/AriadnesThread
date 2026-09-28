@@ -108,10 +108,14 @@ fn setup_impact_fixture(
     let d_sym2 = add_sym(&mut model, "Dsym2", D_H);
     let e_sym = add_sym(&mut model, "Esym", E_H);
 
-    model.file_symbols.insert(FAT, vec![fat_a.clone(), fat_b.clone()]);
+    model
+        .file_symbols
+        .insert(FAT, vec![fat_a.clone(), fat_b.clone()]);
     model.file_symbols.insert(BASE, vec![base_t.clone()]);
     model.file_symbols.insert(C_H, vec![c_sym.clone()]);
-    model.file_symbols.insert(D_H, vec![d_sym.clone(), d_sym2.clone()]);
+    model
+        .file_symbols
+        .insert(D_H, vec![d_sym.clone(), d_sym2.clone()]);
     model.file_symbols.insert(E_H, vec![e_sym.clone()]);
 
     model.edges = vec![dep(&fat_a, &base_t), dep(&fat_b, &base_t)];
@@ -122,13 +126,7 @@ fn setup_impact_fixture(
 fn basenames(headers: &[ImpactHeader]) -> Vec<String> {
     headers
         .iter()
-        .map(|h| {
-            h.path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()
-        })
+        .map(|h| h.path.file_name().unwrap().to_string_lossy().to_string())
         .collect()
 }
 
@@ -200,8 +198,7 @@ fn test_impact_base_fixture_drop_sets_and_counts() {
         .copied()
         .collect::<HashSet<FileId>>();
     assert_eq!(union, id_set(&impact.dropped_directly));
-    assert!(id_set(&impact.dropped_from_root)
-        .is_disjoint(&id_set(&impact.still_reachable)));
+    assert!(id_set(&impact.dropped_from_root).is_disjoint(&id_set(&impact.still_reachable)));
 
     // Required set never contains the source itself (A2 rule).
     assert!(impact.required_headers.iter().all(|h| h.file_id != FAT));

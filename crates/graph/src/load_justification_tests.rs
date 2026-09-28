@@ -68,9 +68,10 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         FileId(2),
         vec![helper_fn.clone(), helper_fn2.clone(), helper_util.clone()],
     );
-    model
-        .file_symbols
-        .insert(FileId(3), vec![SymbolId::new("HugeThing"), SymbolId::new("HugeOther")]);
+    model.file_symbols.insert(
+        FileId(3),
+        vec![SymbolId::new("HugeThing"), SymbolId::new("HugeOther")],
+    );
     model
         .file_symbols
         .insert(FileId(4), vec![base_struct.clone()]);
@@ -167,11 +168,7 @@ fn test_partition_invariant_i1_semantic_plus_collateral() {
         .analyze_file_load(Path::new("Thing.h"))
         .expect("analyze_file_load failed");
 
-    let sem_sum: usize = metric
-        .semantic_sources
-        .iter()
-        .map(|s| s.symbol_count)
-        .sum();
+    let sem_sum: usize = metric.semantic_sources.iter().map(|s| s.symbol_count).sum();
     let col_sum: usize = metric
         .collateral_sources
         .iter()
@@ -232,11 +229,7 @@ fn test_semantic_sources_populated_for_symbol_load() {
             ("Thing.h".to_string(), 1),
         ]
     );
-    let sem_sum: usize = metric
-        .semantic_sources
-        .iter()
-        .map(|s| s.symbol_count)
-        .sum();
+    let sem_sum: usize = metric.semantic_sources.iter().map(|s| s.symbol_count).sum();
     let col_sum: usize = metric
         .collateral_sources
         .iter()
@@ -338,12 +331,7 @@ fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         dst_symbol: dst.clone(),
         kind: DependencyKind::Complete,
     };
-    model.edges = vec![
-        dep(&s1, &x1),
-        dep(&s1, &x2),
-        dep(&x1, &y1),
-        dep(&s2, &y1),
-    ];
+    model.edges = vec![dep(&s1, &x1), dep(&s1, &x2), dep(&x1, &y1), dep(&s2, &y1)];
 
     (ig, model)
 }
@@ -410,8 +398,7 @@ fn test_required_headers_combines_two_seed_closures_excluding_seed_file() {
     let (ig, model) = setup_required_fixture();
     let analyzer = LoadAnalyzer::new(&ig, &model);
 
-    let rows =
-        analyzer.required_headers_for_symbols(&[SymbolId::new("S1"), SymbolId::new("S2")]);
+    let rows = analyzer.required_headers_for_symbols(&[SymbolId::new("S1"), SymbolId::new("S2")]);
 
     assert_eq!(
         header_rows(&rows),
@@ -443,7 +430,10 @@ fn test_required_headers_unknown_symbols_ignored() {
     let analyzer = LoadAnalyzer::new(&ig, &model);
 
     assert!(analyzer
-        .required_headers_for_symbols(&[SymbolId::new("NoSuchSymbol"), SymbolId::new("AlsoMissing")])
+        .required_headers_for_symbols(&[
+            SymbolId::new("NoSuchSymbol"),
+            SymbolId::new("AlsoMissing")
+        ])
         .is_empty());
 
     let known_only = analyzer.required_headers_for_symbols(&[SymbolId::new("S1")]);
@@ -451,10 +441,8 @@ fn test_required_headers_unknown_symbols_ignored() {
         header_rows(&known_only),
         vec![("a.h".to_string(), 2), ("b.h".to_string(), 1)]
     );
-    let mixed = analyzer.required_headers_for_symbols(&[
-        SymbolId::new("NoSuchSymbol"),
-        SymbolId::new("S1"),
-    ]);
+    let mixed = analyzer
+        .required_headers_for_symbols(&[SymbolId::new("NoSuchSymbol"), SymbolId::new("S1")]);
     assert_eq!(mixed, known_only);
 }
 
@@ -642,4 +630,3 @@ fn test_is_includable_header_predicate() {
         );
     }
 }
-
