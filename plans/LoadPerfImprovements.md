@@ -112,3 +112,27 @@ The "Analyzing collateral" step (stage 5/5) has significant performance bottlene
 - **Goal**: Reduce collateral analysis time by 50-70% on large codebases
 - **Baseline**: Current implementation with 1000+ symbols and 500+ files
 - **Measurement**: Time `ensure_load()` stage in isolation
+
+---
+
+## Execution Results (2026-09-28, executed via IDD/TDD orchestration)
+
+**Fixture**: synthetic 520 headers / 40 TUs / 2160 reduced symbols / 5520 semantic edges / 560 file metrics — meets the 1000+ symbols / 500+ files baseline target. Bench: `cargo test -p ariadne-pipeline --test load_perf_bench --release -- --ignored --nocapture --test-threads=1` (cold `ensure_load`, best-of-two, 16 cores).
+
+| Metric | Baseline HEAD | Final | Reduction |
+|---|---|---|---|
+| `ensure_load` stage total | 7145 ms | 2204 ms | **69.2%** ✅ |
+| Analysis phases only (symbol+file loops, the UI "Analyzing collateral" step) | ≈4218–4445 ms | ≈413 ms | **≈91%** ✅ |
+| Artifact save (`save_load_artifacts`, serial) | ≈1.5–1.6 s | ≈1.8–2.0 s | unchanged (Amdahl floor) |
+| In-memory report deep copy into pipeline cache | ≈0.7–0.9 s | 0 ms (Arc move) | 100% |
+
+**Phase dispositions:**
+- **Phase 1 (precompute symbol adjacency) & Phase 2 (closure reuse): ALREADY PRESENT at plan authoring time.** The plan's bottleneck claims #1/#2 were stale — lazy `get_or_insert_with` caching + `with_closures()` already eliminated repeated builds. Superseded by `OnceLock` (contention-free reads) during Phase 4.
+- **Phase 3 (semantic closure memoization): DONE + EXTENDED.** Per-seed `Arc<HashSet<SymbolId>>` memo in `LoadAnalyzer`; multi-seed queries served as unions of cached single-seed closures (zero BFS once seeds are warm — the symbol pass warms all seeds before the file pass). Locked by BFS-count tests in `crates/graph/src/load_perf_tests.rs`.
+- **Phase 4 (parallel file analysis): DONE.** `LoadAnalyzer` made `Send + Sync` (OnceLock/Mutex caches); `ensure_load` runs both symbol and file passes via rayon `par_iter` with order-preserving collection; scoped `ThreadPoolBuilder` honors `Pipeline::workers`. Deliberate deviation: no cargo feature flag (avoids an untested dual path); `workers` is the parallelism knob. Extra wins discovered during measurement: `compute_load` borrows the memoized closure (killed per-call set clone) and a per-def-file `physical_expansion_cache`.
+- **Phase 5 (conditional sorting): DROPPED — rationale.** Every `compute_load` result is serialized into the load artifact; the sorts are the artifact-determinism lock (diff stability across runs). Internal consumers (`extraction_impact`, `required_headers_for_symbols`) never call `compute_load`, so the claimed savings were unreachable. Removing the sort would make JSON artifacts unstable.
+- **Bonus fix (found by measurement):** the stage-total bottleneck was not analysis but the serial artifact tail — `ensure_load`'s `report.clone()` deep copy (~0.9 s) plus artifact save. `load_cache` now holds `Arc<LoadReport>` (no deep copy); `cached_load()` unchanged signature.
+
+**Verification:** `cargo test --workspace` green (graph 63, pipeline 12 + 1 ignored bench); `python tools/hygiene_check.py` exit 0; clippy zero warnings in load*/pipeline/bench files; load.rs 991/1000 lines (next touch: extract cache fields to `load_caches.rs` sibling — 9 lines from cap). Memory tradeoff (plan risk item): caches are append-only per analyzer — one closure per distinct seed symbol and one expansion per distinct def-file; documented in field docs, entry counts locked by `test_cache_entry_counts_match_hand_computed_fixture`.
+
+**Review:** three Code-reviewer passes — memoization APPROVED; rayon parallelization APPROVED; holistic final pass over all layers APPROVED (remaining nits deferred: direct unit test for the multi-def-file `compute_load` fallback — dead-ish code, equivalence-by-construction; load.rs module split on next growth).
