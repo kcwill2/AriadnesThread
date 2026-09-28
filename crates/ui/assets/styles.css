@@ -518,8 +518,8 @@
     }
 
     /* INSPECTOR SIDEBAR */
-    .inspector {
-      width: 440px;
+.inspector {
+  width: 560px;
       background: var(--bg-surface);
       border-left: 1px solid var(--border);
       display: flex;
@@ -901,9 +901,9 @@
     .legend-card.spine-none { border-left-color: transparent; }
 
     /* HOTSPOTS PANEL — workspace column (never an overlay over the legend) */
-    .hotspot-panel {
-      position: static;
-      width: 400px;
+.hotspot-panel {
+  position: static;
+  width: 520px;
       flex-shrink: 0;
       height: 100%;
       background: var(--bg-surface);
@@ -1088,7 +1088,7 @@
     }
 
     .drawer.open {
-      width: var(--source-panel-w, 480px);
+      width: var(--source-panel-w, 560px);
     }
 
     .drawer.resizing {

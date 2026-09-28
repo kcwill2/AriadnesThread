@@ -1,5 +1,5 @@
     // Source Code Panel (right side, collapsible & resizable)
-    let sourcePanelWidth = 480;
+    let sourcePanelWidth = 560;
 
     function startSourceResize(evt) {
       evt.preventDefault();

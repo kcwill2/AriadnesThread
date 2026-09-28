@@ -345,8 +345,8 @@ fn test_hotspots_panel_is_collapsible_layout_column() {
         ".hotspot-panel must be a static flex column, not an absolute overlay"
     );
     assert!(
-        body.contains("width: 400px") && body.contains("flex-shrink: 0"),
-        ".hotspot-panel must reserve a fixed 400px workspace column"
+        body.contains("width: 520px") && body.contains("flex-shrink: 0"),
+        ".hotspot-panel must reserve a fixed 520px workspace column"
     );
     assert!(
         body.contains("background: var(--bg-surface)"),
@@ -378,8 +378,8 @@ fn test_inspector_panel_is_wider_and_collapsible() {
 
     let inspector = css_rule_body(css, ".inspector");
     assert!(
-        inspector.contains("width: 440px") && inspector.contains("flex-shrink: 0"),
-        ".inspector must reserve a fixed 440px workspace column"
+        inspector.contains("width: 560px") && inspector.contains("flex-shrink: 0"),
+        ".inspector must reserve a fixed 560px workspace column"
     );
 
     assert!(
@@ -587,6 +587,22 @@ fn test_collapsed_panels_offer_edge_restore_tabs() {
     assert!(
         restore_drawer.contains("classList.add('open')"),
         "restoreSourceDrawer must reopen the drawer in place without reloading its content"
+    );
+    assert_drawer_default_width(css, file_view);
+}
+
+fn assert_drawer_default_width(css: &str, file_view: &str) {
+    // The drawer's default open width must match the CSS default; the JS
+    // initializer and the .drawer.open fallback must agree so a freshly
+    // restored drawer is not pinned at a stale 480px.
+    assert!(
+        file_view.contains("let sourcePanelWidth = 560"),
+        "file-view.js must initialize sourcePanelWidth to 560, matching the CSS default"
+    );
+    let drawer_open = css_rule_body(css, ".drawer.open");
+    assert!(
+        drawer_open.contains("width: var(--source-panel-w, 560px)"),
+        ".drawer.open must default --source-panel-w to 560px so the drawer opens at the wider default"
     );
 }
 
