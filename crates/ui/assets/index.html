@@ -119,8 +119,6 @@
   <!-- SECONDARY TOOLBAR -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <button class="btn-secondary" id="btnHotspots" onclick="toggleHotspots()" style="display:none;">&#128293; Hotspots</button>
-      <button class="btn-secondary active" id="btnInspector" onclick="toggleInspector()" title="Toggle Node Inspector">Node Inspector</button>
       <button class="btn-secondary" id="btnClearSelection" onclick="clearSelection()" title="Clear selection (Esc)" style="display:none;">&#10005; Clear Selection</button>
       <div class="tool-group">
         <span>Layout:</span>
@@ -243,9 +241,10 @@
         <div id="legendItems"></div>
       </div>
 
-      <!-- COLLAPSED-PANEL RESTORE TABS (right edge, revealed by JS) -->
+      <!-- COLLAPSED-PANEL RESTORE TABS (canvas edges, revealed by JS): hotspots docks left, inspector + source dock right -->
       <button class="panel-restore-tab" id="inspectorRestoreTab" onclick="expandInspector()" hidden>Node Inspector</button>
       <button class="panel-restore-tab" id="sourceRestoreTab" onclick="restoreSourceDrawer()" hidden>Source Code</button>
+      <button class="panel-restore-tab panel-restore-tab-left" id="hotspotRestoreTab" onclick="openHotspots()" hidden>Hotspots</button>
     </div>
 
     <!-- INSPECTOR SIDEBAR -->
@@ -423,12 +422,12 @@
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
           <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Every reachable dependency card states its verdict on a left spine: a <strong>green spine</strong> means every supplied symbol is used (needed), an <strong>amber spine</strong> means partly needed, a <strong>red spine</strong> means it supplies nothing and the include can go; no spine means no verdict data. The card fill stays pure collateral heat &mdash; a flat tier color, never a glow (glow marks selection and the root only). The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along. With Preview after extraction (on justification rows and proposal cards) the map marks what the selected file would stop including (red dashed), what still arrives via other paths (amber dashed), and what the slim edge keeps (green); the spines hide while previewing. The picture is a hypothetical after-state: a warning banner and amber dashed canvas frame say so, the extracted result appears as a violet dashed PROPOSED header node with a placeholder name, its proposed edges fan out in violet, and the slimmed consumer edge turns amber dashed. With a file selected, its outgoing arrows state the verdict: green solid arrows (<code>N/N used</code>) are includes whose every supplied symbol is used, red dashed arrows (<code>0/N used</code>) supply nothing the selection needs and are droppable or slimmable, and amber arrows (<code>J/T used</code>) are partially needed. Each card's spine and its arrow carry the same verdict. These verdicts are root-relative and cover project includes only &mdash; system/stdlib headers are not analyzed or counted, so an arrow's badge never describes what the dependency itself includes. A collapsed side panel (Node Inspector or Source Code) leaves a vertical restore tab on the canvas' right edge that brings it back.</p>
           <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
-          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live beside the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
+          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel (opened from the Hotspots tab on the left edge of the canvas) ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live beside the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
         </div>
         <div id="helpTab-recipes" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">How-To Recipes</h4>
           <p><strong>Finding & Decoupling Header Bloat:</strong> Select a header -> inspect Collateral Breakdown -> click a heavy contributor to illuminate the include path -> refactor or forward-declare.</p>
-          <p><strong>Triage Worst Offenders:</strong> Open 🔥 Hotspots in the toolbar -> switch the metric to rank by burden, degree, closure, or cycles -> click a row to inspect its heat map -> optionally set a directory scope chip first to rank one subtree.</p>
+          <p><strong>Triage Worst Offenders:</strong> Open 🔥 Hotspots from the left-edge tab -> switch the metric to rank by burden, degree, closure, or cycles -> click a row to inspect its heat map -> optionally set a directory scope chip first to rank one subtree.</p>
           <p><strong>Isolating Focused Subgraphs:</strong> Set Direction (Dependencies / Consumers) and step Degree (1 deg, 2 deg) or use ALL-WITH-CAP with safety node caps.</p>
           <p><strong>Breaking Circular Dependencies:</strong> Toggle Highlight Cycle -> inspect circular links -> use Pathfinder to see the loop.</p>
         </div>

@@ -528,22 +528,25 @@ fn test_ui_loading_overlay_and_progress() {
 }
 
 fn assert_hotspot_panel_markup_and_rendering(html: &str) {
-    // Panel, toggle button, and metric selector markup
+    // Panel, left-edge restore tab, and metric selector markup
     assert!(
         html.contains("id=\"hotspotPanel\""),
         "missing hotspotPanel container"
     );
+    let tab_at = html.find("id=\"hotspotRestoreTab\"").expect("missing hotspotRestoreTab");
+    let tag_start = html[..tab_at].rfind("<button").expect("tab must sit on a button");
+    let tag_end = tab_at + html[tab_at..].find('>').expect("tab tag must close");
+    let tab_tag = &html[tag_start..tag_end];
     assert!(
-        html.contains("id=\"btnHotspots\""),
-        "missing btnHotspots toggle button"
+        tab_tag.contains("panel-restore-tab") && tab_tag.contains("onclick=\"openHotspots()\""),
+        "hotspotRestoreTab must share restore-tab styling and call openHotspots()"
     );
+    assert!(!html.contains("id=\"btnHotspots\""), "btnHotspots toolbar button must be gone");
+    assert!(!html.contains("id=\"btnInspector\""), "btnInspector toolbar button must be gone");
+    assert!(html.contains("id=\"hotspotMetric\""), "missing hotspotMetric selector");
     assert!(
-        html.contains("id=\"hotspotMetric\""),
-        "missing hotspotMetric selector"
-    );
-    assert!(
-        html.contains("toggleHotspots"),
-        "missing toggleHotspots handler"
+        html.contains("function openHotspots") && !html.contains("toggleHotspots"),
+        "openHotspots owns the reopen path and dead toggleHotspots must be gone"
     );
 
     // Ranking + rendering logic

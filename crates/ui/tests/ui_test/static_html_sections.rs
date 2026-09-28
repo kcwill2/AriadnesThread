@@ -387,8 +387,8 @@ fn test_inspector_panel_is_wider_and_collapsible() {
         "the inspector aside must carry id=\"inspectorPanel\" so it can be shown and hidden"
     );
     assert!(
-        html.contains("id=\"btnInspector\""),
-        "the toolbar must carry a persistent btnInspector toggle"
+        !html.contains("id=\"btnInspector\"") && !html.contains("id=\"btnHotspots\""),
+        "the toolbar must carry no panel toggle buttons; the edge restore tabs are the reopen path"
     );
     assert!(
         html.contains("onclick=\"toggleInspector()\""),
@@ -396,7 +396,7 @@ fn test_inspector_panel_is_wider_and_collapsible() {
     );
 
     // The ✕ collapse control must live in the inspector head itself, wired to
-    // toggleInspector() — not be satisfiable by the toolbar button alone.
+    // toggleInspector() — it is now the only collapse affordance.
     let head_at = html
         .find("class=\"inspector-head\"")
         .expect("inspector-head region must exist in index.html");
@@ -420,21 +420,24 @@ fn test_inspector_panel_is_wider_and_collapsible() {
         "the .inspector-collapse button in inspector-head must be wired to toggleInspector()"
     );
 
-    // The inspector starts expanded, so the toolbar toggle must start active.
-    let btn_at = html
-        .find("id=\"btnInspector\"")
-        .expect("btnInspector toolbar toggle must exist");
-    let btn_tag_start = html[..btn_at]
-        .rfind("<button")
-        .expect("the btnInspector id must sit on a <button> element");
-    let btn_tag_end = btn_at
-        + html[btn_at..]
-            .find('>')
-            .expect("the btnInspector tag must close");
-    let btn_tag = &html[btn_tag_start..btn_tag_end];
+    // The hotspots entry point is now a left-edge restore tab living in the
+    // canvas container beside the other collapsed-panel restore tabs.
+    let canvas_at = html
+        .find("id=\"canvasContainer\"")
+        .expect("canvas container must exist");
+    let aside_at = html
+        .find("<aside class=\"inspector\"")
+        .expect("the inspector aside must sit after the canvas container");
+    let canvas_region = &html[canvas_at..aside_at];
+    let source_at = canvas_region
+        .find("id=\"sourceRestoreTab\"")
+        .expect("sourceRestoreTab must live inside the canvas container");
+    let hotspot_at = canvas_region
+        .find("id=\"hotspotRestoreTab\"")
+        .expect("hotspotRestoreTab must live in the canvas container beside the other restore tabs");
     assert!(
-        btn_tag.contains("class=\"btn-secondary active\""),
-        "#btnInspector must carry the active class initially because the inspector starts expanded"
+        source_at < hotspot_at,
+        "hotspotRestoreTab must sit in the collapsed-panel restore tabs block beside #sourceRestoreTab"
     );
 
     for marker in [
@@ -511,6 +514,7 @@ fn test_collapsed_panels_offer_edge_restore_tabs() {
     for (tab_id, wiring) in [
         ("inspectorRestoreTab", "onclick=\"expandInspector()\""),
         ("sourceRestoreTab", "onclick=\"restoreSourceDrawer()\""),
+        ("hotspotRestoreTab", "onclick=\"openHotspots()\""),
     ] {
         let id_at = canvas_region
             .find(&format!("id=\"{tab_id}\""))
@@ -524,7 +528,7 @@ fn test_collapsed_panels_offer_edge_restore_tabs() {
                 .unwrap_or_else(|| panic!("the {tab_id} tag must close"));
         let tab_tag = &canvas_region[tag_start..tag_end];
         assert!(
-            tab_tag.contains("class=\"panel-restore-tab\""),
+            tab_tag.contains("panel-restore-tab"),
             "{tab_id} must share the shared .panel-restore-tab styling"
         );
         assert!(
@@ -591,6 +595,60 @@ fn test_collapsed_panels_offer_edge_restore_tabs() {
     assert_drawer_default_width(css, file_view);
 }
 
+#[test]
+fn test_hotspots_restore_tab_reveal_is_owned_by_panel_functions() {
+    let css = ariadne_ui::STYLES_CSS;
+    let html = ariadne_ui::INDEX_HTML;
+    let graph = ariadne_ui::GRAPH_JS;
+    let hotspots = ariadne_ui::HOTSPOTS_JS;
+    let main = ariadne_ui::MAIN_JS;
+
+    // The left-edge tab mirrors the docking rule onto the canvas' left side.
+    let left_rule = css_rule_body(css, ".panel-restore-tab-left");
+    assert!(
+        left_rule.contains("left: 0") && left_rule.contains("right: auto"),
+        ".panel-restore-tab-left must mirror the tabs onto the canvas' left edge"
+    );
+
+    // switchTab is the single source of truth on tab switches, while
+    // open/closeHotspots own the reveal/hide on panel toggles.
+    let switch_tab = js_fn_body(graph, "function switchTab(");
+    assert!(
+        switch_tab.contains("hotspotRestoreTab") && !switch_tab.contains("btnHotspots"),
+        "switchTab must sync #hotspotRestoreTab (shown only on the include tab while closed)"
+    );
+    let open_hotspots = js_fn_body(hotspots, "function openHotspots(");
+    assert!(
+        open_hotspots.contains("hotspotRestoreTab")
+            && open_hotspots.contains("hidden = true")
+            && !open_hotspots.contains("btnHotspots"),
+        "openHotspots must hide #hotspotRestoreTab and drop the removed btnHotspots styling"
+    );
+    let close_hotspots = js_fn_body(hotspots, "function closeHotspots(");
+    assert!(
+        close_hotspots.contains("hotspotRestoreTab")
+            && close_hotspots.contains("hidden")
+            && close_hotspots.contains("currentTab !== 'include'"),
+        "closeHotspots must reveal #hotspotRestoreTab unless closing from a non-include tab"
+    );
+    assert!(
+        !hotspots.contains("function toggleHotspots("),
+        "toggleHotspots is dead code once the toolbar button is gone and must be deleted"
+    );
+    assert!(
+        !html.contains("toggleHotspots()"),
+        "no markup may call the removed toggleHotspots()"
+    );
+
+    // The inspector show/hide pair must not style the removed toolbar toggle.
+    let collapse_inspector = js_fn_body(main, "function collapseInspector(");
+    let expand_inspector = js_fn_body(main, "function expandInspector(");
+    assert!(
+        !collapse_inspector.contains("btnInspector") && !expand_inspector.contains("btnInspector"),
+        "the inspector collapse/expand pair must not style the removed #btnInspector toolbar button"
+    );
+}
+
 fn assert_drawer_default_width(css: &str, file_view: &str) {
     // The drawer's default open width must match the CSS default; the JS
     // initializer and the .drawer.open fallback must agree so a freshly
@@ -613,33 +671,43 @@ fn test_clear_selection_button_in_toolbar() {
     let btn_at = html
         .find("id=\"btnClearSelection\"")
         .expect("the toolbar must carry an explicit btnClearSelection button");
+    let clear_tag_start = html[..btn_at]
+        .rfind("<button")
+        .expect("the btnClearSelection id must sit on a <button> element");
+    let clear_tag_end = btn_at
+        + html[btn_at..]
+            .find('>')
+            .expect("the btnClearSelection tag must close");
+    let clear_tag = &html[clear_tag_start..clear_tag_end];
     assert!(
-        html.contains("onclick=\"clearSelection()\""),
+        clear_tag.contains("onclick=\"clearSelection()\""),
         "the clear selection button must be wired to clearSelection()"
     );
+    assert!(
+        clear_tag.contains("title=\"Clear selection (Esc)\""),
+        "btnClearSelection must keep advertising the Esc shortcut in its title"
+    );
 
-    // It sits immediately after #btnInspector in the same toolbar-left group,
-    // with no other button wedged between them.
-    let inspector_at = html
-        .find("id=\"btnInspector\"")
-        .expect("btnInspector toolbar toggle must exist");
+    // The panel toggle buttons were replaced by edge restore tabs, so
+    // btnClearSelection is now the FIRST button of the toolbar-left group,
+    // still ahead of the layout control.
+    let toolbar_at = html
+        .find("class=\"toolbar-left\"")
+        .expect("the toolbar-left group must exist");
+    let first_btn_at = toolbar_at
+        + html[toolbar_at..]
+            .find("<button")
+            .expect("toolbar-left must contain at least one button");
+    assert!(
+        first_btn_at == clear_tag_start,
+        "btnClearSelection must be the first button in toolbar-left once the panel toggles are gone"
+    );
     let layout_at = html
         .find("id=\"layoutSelect\"")
         .expect("the layout select must exist after the toolbar buttons");
     assert!(
-        inspector_at < btn_at && btn_at < layout_at,
-        "btnClearSelection must live between btnInspector and the layout control in toolbar-left"
-    );
-    let inspector_tag_end = inspector_at
-        + html[inspector_at..]
-            .find('>')
-            .expect("the btnInspector tag must close");
-    let clear_tag_start = html[..btn_at]
-        .rfind("<button")
-        .expect("the btnClearSelection id must sit on a <button> element");
-    assert!(
-        !html[inspector_tag_end..clear_tag_start].contains("<button"),
-        "btnClearSelection must be the button immediately after btnInspector"
+        btn_at < layout_at,
+        "btnClearSelection must live before the layout control in toolbar-left"
     );
 }
 

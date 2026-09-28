@@ -332,7 +332,8 @@
       if (currentTab !== 'include') return;
       hotspotOpen = true;
       document.getElementById('hotspotPanel').style.display = 'flex';
-      document.getElementById('btnHotspots').classList.add('active');
+      const restoreTab = document.getElementById('hotspotRestoreTab');
+      if (restoreTab) restoreTab.hidden = true;
       renderHotspots();
     }
 
@@ -340,14 +341,8 @@
       hotspotOpen = false;
       const panel = document.getElementById('hotspotPanel');
       if (panel) panel.style.display = 'none';
-      const btn = document.getElementById('btnHotspots');
-      if (btn) btn.classList.remove('active');
-    }
-
-    function toggleHotspots() {
-      if (currentTab !== 'include') return;
-      if (hotspotOpen) closeHotspots();
-      else openHotspots();
+      const restoreTab = document.getElementById('hotspotRestoreTab');
+      if (restoreTab) restoreTab.hidden = currentTab !== 'include';
     }
 
     document.addEventListener('click', e => {

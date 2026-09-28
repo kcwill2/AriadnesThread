@@ -16,11 +16,11 @@
         }
       });
 
-      // Hotspots are include-tab only: hide button + panel elsewhere, restore open state here.
-      const hsBtn = document.getElementById('btnHotspots');
-      if (hsBtn) hsBtn.style.display = tab === 'include' ? 'inline-block' : 'none';
+      // Hotspots are include-tab only: panel state + left-edge restore tab live here.
       const hsPanel = document.getElementById('hotspotPanel');
       if (hsPanel) hsPanel.style.display = (tab === 'include' && hotspotOpen) ? 'flex' : 'none';
+      const hsRestoreTab = document.getElementById('hotspotRestoreTab');
+      if (hsRestoreTab) hsRestoreTab.hidden = !(tab === 'include' && !hotspotOpen);
 
       // Update legend
       document.getElementById('legendViewLabel').textContent = 

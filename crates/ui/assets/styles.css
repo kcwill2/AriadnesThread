@@ -560,7 +560,7 @@
       color: var(--text-main);
     }
 
-    /* RIGHT-EDGE RESTORE TABS — the discoverable way back for collapsed panels */
+    /* EDGE RESTORE TABS — the discoverable way back for collapsed panels (right edge, plus a left-edge variant) */
     .panel-restore-tab {
       position: absolute;
       right: 0;
@@ -587,6 +587,15 @@
     /* Two collapsed panels show both tabs side by side without overlap. */
     #sourceRestoreTab {
       right: 26px;
+    }
+
+    /* LEFT-EDGE variant — hotspots panel opens from the left, so its tab mirrors the others */
+    .panel-restore-tab-left {
+      left: 0;
+      right: auto;
+      border-left: 1px solid var(--border);
+      border-right: 0;
+      border-radius: 0 6px 6px 0;
     }
 
     .inspector-body {
