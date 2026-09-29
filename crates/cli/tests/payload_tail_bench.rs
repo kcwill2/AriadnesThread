@@ -350,9 +350,9 @@ fn run_assembly(
     let justification_entries: usize = justification.values().map(|m| m.len()).sum();
     let rows = vec![
         ("get_or_build_include_graph clone (cold)", graph_cold_ms),
-        ("get_or_build_load clone (cold)", load_cold_ms),
+        ("get_or_build_load hand-out (cold)", load_cold_ms),
         ("get_or_build_include_graph clone (warm)", graph_warm_ms),
-        ("get_or_build_load clone (warm)", load_warm_ms),
+        ("get_or_build_load hand-out (warm)", load_warm_ms),
         ("generate_report+detect_cycles (combined)", report_cycles_ms),
         ("build_include_elements", include_elements_ms),
         (

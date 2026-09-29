@@ -281,7 +281,7 @@ impl Pipeline {
     /// SAFETY PRECONDITION — nothing downstream may read `include_cache`
     /// after a take. The only user, `build_ui_payload`, satisfies this:
     /// every stage that consumes the include graph (`ensure_load` reads the
-    /// cache at `Self::ensure_load`) runs via `run_pipeline_stages` BEFORE
+    /// cache at `Self::cached_include_graph`) runs via `run_pipeline_stages` BEFORE
     /// the take, and the moved graph/closures are used locally afterwards.
     /// The watcher refresh is safe because each refresh constructs a FRESH
     /// `Pipeline` (`spawn_watcher` -> `build_ui_payload` -> `Pipeline::new`).
