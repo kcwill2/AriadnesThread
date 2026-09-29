@@ -568,6 +568,67 @@ fn test_load_milestone_event_order() {
     );
 }
 
+/// Load-stage progress events: `LoadMilestone` + `CollateralFile`.
+fn load_progress_event_count(events: &[ProgressEvent]) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                ProgressEvent::LoadMilestone(_) | ProgressEvent::CollateralFile { .. }
+            )
+        })
+        .count()
+}
+
+/// A4 minor: every cache-hit return in `ensure_load` must exit BEFORE any
+/// notify. Two distinct hits, one test: (1) the in-memory hit — `load_cache`
+/// is already `Some`, so `get_or_build_load` on the SAME pipeline returns
+/// the cached handle silently; (2) the on-disk hit — a fresh pipeline over
+/// the same artifacts dir finds the load stage fresh and loads the stored
+/// report, also silently. A warm boot must never replay stale milestones
+/// over an already-finished bar.
+#[test]
+fn test_load_milestones_absent_on_cache_hit() {
+    let dir = setup_repo();
+    let events: Arc<Mutex<Vec<ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = events.clone();
+    let mut pipeline = Pipeline::new(dir.path(), None)
+        .unwrap()
+        .with_progress(move |event| recorder.lock().unwrap().push(event.clone()));
+    pipeline.ensure_load().unwrap();
+
+    let cold_count = load_progress_event_count(&events.lock().unwrap());
+    assert!(
+        cold_count > 0,
+        "cold rebuild must record load events, else the warm comparison is vacuous"
+    );
+
+    let handle = pipeline.get_or_build_load().unwrap();
+    assert!(
+        !handle.symbol_metrics.is_empty(),
+        "the in-memory hit must still hand out the full cached report"
+    );
+    assert_eq!(
+        load_progress_event_count(&events.lock().unwrap()),
+        cold_count,
+        "second call on the SAME pipeline must emit zero LoadMilestone/CollateralFile"
+    );
+    drop(handle);
+
+    let warm_events: Arc<Mutex<Vec<ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let warm_recorder = warm_events.clone();
+    let mut warm = Pipeline::new(dir.path(), None)
+        .unwrap()
+        .with_progress(move |event| warm_recorder.lock().unwrap().push(event.clone()));
+    warm.ensure_load().unwrap();
+    assert_eq!(
+        load_progress_event_count(&warm_events.lock().unwrap()),
+        0,
+        "fresh pipeline loading fresh on-disk artifacts must emit zero LoadMilestone/CollateralFile"
+    );
+}
+
 /// A2: `collect_file_metrics` must emit the exact metrics the sequential
 /// path round-trip produced, while keeping the old skip contract — an id
 /// present in `file_symbols` but unregistered in `file_paths` yields no

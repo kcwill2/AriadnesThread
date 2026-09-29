@@ -868,6 +868,48 @@ mod progress_contract_tests {
         assert_eq!(reports.last().unwrap().message, "Payload assembled");
     }
 
+    /// A4 minor: the replay above proves the helper mapping is right, but a
+    /// future edit could still reorder the real `stage5_report` calls in
+    /// `build_ui_payload` and the replay would keep passing. Pin the real
+    /// call order in the SOURCE TEXT: inside the production section of
+    /// ui.rs (everything before the first test attribute), the byte offset
+    /// of "Planning extractions" must be strictly before "Justifying
+    /// symbols", and both strictly before the guarded
+    /// `build_file_justification_with_memo(` call. Reordering the planner
+    /// behind the memo — misrepresenting the boot bar — fails here loudly.
+    #[test]
+    fn test_planning_milestone_precedes_justifying_in_source() {
+        let ui_code = include_str!("ui.rs");
+        let production_end = ui_code
+            .find("#[cfg(test)]")
+            .expect("ui.rs must have a test module to cut the production section at");
+        let production = &ui_code[..production_end];
+        // The production cut already excludes this test's own literals.
+        let planning_at = production
+            .find("Planning extractions")
+            .expect("planning milestone label must be emitted in production code");
+        let justifying_at = production
+            .find("Justifying symbols")
+            .expect("justifying milestone label must be emitted in production code");
+        // Needle carries the open paren: the doc comments naming the memo
+        // function never match, only the real call site does.
+        let justification_call_at = production
+            .find("build_file_justification_with_memo(")
+            .expect("the guarded justification call must exist in production code");
+        assert!(
+            planning_at < justifying_at,
+            "\"Planning extractions\" (byte {planning_at}) must precede \"Justifying symbols\" (byte {justifying_at}) in ui.rs source — the planner really runs before the memo"
+        );
+        assert!(
+            planning_at < justification_call_at,
+            "\"Planning extractions\" (byte {planning_at}) must precede the justification call (byte {justification_call_at})"
+        );
+        assert!(
+            justifying_at < justification_call_at,
+            "\"Justifying symbols\" (byte {justifying_at}) must immediately precede the call it guards (byte {justification_call_at})"
+        );
+    }
+
     #[test]
     fn test_phase_label_stable_within_stage() {
         let mut phase_by_stage: HashMap<usize, &str> = HashMap::new();
