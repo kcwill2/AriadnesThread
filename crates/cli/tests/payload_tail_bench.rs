@@ -50,6 +50,14 @@
 //! cold == warm — it is an unconditional `Arc::unwrap_or_clone` copy).
 //! The include-graph clone (~1 ms) is negligible.
 //!
+//! A6 honesty note: the `OptimizationPlanner::plan() cold` row in the A0
+//! baseline table predates plan A1. The bench now mirrors the CURRENT boot
+//! wiring in ui.rs `build_extraction_proposals` (screening facts from the
+//! stage's file metrics + reuse of the stage closures, and the rows run in
+//! true boot order — proposals before the justification memo takes the
+//! closures), so the current planner row is NOT comparable against the A0
+//! cold number kept above for history.
+//!
 //! Run with:
 //!   cargo test -p ariadne-cli --test payload_tail_bench --release -- \
 //!     --ignored --nocapture --test-threads=1
@@ -296,25 +304,21 @@ fn run_assembly(
         (millis(started), path_to_id)
     };
 
-    // ui.rs:250 — boot seeds the ONE shared memo by MOVING the closures
-    // (out of its take); this bench moves its cloned map here likewise.
-    let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
-    let (justification, justification_ms) = timed(|| {
-        ariadne_ui::build_file_justification_with_memo(
-            &load_report.file_metrics,
-            &graph,
-            reduced,
-            &path_to_id,
-            Some(&load_memo),
-        )
-    });
+    // ui.rs:238-245 — boot runs the planner on screening facts from the
+    // stage's file metrics and reuses the stage closures (plan A1), BEFORE
+    // the memo below takes `closures`; mirrored here.
     let tu_ids = translation_unit_file_ids(&pipeline.build);
     let (plans, planner_ms) = timed(|| {
-        ariadne_cluster::planner::OptimizationPlanner::new(
+        ariadne_cluster::planner::OptimizationPlanner::with_screening_facts(
             &graph,
             reduced,
             &pipeline.discovery.files,
             &tu_ids,
+            ariadne_cluster::planner::screening_facts_from_metrics(
+                &graph,
+                &load_report.file_metrics,
+            ),
+            &closures,
         )
         .plan()
     });
@@ -330,6 +334,19 @@ fn run_assembly(
             .count()
     });
 
+    // ui.rs:250 — boot seeds the ONE shared memo by MOVING the closures
+    // (out of its take); this bench moves its cloned map here likewise.
+    let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
+    let (justification, justification_ms) = timed(|| {
+        ariadne_ui::build_file_justification_with_memo(
+            &load_report.file_metrics,
+            &graph,
+            reduced,
+            &path_to_id,
+            Some(&load_memo),
+        )
+    });
+
     let justification_entries: usize = justification.values().map(|m| m.len()).sum();
     let rows = vec![
         ("get_or_build_include_graph clone (cold)", graph_cold_ms),
@@ -342,9 +359,9 @@ fn run_assembly(
             "path_to_id+file_collateral maps (combined)",
             justification_maps_ms,
         ),
-        ("build_file_justification_with_memo", justification_ms),
-        ("OptimizationPlanner::plan() cold", planner_ms),
+        ("OptimizationPlanner::plan() facts+closures", planner_ms),
         ("conservative filter pass", proposal_filter_ms),
+        ("build_file_justification_with_memo", justification_ms),
     ];
     AssemblyOutcome {
         rows,
