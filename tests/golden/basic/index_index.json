@@ -225,6 +225,7 @@
           "src_symbol": "Thing::get_id"
         }
       ],
+      "language": "Cpp",
       "references": [],
       "symbols": [
         {
@@ -532,6 +533,7 @@
           "src_symbol": "Thing::get_id"
         }
       ],
+      "language": "Cpp",
       "references": [],
       "symbols": [
         {

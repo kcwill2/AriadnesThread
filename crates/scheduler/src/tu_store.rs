@@ -18,7 +18,7 @@ use ariadne_graph::IncludeResolver;
 use ariadne_index::{
     CppSemanticAnalyzer, TuAnalysis, TuCacheFingerprint, CURRENT_ANALYSIS_VERSION,
 };
-use ariadne_repo::{compute_file_hash, FileId, RepositoryDiscoveryResult};
+use ariadne_repo::{compute_file_hash, FileId, RepositoryDiscoveryResult, SourceLanguage};
 
 /// Envelope written to the shard store. Missing or mismatched fingerprint
 /// means miss; pre-envelope plain-`TuAnalysis` shards fail deserialization
@@ -240,6 +240,7 @@ pub fn analyze_closure(tu: &TranslationUnit, closure: &TuClosure) -> TuAnalysis 
         edges: combined_edges,
         references: combined_references,
         call_sites: combined_call_sites,
+        language: SourceLanguage::Cpp,
     }
 }
 
@@ -295,6 +296,7 @@ mod tests {
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+            language: ariadne_repo::SourceLanguage::Cpp,
         };
         fs::write(
             shard_file(path, old.tu_file_id),

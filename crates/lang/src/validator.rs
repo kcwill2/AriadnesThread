@@ -1,5 +1,6 @@
 //! Compiler validation trait for language plugins.
 
+use ariadne_lang_api::capability::ToolchainStatus;
 use std::path::PathBuf;
 
 /// Invokes the real language compiler to verify that a set of source files
@@ -17,4 +18,31 @@ pub trait CompilerValidator: Send + Sync {
         source_files: &[PathBuf],
         compiler_args: &[String],
     ) -> Result<(), String>;
+
+    /// Whether the language toolchain is present, so tier-3 validation can
+    /// report `Skipped` instead of `Fail` when the compiler is absent.
+    fn toolchain_status(&self) -> ToolchainStatus {
+        ToolchainStatus::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoopValidator;
+    impl CompilerValidator for NoopValidator {
+        fn validate_compile(
+            &self,
+            _source_files: &[PathBuf],
+            _compiler_args: &[String],
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn default_toolchain_status_is_unknown() {
+        assert_eq!(NoopValidator.toolchain_status(), ToolchainStatus::Unknown);
+    }
 }

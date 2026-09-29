@@ -236,6 +236,7 @@ mod tests {
                 edges: vec![],
                 references: vec![],
                 call_sites: vec![],
+                language: ariadne_repo::SourceLanguage::Cpp,
             },
         }
         .is_valid(&fp1));
@@ -253,6 +254,7 @@ mod tests {
                 edges: vec![],
                 references: vec![],
                 call_sites: vec![],
+                language: ariadne_repo::SourceLanguage::Cpp,
             },
         }
         .is_valid(&fp2));

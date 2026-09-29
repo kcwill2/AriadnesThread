@@ -555,6 +555,7 @@ mod tests {
                 content_hash: "dummy".to_string(),
                 ownership: ariadne_repo::FileOwnership::Repository,
                 optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                language: ariadne_repo::SourceLanguage::Cpp,
             }],
             ownership_summary: Default::default(),
             policy_summary: Default::default(),

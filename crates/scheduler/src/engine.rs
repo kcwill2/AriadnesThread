@@ -297,6 +297,7 @@ mod tests {
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
                     content_hash: "hash1".into(),
+                    language: ariadne_repo::SourceLanguage::Cpp,
                 },
                 ariadne_repo::FileRecord {
                     id: f2_id.clone(),
@@ -307,6 +308,7 @@ mod tests {
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
                     content_hash: "hash2".into(),
+                    language: ariadne_repo::SourceLanguage::Cpp,
                 },
             ],
             ownership_summary: std::collections::HashMap::new(),

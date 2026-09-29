@@ -527,6 +527,7 @@ mod tests {
             content_hash: String::new(),
             ownership: FileOwnership::Repository,
             optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
         };
         let repo_discovery = RepositoryDiscoveryResult {
             root: PathBuf::from("/"),

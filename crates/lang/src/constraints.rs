@@ -1,6 +1,6 @@
 //! Clustering constraint trait for language plugins.
 
-use ariadne_index::{SymbolId, SymbolRecord};
+use ariadne_lang_api::types::{SymbolId, SymbolRecord};
 use std::collections::HashSet;
 
 /// Language-specific rules that constrain the SCC-based extraction planner.

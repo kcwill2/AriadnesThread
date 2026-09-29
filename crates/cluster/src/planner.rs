@@ -386,6 +386,7 @@ mod tests {
                 content_hash: String::new(),
                 ownership: FileOwnership::Repository,
                 optimization_policy: OptimizationPolicy::Optimizable,
+                language: ariadne_repo::SourceLanguage::Cpp,
             },
             FileRecord {
                 id: FileId(2),
@@ -396,6 +397,7 @@ mod tests {
                 content_hash: String::new(),
                 ownership: FileOwnership::ThirdParty,
                 optimization_policy: OptimizationPolicy::Frozen,
+                language: ariadne_repo::SourceLanguage::Cpp,
             },
         ];
         let tu_file_ids = vec![];

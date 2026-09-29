@@ -139,6 +139,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-build",
+ "ariadne-lang-api",
  "ariadne-repo",
  "bincode",
  "serde",
@@ -156,6 +157,8 @@ dependencies = [
  "ariadne-cluster",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-api",
  "ariadne-pipeline",
  "ariadne-repo",
  "ariadne-report",
@@ -176,9 +179,18 @@ name = "ariadne-lang"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ariadne-index",
+ "ariadne-lang-api",
  "ariadne-repo",
  "serde",
+]
+
+[[package]]
+name = "ariadne-lang-api"
+version = "0.1.0"
+dependencies = [
+ "ariadne-repo",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

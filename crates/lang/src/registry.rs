@@ -6,7 +6,12 @@ use crate::detector::{LanguageDetector, SourceFileKind};
 use crate::extractor::SourceExtractor;
 use crate::resolver::DependencyResolver;
 use crate::rewriter::DependencyRewriter;
+use crate::unit::UnitShaper;
 use crate::validator::CompilerValidator;
+use ariadne_lang_api::capability::LanguageCapabilities;
+use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
+use ariadne_lang_api::modeling::LanguageModeling;
+use ariadne_repo::FileKind;
 use std::path::Path;
 
 /// Bundles all language-specific pipeline components into one object.
@@ -22,6 +27,22 @@ pub trait LanguagePlugin: Send + Sync {
     fn extractor(&self) -> &dyn SourceExtractor;
     fn rewriter(&self) -> &dyn DependencyRewriter;
     fn validator(&self) -> &dyn CompilerValidator;
+
+    /// Dispatch key for `plugin_for_id` and per-language cache scoping.
+    fn id(&self) -> LanguageId;
+    /// Replaces the ".h"/TU assumptions previously hardcoded in core crates.
+    fn modeling(&self) -> LanguageModeling;
+    /// Stage gating: disabled stages are reported, never silently empty.
+    fn capabilities(&self) -> LanguageCapabilities;
+    /// Ingredient of every cache fingerprint: bump when the plugin's parser changes.
+    fn analysis_fingerprint(&self) -> String {
+        "v1".into()
+    }
+    /// Unit shaping (build stage). `None` = use the built-in
+    /// CMake/VS/compile_commands shaper.
+    fn shaper(&self) -> Option<&dyn UnitShaper> {
+        None
+    }
 }
 
 /// Dispatches pipeline calls to the appropriate [`LanguagePlugin`] based on
@@ -68,6 +89,28 @@ impl LanguageRegistry {
             .find(|k| *k != SourceFileKind::Other)
             .unwrap_or(SourceFileKind::Other)
     }
+
+    /// Returns the first plugin registered for exactly `id`.
+    pub fn plugin_for_id(&self, id: LanguageId) -> Option<&dyn LanguagePlugin> {
+        self.plugins.iter().find(|p| p.id() == id).map(|p| p.as_ref())
+    }
+
+    /// All plugin language ids, in registration order.
+    pub fn languages(&self) -> Vec<LanguageId> {
+        self.plugins.iter().map(|p| p.id()).collect()
+    }
+
+    /// Language of `path`, but only when BOTH the file kind maps to a real
+    /// language (`FileKind::Other` ⇒ `SourceLanguage::Other` ⇒ `None`, plan
+    /// §3.3: `Other` deliberately has no plugin) AND a registered plugin's
+    /// detector claims the path. With several claiming plugins, the first
+    /// registered wins (deterministic, registration-order precedence).
+    pub fn detect_language(&self, path: &Path) -> Option<LanguageId> {
+        if language_of_file_kind(FileKind::from_path(path)) == LanguageId::Other {
+            return None;
+        }
+        self.plugin_for(path).map(|plugin| plugin.id())
+    }
 }
 
 impl Default for LanguageRegistry {
@@ -83,21 +126,33 @@ mod tests {
     use crate::extractor::{GeneratedSourceFile, SourceExtractor, SymbolBody};
     use crate::resolver::{DependencyResolver, RawDepEdge, ResolutionContext};
     use crate::rewriter::{DependencyRewriter, RewriteSpec};
-    use ariadne_index::{SymbolId, SymbolRecord, TuAnalysis};
+    use crate::{
+        AggregationKind, CyclePolicy, GuardKind, LanguageCapabilities, SymbolId, SymbolRecord,
+        SymbolPlacement, TuAnalysis, UnitKind,
+    };
     use ariadne_repo::FileId;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
 
     // ── minimal stubs ────────────────────────────────────────────────────────
 
-    struct MockDetector;
+    struct MockDetector {
+        extension: &'static str,
+    }
+
+    impl MockDetector {
+        fn new(extension: &'static str) -> Self {
+            Self { extension }
+        }
+    }
+
     impl LanguageDetector for MockDetector {
         fn name(&self) -> &str {
             "mock"
         }
         fn detect(&self, path: &Path) -> SourceFileKind {
             match path.extension().and_then(|e| e.to_str()) {
-                Some("mock") => SourceFileKind::Source,
+                Some(ext) if ext == self.extension => SourceFileKind::Source,
                 _ => SourceFileKind::Other,
             }
         }
@@ -161,6 +216,7 @@ mod tests {
     }
 
     struct MockPlugin {
+        language: LanguageId,
         detector: MockDetector,
         analyzer: MockAnalyzer,
         resolver: MockResolver,
@@ -172,8 +228,13 @@ mod tests {
 
     impl MockPlugin {
         fn new() -> Self {
+            Self::with_extension("mock", LanguageId::Cpp)
+        }
+
+        fn with_extension(extension: &'static str, language: LanguageId) -> Self {
             Self {
-                detector: MockDetector,
+                language,
+                detector: MockDetector::new(extension),
                 analyzer: MockAnalyzer,
                 resolver: MockResolver,
                 constraints: MockConstraints,
@@ -205,6 +266,34 @@ mod tests {
         }
         fn validator(&self) -> &dyn CompilerValidator {
             &self.validator
+        }
+        fn id(&self) -> LanguageId {
+            self.language
+        }
+        fn modeling(&self) -> LanguageModeling {
+            LanguageModeling {
+                language: self.language,
+                unit: UnitKind::SourceFile,
+                aggregation: AggregationKind::None,
+                guard: GuardKind::None,
+                symbol_placement: SymbolPlacement::SingleFile,
+                aggregation_reexports: false,
+                cycle_policy: CyclePolicy::Tolerate,
+                external_path_markers: vec![],
+            }
+        }
+        fn capabilities(&self) -> LanguageCapabilities {
+            LanguageCapabilities {
+                discovery: true,
+                dependency_graph: true,
+                semantic_index: true,
+                load_metric: true,
+                planning: false,
+                extraction: false,
+                rewriting: false,
+                validation: false,
+                requires_toolchain: false,
+            }
         }
     }
 
@@ -241,5 +330,49 @@ mod tests {
         let registry = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
         let plugin = registry.plugin_for(Path::new("src/main.mock")).unwrap();
         assert_eq!(plugin.detector().name(), "mock");
+    }
+
+    #[test]
+    fn plugin_for_id_hits_registered_and_misses_unknown() {
+        let registry = LanguageRegistry::new()
+            .register(Box::new(MockPlugin::with_extension("scala", LanguageId::Scala)));
+        assert!(registry.plugin_for_id(LanguageId::Scala).is_some());
+        assert_eq!(registry.plugin_for_id(LanguageId::Scala).unwrap().id(), LanguageId::Scala);
+        assert!(registry.plugin_for_id(LanguageId::Cpp).is_none());
+    }
+
+    #[test]
+    fn languages_lists_registration_order() {
+        let registry = LanguageRegistry::new()
+            .register(Box::new(MockPlugin::with_extension("scala", LanguageId::Scala)))
+            .register(Box::new(MockPlugin::with_extension("cpp", LanguageId::Cpp)));
+        assert_eq!(
+            registry.languages(),
+            vec![LanguageId::Scala, LanguageId::Cpp]
+        );
+    }
+
+    #[test]
+    fn detect_language_first_registered_claiming_plugin_wins() {
+        let first = MockPlugin::with_extension("scala", LanguageId::Scala);
+        let second = MockPlugin::with_extension("scala", LanguageId::Cpp);
+        let registry = LanguageRegistry::new()
+            .register(Box::new(first))
+            .register(Box::new(second));
+        assert_eq!(
+            registry.detect_language(Path::new("src/Main.scala")),
+            Some(LanguageId::Scala)
+        );
+    }
+
+    #[test]
+    fn detect_language_yields_none_when_file_kind_maps_to_other() {
+        // `.mock` is not a recognised FileKind ⇒ SourceLanguage::Other, and
+        // Other deliberately has no plugin even though this plugin's
+        // detector claims the extension.
+        let registry = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
+        assert!(registry.plugin_for(Path::new("src/main.mock")).is_some());
+        assert_eq!(registry.detect_language(Path::new("src/main.mock")), None);
+        assert_eq!(registry.detect_language(Path::new("notes.txt")), None);
     }
 }

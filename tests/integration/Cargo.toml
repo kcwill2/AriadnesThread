@@ -24,3 +24,7 @@ serde.workspace = true
 tokio.workspace = true
 ariadne-ui = { path = "../../crates/ui" }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+
+[dev-dependencies]
+ariadne-lang-api = { path = "../../crates/lang-api" }
+ariadne-lang = { path = "../../crates/lang" }

@@ -1,5 +1,6 @@
 //! Inter-file dependency resolution trait for language plugins.
 
+use ariadne_lang_api::catalog::{FileCatalog, ResolveOutcome};
 use ariadne_repo::FileId;
 use std::path::Path;
 
@@ -41,6 +42,18 @@ pub trait DependencyResolver: Send + Sync {
         source: &str,
         ctx: &ResolutionContext<'_>,
     ) -> Vec<RawDepEdge>;
+
+    /// Maps a raw directive to a repository file. Default: unresolved.
+    /// C++: include-dir + basename search. Scala: package → directory mapping.
+    fn resolve_target(
+        &self,
+        edge: &RawDepEdge,
+        catalog: &FileCatalog,
+        ctx: &ResolutionContext<'_>,
+    ) -> ResolveOutcome {
+        let _ = (edge, catalog, ctx);
+        ResolveOutcome::Unresolved
+    }
 }
 
 #[cfg(test)]
@@ -58,5 +71,35 @@ mod tests {
         };
         assert!(edge.is_wildcard);
         assert_eq!(edge.line, 3);
+    }
+
+    struct ParseOnlyResolver;
+    impl DependencyResolver for ParseOnlyResolver {
+        fn resolve_edges(
+            &self,
+            _file_id: FileId,
+            _rel_path: &Path,
+            _source: &str,
+            _ctx: &ResolutionContext<'_>,
+        ) -> Vec<RawDepEdge> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn default_resolve_target_is_unresolved() {
+        let ctx = ResolutionContext {
+            repo_root: Path::new("."),
+        };
+        let edge = RawDepEdge {
+            source_file: FileId::from_relative_path("src/a.cpp"),
+            raw_target: "b.h".into(),
+            is_wildcard: false,
+            line: 1,
+        };
+        assert_eq!(
+            ParseOnlyResolver.resolve_target(&edge, &FileCatalog::default(), &ctx),
+            ResolveOutcome::Unresolved
+        );
     }
 }

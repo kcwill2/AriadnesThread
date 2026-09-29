@@ -1,0 +1,12 @@
+[package]
+name = "ariadne-lang-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+ariadne-repo = { path = "../repo" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

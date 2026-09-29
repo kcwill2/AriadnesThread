@@ -1,7 +1,7 @@
 use crate::parser::ParserCtx;
 use crate::tokenizer::{tokenize, TokenKind};
 use crate::types::*;
-use ariadne_repo::FileId;
+use ariadne_repo::{FileId, SourceLanguage};
 use std::path::Path;
 
 pub struct CppSemanticAnalyzer;
@@ -43,6 +43,7 @@ impl CppSemanticAnalyzer {
             edges: ctx.edges,
             references: vec![],
             call_sites: ctx.call_sites,
+            language: SourceLanguage::Cpp,
         }
     }
 

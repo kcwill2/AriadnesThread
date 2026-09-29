@@ -310,6 +310,7 @@ mod tests {
         let tu = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: sym_a.clone(),
@@ -438,6 +439,7 @@ mod tests {
         let tu = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: sym_caller.clone(),
@@ -506,6 +508,7 @@ mod tests {
         let tu = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: sym_exact.clone(),

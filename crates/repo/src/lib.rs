@@ -8,6 +8,7 @@ pub use discovery::{build_discovery_result, compute_file_hash, discover_reposito
 pub use policy::classify_ownership_and_policy;
 pub use types::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, RepositoryDiscoveryResult,
+    SourceLanguage,
 };
 
 use anyhow::{Context, Result};

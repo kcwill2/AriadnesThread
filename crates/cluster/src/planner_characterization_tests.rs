@@ -39,6 +39,7 @@ impl PlannerFixture {
             content_hash: String::new(),
             ownership,
             optimization_policy: policy,
+            language: ariadne_repo::SourceLanguage::Cpp,
         });
         self
     }

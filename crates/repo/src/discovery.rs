@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::policy::classify_ownership_and_policy;
 use crate::types::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, RepositoryDiscoveryResult,
+    SourceLanguage,
 };
 
 /// Computes the SHA-256 hex digest of a file's contents.
@@ -69,6 +70,7 @@ pub fn discover_repository_files(root: &Path) -> Result<Vec<FileRecord>> {
                         content_hash,
                         ownership,
                         optimization_policy: policy,
+                        language: SourceLanguage::from_file_kind(kind),
                     });
                 }
             }
@@ -172,6 +174,7 @@ mod tests {
             content_hash: "hash1".to_string(),
             ownership: FileOwnership::Repository,
             optimization_policy: OptimizationPolicy::Optimizable,
+            language: crate::types::SourceLanguage::Cpp,
         };
         let file2 = FileRecord {
             id: crate::types::FileId::from_relative_path("third_party/lib.cpp"),
@@ -182,6 +185,7 @@ mod tests {
             content_hash: "hash2".to_string(),
             ownership: FileOwnership::ThirdParty,
             optimization_policy: OptimizationPolicy::Frozen,
+            language: crate::types::SourceLanguage::Cpp,
         };
 
         let result = build_discovery_result(PathBuf::from("/mock"), vec![file1, file2]);

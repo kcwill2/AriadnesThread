@@ -72,8 +72,13 @@ impl FileKind {
 }
 
 /// The programming language associated with a file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// Derived `Ord` gives a stable order for report grouping; `#[default] Cpp`
+/// makes every pre-existing JSON artifact (which lacks the field) read back
+/// as `Cpp`. Stored PascalCase variant names are unchanged (no `rename_all`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
 pub enum SourceLanguage {
+    #[default]
     Cpp,
     Scala,
     Other,
@@ -119,6 +124,10 @@ pub struct FileRecord {
     pub content_hash: String,
     pub ownership: FileOwnership,
     pub optimization_policy: OptimizationPolicy,
+    /// Language of the file. Additive (plan §3.5): `#[serde(default)]` ⇒
+    /// pre-existing manifests read back as `Cpp`.
+    #[serde(default)]
+    pub language: SourceLanguage,
 }
 
 /// Aggregate result of repository discovery.

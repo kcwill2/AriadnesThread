@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-ariadne-repo  = { path = "../repo" }
-ariadne-index = { path = "../index" }
+ariadne-repo     = { path = "../repo" }
+ariadne-lang-api = { path = "../lang-api" }
 anyhow.workspace = true
 serde.workspace = true

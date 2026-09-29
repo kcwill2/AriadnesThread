@@ -11,7 +11,24 @@ pub mod extractor;
 pub mod registry;
 pub mod resolver;
 pub mod rewriter;
+pub mod unit;
 pub mod validator;
+
+// Neutral vocabulary now lives in `ariadne-lang-api`; these targeted
+// re-exports (no glob: they would collide with this crate's own trait
+// names) keep `ariadne_lang::SymbolId`, `ariadne_lang::TuAnalysis`, ...
+// resolving for existing users after the `lang -> index` edge was removed.
+pub use ariadne_lang_api::capability::{LanguageCapabilities, ToolchainStatus};
+pub use ariadne_lang_api::catalog::{FileCatalog, ResolveOutcome};
+pub use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
+pub use ariadne_lang_api::modeling::{
+    AggregationKind, CyclePolicy, GuardKind, LanguageModeling, SymbolPlacement, UnitKind,
+};
+pub use ariadne_lang_api::types::{
+    CallSite, DeclId, DependencyKind, FileLocation, SemanticEdge, SymbolDecl, SymbolId, SymbolKind,
+    SymbolRecord, TuAnalysis,
+};
+pub use ariadne_lang_api::unit::UnitDescriptor;
 
 pub use analyzer::SemanticAnalyzer;
 pub use constraints::ClusteringConstraints;
@@ -20,4 +37,5 @@ pub use extractor::{GeneratedSourceFile, SourceExtractor, SymbolBody};
 pub use registry::{LanguagePlugin, LanguageRegistry};
 pub use resolver::{DependencyResolver, RawDepEdge, ResolutionContext};
 pub use rewriter::{DependencyRewriter, RewriteSpec};
+pub use unit::UnitShaper;
 pub use validator::CompilerValidator;

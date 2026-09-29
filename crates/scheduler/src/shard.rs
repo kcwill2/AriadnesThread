@@ -260,6 +260,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: alpha,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: shared.clone(),
@@ -319,6 +320,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: beta,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 // Second record for the shared symbol: Class kind and a different
                 // definition arrive AFTER the Function record from tu alpha.
@@ -377,6 +379,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: gamma,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![],
             declarations: vec![],
             edges: vec![SemanticEdge {
@@ -591,6 +594,7 @@ mod tests {
         let tu1 = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "default".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![sym1.clone()],
             declarations: vec![],
             edges: vec![edge.clone()],
@@ -601,6 +605,7 @@ mod tests {
         let tu2 = TuAnalysis {
             tu_file_id: f2.clone(),
             context_name: "default".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![sym2.clone()],
             declarations: vec![],
             edges: vec![],

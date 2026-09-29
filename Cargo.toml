@@ -2,6 +2,7 @@
 members = [
     "crates/cli",
     "crates/lang",
+    "crates/lang-api",
     "crates/repo",
     "crates/build",
     "crates/scheduler",

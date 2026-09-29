@@ -183,6 +183,7 @@ mod tests {
             content_hash: content_hash.to_string(),
             ownership: FileOwnership::Repository,
             optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
         }
     }
 

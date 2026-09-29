@@ -270,6 +270,7 @@ mod tests {
             content_hash: String::new(),
             ownership,
             optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
         }
     }
 
