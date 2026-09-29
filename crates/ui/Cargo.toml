@@ -21,3 +21,5 @@ ariadne-report = { path = "../report" }
 [dev-dependencies]
 tempfile.workspace = true
 tower = { version = "0.4", features = ["util"] }
+# C1 memo-reuse route locks read the LoadMemo instrumentation counters.
+ariadne-graph = { path = "../graph", features = ["test-instrument"] }

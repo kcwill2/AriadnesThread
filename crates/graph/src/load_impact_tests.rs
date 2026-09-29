@@ -19,11 +19,13 @@ use std::path::PathBuf;
 // reaches only BaseT@base.h, so R = required_headers = {base.h} (fat.h is the
 // seed defining file and excluded per the A2 rule).
 
-const MAIN: FileId = FileId(1);
-const FAT: FileId = FileId(2);
+// `pub(super)` so the perf suite (sibling module of the shared `load`
+// parent) can reuse this fixture for its cold-vs-warm impact nets.
+pub(super) const MAIN: FileId = FileId(1);
+pub(super) const FAT: FileId = FileId(2);
 const BASE: FileId = FileId(3);
-const C_H: FileId = FileId(4);
-const D_H: FileId = FileId(5);
+pub(super) const C_H: FileId = FileId(4);
+pub(super) const D_H: FileId = FileId(5);
 const E_H: FileId = FileId(6);
 
 fn include(from: FileId, to: FileId, name: &str) -> IncludeEdge {
@@ -66,7 +68,7 @@ fn dep(src: &SymbolId, dst: &SymbolId) -> ReducedSemanticEdge {
 /// fixture (e.g. `[(MAIN, D_H)]` for the sibling-path trap). Lone, when true,
 /// registers a seed symbol in fat.h with NO semantic edges — an extraction
 /// justified by it requires zero headers (R = {}).
-fn setup_impact_fixture(
+pub(super) fn setup_impact_fixture(
     extra_edges: &[(FileId, FileId, &str)],
     lone: bool,
 ) -> (IncludeGraph, ReducedSemanticModel) {

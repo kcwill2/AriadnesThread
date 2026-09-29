@@ -2,6 +2,7 @@
 
 pub mod builder;
 pub mod callgraph;
+pub(crate) mod closures;
 pub mod graph;
 pub mod load;
 pub mod reduced;

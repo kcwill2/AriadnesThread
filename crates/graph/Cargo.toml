@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[features]
+# Enables the LoadMemo traversal counters + accessors outside of this crate's
+# own `cfg(test)` build, so downstream integration tests (ui C1 memo-reuse
+# lock) can assert zero warm-path work. Release builds never enable it, so the
+# atomics stay absent exactly as under plain `cfg(test)`.
+test-instrument = []
+
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
@@ -15,3 +22,4 @@ ariadne-index = { path = "../index" }
 
 [dev-dependencies]
 tempfile.workspace = true
+rayon.workspace = true

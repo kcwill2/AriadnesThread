@@ -202,7 +202,32 @@ pub fn build_file_justification(
     String,
     std::collections::HashMap<String, JustificationEntry>,
 > {
-    let analyzer = ariadne_graph::LoadAnalyzer::new(include_graph, model);
+    build_file_justification_with_memo(file_metrics, include_graph, model, path_to_id, None)
+}
+
+/// C1 memo-seeding twin: `Some(memo)` builds the analyzer over an ALREADY
+/// WARM shared `Arc<LoadMemo>` (the cli boot path seeds closures from the
+/// pipeline stage output, so payload assembly and every later live route
+/// share one warm memo); `None` keeps the cold per-build analyzer, the
+/// behavior of the plain wrapper above.
+pub fn build_file_justification_with_memo(
+    file_metrics: &[ariadne_graph::LoadMetric],
+    include_graph: &ariadne_graph::IncludeGraph,
+    model: &ariadne_graph::ReducedSemanticModel,
+    path_to_id: &std::collections::HashMap<std::path::PathBuf, u64>,
+    memo: Option<&std::sync::Arc<ariadne_graph::LoadMemo>>,
+) -> std::collections::HashMap<
+    String,
+    std::collections::HashMap<String, JustificationEntry>,
+> {
+    let analyzer = match memo {
+        Some(memo) => ariadne_graph::LoadAnalyzer::with_memo(
+            include_graph,
+            model,
+            std::sync::Arc::clone(memo),
+        ),
+        None => ariadne_graph::LoadAnalyzer::new(include_graph, model),
+    };
     let mut out: std::collections::HashMap<
         String,
         std::collections::HashMap<String, JustificationEntry>,

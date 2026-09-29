@@ -417,3 +417,80 @@ fn test_load_deterministic_across_pipelines() {
         "file metrics must be identical across independent cold pipelines"
     );
 }
+
+/// A2: `collect_file_metrics` must emit the exact metrics the sequential
+/// path round-trip produced, while keeping the old skip contract — an id
+/// present in `file_symbols` but unregistered in `file_paths` yields no
+/// metric (still counted in `completed`, mirroring the old
+/// `get(path).and_then(...)` + `flatten()` semantics).
+#[test]
+fn test_collect_file_metrics_matches_path_reference_and_skips_unregistered() {
+    use ariadne_graph::ReducedSymbolRecord;
+    use ariadne_index::types::{SymbolId, SymbolKind};
+    use std::collections::BTreeMap;
+
+    let mut graph = IncludeGraph::new();
+    graph.register_file(FileId(1), PathBuf::from("a.h"));
+    graph.register_file(FileId(2), PathBuf::from("b.h"));
+
+    let mut reduced = ReducedSemanticModel {
+        repo_root: PathBuf::from("/"),
+        symbols: BTreeMap::new(),
+        edges: vec![],
+        tu_usage: BTreeMap::new(),
+        file_symbols: BTreeMap::new(),
+    };
+    let add = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
+        let id = SymbolId::new(name);
+        model.symbols.insert(
+            id.clone(),
+            ReducedSymbolRecord {
+                id: id.clone(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                defining_file: Some(file),
+                declarations: vec![],
+                definition: None,
+            },
+        );
+        model.file_symbols.entry(file).or_default().push(id);
+    };
+    add(&mut reduced, "Alpha", FileId(1));
+    add(&mut reduced, "Beta", FileId(2));
+    // Orphan id: symbols registered, path never registered — must be skipped.
+    add(&mut reduced, "Orphan", FileId(9));
+
+    let analyzer = LoadAnalyzer::new(&graph, &reduced);
+    let progress: Mutex<Option<ProgressCb>> = Mutex::new(None);
+    let completed = AtomicUsize::new(0);
+    let metrics = collect_file_metrics(
+        &analyzer,
+        &graph,
+        &reduced,
+        reduced.file_symbols.len(),
+        &progress,
+        &completed,
+    );
+
+    let reference: Vec<LoadMetric> = reduced
+        .file_symbols
+        .keys()
+        .filter_map(|id| graph.file_paths.get(id))
+        .filter_map(|path| analyzer.analyze_file_load(path).ok())
+        .collect();
+
+    assert_eq!(
+        metrics.len(),
+        2,
+        "only ids with a registered path may produce metrics"
+    );
+    assert_eq!(
+        completed.load(Ordering::SeqCst),
+        3,
+        "skipped ids must still count as completed (old enumerate contract)"
+    );
+    assert_eq!(
+        metrics, reference,
+        "file metrics must equal the path round-trip reference, same order"
+    );
+}

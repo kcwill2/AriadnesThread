@@ -6,11 +6,26 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+// Only the test-only scan counter touches atomics; the import stays
+// `cfg(test)` so release builds emit no unused-import warning.
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::Arc;
+
 /// Central include graph model managing dependency edges, closures, and analysis.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IncludeGraph {
     pub edges: Vec<IncludeEdge>,
     pub file_paths: HashMap<FileId, PathBuf>,
+    /// Test-only tally of `find_file_id` O(V) string scans (plan LoadPerf
+    /// A2); the by-id analyzer path must keep this at zero. `Arc` so the
+    /// existing `Clone` derive still works (a clone shares the tally);
+    /// Serde-skipped so artifact bytes never see it (absent in non-test
+    /// builds anyway).
+    #[cfg(test)]
+    #[serde(skip)]
+    find_file_id_scans: Arc<AtomicUsize>,
 }
 
 impl IncludeGraph {
@@ -30,6 +45,8 @@ impl IncludeGraph {
 
     /// Finds a FileId by matching filename or relative path.
     pub fn find_file_id(&self, path_or_name: &Path) -> Option<FileId> {
+        #[cfg(test)]
+        self.find_file_id_scans.fetch_add(1, Ordering::Relaxed);
         let target_str = path_or_name.to_string_lossy();
         let target_name = path_or_name
             .file_name()
@@ -49,10 +66,19 @@ impl IncludeGraph {
         None
     }
 
+    /// Test-only: tally of `find_file_id` scans on this graph; the by-id
+    /// analyzer path (plan LoadPerf A2) must keep this at zero.
+    #[cfg(test)]
+    pub(crate) fn find_file_id_scan_count(&self) -> usize {
+        self.find_file_id_scans.load(Ordering::Relaxed)
+    }
+
     /// Builds a `source -> sorted, deduplicated destinations` map from the edge list.
     /// Matches `direct_includes` semantics; lets whole-graph traversals run in O(V + E)
-    /// instead of rescanning the edge list at every visited node.
-    fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
+    /// instead of rescanning the edge list at every visited node. The single
+    /// adjacency-build call sites are `compute_closures` and `LoadAnalyzer`'s
+    /// `file_adjacency` memo — no other code may duplicate this loop.
+    pub(crate) fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
         let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for edge in &self.edges {
             if let Some(dest) = edge.destination {
@@ -83,7 +109,34 @@ impl IncludeGraph {
     }
 
     /// Computes direct and transitive include closures for all known files in the graph.
+    ///
+    /// Delegates to the SCC-condensation DP in `closures` (D1, plan
+    /// 1790608181551); the scoped file set is unchanged from the original
+    /// per-file BFS: registered files plus edge sources plus resolved
+    /// destinations. Byte-identical output is locked by the equivalence
+    /// suite in `closure_equivalence_tests.rs` against the frozen BFS oracle
+    /// below.
     pub fn compute_closures(&self) -> HashMap<FileId, IncludeClosure> {
+        let adj = self.adjacency();
+
+        let mut all_files: HashSet<FileId> = self.file_paths.keys().copied().collect();
+        for edge in &self.edges {
+            all_files.insert(edge.source);
+            if let Some(dest) = edge.destination {
+                all_files.insert(dest);
+            }
+        }
+
+        crate::closures::compute_closures(&adj, &all_files)
+    }
+
+    /// Test-only oracle for D1 (plan 1790608181551): the ORIGINAL per-file
+    /// BFS body of `compute_closures`, preserved verbatim as the definition
+    /// of correct. The SCC-condensation rewrite may never change this body;
+    /// it seeds `visited` with the queried file itself, which is what
+    /// excludes the seed from `transitive_includes` even inside cycles.
+    #[cfg(test)]
+    pub(crate) fn compute_closures_bfs_oracle(&self) -> HashMap<FileId, IncludeClosure> {
         let mut closures = HashMap::new();
         let adj = self.adjacency();
 
@@ -422,3 +475,11 @@ mod tests {
         );
     }
 }
+
+/// D1 equivalence suite (plan 1790608181551): locks the SCC-condensation
+/// `compute_closures` rewrite byte-for-byte against the verbatim BFS oracle
+/// (`IncludeGraph::compute_closures_bfs_oracle`) over every existing graph
+/// test fixture and seeded random digraphs with cycles.
+#[cfg(test)]
+#[path = "closure_equivalence_tests.rs"]
+mod closure_equivalence;

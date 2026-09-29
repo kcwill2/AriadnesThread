@@ -574,3 +574,170 @@ fn test_save_load_callgraph_artifacts() {
     assert_eq!(loaded.nodes.len(), 1);
     assert_eq!(loaded.nodes[0].name, "A");
 }
+
+// --- Task E1: load-artifact byte-stability lock (I2) ---------------------
+
+const LOCK_REPORT_JSON_HASH: u64 = 0x70c9_1d07_9946_f7d9;
+const LOCK_REPORT_BIN_HASH: u64 = 0x7a12_1e91_0cbf_2e00;
+const LOCK_MANIFEST_JSON_HASH: u64 = 0x8555_8c5e_b51e_12b1;
+
+fn fnv1a64_hash(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn fixture_contributing_source(
+    header: &str,
+    qualified_prefix: &str,
+    symbol_names: &[&str],
+) -> ariadne_graph::ContributingSource {
+    ariadne_graph::ContributingSource {
+        file_id: FileId::from_relative_path(header),
+        path: PathBuf::from(header),
+        symbol_count: symbol_names.len(),
+        symbols: symbol_names
+            .iter()
+            .map(|name| ariadne_index::types::SymbolId::new(format!("{qualified_prefix}{name}")))
+            .collect(),
+    }
+}
+
+fn fixture_load_report() -> LoadReport {
+    let alpha_source =
+        fixture_contributing_source("include/alpha.h", "Alpha::", &["value", "helper", "state"]);
+    let beta_source = fixture_contributing_source("include/beta.hpp", "Beta::", &["edge"]);
+    LoadReport {
+        repository_root: PathBuf::from("fixture/repo"),
+        symbol_metrics: vec![
+            ariadne_graph::LoadMetric {
+                target_name: "AlphaStore".to_string(),
+                target_file: Some(PathBuf::from("src/alpha_store.cpp")),
+                semantic_load: 3,
+                include_load: 5,
+                collateral_load: 4,
+                total_load: 9,
+                semantic_symbols: vec![
+                    ariadne_index::types::SymbolId::new("AlphaStore"),
+                    ariadne_index::types::SymbolId::new("AlphaStore::flush"),
+                    ariadne_index::types::SymbolId::new("AlphaStore::read"),
+                ],
+                collateral_symbols: vec![
+                    ariadne_index::types::SymbolId::new("Alpha::value"),
+                    ariadne_index::types::SymbolId::new("Alpha::helper"),
+                    ariadne_index::types::SymbolId::new("Alpha::state"),
+                    ariadne_index::types::SymbolId::new("Beta::edge"),
+                ],
+                collateral_sources: vec![alpha_source.clone(), beta_source.clone()],
+                largest_collateral_source: Some(alpha_source.clone()),
+                semantic_sources: vec![alpha_source],
+            },
+            ariadne_graph::LoadMetric {
+                target_name: "BetaView".to_string(),
+                target_file: Some(PathBuf::from("src/beta_view.cpp")),
+                semantic_load: 1,
+                include_load: 1,
+                collateral_load: 0,
+                total_load: 1,
+                semantic_symbols: vec![ariadne_index::types::SymbolId::new("BetaView")],
+                collateral_symbols: vec![],
+                collateral_sources: vec![],
+                largest_collateral_source: None,
+                semantic_sources: vec![fixture_contributing_source(
+                    "include/beta.hpp",
+                    "Beta::",
+                    &["view"],
+                )],
+            },
+        ],
+        file_metrics: vec![ariadne_graph::LoadMetric {
+            target_name: "include/alpha.h".to_string(),
+            target_file: Some(PathBuf::from("include/alpha.h")),
+            semantic_load: 3,
+            include_load: 2,
+            collateral_load: 1,
+            total_load: 5,
+            semantic_symbols: vec![ariadne_index::types::SymbolId::new("Alpha::value")],
+            collateral_symbols: vec![ariadne_index::types::SymbolId::new("Beta::edge")],
+            collateral_sources: vec![beta_source],
+            largest_collateral_source: None,
+            semantic_sources: vec![],
+        }],
+    }
+}
+
+fn load_artifact_hashes(load_dir: &Path) -> (u64, u64, u64) {
+    (
+        fnv1a64_hash(&fs::read(load_dir.join("report.json")).unwrap()),
+        fnv1a64_hash(&fs::read(load_dir.join("report.bin")).unwrap()),
+        fnv1a64_hash(&fs::read(load_dir.join("manifest.json")).unwrap()),
+    )
+}
+
+fn manager_in_fresh_tempdir(dir: &tempfile::TempDir) -> ArtifactManager {
+    let repo = Repository::locate(dir.path()).unwrap();
+    ArtifactManager::prepare_for_repo(&repo).unwrap()
+}
+
+#[test]
+fn load_artifact_bytes_are_byte_locked() {
+    let dir = tempdir().unwrap();
+    let mgr = manager_in_fresh_tempdir(&dir);
+
+    let load_dir = mgr.save_load_artifacts(&fixture_load_report(), FP).unwrap();
+    let (json_hash, bin_hash, manifest_hash) = load_artifact_hashes(&load_dir);
+
+    assert_eq!(
+        (json_hash, bin_hash, manifest_hash),
+        (
+            LOCK_REPORT_JSON_HASH,
+            LOCK_REPORT_BIN_HASH,
+            LOCK_MANIFEST_JSON_HASH
+        ),
+        "I2 violation: artifact bytes changed (json={json_hash:#018x} bin={bin_hash:#018x} manifest={manifest_hash:#018x})"
+    );
+}
+
+#[test]
+fn load_artifact_bytes_independent_of_threading() {
+    let dir = tempdir().unwrap();
+    let mgr = manager_in_fresh_tempdir(&dir);
+
+    let first = load_artifact_hashes(&mgr.save_load_artifacts(&fixture_load_report(), FP).unwrap());
+    let second =
+        load_artifact_hashes(&mgr.save_load_artifacts(&fixture_load_report(), FP).unwrap());
+    assert_eq!(first, second, "consecutive saves must be byte-identical");
+
+    let single_thread = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    let single_dir = tempdir().unwrap();
+    let single_mgr = manager_in_fresh_tempdir(&single_dir);
+    let single = single_thread.install(|| {
+        load_artifact_hashes(
+            &single_mgr
+                .save_load_artifacts(&fixture_load_report(), FP)
+                .unwrap(),
+        )
+    });
+    assert_eq!(first, single, "1-thread rayon pool must match direct call");
+
+    let multi_thread = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let multi_dir = tempdir().unwrap();
+    let multi_mgr = manager_in_fresh_tempdir(&multi_dir);
+    let multi = multi_thread.install(|| {
+        load_artifact_hashes(
+            &multi_mgr
+                .save_load_artifacts(&fixture_load_report(), FP)
+                .unwrap(),
+        )
+    });
+    assert_eq!(first, multi, "4-thread rayon pool must match direct call");
+}

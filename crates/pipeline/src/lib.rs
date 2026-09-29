@@ -627,10 +627,15 @@ fn collect_file_metrics(
     file_ids
         .par_iter()
         .map(|&file_id| {
-            let metric = graph
-                .file_paths
-                .get(&file_id)
-                .and_then(|path| analyzer.analyze_file_load(path).ok());
+            // By-id analysis drops the per-file O(V) `find_file_id` string
+            // scan the old path round-trip paid (plan LoadPerf A2). The
+            // registration check preserves the old skip contract: an id
+            // without a path yields None and disappears via `flatten()`.
+            let metric = if graph.file_paths.contains_key(&file_id) {
+                analyzer.analyze_file_load_by_id(file_id).ok()
+            } else {
+                None
+            };
             let done = completed.fetch_add(1, Ordering::SeqCst);
             if let Some(cb) = progress.lock().unwrap().as_mut() {
                 cb(&ProgressEvent::CollateralFile {

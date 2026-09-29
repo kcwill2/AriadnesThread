@@ -248,7 +248,7 @@ fn test_multi_seed_query_never_bfs_after_seeds_warm() {
 // (alpha.h → alpha_helper.h → alpha_leaf.h, beta.h → beta_helper.h) so
 // concurrent workers hit independent closures as well as the shared adjacency
 // and memo tables.
-fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
     let mut ig = IncludeGraph::new();
     ig.register_file(FileId(1), PathBuf::from("Thing.h"));
     ig.register_file(FileId(2), PathBuf::from("Helper.h"));
@@ -498,14 +498,21 @@ fn test_union_of_single_seed_closures_equals_direct_multi_seed() {
     ];
 
     for seeds in &cases {
-        let direct = LoadAnalyzer::new(&ig, &model).get_semantic_closure_of_symbols(seeds);
+        let direct = LoadAnalyzer::new(&ig, &model)
+            .memo()
+            .get_semantic_closure_of_symbols(&model, seeds);
 
         let warm = LoadAnalyzer::new(&ig, &model);
         let mut union = HashSet::new();
         for seed in seeds {
-            union.extend(warm.get_semantic_closure_of_symbols(std::slice::from_ref(seed)));
+            union.extend(
+                warm.memo()
+                    .get_semantic_closure_of_symbols(&model, std::slice::from_ref(seed)),
+            );
         }
-        let via_warm = warm.get_semantic_closure_of_symbols(seeds);
+        let via_warm = warm
+            .memo()
+            .get_semantic_closure_of_symbols(&model, seeds);
 
         assert_eq!(
             direct, union,
@@ -520,10 +527,12 @@ fn test_union_of_single_seed_closures_equals_direct_multi_seed() {
     // Unknown and edgeless seeds contribute themselves only, mirroring
     // test_required_headers_unknown_symbols_ignored semantics.
     let ghost_closure = LoadAnalyzer::new(&ig, &model)
-        .get_semantic_closure_of_symbols(std::slice::from_ref(&ghost));
+        .memo()
+        .get_semantic_closure_of_symbols(&model, std::slice::from_ref(&ghost));
     assert_eq!(ghost_closure, HashSet::from([ghost.clone()]));
     let lonely_closure = LoadAnalyzer::new(&ig, &model)
-        .get_semantic_closure_of_symbols(std::slice::from_ref(&lonely));
+        .memo()
+        .get_semantic_closure_of_symbols(&model, std::slice::from_ref(&lonely));
     assert_eq!(lonely_closure, HashSet::from([lonely.clone()]));
 
     // The public projection agrees cold-vs-warm too, even with an unknown seed mixed in.
@@ -661,5 +670,266 @@ fn test_cache_entry_counts_match_hand_computed_fixture() {
         ),
         (2, 2),
         "hand-counted: 2 warm seeds, 2 distinct def-files"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A1 — override_closure must reuse ONE lockless include-adjacency map.
+// ---------------------------------------------------------------------------
+
+use super::impact::{setup_impact_fixture, C_H, D_H, FAT, MAIN};
+
+/// A1 (I4-adjacent performance lock): `extraction_impact` runs TWO
+/// `override_closure` BFSes per call (kept_subtree + root_after) and is
+/// itself invoked once per justification entry, yet the include-adjacency
+/// map never changes — building it per BFS was pure re-work. N impact calls
+/// must perform AT MOST one adjacency build and warmed calls must add zero
+/// (the OnceLock memo the suite demands).
+#[test]
+fn test_extraction_impact_builds_include_adjacency_at_most_once() {
+    const REPEATS: usize = 4;
+    let (ig, model) = setup_impact_fixture(&[(MAIN, D_H, "d.h")], false);
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+    let seeds = [SymbolId::new("FatA"), SymbolId::new("FatB")];
+
+    let first = analyzer
+        .extraction_impact(MAIN, FAT, &seeds)
+        .expect("impact must exist");
+    assert!(
+        analyzer.include_adjacency_build_count() <= 1,
+        "extraction_impact must share one adjacency build across its BFSes, got {}",
+        analyzer.include_adjacency_build_count()
+    );
+
+    let warmed = analyzer.include_adjacency_build_count();
+    for _ in 1..REPEATS {
+        let repeated = analyzer
+            .extraction_impact(MAIN, FAT, &seeds)
+            .expect("repeated impact must exist");
+        assert_eq!(repeated, first, "repeated impact must be identical");
+    }
+    assert_eq!(
+        analyzer.include_adjacency_build_count(),
+        warmed,
+        "warmed impact calls must add zero adjacency builds"
+    );
+}
+
+/// One impact-fixture configuration: extra include edges + the lone flag.
+type ImpactVariant = (Vec<(FileId, FileId, &'static str)>, bool);
+
+/// A1 equivalence lock (I1/I3): the reused adjacency must not change a
+/// single byte of `ExtractionImpact` — every fixture variant (base,
+/// sibling trap, partial trap, empty-R) agrees between a cold analyzer, a
+/// warmed repeat on the same analyzer, and a fresh analyzer.
+#[test]
+fn test_extraction_impact_cold_matches_warm_across_variants() {
+    let seeds = [SymbolId::new("FatA"), SymbolId::new("FatB")];
+    let variants: Vec<ImpactVariant> = vec![
+        (vec![], false),
+        (vec![(MAIN, D_H, "d.h")], false),
+        (vec![(MAIN, C_H, "c.h")], false),
+        (vec![], true),
+    ];
+    for (extra_edges, lone) in &variants {
+        let (ig, model) = setup_impact_fixture(extra_edges, *lone);
+        let warm = LoadAnalyzer::new(&ig, &model);
+        let cold = warm
+            .extraction_impact(MAIN, FAT, &seeds)
+            .expect("cold impact must exist");
+        let repeated = warm
+            .extraction_impact(MAIN, FAT, &seeds)
+            .expect("warm impact must exist");
+        let fresh = LoadAnalyzer::new(&ig, &model)
+            .extraction_impact(MAIN, FAT, &seeds)
+            .expect("fresh impact must exist");
+        assert_eq!(cold, repeated, "warm repeat must equal cold run");
+        assert_eq!(cold, fresh, "cold run must equal fresh analyzer");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A2 — analyze_file_load_by_id must stop re-deriving FileIds.
+// ---------------------------------------------------------------------------
+
+/// Counter sanity (characterization of the OLD cost): the path-based public
+/// entry resolves through `find_file_id`, so an N-file pass pays exactly N
+/// O(V) string scans. The A2 by-id variant must drive this to zero.
+#[test]
+fn test_path_based_file_analysis_pays_one_scan_per_file() {
+    let (ig, model) = setup_chain_fixture();
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+    assert_eq!(ig.find_file_id_scan_count(), 0);
+    let paths: Vec<&PathBuf> = ig.file_paths.values().collect();
+    assert!(paths.len() >= 4, "chain fixture must have >= 4 files");
+    for path in &paths {
+        analyzer
+            .analyze_file_load(path)
+            .unwrap_or_else(|_| panic!("analyze_file_load({}) failed", path.display()));
+    }
+    assert_eq!(
+        ig.find_file_id_scan_count(),
+        paths.len(),
+        "each path-based file analysis must perform exactly one find_file_id scan"
+    );
+}
+
+/// A2 (I1 lock): for every fixture file — chain and impact fixtures alike —
+/// the by-id analysis must return a `LoadMetric` byte-identical to the
+/// path-based one, so `analyze_file_load` can safely delegate to it.
+#[test]
+fn test_analyze_file_load_by_id_matches_path_variant_on_all_fixtures() {
+    let fixtures = [
+        setup_chain_fixture(),
+        setup_impact_fixture(&[], false),
+        setup_impact_fixture(&[(MAIN, D_H, "d.h")], false),
+    ];
+    for (ig, model) in &fixtures {
+        let analyzer = LoadAnalyzer::new(ig, model);
+        for (&file_id, path) in &ig.file_paths {
+            let by_path = analyzer
+                .analyze_file_load(path)
+                .unwrap_or_else(|_| panic!("analyze_file_load({}) failed", path.display()));
+            let by_id = analyzer
+                .analyze_file_load_by_id(file_id)
+                .unwrap_or_else(|_| panic!("analyze_file_load_by_id({file_id:?}) failed"));
+            assert_eq!(
+                by_id, by_path,
+                "by-id metric must equal the path metric for {}",
+                path.display()
+            );
+        }
+    }
+}
+
+/// A2 (performance lock): an N-file by-id pass — exactly what the pipeline
+/// `collect_file_metrics` does per file — must perform ZERO `find_file_id`
+/// scans, unlike the identical path-based pass (see the counter sanity test).
+#[test]
+fn test_by_id_file_pass_performs_zero_find_file_id_scans() {
+    let (ig, model) = setup_impact_fixture(&[], false);
+    let analyzer = LoadAnalyzer::new(&ig, &model);
+    let ids: Vec<FileId> = ig.file_paths.keys().copied().collect();
+    assert!(ids.len() >= 6, "impact fixture must have >= 6 files");
+    for file_id in &ids {
+        analyzer
+            .analyze_file_load_by_id(*file_id)
+            .unwrap_or_else(|_| panic!("analyze_file_load_by_id({file_id:?}) failed"));
+    }
+    assert_eq!(
+        ig.find_file_id_scan_count(),
+        0,
+        "the by-id pipeline-shaped pass must never call find_file_id"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A3 — compute_load single-pass partition.
+// ---------------------------------------------------------------------------
+
+/// Verbatim reconstruction of `compute_load`'s current two-pass output:
+/// filter pair over `physical_symbols`, each vector sorted ascending. This
+/// is the legacy oracle the single-pass partition must match exactly.
+fn legacy_symbol_split(
+    physical_symbols: &HashSet<SymbolId>,
+    semantic_closure: &HashSet<SymbolId>,
+) -> (Vec<SymbolId>, Vec<SymbolId>) {
+    let mut collateral: Vec<SymbolId> = physical_symbols
+        .iter()
+        .filter(|s| !semantic_closure.contains(s))
+        .cloned()
+        .collect();
+    let mut semantic: Vec<SymbolId> = physical_symbols
+        .iter()
+        .filter(|s| semantic_closure.contains(s))
+        .cloned()
+        .collect();
+    collateral.sort();
+    semantic.sort();
+    (semantic, collateral)
+}
+
+/// A3 characterization lock (I3): the single-pass `partition_symbols` must
+/// equal the legacy filter-pair output — vector contents AND ascending sort
+/// order — for every def-file of the chain/justification and concurrency
+/// fixtures, plus the empty-closure and empty-physical edge cases.
+#[test]
+fn test_partition_symbols_equals_legacy_split_including_order() {
+    for (ig, model) in [setup_chain_fixture(), setup_concurrency_fixture()] {
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        for (file_id, seeds) in &model.file_symbols {
+            let physical = analyzer
+                .memo
+                .expand_physical_symbols(&ig, &model, &HashSet::from([*file_id]));
+            let closure = analyzer
+                .memo
+                .get_semantic_closure_of_symbols(&model, seeds);
+            assert_eq!(
+                partition_symbols(&physical, &closure),
+                legacy_symbol_split(&physical, &closure),
+                "single-pass partition must equal the legacy filter pair for {file_id:?}"
+            );
+        }
+        // Edge cases: nothing semantic, nothing physical.
+        let physical = analyzer
+            .memo
+            .expand_physical_symbols(&ig, &model, &HashSet::from([FileId(1)]));
+        assert_eq!(
+            partition_symbols(&physical, &HashSet::new()),
+            legacy_symbol_split(&physical, &HashSet::new()),
+            "empty semantic closure must partition all to collateral"
+        );
+        assert_eq!(
+            partition_symbols(&HashSet::new(), &HashSet::new()),
+            legacy_symbol_split(&HashSet::new(), &HashSet::new()),
+            "empty physical set must partition to two empty vectors"
+        );
+    }
+}
+
+/// A3 warm-vs-cold equivalence net (I1): every file- and symbol-level metric
+/// over the concurrency fixture must be identical between a warmed analyzer
+/// (caches + memos full) and fresh analyzers.
+#[test]
+fn test_compute_load_warm_matches_cold_on_concurrency_fixture() {
+    let (ig, model) = setup_concurrency_fixture();
+    let paths: Vec<PathBuf> = ig.file_paths.values().cloned().collect();
+    let names: Vec<String> = model.symbols.values().map(|r| r.name.clone()).collect();
+
+    let warm = LoadAnalyzer::new(&ig, &model);
+    let cold_files: Vec<LoadMetric> = paths
+        .iter()
+        .map(|p| warm.analyze_file_load(p).expect("file load"))
+        .collect();
+    let cold_symbols: Vec<LoadMetric> = names
+        .iter()
+        .map(|n| warm.analyze_symbol_load(n).expect("symbol load"))
+        .collect();
+
+    let warm_files: Vec<LoadMetric> = paths
+        .iter()
+        .map(|p| warm.analyze_file_load(p).expect("warm file load"))
+        .collect();
+    let warm_symbols: Vec<LoadMetric> = names
+        .iter()
+        .map(|n| warm.analyze_symbol_load(n).expect("warm symbol load"))
+        .collect();
+
+    let fresh = LoadAnalyzer::new(&ig, &model);
+    let fresh_files: Vec<LoadMetric> = paths
+        .iter()
+        .map(|p| fresh.analyze_file_load(p).expect("fresh file load"))
+        .collect();
+    let fresh_symbols: Vec<LoadMetric> = names
+        .iter()
+        .map(|n| fresh.analyze_symbol_load(n).expect("fresh symbol load"))
+        .collect();
+
+    assert_eq!(warm_files, cold_files, "warmed file metrics must equal cold ones");
+    assert_eq!(warm_symbols, cold_symbols, "warmed symbol metrics must equal cold ones");
+    assert_eq!(warm_files, fresh_files, "warmed file metrics must equal fresh analyzers'");
+    assert_eq!(
+        warm_symbols, fresh_symbols,
+        "warmed symbol metrics must equal fresh analyzers'"
     );
 }

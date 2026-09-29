@@ -13,6 +13,9 @@ pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
     pub reduced_model: ariadne_graph::ReducedSemanticModel,
     pub call_graph: ariadne_graph::CallGraph,
+    /// The generation's ONE shared memo, closure-seeded from stage output
+    /// (plan C1): every live route request reuses it.
+    pub load_memo: Arc<ariadne_graph::LoadMemo>,
     pub payload: GraphExportPayload,
     pub status: StageStatus,
     pub fps: StageFingerprints,
@@ -236,13 +239,19 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let cycles = include_graph.detect_cycles();
     let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
 
+    // C1: ONE memo for the whole generation, seeded with the stage closures
+    // (`with_closures` pattern of `ensure_load`). Payload assembly and every
+    // live route share it; rebuilds swap graph+model+memo as one unit.
+    let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
+
     let path_to_id = build_path_to_id(&include_graph);
     let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
-    let file_justification = ariadne_ui::build_file_justification(
+    let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
         &include_graph,
         &reduced_model,
         &path_to_id,
+        Some(&load_memo),
     );
     let extraction_proposals = build_extraction_proposals(
         &include_graph,
@@ -284,6 +293,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         include_graph,
         reduced_model,
         call_graph,
+        load_memo,
         payload,
         status,
         fps: pipeline.fps.clone(),
@@ -426,11 +436,12 @@ fn proposal_basename(path: &std::path::Path) -> String {
 }
 
 /// Swap a freshly built snapshot into live UI state. The stale payload keeps
-/// serving every request until each slot is replaced.
+/// serving until each slot is replaced. `{graph, model, memo}` enter as ONE
+/// generation via `install_analysis` (plan C1), so no request can pair one
+/// generation's memo with another generation's graph (no stale entries).
 fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
     let fps = out.fps.clone();
-    *write_state(&state.include_graph) = Some(out.include_graph);
-    *write_state(&state.reduced_model) = Some(out.reduced_model);
+    state.install_analysis(out.include_graph, out.reduced_model, out.load_memo);
     *write_state(&state.call_graph) = Some(out.call_graph);
     *write_state(&state.payload) = Some(out.payload);
     *write_state(&state.stage_status) = out.status;

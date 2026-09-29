@@ -95,14 +95,17 @@ async fn test_async_ui_state_loading() {
             file_justification: HashMap::new(),
             extraction_proposals: vec![],
         });
-        *state.include_graph.write().unwrap() = Some(IncludeGraph::new());
-        *state.reduced_model.write().unwrap() = Some(ReducedSemanticModel {
-            repo_root: std::path::PathBuf::from("."),
-            symbols: std::collections::BTreeMap::new(),
-            edges: vec![],
-            tu_usage: std::collections::BTreeMap::new(),
-            file_symbols: std::collections::BTreeMap::new(),
-        });
+        state.install_analysis(
+            IncludeGraph::new(),
+            ReducedSemanticModel {
+                repo_root: std::path::PathBuf::from("."),
+                symbols: std::collections::BTreeMap::new(),
+                edges: vec![],
+                tu_usage: std::collections::BTreeMap::new(),
+                file_symbols: std::collections::BTreeMap::new(),
+            },
+            Arc::new(ariadne_graph::LoadMemo::new()),
+        );
         *state.call_graph.write().unwrap() = Some(CallGraph::default());
     }
 
@@ -642,4 +645,111 @@ async fn test_justification_route_requires_file_param() {
     let app = build_router(justification_state());
     let (status, _headers, _body) = common::request_route(app, "/api/justification").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// C1 (plan 1790608181551): ONE warm memo per analysis generation serves every
+// request. The lock is the memo's test-instrument traversal counters (via the
+// ariadne-graph dev-dependency feature), never wall time.
+// ---------------------------------------------------------------------------
+
+/// One cold/warm snapshot of the shared memo: closures, include-adjacency
+/// builds, semantic BFS traversals, physical expansions.
+fn memo_counters(memo: &ariadne_graph::LoadMemo) -> (usize, usize, usize, usize) {
+    (
+        memo.closure_computation_count(),
+        memo.include_adjacency_build_count(),
+        memo.semantic_bfs_traversal_count(),
+        memo.physical_expansion_count(),
+    )
+}
+
+#[tokio::test]
+async fn test_justification_route_second_request_reuses_shared_memo() {
+    let state = justification_state();
+    let app = build_router(state.clone());
+
+    let (status, _headers, first) =
+        common::request_route(app.clone(), "/api/justification?file=1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        first["total_justified"], 15,
+        "fixture must serve real detail, not an empty body"
+    );
+
+    let memo = state.analysis().expect("loaded generation exposes memo").memo.clone();
+    let after_first = memo_counters(&memo);
+    assert_eq!(
+        after_first.0, 1,
+        "first cold request computes include closures exactly once for the generation"
+    );
+    assert!(
+        after_first.1 >= 1 && after_first.2 > 0 && after_first.3 > 0,
+        "first request must do the real cold work, got {after_first:?}"
+    );
+
+    let (_status, _headers, second) =
+        common::request_route(app.clone(), "/api/justification?file=1").await;
+    assert_eq!(
+        first, second,
+        "shape lock: repeated route calls return identical bodies"
+    );
+
+    let after_second = memo_counters(&memo);
+    assert_eq!(
+        after_second, after_first,
+        "second request must add ZERO closure computations, adjacency builds, \
+         semantic BFS traversals, and physical expansions, got {after_first:?} -> {after_second:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_rebuild_swap_installs_fresh_cold_memo() {
+    let state = justification_state();
+    let app = build_router(state.clone());
+    let (_status, _headers, body) =
+        common::request_route(app.clone(), "/api/justification?file=1").await;
+    assert_eq!(body["total_justified"], 15);
+
+    let old_memo = state
+        .analysis()
+        .expect("generation 1")
+        .memo
+        .clone();
+    assert_eq!(
+        old_memo.closure_computation_count(),
+        1,
+        "generation 1 memo is warm"
+    );
+
+    // Simulate the watcher rebuild swap (cli `swap_into_state`): the whole
+    // {graph, model, memo} generation is replaced by ONE install (I5).
+    state.install_analysis(
+        IncludeGraph::new(),
+        common::empty_reduced_model(),
+        Arc::new(ariadne_graph::LoadMemo::new()),
+    );
+
+    let new_memo = state.analysis().expect("generation 2").memo.clone();
+    assert!(
+        !Arc::ptr_eq(&old_memo, &new_memo),
+        "a rebuild must install a fresh memo Arc, not reuse the previous generation's"
+    );
+    assert_eq!(
+        memo_counters(&new_memo),
+        (0, 0, 0, 0),
+        "fresh memo must be fully cold: no stale entries survive a generation swap"
+    );
+
+    let stale_snapshot = memo_counters(&old_memo);
+    let (_status, _headers, body) = common::request_route(app, "/api/justification?file=1").await;
+    assert_eq!(
+        body["total_justified"], 0,
+        "generation 2 (empty graph) serves the now-unknown file id as empty detail"
+    );
+    assert_eq!(
+        memo_counters(&old_memo),
+        stale_snapshot,
+        "the detached generation-1 memo must never be queried after the swap"
+    );
 }

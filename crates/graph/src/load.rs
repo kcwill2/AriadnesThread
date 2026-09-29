@@ -5,12 +5,7 @@ use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
-
-// Only the test-only BFS counter touches atomics; the import stays
-// `cfg(test)` so release builds emit no unused-import warning.
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Renders a path's final component, falling back to the full path for names
 /// without one (e.g. `..`), mirroring `format_summary`'s file_name fallback.
@@ -93,96 +88,21 @@ impl LoadMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LoadExplanation {
-    pub target_name: String,
-    pub target_file: PathBuf,
-    pub path: Vec<String>,
-    pub collateral_source: String,
-    pub collateral_symbols_count: usize,
-    pub reason: String,
-}
-
-impl LoadExplanation {
-    pub fn format_explanation(&self) -> String {
-        let mut out = String::new();
-        let path_len = self.path.len();
-        for (i, node) in self.path.iter().enumerate() {
-            out.push_str(node);
-            out.push('\n');
-            if i < path_len - 1 {
-                out.push_str("  ↓\n");
-            }
-        }
-
-        out.push_str("\nReason:\n");
-        let indented_reason = self
-            .reason
-            .split('\n')
-            .map(|line| format!("  {}", line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        out.push_str(&indented_reason);
-        out.push('\n');
-
-        out
-    }
-}
-
-/// Thread-safe (`Send + Sync`) so the pipeline can share ONE memoized
-/// analyzer across rayon workers (plan LoadPerfImprovements Phase 4).
-/// Contention-free reads (plan LoadPerfImprovements Phase 5): `closures`
-/// and `symbol_adjacency` are `OnceLock`s — after initialization every
-/// access is a plain shared reference with NO lock held, so BFS traversals
-/// never serialize on an adjacency mutex; `semantic_closure_cache` keeps a
-/// short `Mutex` only around map lookup/insert, and cache hits hand out an
-/// `Arc` refcount bump instead of cloning the whole closure set. The
-/// `Mutex` poisoning via `.unwrap()` is acceptable because poisoning
-/// requires a prior panic while holding that same lock, which already
-/// aborts the run. No lock is ever held while acquiring another
-/// (`OnceLock::get_or_init` for `symbol_adjacency` is invoked OUTSIDE any
-/// other guard, and the `semantic_closure_cache` guard ends before the
-/// miss-path BFS starts), so the caches cannot deadlock, and no guard
-/// crosses a rayon job boundary.
+/// Cheap query handle over an `IncludeGraph` + `ReducedSemanticModel` pair
+/// and one shared `Arc<LoadMemo>` (plan 1790608181551 B1): every cache field
+/// and cache method moved verbatim to `load_caches.rs`, so constructing an
+/// analyzer is a refcount bump, and `with_memo` lets a UI server or the
+/// pipeline share ONE warmed memo across requests/workers instead of
+/// cold-starting per construction. Thread-safe (`Send + Sync`) so the
+/// pipeline can share ONE memoized analyzer across rayon workers (plan
+/// LoadPerfImprovements Phase 4); the lock discipline (I4) is documented on
+/// `LoadMemo`.
 pub struct LoadAnalyzer<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
-    closures: OnceLock<HashMap<FileId, IncludeClosure>>,
-    symbol_adjacency: OnceLock<HashMap<SymbolId, Vec<SymbolId>>>,
-    /// Append-only memo of single-seed semantic closures, keyed by seed.
-    /// `LoadAnalyzer` never mutates `model` or `include_graph` after
-    /// construction, so a closure computed once can never go stale: entries
-    /// are permanent and NO invalidation logic is required. Memory grows by
-    /// one `Arc<HashSet<SymbolId>>` per distinct seed ever queried; the Arc
-    /// makes concurrent cache hits a refcount bump instead of a full
-    /// `HashSet` clone.
-    semantic_closure_cache: Mutex<HashMap<SymbolId, Arc<HashSet<SymbolId>>>>,
-    /// Append-only memo of the physical symbol expansion of a SINGLE
-    /// def-file — the union of `model.file_symbols` over the file's
-    /// transitive includes (seed included). Like the semantic memo, the
-    /// inputs (include closures, reduced model) are immutable after
-    /// construction, so entries are permanent and need no invalidation;
-    /// `compute_load`'s `def_files.len() == 1` fast path borrows the `Arc`
-    /// instead of re-cloning thousands of `SymbolId`s per call. Multi-file
-    /// def-file sets (none in practice) use the non-memoized path. Memory
-    /// grows by one `Arc<HashSet<SymbolId>>` per distinct def-file ever
-    /// queried, mirroring the semantic memo's per-seed growth.
-    physical_expansion_cache: Mutex<HashMap<FileId, Arc<HashSet<SymbolId>>>>,
-    /// Test-only tally of real per-def-file physical expansions (transitive
-    /// include closure unioned into `model.file_symbols`) executed by this
-    /// analyzer; the memo under test must serve repeats without a new
-    /// expansion. Absent from release builds entirely, mirroring
-    /// `semantic_bfs_traversals`.
-    #[cfg(test)]
-    physical_expansions: AtomicUsize,
-    /// Test-only tally of actual semantic-closure BFS traversals executed by
-    /// this analyzer. Instrumented per analyzer (not a global counter) so
-    /// parallel test threads cannot observe each other's traversals; absent
-    /// from release builds entirely. Atomic (not `Cell`) because the struct
-    /// must be `Sync` so the pipeline can share one analyzer across rayon
-    /// workers.
-    #[cfg(test)]
-    semantic_bfs_traversals: AtomicUsize,
+    /// Shared cache generation (I5): cloning a handle bumps the refcount;
+    /// the memo's entry bound stays per-analysis-generation.
+    memo: Arc<LoadMemo>,
 }
 
 /// One header row in an `ExtractionImpact` list. `symbol_count` is the total
@@ -221,19 +141,38 @@ pub struct ExtractionImpact {
     pub symbols_no_longer_parsed: usize,
 }
 
+/// Single-pass split of the physical expansion into `(semantic, collateral)`
+/// vectors (plan LoadPerf A3): one walk of `physical_symbols` instead of the
+/// old two filter passes, then one ascending sort each. Sorting after the
+/// walk keeps the order fed to `contributing_sources` deterministic no matter
+/// how the input `HashSet` iterates (I3).
+fn partition_symbols(
+    physical_symbols: &HashSet<SymbolId>,
+    semantic_closure: &HashSet<SymbolId>,
+) -> (Vec<SymbolId>, Vec<SymbolId>) {
+    let mut semantic: Vec<SymbolId> = Vec::new();
+    let mut collateral: Vec<SymbolId> = Vec::new();
+    for symbol in physical_symbols {
+        if semantic_closure.contains(symbol) {
+            semantic.push(symbol.clone());
+        } else {
+            collateral.push(symbol.clone());
+        }
+    }
+    semantic.sort();
+    collateral.sort();
+    (semantic, collateral)
+}
+
 impl<'a> LoadAnalyzer<'a> {
+    /// Cold-start behavior unchanged from pre-B1: every fresh analyzer gets
+    /// a fresh `Arc<LoadMemo>` — same once-per-instance memoization as before
+    /// the caches moved out.
     pub fn new(include_graph: &'a IncludeGraph, model: &'a ReducedSemanticModel) -> Self {
         Self {
             include_graph,
             model,
-            closures: OnceLock::new(),
-            symbol_adjacency: OnceLock::new(),
-            semantic_closure_cache: Mutex::new(HashMap::new()),
-            physical_expansion_cache: Mutex::new(HashMap::new()),
-            #[cfg(test)]
-            physical_expansions: AtomicUsize::new(0),
-            #[cfg(test)]
-            semantic_bfs_traversals: AtomicUsize::new(0),
+            memo: Arc::new(LoadMemo::new()),
         }
     }
 
@@ -247,15 +186,31 @@ impl<'a> LoadAnalyzer<'a> {
         Self {
             include_graph,
             model,
-            closures: OnceLock::from(closures),
-            symbol_adjacency: OnceLock::new(),
-            semantic_closure_cache: Mutex::new(HashMap::new()),
-            physical_expansion_cache: Mutex::new(HashMap::new()),
-            #[cfg(test)]
-            physical_expansions: AtomicUsize::new(0),
-            #[cfg(test)]
-            semantic_bfs_traversals: AtomicUsize::new(0),
+            memo: Arc::new(LoadMemo::with_closures(closures)),
         }
+    }
+
+    /// Handle over an ALREADY SHARED memo (plan 1790608181551 B1): O(1)
+    /// construction that reuses whatever the memo has already warmed — the
+    /// cheap handle the UI route path (C1) builds per request. Sharing one
+    /// memo across graph/model generations is the caller's contract: the
+    /// memo keys on FileId/SymbolId, which are generation-local.
+    pub fn with_memo(
+        include_graph: &'a IncludeGraph,
+        model: &'a ReducedSemanticModel,
+        memo: Arc<LoadMemo>,
+    ) -> Self {
+        Self {
+            include_graph,
+            model,
+            memo,
+        }
+    }
+
+    /// Clone of the shared memo handle (refcount bump) — what `with_memo`
+    /// takes to build sibling handles over the same caches.
+    pub fn memo(&self) -> Arc<LoadMemo> {
+        Arc::clone(&self.memo)
     }
 
     fn find_symbol_id(&self, symbol_name_or_id: &str) -> Option<SymbolId> {
@@ -280,131 +235,37 @@ impl<'a> LoadAnalyzer<'a> {
         }
     }
 
-    fn get_transitive_includes(&self, file_id: FileId) -> HashSet<FileId> {
-        let closures = self
-            .closures
-            .get_or_init(|| self.include_graph.compute_closures());
-        let mut all = HashSet::new();
-        all.insert(file_id);
-        if let Some(closure) = closures.get(&file_id) {
-            all.extend(closure.transitive_includes.iter().copied());
-        }
-        all
-    }
-
-    /// Semantic closure of `start_symbols`, served per seed from
-    /// `semantic_closure_cache`. Reachability is seed-local, so
-    /// `closure({a, b}) == closure({a}) ∪ closure({b})`: the union of the
-    /// per-seed results equals the old single multi-seed BFS exactly, seeds
-    /// included (an unknown/edgeless seed yields the singleton `{itself}`).
-    /// The single-seed case copies the memoized set once; multi-seed calls
-    /// union the Arc contents into the owned result.
-    fn get_semantic_closure_of_symbols(&self, start_symbols: &[SymbolId]) -> HashSet<SymbolId> {
-        if let [only_seed] = start_symbols {
-            return (*self.cached_single_seed_closure(only_seed)).clone();
-        }
-        let mut visited = HashSet::new();
-        for seed in start_symbols {
-            visited.extend(self.cached_single_seed_closure(seed).iter().cloned());
-        }
-        visited
-    }
-
-    /// Single-seed semantic closure, memoized in `semantic_closure_cache`:
-    /// the cache `lock()` guard ends at the end of the lookup statement, so
-    /// the miss-path insert lock never overlaps another lock. Hits clone
-    /// only the `Arc` (refcount bump), never the closure set itself.
-    fn cached_single_seed_closure(&self, seed: &SymbolId) -> Arc<HashSet<SymbolId>> {
-        let memoized = self
-            .semantic_closure_cache
-            .lock()
-            .unwrap()
-            .get(seed)
-            .cloned();
-        if let Some(closure) = memoized {
-            return closure;
-        }
-        let closure = Arc::new(self.compute_single_seed_closure(seed));
-        self.semantic_closure_cache
-            .lock()
-            .unwrap()
-            .insert(seed.clone(), Arc::clone(&closure));
-        closure
-    }
-
-    /// One BFS traversal from a single seed over the lazily built
-    /// `symbol_adjacency`. Seeds are always inserted into `visited`, so an
-    /// unknown symbol yields exactly `{seed}` — the behavior the cache
-    /// memoizes bit-for-bit. `OnceLock::get_or_init` builds the map at most
-    /// once and afterwards hands out a plain `&` — no lock is held during
-    /// the traversal, so concurrent cache-miss BFS runs in parallel.
-    fn compute_single_seed_closure(&self, seed: &SymbolId) -> HashSet<SymbolId> {
-        #[cfg(test)]
-        self.record_semantic_bfs_traversal();
-
-        let adjacency = self.symbol_adjacency.get_or_init(|| {
-            let mut adj: HashMap<SymbolId, Vec<SymbolId>> = HashMap::new();
-            for edge in &self.model.edges {
-                adj.entry(edge.src_symbol.clone())
-                    .or_default()
-                    .push(edge.dst_symbol.clone());
-            }
-            adj
-        });
-
-        let mut visited = HashSet::new();
-        visited.insert(seed.clone());
-        let mut stack = vec![seed.clone()];
-
-        while let Some(current) = stack.pop() {
-            if let Some(nexts) = adjacency.get(&current) {
-                for next in nexts {
-                    if visited.insert(next.clone()) {
-                        stack.push(next.clone());
-                    }
-                }
-            }
-        }
-        visited
-    }
-
-    /// Test-only: counts each semantic-closure BFS traversal actually run by
-    /// this analyzer. Gated behind `cfg(test)` so release builds pay nothing.
-    #[cfg(test)]
-    fn record_semantic_bfs_traversal(&self) {
-        self.semantic_bfs_traversals.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Test-only: tally of semantic-closure BFS traversals run so far.
+    /// Test-only: tally of semantic-closure BFS traversals run so far on
+    /// this analyzer's shared memo (delegates to `LoadMemo`).
     #[cfg(test)]
     fn semantic_bfs_traversal_count(&self) -> usize {
-        self.semantic_bfs_traversals.load(Ordering::Relaxed)
+        self.memo.semantic_bfs_traversal_count()
     }
 
-    /// Test-only: counts each real physical expansion executed by this
-    /// analyzer (a per-def-file cache miss, or a multi-def-file expansion
-    /// that is never memoized). Gated behind `cfg(test)`.
-    #[cfg(test)]
-    fn record_physical_expansion(&self) {
-        self.physical_expansions.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Test-only: tally of real physical expansions run so far.
+    /// Test-only: tally of real physical expansions run so far on this
+    /// analyzer's shared memo (delegates to `LoadMemo`).
     #[cfg(test)]
     fn physical_expansion_count(&self) -> usize {
-        self.physical_expansions.load(Ordering::Relaxed)
+        self.memo.physical_expansion_count()
+    }
+
+    /// Test-only: tally of include-adjacency builds run so far on this
+    /// analyzer's shared memo; the OnceLock memo contract caps this at one.
+    #[cfg(test)]
+    fn include_adjacency_build_count(&self) -> usize {
+        self.memo.include_adjacency_build_count()
     }
 
     /// Test-only: number of memoized single-seed semantic closures.
     #[cfg(test)]
     fn semantic_closure_cache_len(&self) -> usize {
-        self.semantic_closure_cache.lock().unwrap().len()
+        self.memo.semantic_closure_cache_len()
     }
 
     /// Test-only: number of memoized single-def-file physical expansions.
     #[cfg(test)]
     fn physical_expansion_cache_len(&self) -> usize {
-        self.physical_expansion_cache.lock().unwrap().len()
+        self.memo.physical_expansion_cache_len()
     }
 
     /// Groups symbols by defining file into contributor entries, applying the
@@ -464,7 +325,9 @@ impl<'a> LoadAnalyzer<'a> {
             .iter()
             .filter_map(|s| self.model.symbols.get(s).and_then(|r| r.defining_file))
             .collect();
-        let closure = self.get_semantic_closure_of_symbols(symbol_ids);
+        let closure = self
+            .memo
+            .get_semantic_closure_of_symbols(self.model, symbol_ids);
         let required: Vec<SymbolId> = closure
             .into_iter()
             .filter(|sym| {
@@ -488,49 +351,37 @@ impl<'a> LoadAnalyzer<'a> {
             .collect()
     }
 
-    /// Strict include closure of a file: transitive includes WITHOUT the file
-    /// itself, served from the shared `closures` cache (real edges only).
-    /// The OnceLock guard is never held across derived work — the returned
-    /// `&HashMap` is a plain shared borrow.
-    fn strict_closure(&self, file_id: FileId) -> HashSet<FileId> {
-        self.closures
-            .get_or_init(|| self.include_graph.compute_closures())
-            .get(&file_id)
-            .map(|c| c.transitive_includes.iter().copied().collect())
-            .unwrap_or_default()
-    }
-
     /// BFS from `start` over real include edges where `source`'s outgoing
     /// edges are REPLACED by edges to every header in `replacement`
     /// (override expansion; the graph is never cloned). The result contains
     /// `start` itself; callers using strict-closure sizes subtract it.
     /// The `closures` cache models real edges only, so closure_after cannot
-    /// reuse it — this BFS is the modeled after-state.
+    /// reuse it — this BFS is the modeled after-state, run over the shared
+    /// `file_adjacency` memo.
     fn override_closure(
         &self,
         start: FileId,
         source: FileId,
         replacement: &HashSet<FileId>,
     ) -> HashSet<FileId> {
-        let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
-        for edge in &self.include_graph.edges {
-            if let Some(dest) = edge.destination {
-                adj.entry(edge.source).or_default().push(dest);
-            }
-        }
-
+        let adj = self.memo.file_adjacency_map(self.include_graph);
         let mut visited: HashSet<FileId> = HashSet::new();
         visited.insert(start);
         let mut stack = vec![start];
         while let Some(current) = stack.pop() {
-            let nexts: Vec<FileId> = if current == source {
-                replacement.iter().copied().collect()
-            } else {
-                adj.get(&current).cloned().unwrap_or_default()
-            };
-            for next in nexts {
-                if visited.insert(next) {
-                    stack.push(next);
+            if current == source {
+                // The modeled slim edge replaces S's real outgoing edges.
+                // Set order is irrelevant: the traversal result is a set.
+                for &next in replacement {
+                    if visited.insert(next) {
+                        stack.push(next);
+                    }
+                }
+            } else if let Some(nexts) = adj.get(&current) {
+                for &next in nexts {
+                    if visited.insert(next) {
+                        stack.push(next);
+                    }
                 }
             }
         }
@@ -597,14 +448,17 @@ impl<'a> LoadAnalyzer<'a> {
 
         let kept_subtree = self.override_closure(source, source, &required_set);
         let dropped_directly: HashSet<FileId> = self
-            .strict_closure(source)
+            .memo
+            .strict_closure(self.include_graph, source)
             .difference(&kept_subtree)
             .copied()
             .collect();
 
         let root_after = self.override_closure(root, source, &required_set);
         let root_closure_after = root_after.len().saturating_sub(1);
-        let root_before = self.strict_closure(root);
+        let root_before = self
+            .memo
+            .strict_closure(self.include_graph, root);
         let dropped_from_root: HashSet<FileId> =
             root_before.difference(&root_after).copied().collect();
         let still_reachable: HashSet<FileId> = dropped_directly
@@ -633,54 +487,6 @@ impl<'a> LoadAnalyzer<'a> {
         })
     }
 
-    /// Physical expansion of a def-file set: the union of
-    /// `model.file_symbols` over each def-file's transitive includes (the
-    /// seed files included), exactly as `compute_load` used to build it
-    /// inline. Each call is one REAL expansion and counts on the test-only
-    /// `physical_expansions` tally; the single-file memo below decides how
-    /// often this runs.
-    fn expand_physical_symbols(&self, def_files: &HashSet<FileId>) -> HashSet<SymbolId> {
-        #[cfg(test)]
-        self.record_physical_expansion();
-
-        let mut physical_include_files = HashSet::new();
-        for f in def_files {
-            physical_include_files.extend(self.get_transitive_includes(*f));
-        }
-
-        let mut physical_symbols = HashSet::new();
-        for f in &physical_include_files {
-            if let Some(syms) = self.model.file_symbols.get(f) {
-                physical_symbols.extend(syms.iter().cloned());
-            }
-        }
-        physical_symbols
-    }
-
-    /// Single-def-file physical expansion, memoized in
-    /// `physical_expansion_cache`: the `lock()` guard ends at the end of the
-    /// lookup statement, and the miss-path expansion (which touches the
-    /// `closures` OnceLock) runs outside every guard — the same append-only
-    /// pattern as `cached_single_seed_closure`, so cache hits are an `Arc`
-    /// refcount bump and the caches cannot deadlock.
-    fn cached_physical_expansion(&self, file_id: FileId) -> Arc<HashSet<SymbolId>> {
-        let memoized = self
-            .physical_expansion_cache
-            .lock()
-            .unwrap()
-            .get(&file_id)
-            .cloned();
-        if let Some(expansion) = memoized {
-            return expansion;
-        }
-        let expansion = Arc::new(self.expand_physical_symbols(&HashSet::from([file_id])));
-        self.physical_expansion_cache
-            .lock()
-            .unwrap()
-            .insert(file_id, Arc::clone(&expansion));
-        expansion
-    }
-
     /// The semantic closure is consumed by reference: every caller either
     /// owns a freshly built set or borrows the memoized `Arc` in
     /// `analyze_symbol_load`, and this pass only ever queries `contains`,
@@ -699,34 +505,25 @@ impl<'a> LoadAnalyzer<'a> {
         // in practice) keep the old non-memoized expansion, so every metric
         // is computed from the identical element set either way.
         let memoized: Option<Arc<HashSet<SymbolId>>> = match def_files.len() {
-            1 => def_files
-                .iter()
-                .next()
-                .map(|&f| self.cached_physical_expansion(f)),
+            1 => def_files.iter().next().map(|&f| {
+                self.memo
+                    .cached_physical_expansion(self.include_graph, self.model, f)
+            }),
             _ => None,
         };
         let expanded: HashSet<SymbolId>;
         let physical_symbols: &HashSet<SymbolId> = match &memoized {
             Some(expansion) => expansion,
             None => {
-                expanded = self.expand_physical_symbols(&def_files);
+                expanded = self
+                    .memo
+                    .expand_physical_symbols(self.include_graph, self.model, &def_files);
                 &expanded
             }
         };
 
-        let mut collateral_symbols: Vec<SymbolId> = physical_symbols
-            .iter()
-            .filter(|s| !semantic_closure.contains(s))
-            .cloned()
-            .collect();
-        let mut semantic_sym_vec: Vec<SymbolId> = physical_symbols
-            .iter()
-            .filter(|s| semantic_closure.contains(s))
-            .cloned()
-            .collect();
-
-        collateral_symbols.sort();
-        semantic_sym_vec.sort();
+        let (semantic_sym_vec, collateral_symbols) =
+            partition_symbols(physical_symbols, semantic_closure);
 
         let collateral_sources = self.contributing_sources(&collateral_symbols);
         let largest_collateral_source = collateral_sources.first().cloned();
@@ -766,7 +563,7 @@ impl<'a> LoadAnalyzer<'a> {
         // pipeline's per-symbol pass calls this once per symbol, and
         // cloning the whole closure set per call was the dominant
         // cache-hit cost the Arc memo exists to remove.
-        let semantic_closure = self.cached_single_seed_closure(&sym_id);
+        let semantic_closure = self.memo.cached_single_seed_closure(self.model, &sym_id);
 
         let mut def_files = HashSet::new();
         def_files.insert(def_file);
@@ -779,12 +576,23 @@ impl<'a> LoadAnalyzer<'a> {
         )
     }
 
+    /// Path entry: resolve the id, then delegate. Zero behavior change —
+    /// the metric body lives in `analyze_file_load_by_id` alone, so the two
+    /// entries can never drift.
     pub fn analyze_file_load(&self, file_path_or_id: &Path) -> Result<LoadMetric> {
         let file_id = self
             .include_graph
             .find_file_id(file_path_or_id)
             .ok_or_else(|| anyhow!("File not found in include graph"))?;
+        self.analyze_file_load_by_id(file_id)
+    }
 
+    /// File load from a pre-resolved `FileId`: skips the O(V) `find_file_id`
+    /// string scan that the path entry pays per call — the pipeline file
+    /// pass (plan LoadPerf A2) already holds the ids it is iterating. An id
+    /// unregistered in `file_paths` analyzes as the `"unknown"`-named empty
+    /// target (callers that must skip such ids check registration first).
+    pub fn analyze_file_load_by_id(&self, file_id: FileId) -> Result<LoadMetric> {
         let target_file = self.include_graph.file_paths.get(&file_id).cloned();
         let target_name = target_file
             .as_ref()
@@ -797,173 +605,31 @@ impl<'a> LoadAnalyzer<'a> {
             .get(&file_id)
             .cloned()
             .unwrap_or_default();
-        let semantic_closure = self.get_semantic_closure_of_symbols(&syms);
+        let semantic_closure = self.memo.get_semantic_closure_of_symbols(self.model, &syms);
 
         let mut def_files = HashSet::new();
         def_files.insert(file_id);
 
         self.compute_load(target_name, target_file, def_files, &semantic_closure)
     }
-
-    fn find_shortest_include_path(&self, start: FileId, end: FileId) -> Option<Vec<FileId>> {
-        if start == end {
-            return Some(vec![start]);
-        }
-
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(vec![start]);
-        let mut visited = HashSet::new();
-        visited.insert(start);
-
-        while let Some(path) = queue.pop_front() {
-            // Queue entries are seeded with `[start]` and grow one hop at a
-            // time, so `last()` is a defensive guard, not a reachable None.
-            let current = match path.last() {
-                Some(&id) => id,
-                None => continue,
-            };
-            for dest in self.include_graph.direct_includes(current) {
-                if dest == end {
-                    let mut new_path = path.clone();
-                    new_path.push(dest);
-                    return Some(new_path);
-                }
-                if !visited.contains(&dest) {
-                    visited.insert(dest);
-                    let mut new_path = path.clone();
-                    new_path.push(dest);
-                    queue.push_back(new_path);
-                }
-            }
-        }
-        None
-    }
-
-    pub fn explain_symbol_load(
-        &self,
-        symbol_name_or_id: &str,
-        source_filter: Option<&str>,
-    ) -> Result<LoadExplanation> {
-        let metric = self.analyze_symbol_load(symbol_name_or_id)?;
-
-        let col_source = if let Some(filter) = source_filter {
-            metric
-                .collateral_sources
-                .iter()
-                .find(|cs| cs.path.to_string_lossy().contains(filter))
-                .cloned()
-        } else {
-            metric.largest_collateral_source.clone()
-        };
-
-        let col_source =
-            col_source.ok_or_else(|| anyhow!("No matching collateral source found"))?;
-
-        let sym_id = self
-            .find_symbol_id(symbol_name_or_id)
-            .ok_or_else(|| anyhow!("Symbol not found: {}", symbol_name_or_id))?;
-        let record = self
-            .model
-            .symbols
-            .get(&sym_id)
-            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_name_or_id))?;
-        let target_file_id = record
-            .defining_file
-            .ok_or_else(|| anyhow!("No defining file for symbol"))?;
-
-        let path_ids = self
-            .find_shortest_include_path(target_file_id, col_source.file_id)
-            .ok_or_else(|| anyhow!("No include path found to collateral source"))?;
-
-        let mut path_strs = Vec::new();
-        path_strs.push(metric.target_name.clone());
-        for id in &path_ids {
-            path_strs.push(self.file_basename(*id));
-        }
-
-        let parent_file_id = if path_ids.len() >= 2 {
-            path_ids[path_ids.len() - 2]
-        } else {
-            path_ids[0]
-        };
-        let parent_name = self.file_basename(parent_file_id);
-        let col_name = path_basename(&col_source.path);
-
-        let reason = format!(
-            "{} is included by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
-            col_name, parent_name, metric.target_name, col_name
-        );
-
-        Ok(LoadExplanation {
-            target_name: metric.target_name,
-            target_file: metric
-                .target_file
-                .unwrap_or_else(|| PathBuf::from("unknown")),
-            path: path_strs,
-            collateral_source: col_name,
-            collateral_symbols_count: col_source.symbol_count,
-            reason,
-        })
-    }
-
-    pub fn explain_file_load(
-        &self,
-        file_path_or_id: &Path,
-        source_filter: Option<&str>,
-    ) -> Result<LoadExplanation> {
-        let metric = self.analyze_file_load(file_path_or_id)?;
-        let file_id = self
-            .include_graph
-            .find_file_id(file_path_or_id)
-            .ok_or_else(|| anyhow!("File not found in include graph"))?;
-
-        let col_source = if let Some(filter) = source_filter {
-            metric
-                .collateral_sources
-                .iter()
-                .find(|cs| cs.path.to_string_lossy().contains(filter))
-                .cloned()
-        } else {
-            metric.largest_collateral_source.clone()
-        };
-
-        let col_source =
-            col_source.ok_or_else(|| anyhow!("No matching collateral source found"))?;
-
-        let path_ids = self
-            .find_shortest_include_path(file_id, col_source.file_id)
-            .ok_or_else(|| anyhow!("No include path found to collateral source"))?;
-
-        let mut path_strs = Vec::new();
-        for id in &path_ids {
-            path_strs.push(self.file_basename(*id));
-        }
-
-        let parent_file_id = if path_ids.len() >= 2 {
-            path_ids[path_ids.len() - 2]
-        } else {
-            path_ids[0]
-        };
-        let parent_name = self.file_basename(parent_file_id);
-        let col_name = path_basename(&col_source.path);
-
-        let reason = format!(
-            "{} is included by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
-            col_name, parent_name, metric.target_name, col_name
-        );
-
-        Ok(LoadExplanation {
-            target_name: metric.target_name,
-            target_file: metric
-                .target_file
-                .unwrap_or_else(|| PathBuf::from("unknown")),
-            path: path_strs,
-            collateral_source: col_name,
-            collateral_symbols_count: col_source.symbol_count,
-            reason,
-        })
-    }
 }
+
+/// Shared memoization caches (`LoadMemo`) relocated to a sibling module to
+/// keep both files comfortably under the R2 line limit; pure code move
+/// (plan 1790608181551 B1). `pub use` keeps it reachable as
+/// `ariadne_graph::LoadMemo` for the memo-sharing consumers (C1).
+#[path = "load_caches.rs"]
+mod caches;
+
+pub use caches::LoadMemo;
+
+/// Explanation surface (`LoadExplanation` + the `explain_*` methods and
+/// their shared shortest-path BFS) relocated to a sibling module to keep
+/// both files comfortably under the R2 line limit; pure code move.
+#[path = "load_explain.rs"]
+mod explain;
+
+pub use explain::LoadExplanation;
 
 /// Characterization suite: locks CURRENT behavior of the load analyzer
 /// (explain_symbol_load outputs incl. error paths) via mock fixtures;
@@ -989,3 +655,10 @@ mod impact;
 #[cfg(test)]
 #[path = "load_perf_tests.rs"]
 mod perf;
+
+/// B1 memo-sharing suite: locks shared-`Arc<LoadMemo>` handles (Send+Sync
+/// contract, zero re-work on a warm shared memo, rayon equivalence; plan
+/// 1790608181551). Split from the perf suite to keep both under R2.
+#[cfg(test)]
+#[path = "load_memo_tests.rs"]
+mod memo_perf;

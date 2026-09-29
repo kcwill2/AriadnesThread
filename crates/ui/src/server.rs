@@ -22,10 +22,28 @@ fn read_state<'a, T>(lock: &'a std::sync::RwLock<T>) -> std::sync::RwLockReadGua
     lock.read().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Poison recovery twin for writers: same reasoning as `read_state`.
+fn write_state<'a, T>(lock: &'a std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<'a, T> {
+    lock.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One analysis generation: the include graph, the reduced model, and the
+/// ONE warm `LoadMemo` that serves every request until the next rebuild.
+/// The memo keys on FileId/SymbolId, which are generation-local, so memo
+/// lifetime == analysis generation: swapping this struct (never its parts)
+/// is what makes stale memo entries unobservable (plan C1, I5).
+pub struct AnalysisGeneration {
+    pub include_graph: ariadne_graph::IncludeGraph,
+    pub reduced_model: ariadne_graph::ReducedSemanticModel,
+    pub memo: Arc<ariadne_graph::LoadMemo>,
+}
+
 pub struct UiState {
     pub repo_root: std::path::PathBuf,
-    pub include_graph: std::sync::RwLock<Option<ariadne_graph::IncludeGraph>>,
-    pub reduced_model: std::sync::RwLock<Option<ariadne_graph::ReducedSemanticModel>>,
+    /// `{graph, model, memo}` swap as ONE unit: rebuilds install a fresh
+    /// `Arc<AnalysisGeneration>` under this single lock (`install_analysis`),
+    /// so no request can pair one generation's memo with another's graph.
+    pub analysis: std::sync::RwLock<Option<Arc<AnalysisGeneration>>>,
     pub call_graph: std::sync::RwLock<Option<ariadne_graph::CallGraph>>,
     pub payload: std::sync::RwLock<Option<GraphExportPayload>>,
     pub progress: std::sync::RwLock<crate::dto::ServerProgress>,
@@ -36,8 +54,7 @@ impl UiState {
     pub fn new_loading(repo_root: std::path::PathBuf) -> Self {
         Self {
             repo_root,
-            include_graph: std::sync::RwLock::new(None),
-            reduced_model: std::sync::RwLock::new(None),
+            analysis: std::sync::RwLock::new(None),
             call_graph: std::sync::RwLock::new(None),
             payload: std::sync::RwLock::new(None),
             progress: std::sync::RwLock::new(crate::dto::ServerProgress {
@@ -57,10 +74,9 @@ impl UiState {
         call_graph: ariadne_graph::CallGraph,
         payload: GraphExportPayload,
     ) -> Self {
-        Self {
+        let state = Self {
             repo_root,
-            include_graph: std::sync::RwLock::new(Some(include_graph)),
-            reduced_model: std::sync::RwLock::new(Some(reduced_model)),
+            analysis: std::sync::RwLock::new(None),
             call_graph: std::sync::RwLock::new(Some(call_graph)),
             payload: std::sync::RwLock::new(Some(payload)),
             progress: std::sync::RwLock::new(crate::dto::ServerProgress {
@@ -70,7 +86,38 @@ impl UiState {
                 message: "Ready".to_string(),
             }),
             stage_status: std::sync::RwLock::new(crate::dto::StageStatus::default()),
-        }
+        };
+        // Cold memo; the live server path installs a closure-seeded memo via
+        // `install_analysis` instead (cli boot seeds `LoadMemo::with_closures`
+        // from the pipeline stage output).
+        state.install_analysis(include_graph, reduced_model, Arc::new(ariadne_graph::LoadMemo::new()));
+        state
+    }
+
+    /// Swap a whole analysis generation in one lock-protected assignment —
+    /// THE only way graph/model/memo change after boot (cli boot + watcher
+    /// rebuild both call this, mirroring `swap_into_state`). Dropping the
+    /// `Arc` here detaches the old memo with its generation (I5: no stale
+    /// entry window; no new lock layer).
+    pub fn install_analysis(
+        &self,
+        include_graph: ariadne_graph::IncludeGraph,
+        reduced_model: ariadne_graph::ReducedSemanticModel,
+        memo: Arc<ariadne_graph::LoadMemo>,
+    ) {
+        let generation = Arc::new(AnalysisGeneration {
+            include_graph,
+            reduced_model,
+            memo,
+        });
+        *write_state(&self.analysis) = Some(generation);
+    }
+
+    /// Current generation for one request: an `Arc` refcount bump, after
+    /// which the graph/model/memo stay alive for the whole request even if
+    /// a rebuild swaps in a newer generation mid-flight.
+    pub fn analysis(&self) -> Option<Arc<AnalysisGeneration>> {
+        read_state(&self.analysis).clone()
     }
 }
 
@@ -257,11 +304,10 @@ async fn api_graph_traverse(
         "include" => {
             if let Ok(id) = query.center.parse::<u64>() {
                 let center = FileId(id);
-                let g = read_state(&state.include_graph);
-                let g_ref = g
-                    .as_ref()
+                let gen = state
+                    .analysis()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-                let subgraph = g_ref.traverse_neighborhood(center, depth, direction);
+                let subgraph = gen.include_graph.traverse_neighborhood(center, depth, direction);
                 let node_ids: std::collections::HashSet<String> = subgraph
                     .nodes
                     .into_iter()
@@ -277,11 +323,10 @@ async fn api_graph_traverse(
         }
         "symbol" => {
             let center = SymbolId(query.center.clone());
-            let g = read_state(&state.reduced_model);
-            let g_ref = g
-                .as_ref()
+            let gen = state
+                .analysis()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            let subgraph = g_ref.traverse_neighborhood(&center, depth, direction);
+            let subgraph = gen.reduced_model.traverse_neighborhood(&center, depth, direction);
             let node_ids: std::collections::HashSet<String> =
                 subgraph.nodes.into_iter().map(|n| n.0).collect();
             let edge_ids: std::collections::HashSet<String> = subgraph
@@ -341,11 +386,10 @@ async fn api_graph_path(
     let path = match query.graph_type.as_str() {
         "include" => {
             if let (Ok(from), Ok(to)) = (query.from.parse::<u64>(), query.to.parse::<u64>()) {
-                let g = read_state(&state.include_graph);
-                let g_ref = g
-                    .as_ref()
+                let gen = state
+                    .analysis()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-                g_ref
+                gen.include_graph
                     .shortest_include_path(FileId(from), FileId(to))
                     .map(|p| p.into_iter().map(|id| id.0.to_string()).collect())
             } else {
@@ -353,11 +397,10 @@ async fn api_graph_path(
             }
         }
         "symbol" => {
-            let g = read_state(&state.reduced_model);
-            let g_ref = g
-                .as_ref()
+            let gen = state
+                .analysis()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            g_ref
+            gen.reduced_model
                 .shortest_dependency_path(
                     &SymbolId(query.from.clone()),
                     &SymbolId(query.to.clone()),
@@ -397,11 +440,10 @@ async fn api_graph_entrypoints(
 
     let (roots_ids, leaves_ids, hubs_ids, source_elements) = match query.graph_type.as_str() {
         "include" => {
-            let g = read_state(&state.include_graph);
-            let g_ref = g
-                .as_ref()
+            let gen = state
+                .analysis()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            let (r, l, h) = g_ref.get_entrypoints(limit);
+            let (r, l, h) = gen.include_graph.get_entrypoints(limit);
             (
                 r.into_iter().map(|id| id.0.to_string()).collect(),
                 l.into_iter().map(|id| id.0.to_string()).collect(),
@@ -410,11 +452,10 @@ async fn api_graph_entrypoints(
             )
         }
         "symbol" => {
-            let g = read_state(&state.reduced_model);
-            let g_ref = g
-                .as_ref()
+            let gen = state
+                .analysis()
                 .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            let (r, l, h) = g_ref.get_entrypoints(limit);
+            let (r, l, h) = gen.reduced_model.get_entrypoints(limit);
             (
                 r.into_iter().map(|id| id.0).collect(),
                 l.into_iter().map(|id| id.0).collect(),
@@ -593,22 +634,21 @@ pub async fn api_graph_collateral(
     if let Ok(file_id_num) = query.file.parse::<u64>() {
         let file_id = ariadne_repo::FileId(file_id_num);
 
-        let inc_g = read_state(&state.include_graph);
-        let reduced = read_state(&state.reduced_model);
-
-        let inc_g_ref = inc_g
-            .as_ref()
-            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-        let reduced_ref = reduced
-            .as_ref()
+        let gen = state
+            .analysis()
             .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-        let analyzer = ariadne_graph::LoadAnalyzer::new(inc_g_ref, reduced_ref);
-        if let Some(path) = inc_g_ref.file_paths.get(&file_id) {
-            if let Ok(metric) = analyzer.analyze_file_load(path) {
+        // Cheap per-request handle over the generation's ONE warm memo (C1).
+        let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+            &gen.include_graph,
+            &gen.reduced_model,
+            Arc::clone(&gen.memo),
+        );
+        if gen.include_graph.file_paths.contains_key(&file_id) {
+            if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
                 total_collateral = metric.collateral_load;
 
-                let direct_includes = inc_g_ref.direct_includes(file_id);
+                let direct_includes = gen.include_graph.direct_includes(file_id);
                 let mut direct_set = std::collections::HashSet::new();
                 for d in direct_includes {
                     direct_set.insert(d);
@@ -656,25 +696,27 @@ pub async fn api_justification(
     if let Ok(file_id_num) = query.file.parse::<u64>() {
         let file_id = ariadne_repo::FileId(file_id_num);
 
-        let inc_g = read_state(&state.include_graph);
-        let reduced = read_state(&state.reduced_model);
-
-        let inc_g_ref = inc_g
-            .as_ref()
-            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-        let reduced_ref = reduced
-            .as_ref()
+        let gen = state
+            .analysis()
             .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-        let analyzer = ariadne_graph::LoadAnalyzer::new(inc_g_ref, reduced_ref);
-        if let Some(path) = inc_g_ref.file_paths.get(&file_id) {
-            if let Ok(metric) = analyzer.analyze_file_load(path) {
+        // C1: O(1) handle over the generation's ONE warm memo — no more
+        // per-request `LoadAnalyzer::new` (which re-ran compute_closures and
+        // cold BFS on every click).
+        let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+            &gen.include_graph,
+            &gen.reduced_model,
+            Arc::clone(&gen.memo),
+        );
+        if gen.include_graph.file_paths.contains_key(&file_id) {
+            // A4 by-id: the id is already in hand; skip the O(V) path scan.
+            if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
                 response = crate::dto::build_file_justification_detail(
                     &query.file,
                     file_id,
                     &metric,
                     &analyzer,
-                    reduced_ref,
+                    &gen.reduced_model,
                 );
             }
         }

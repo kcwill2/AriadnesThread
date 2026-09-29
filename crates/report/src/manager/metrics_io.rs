@@ -8,6 +8,38 @@ use std::path::{Path, PathBuf};
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{LoadManifest, LoadReport, PlanManifest};
 
+fn write_load_report_json(path: &Path, report: &LoadReport) -> Result<()> {
+    write_json_atomic(path, report)
+}
+
+fn write_load_report_binary(path: &Path, report: &LoadReport) -> Result<()> {
+    let report_bin =
+        bincode::serialize(report).context("Failed to serialize load report to binary")?;
+    write_atomic(path, &report_bin)
+}
+
+fn build_load_manifest(report: &LoadReport, input_fingerprint: &str) -> LoadManifest {
+    let total_collateral_load: usize = report
+        .symbol_metrics
+        .iter()
+        .map(|m| m.collateral_load)
+        .sum::<usize>()
+        + report
+            .file_metrics
+            .iter()
+            .map(|m| m.collateral_load)
+            .sum::<usize>();
+
+    LoadManifest {
+        repository_root: report.repository_root.clone(),
+        total_analyzed_symbols: report.symbol_metrics.len(),
+        total_analyzed_files: report.file_metrics.len(),
+        total_collateral_load,
+        input_fingerprint: input_fingerprint.to_string(),
+        analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+    }
+}
+
 impl ArtifactManager {
     pub fn save_load_artifacts(
         &self,
@@ -22,34 +54,19 @@ impl ArtifactManager {
             )
         })?;
 
-        // 1. report.json
-        write_json_atomic(&load_artifact_dir.join("report.json"), report)?;
+        // The two full-report serializations are independent CPU-heavy work
+        // writing to distinct files, so overlap them; each keeps its exact
+        // pre-parallelization byte path (I2 byte-stability lock).
+        let report_json_path = load_artifact_dir.join("report.json");
+        let report_bin_path = load_artifact_dir.join("report.bin");
+        let (json_write, bin_write) = rayon::join(
+            || write_load_report_json(&report_json_path, report),
+            || write_load_report_binary(&report_bin_path, report),
+        );
+        json_write?;
+        bin_write?;
 
-        // 2. report.bin
-        let report_bin =
-            bincode::serialize(report).context("Failed to serialize load report to binary")?;
-        write_atomic(&load_artifact_dir.join("report.bin"), &report_bin)?;
-
-        // 3. manifest.json
-        let total_collateral_load: usize = report
-            .symbol_metrics
-            .iter()
-            .map(|m| m.collateral_load)
-            .sum::<usize>()
-            + report
-                .file_metrics
-                .iter()
-                .map(|m| m.collateral_load)
-                .sum::<usize>();
-
-        let manifest = LoadManifest {
-            repository_root: report.repository_root.clone(),
-            total_analyzed_symbols: report.symbol_metrics.len(),
-            total_analyzed_files: report.file_metrics.len(),
-            total_collateral_load,
-            input_fingerprint: input_fingerprint.to_string(),
-            analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
-        };
+        let manifest = build_load_manifest(report, input_fingerprint);
         write_json_atomic(&load_artifact_dir.join("manifest.json"), &manifest)?;
 
         Ok(load_artifact_dir)
