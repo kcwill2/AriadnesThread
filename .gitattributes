@@ -1,0 +1,3 @@
+# Pin byte-exact test fixtures to LF on checkout so core.autocrlf=true
+# clones compare equal against the committed (normalized LF) blobs.
+crates/ui/tests/fixtures/*.json text eol=lf
