@@ -11,3 +11,4 @@ serde_json.workspace = true
 ariadne-repo = { path = "../repo" }
 ariadne-index = { path = "../index" }
 ariadne-graph = { path = "../graph" }
+rayon = { workspace = true }

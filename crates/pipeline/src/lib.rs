@@ -115,6 +115,20 @@ impl RunStats {
 pub enum ProgressEvent {
     TuIndex { done: usize, total: usize },
     CollateralFile { done: usize, total: usize },
+    /// A4: named checkpoints inside the load stage that no per-item event
+    /// covers — the symbol pass boundary and the artifact-save completion.
+    LoadMilestone(LoadMilestone),
+}
+
+/// Load-stage milestones (plan load-tail A4). `SymbolsAnalyzed` fires once
+/// the symbol pass has fully collected (before any `CollateralFile` event);
+/// `ArtifactsSaved` fires only after `save_load_artifacts` has returned, so
+/// progress consumers never observe the save as complete before the bytes
+/// are on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadMilestone {
+    SymbolsAnalyzed { symbols: usize },
+    ArtifactsSaved,
 }
 
 type ProgressCb = Box<dyn FnMut(&ProgressEvent) + Send>;
@@ -270,6 +284,27 @@ impl Pipeline {
     ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
         self.ensure_include_graph()?;
         self.cached_include_graph()
+    }
+
+    /// MOVE the `(graph, closures)` pair out of the include cache — the
+    /// zero-copy hand-out for consumers that take ownership of the whole
+    /// stage output (UI payload assembly, plan load-tail A3). Returns the
+    /// same documented missing-cache error as `cached_include_graph` when
+    /// the stage has not run or was already taken.
+    ///
+    /// SAFETY PRECONDITION — nothing downstream may read `include_cache`
+    /// after a take. The only user, `build_ui_payload`, satisfies this:
+    /// every stage that consumes the include graph (`ensure_load` reads the
+    /// cache at `Self::cached_include_graph`) runs via `run_pipeline_stages` BEFORE
+    /// the take, and the moved graph/closures are used locally afterwards.
+    /// The watcher refresh is safe because each refresh constructs a FRESH
+    /// `Pipeline` (`spawn_watcher` -> `build_ui_payload` -> `Pipeline::new`).
+    pub fn take_include_graph(
+        &mut self,
+    ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
+        self.include_cache
+            .take()
+            .context("include stage cache must exist after ensure_include_graph")
     }
 
     // ------------------------------------------------------------------
@@ -494,23 +529,33 @@ impl Pipeline {
         let analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
         let total_files = reduced.file_symbols.len();
         let repository_root = self.repo.root.clone();
+        // A4: the two analysis passes run as separate pool sections so the
+        // symbol-pass boundary can notify through `self.notify` while the
+        // callback is still on `self`; the file pass then takes the callback
+        // into a Mutex for the rayon workers, mirroring
+        // `rebuild_index_single_threaded`. Field order of the old `LoadReport`
+        // struct literal already guaranteed symbols-before-files; the split
+        // keeps that order and makes it a notifiable milestone.
+        let symbol_metrics =
+            self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer, &reduced))?;
+        self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
+            symbols: symbol_metrics.len(),
+        }));
+
         // take/restore the callback around the parallel section, mirroring
         // `rebuild_index_single_threaded`; the Mutex lets every worker share
         // one `FnMut` sink and guards are only held for a single event.
         let progress = Mutex::new(self.progress.take());
         let completed_files = AtomicUsize::new(0);
-
-        let report = self.run_on_configured_pool(|| LoadReport {
-            repository_root,
-            symbol_metrics: collect_symbol_metrics(&analyzer, &reduced),
-            file_metrics: collect_file_metrics(
+        let file_metrics = self.run_on_configured_pool(|| {
+            collect_file_metrics(
                 &analyzer,
                 &graph,
                 &reduced,
                 total_files,
                 &progress,
                 &completed_files,
-            ),
+            )
         })?;
 
         self.progress = progress.into_inner().unwrap_or_else(|err| err.into_inner());
@@ -519,13 +564,20 @@ impl Pipeline {
             total: total_files,
         });
 
+        let report = LoadReport {
+            repository_root,
+            symbol_metrics,
+            file_metrics,
+        };
         self.manager.save_load_artifacts(&report, &self.fps.load)?;
+        self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
         self.load_cache = Some(Arc::new(report));
         self.stats.record(STAGE_LOAD, StageReuse::Rebuilt);
         Ok(())
     }
 
-    pub fn get_or_build_load(&mut self) -> Result<LoadReport> {
+    /// A3: hands out a shared `Arc<LoadReport>` handle, not a copy.
+    pub fn get_or_build_load(&mut self) -> Result<Arc<LoadReport>> {
         self.ensure_load()?;
         self.cached_load()
     }
@@ -579,12 +631,13 @@ impl Pipeline {
             .context("callgraph stage cache must exist after ensure_callgraph")
     }
 
-    fn cached_load(&self) -> Result<LoadReport> {
-        let report = self
-            .load_cache
-            .as_ref()
-            .context("load stage cache must exist after ensure_load")?;
-        Ok(Arc::unwrap_or_clone(Arc::clone(report)))
+    fn cached_load(&self) -> Result<Arc<LoadReport>> {
+        // A3: hand out a shared `Arc` handle (refcount bump, no deep copy).
+        // The old `Arc::unwrap_or_clone` copied the whole report per call
+        // (~1 s on the UI boot fixture, plan load-tail A0).
+        self.load_cache
+            .clone()
+            .context("load stage cache must exist after ensure_load")
     }
 }
 

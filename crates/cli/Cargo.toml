@@ -34,3 +34,6 @@ serde_json.workspace = true
 ariadne-ui = { path = "../ui" }
 open = "5.1.2"
 axum = { version = "0.7", features = ["tokio"] }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,10 +176,18 @@ pub struct GraphExportPayload {
     pub symbol_graph: Vec<CytoscapeElement>,
     pub call_graph: Vec<CytoscapeElement>,
     pub stats: SummaryStats,
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty",
+        serialize_with = "serialize_sorted_nested_maps"
+    )]
     pub file_collateral:
         std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty",
+        serialize_with = "serialize_sorted_nested_maps"
+    )]
     pub file_justification: std::collections::HashMap<
         String,
         std::collections::HashMap<String, JustificationEntry>,
@@ -187,6 +196,51 @@ pub struct GraphExportPayload {
     /// absent from the JSON when empty, so older payloads round-trip (I2).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extraction_proposals: Vec<ExtractionProposalDto>,
+}
+
+/// Serialize a map with keys in ascending order: std `HashMap` iteration
+/// order comes from a per-process seed, so every map in the export payload
+/// must sort at emission for the `--export` bytes to be stable across
+/// processes. Deserialization keeps the plain impl — JSON object key order
+/// carries no semantics.
+fn serialize_sorted_map<K, V, S>(
+    map: &std::collections::HashMap<K, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    K: Ord + Serialize,
+    V: Serialize,
+    S: serde::Serializer,
+{
+    let mut entries: Vec<(&K, &V)> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+    serializer.collect_map(entries)
+}
+
+/// Ascending-key view of an inner payload map (see `serialize_sorted_map`).
+struct SortedInnerMap<'a, V>(&'a std::collections::HashMap<String, V>);
+
+impl<V: Serialize> Serialize for SortedInnerMap<'_, V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_sorted_map(self.0, serializer)
+    }
+}
+
+/// `serialize_with` helper for the payload's nested map fields: both the
+/// outer and the inner key level serialize in ascending order.
+fn serialize_sorted_nested_maps<V, S>(
+    map: &std::collections::HashMap<String, std::collections::HashMap<String, V>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    V: Serialize,
+    S: serde::Serializer,
+{
+    let sorted: std::collections::BTreeMap<&String, SortedInnerMap<'_, V>> = map
+        .iter()
+        .map(|(key, inner)| (key, SortedInnerMap(inner)))
+        .collect();
+    sorted.serialize(serializer)
 }
 
 /// Maps `root FileId -> source FileId -> per-edge justification`, keyed like
@@ -210,6 +264,18 @@ pub fn build_file_justification(
 /// pipeline stage output, so payload assembly and every later live route
 /// share one warm memo); `None` keeps the cold per-build analyzer, the
 /// behavior of the plain wrapper above.
+///
+/// A6: the per-file loop runs in parallel over `file_metrics` (rayon
+/// `par_iter`, the established repo pattern of cluster's planner and the
+/// pipeline's `collect_file_metrics`). Determinism is structural, not
+/// incidental: the payload is keyed by numeric file ids, every symbol /
+/// header / impact row inside one root group is canonically sorted by the
+/// graph and dto contracts, the per-file `impact_slots` budget is local to
+/// the unit, and the outer map's key order was never payload-meaningful.
+/// The only shared state is the `Sync` analyzer + `Arc<LoadMemo>` (OnceLock
+/// maps + Mutex guards held only for get/insert, never across derived work);
+/// no inner loop here spawns nested rayon work. Locked byte-for-byte by the
+/// golden/determinism tests in `tests/ui_test/justification_golden.rs`.
 pub fn build_file_justification_with_memo(
     file_metrics: &[ariadne_graph::LoadMetric],
     include_graph: &ariadne_graph::IncludeGraph,
@@ -228,80 +294,91 @@ pub fn build_file_justification_with_memo(
         ),
         None => ariadne_graph::LoadAnalyzer::new(include_graph, model),
     };
-    let mut out: std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, JustificationEntry>,
-    > = std::collections::HashMap::new();
-    for metric in file_metrics {
-        let Some(root_id) = metric
-            .target_file
-            .as_ref()
-            .and_then(|p| path_to_id.get(p))
-        else {
-            continue;
-        };
-        let sides = collect_source_sides(metric);
-        if sides.is_empty() {
-            continue;
-        }
-        let ranked = rank_source_ids(&sides);
+    let roots: Vec<(String, std::collections::HashMap<String, JustificationEntry>)> =
+        file_metrics
+            .par_iter()
+            .filter_map(|metric| justification_root(metric, &analyzer, model, path_to_id))
+            .collect();
+    roots.into_iter().collect()
+}
 
-        let mut per_root = std::collections::HashMap::new();
-        let mut impact_slots = 0usize;
-        for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
-            let s = &sides[&id];
-            let (justified_symbols, justified_truncated) =
-                justification_names(s.justified, model, JUSTIFICATION_MAX_NAMES);
-            let (collateral_symbols, collateral_truncated) =
-                justification_names(s.collateral, model, JUSTIFICATION_MAX_NAMES);
-            let required_headers = s
-                .justified
-                .map(|j| {
-                    justification_required_headers(
-                        &analyzer,
-                        &j.symbols,
-                        &j.path,
-                        JUSTIFICATION_MAX_HEADERS,
-                    )
-                })
-                .unwrap_or_default();
-            let justified_count = s.justified.map_or(0, |x| x.symbol_count);
-            let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
-            let mut impact = None;
-            if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
-                impact = entry_extraction_impact(
-                    &analyzer,
-                    ariadne_repo::FileId(*root_id),
-                    id,
-                    s.justified,
-                    justified_count,
-                    collateral_count,
-                )
-                .as_ref()
-                .map(impact_summary_from);
-                if impact.is_some() {
-                    impact_slots += 1;
-                }
-            }
-            per_root.insert(
-                id.to_string(),
-                JustificationEntry {
-                    justified_symbols,
-                    collateral_symbols,
-                    justified_count,
-                    collateral_count,
-                    justified_truncated,
-                    collateral_truncated,
-                    required_headers,
-                    impact,
-                },
-            );
-        }
-        if !per_root.is_empty() {
-            out.insert(root_id.to_string(), per_root);
-        }
+/// A6 rayon unit of work for one root file: the identical pre-A6 per-metric
+/// body (rank sources, build capped entries, spend the per-file impact-slot
+/// budget). `None` reproduces the serial loop's three `continue`s: target
+/// unregistered, sides empty after the E-I9 header filter, or no kept
+/// entries.
+fn justification_root(
+    metric: &ariadne_graph::LoadMetric,
+    analyzer: &ariadne_graph::LoadAnalyzer,
+    model: &ariadne_graph::ReducedSemanticModel,
+    path_to_id: &std::collections::HashMap<std::path::PathBuf, u64>,
+) -> Option<(String, std::collections::HashMap<String, JustificationEntry>)> {
+    let root_id = metric
+        .target_file
+        .as_ref()
+        .and_then(|p| path_to_id.get(p))?;
+    let sides = collect_source_sides(metric);
+    if sides.is_empty() {
+        return None;
     }
-    out
+    let ranked = rank_source_ids(&sides);
+
+    let mut per_root = std::collections::HashMap::new();
+    let mut impact_slots = 0usize;
+    for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
+        let s = &sides[&id];
+        let (justified_symbols, justified_truncated) =
+            justification_names(s.justified, model, JUSTIFICATION_MAX_NAMES);
+        let (collateral_symbols, collateral_truncated) =
+            justification_names(s.collateral, model, JUSTIFICATION_MAX_NAMES);
+        let required_headers = s
+            .justified
+            .map(|j| {
+                justification_required_headers(
+                    analyzer,
+                    &j.symbols,
+                    &j.path,
+                    JUSTIFICATION_MAX_HEADERS,
+                )
+            })
+            .unwrap_or_default();
+        let justified_count = s.justified.map_or(0, |x| x.symbol_count);
+        let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
+        let mut impact = None;
+        if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
+            impact = entry_extraction_impact(
+                analyzer,
+                ariadne_repo::FileId(*root_id),
+                id,
+                s.justified,
+                justified_count,
+                collateral_count,
+            )
+            .as_ref()
+            .map(impact_summary_from);
+            if impact.is_some() {
+                impact_slots += 1;
+            }
+        }
+        per_root.insert(
+            id.to_string(),
+            JustificationEntry {
+                justified_symbols,
+                collateral_symbols,
+                justified_count,
+                collateral_count,
+                justified_truncated,
+                collateral_truncated,
+                required_headers,
+                impact,
+            },
+        );
+    }
+    if per_root.is_empty() {
+        None
+    } else {
+        Some((root_id.to_string(), per_root))
+    }
 }
 
 #[derive(Default)]
@@ -548,7 +625,15 @@ pub fn build_include_elements(
         }
     }
 
-    for (file_id, path) in &graph.file_paths {
+    // Canonical (path asc, file_id asc) emission: `file_paths` is a std
+    // HashMap whose seed is per-process, so raw iteration would shuffle the
+    // node array on every run — `--export` must be byte-stable across
+    // processes.
+    let mut ordered_files: Vec<(&ariadne_repo::FileId, &std::path::PathBuf)> =
+        graph.file_paths.iter().collect();
+    ordered_files.sort_by_key(|(file_id, path)| (*path, **file_id));
+
+    for (file_id, path) in ordered_files {
         let path_str = path.to_string_lossy();
         let fname = path
             .file_name()

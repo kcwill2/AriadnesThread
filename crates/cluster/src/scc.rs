@@ -7,14 +7,34 @@ pub struct SymbolScc {
     pub symbols: Vec<SymbolId>,
 }
 
+/// Wrapper kept for edge-slice callers: builds the adjacency fresh on every
+/// call. Hot loops that reuse one edge set across many symbol seeds (the
+/// planner's per-header SCC pass) should build the adjacency once and call
+/// [`compute_symbol_sccs_from_adj`] directly instead.
 pub fn compute_symbol_sccs(symbols: &[SymbolId], edges: &[SemanticEdge]) -> Vec<SymbolScc> {
+    let adj = build_symbol_adjacency(edges);
+    compute_symbol_sccs_from_adj(symbols, &adj)
+}
+
+/// Adjacency map consumed by [`compute_symbol_sccs_from_adj`], built in edge
+/// iteration order exactly as the wrapper does internally.
+pub fn build_symbol_adjacency(edges: &[SemanticEdge]) -> HashMap<&SymbolId, Vec<&SymbolId>> {
     let mut adj: HashMap<&SymbolId, Vec<&SymbolId>> = HashMap::new();
     for edge in edges {
         adj.entry(&edge.src_symbol)
             .or_default()
             .push(&edge.dst_symbol);
     }
+    adj
+}
 
+/// Tarjan SCCs over the seed `symbols`, traversing a prebuilt adjacency map.
+/// Output is identical to [`compute_symbol_sccs`] fed edges that build the
+/// same adjacency (same neighbor order); the adjacency is only ever read.
+pub fn compute_symbol_sccs_from_adj<'a>(
+    symbols: &[SymbolId],
+    adj: &HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
+) -> Vec<SymbolScc> {
     let mut index = 0;
     let mut indices: HashMap<&SymbolId, usize> = HashMap::new();
     let mut lowlink: HashMap<&SymbolId, usize> = HashMap::new();
@@ -26,7 +46,7 @@ pub fn compute_symbol_sccs(symbols: &[SymbolId], edges: &[SemanticEdge]) -> Vec<
         if !indices.contains_key(sym) {
             strongconnect(
                 sym,
-                &adj,
+                adj,
                 &mut index,
                 &mut indices,
                 &mut lowlink,
@@ -215,6 +235,80 @@ mod tests {
         assert!(sccs[1].symbols.contains(&SymbolId::new("C")));
         assert!(sccs[1].symbols.contains(&SymbolId::new("D")));
         assert!(sccs[1].symbols.contains(&SymbolId::new("E")));
+    }
+
+    #[test]
+    fn from_adj_matches_wrapper_on_shared_fixture() {
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+            SymbolId::new("D"),
+            SymbolId::new("E"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "A"),
+            edge("B", "C"),
+            edge("C", "D"),
+            edge("D", "E"),
+            edge("E", "C"),
+            edge("E", "A"),
+        ];
+        let adj: HashMap<&SymbolId, Vec<&SymbolId>> = edges.iter().fold(
+            HashMap::new(),
+            |mut adj: HashMap<&SymbolId, Vec<&SymbolId>>, edge| {
+                adj.entry(&edge.src_symbol)
+                    .or_default()
+                    .push(&edge.dst_symbol);
+                adj
+            },
+        );
+        assert_eq!(
+            compute_symbol_sccs_from_adj(&syms, &adj),
+            compute_symbol_sccs(&syms, &edges),
+            "prebuilt-adjacency SCCs must equal the delegating wrapper's"
+        );
+    }
+
+    #[test]
+    fn from_adj_resolves_two_disjoint_sccs() {
+        // The shared fixture minus the E->A back edge: {A,B} and {C,D,E}
+        // are genuinely two SCCs, asserted on the from_adj entry point.
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+            SymbolId::new("D"),
+            SymbolId::new("E"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "A"),
+            edge("B", "C"),
+            edge("C", "D"),
+            edge("D", "E"),
+            edge("E", "C"),
+        ];
+        let sccs = compute_symbol_sccs_from_adj(&syms, &build_symbol_adjacency(&edges));
+        assert_eq!(
+            sccs.len(),
+            2,
+            "dropping E->A must split the whole graph in two SCCs"
+        );
+        let ab = sccs
+            .iter()
+            .find(|scc| scc.symbols.contains(&SymbolId::new("A")))
+            .expect("SCC containing A");
+        assert_eq!(ab.symbols.len(), 2);
+        assert!(ab.symbols.contains(&SymbolId::new("B")));
+        let cde = sccs
+            .iter()
+            .find(|scc| scc.symbols.contains(&SymbolId::new("C")))
+            .expect("SCC containing C");
+        assert_eq!(cde.symbols.len(), 3);
+        assert!(cde.symbols.contains(&SymbolId::new("D")));
+        assert!(cde.symbols.contains(&SymbolId::new("E")));
     }
 
     #[test]
