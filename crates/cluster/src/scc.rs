@@ -272,6 +272,46 @@ mod tests {
     }
 
     #[test]
+    fn from_adj_resolves_two_disjoint_sccs() {
+        // The shared fixture minus the E->A back edge: {A,B} and {C,D,E}
+        // are genuinely two SCCs, asserted on the from_adj entry point.
+        let syms = vec![
+            SymbolId::new("A"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+            SymbolId::new("D"),
+            SymbolId::new("E"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "A"),
+            edge("B", "C"),
+            edge("C", "D"),
+            edge("D", "E"),
+            edge("E", "C"),
+        ];
+        let sccs = compute_symbol_sccs_from_adj(&syms, &build_symbol_adjacency(&edges));
+        assert_eq!(
+            sccs.len(),
+            2,
+            "dropping E->A must split the whole graph in two SCCs"
+        );
+        let ab = sccs
+            .iter()
+            .find(|scc| scc.symbols.contains(&SymbolId::new("A")))
+            .expect("SCC containing A");
+        assert_eq!(ab.symbols.len(), 2);
+        assert!(ab.symbols.contains(&SymbolId::new("B")));
+        let cde = sccs
+            .iter()
+            .find(|scc| scc.symbols.contains(&SymbolId::new("C")))
+            .expect("SCC containing C");
+        assert_eq!(cde.symbols.len(), 3);
+        assert!(cde.symbols.contains(&SymbolId::new("D")));
+        assert!(cde.symbols.contains(&SymbolId::new("E")));
+    }
+
+    #[test]
     fn test_connected_multi_scc_graph() {
         let syms = vec![
             SymbolId::new("A"),

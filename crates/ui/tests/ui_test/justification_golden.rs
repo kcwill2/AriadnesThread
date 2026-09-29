@@ -198,9 +198,7 @@ fn build_fixture_model() -> ReducedSemanticModel {
             .symbols
             .insert(SymbolId(drive.clone()), sym(&drive, TU_ID_BASE + tu));
         for root in tu_roots(tu).iter().take(2) {
-            model
-                .edges
-                .push(sem_edge(&drive, &format!("h{root:02}_s")));
+            model.edges.push(sem_edge(&drive, &format!("h{root:02}_s")));
         }
     }
     // Shedding pin symbols (edgeless, so required_headers for the R->S edge
@@ -209,10 +207,9 @@ fn build_fixture_model() -> ReducedSemanticModel {
     model
         .symbols
         .insert(SymbolId("leafsym".to_string()), sym("leafsym", 55));
-    model.file_symbols.insert(
-        FileId(55),
-        vec![SymbolId("leafsym".to_string())],
-    );
+    model
+        .file_symbols
+        .insert(FileId(55), vec![SymbolId("leafsym".to_string())]);
     for mid in ["mid_f", "midsym"] {
         model
             .symbols
@@ -220,7 +217,10 @@ fn build_fixture_model() -> ReducedSemanticModel {
     }
     model.file_symbols.insert(
         FileId(56),
-        vec![SymbolId("mid_f".to_string()), SymbolId("midsym".to_string())],
+        vec![
+            SymbolId("mid_f".to_string()),
+            SymbolId("midsym".to_string()),
+        ],
     );
     model
 }
@@ -243,7 +243,11 @@ fn header_metric(index: u64) -> LoadMetric {
         justified.push(source(1, &header_path(0), wide));
         for j in 0..14 {
             let extra = (5 + j * 3) % HEADER_COUNT;
-            justified.push(source(extra + 1, &header_path(extra), header_symbols(extra)));
+            justified.push(source(
+                extra + 1,
+                &header_path(extra),
+                header_symbols(extra),
+            ));
         }
     }
     if index == 1 {
@@ -299,9 +303,11 @@ fn build_fixture_metrics() -> Vec<LoadMetric> {
     metrics.push(metric_with(
         &header_path(5),
         vec![],
-        vec![source(TU_ID_BASE + 1, &tu_path(1), vec![
-            "tu1_drive".to_string(),
-        ])],
+        vec![source(
+            TU_ID_BASE + 1,
+            &tu_path(1),
+            vec!["tu1_drive".to_string()],
+        )],
     ));
     metrics
 }

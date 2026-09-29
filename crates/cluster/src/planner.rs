@@ -173,8 +173,9 @@ impl<'a> OptimizationPlanner<'a> {
         self.number_pending_plans(pending, &context)
     }
 
-    /// Characterization driver reproducing the pre-A2 serial loop verbatim
-    /// through the same shared steps, for the parallel-parity lock. Gate-less
+    /// Characterization driver reproducing the pre-A2 serial loop through
+    /// the same shared steps, differing only in the driver under test, for
+    /// the parallel-parity lock. Gate-less
     /// `doc(hidden)`: integration tests compile against the non-test cfg
     /// crate, so `#[cfg(test)]`/`pub(crate)` would not be visible to
     /// `tests/planner_facts_parity.rs`.
