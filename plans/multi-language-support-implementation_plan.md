@@ -1,7 +1,7 @@
 # Multi-Language Architecture — Implementation Plan
 
 Status: **DRAFT for approval** (no source changed yet)
-Date: 2026-09-24 · Baseline: `664e014` + uncommitted WIP · `cargo check --workspace --all-targets` = green (warnings only)
+Date: 2026-09-24 · Refined 2026-09-29 (symbol-isolation + placement modeling, §0.1/D6/D7) · Baseline: `664e014` + uncommitted WIP · `cargo check --workspace --all-targets` = green (warnings only)
 
 ---
 
@@ -10,6 +10,13 @@ Date: 2026-09-24 · Baseline: `664e014` + uncommitted WIP · `cargo check --work
 **Confirmed:** reference second language = **Scala**. The tree is already partly prepared: `crates/lang` (untracked WIP) contains unit-tested plugin traits (`LanguagePlugin`, `LanguageRegistry`, `LanguageDetector`, `DependencyResolver`, `SemanticAnalyzer`, `SourceExtractor`, `DependencyRewriter`, `CompilerValidator`, `ClusteringConstraints`), and `crates/repo/src/types.rs` already has `FileKind::{ScalaSource, ScalaScript, BuildDefinition}` plus `SourceLanguage { Cpp, Scala, Other }` / `from_file_kind` / `FileKind::language()`.
 
 **Architectural refinement:** Rename "Include Graph" to "Import Graph" since superfluous imports affect Java, Scala, and other languages, not just C++. This makes the architecture truly language-agnostic and relevant for all modern languages with import systems.
+
+### 0.1 Refinements (2026-09-29, confirmed by user — see D6/D7)
+
+C++ is special among target languages: a symbol's **declaration** lives in a header while its **definition** may live in a different source file; most modern languages (Scala, Go, TS, Python) are **single-file placement** — one file per top-level symbol, declaration and definition inseparable. Two consequences are folded into this plan:
+
+1. **The split is modeled explicitly, never assumed** (§3.2 `SymbolPlacement`, §3.4, D7): `LanguageModeling` gains `symbol_placement`; the reduced model resolves a *true* `defining_file` from the definition's declaration location and records `declaring_files`, instead of equating them via `owning_file` ("usually" — `crates/graph/src/reduced.rs:141`).
+2. **Extraction is generalized into symbol isolation** (§3.6, D6): the language-neutral primitive is "move symbol S out of shared file F into its own file F_S; consumers that use only S point at F_S". For C++ that shrinks the include closure; for single-file languages it shrinks import granularity and makes the symbol→file relation (and therefore the per-file load metric) honest. `transform` becomes a neutral isolation engine in M18; M23 is re-framed from "Scala transform" to "symbol isolation — shared engine (C++ + Scala)".
 
 **Assumptions (correct any of these — they are restated as decision points in §8):**
 
@@ -43,7 +50,7 @@ Verified in the working tree (each row is a real call site, not a guess):
 | 11 | `ariadne-lang` traits exist and are unit-tested, but **no production code calls them** | `crates/lang/src/{lib,registry,detector,analyzer,resolver,extractor,rewriter,validator,constraints}.rs`; `LanguageRegistry::plugin_for` appears only in `crates/lang/src/registry.rs` tests | The scaffold is dead code: every stage is still hardcoded |
 | 12 | Dependency direction forbids the naive fix | `crates/lang/Cargo.toml` → `ariadne-index`, because `lang` traits take/return `ariadne_index::{SymbolId, SymbolRecord, TuAnalysis}` defined in `crates/index/src/types.rs` | `index` cannot consume `lang` today ⇒ cycle |
 
-**Already language-neutral — do not "generalize" it:** `crates/repo/src/types.rs` (`FileKind::ScalaSource`/`ScalaScript`/`BuildDefinition`, `SourceLanguage { Cpp, Scala, Other }`, `SourceLanguage::from_file_kind`, `FileKind::language()`, `is_analyzable()` which already includes `ScalaSource`), `crates/repo/src/policy.rs`, `crates/graph/src/reduced.rs::reduce` (ownership comes from `owning_file`/definition, no extension test), `crates/graph/src/load.rs::compute_load` (works on graph closure + symbol closure only), `crates/cluster/src/scc.rs`.
+**Already language-neutral — do not "generalize" it:** `crates/repo/src/types.rs` (`FileKind::ScalaSource`/`ScalaScript`/`BuildDefinition`, `SourceLanguage { Cpp, Scala, Other }`, `SourceLanguage::from_file_kind`, `FileKind::language()`, `is_analyzable()` which already includes `ScalaSource`), `crates/repo/src/policy.rs`, `crates/graph/src/reduced.rs::reduce` (ownership comes from `owning_file`/definition, no extension test — *except* the placement leak at line 141 `defining_file = owning_file` "usually", fixed by §3.6.1, not generalized), `crates/graph/src/load.rs::compute_load` (works on graph closure + symbol closure only), `crates/cluster/src/scc.rs`.
 
 **Consequence today:** adding a language = edits in ≥ 6 crates + 2 binaries.
 **Target after this plan:** new language = **1 new crate + 1 registry entry + fixtures/tests**, with **0 edits** to `index`, `graph`, `cluster`, `transform`, `validate`, `report`, `scheduler` (review rule R1, §7).
@@ -123,12 +130,20 @@ pub enum AggregationKind { Header, PackageObject, None }  // what "owns" symbols
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardKind { PragmaOnce, IncludeGuard, None }     // was: hardcoded #pragma once
 
+/// Does one symbol's declaration and definition live in different files?
+/// C++ (header declares, source defines) => SplitDeclaration.
+/// Scala/Go/TS/Python (one file per top-level symbol) => SingleFile.
+/// Drives symbol-isolation targets (§3.6) and reduced-model provenance (§3.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SymbolPlacement { SplitDeclaration, SingleFile }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageModeling {
     pub language: LanguageId,
     pub unit: UnitKind,
     pub aggregation: AggregationKind,
     pub guard: GuardKind,
+    pub symbol_placement: SymbolPlacement,                   // NEW (D7)
     /// Does an aggregation artifact physically re-aggregate dependency code (C++ header)
     /// or only re-export/nominalise it (Scala package object / given precedence)?
     pub aggregation_reexports: bool,
@@ -232,11 +247,12 @@ Two facts make M18 cheaper than it looks:
 | External boundary | angle system include, `third_party/`, `vendor/` | unresolved package prefix, `lib/`, `target/scala-*/`, managed deps of `build.sbt` |
 | Cycle policy | `CyclePolicy::Reject` (TU cycle = defect) | `CyclePolicy::TolerateWithinPackage` (mutually recursive classes are legal) |
 | "Collateral load" | symbols from transitively included headers you do not use | symbols pulled into the compile-time closure by importing a package aggregation |
-| Symbol ownership | header owns declarations, TU owns definitions | file owns top-level `class/trait/object/enum/given`; `package` clause owns the namespace |
+| Symbol ownership | header owns declarations, TU owns definitions — `SymbolPlacement::SplitDeclaration`; reduced model keeps `defining_file` (definition decl's file) distinct from `declaring_files` | file owns top-level `class/trait/object/enum/given`; `package` clause owns the namespace — `SymbolPlacement::SingleFile`; declaring file == defining file always |
 | Build manifest | `CMakeLists.txt`, `.vcxproj`, `compile_commands.json` | `build.sbt`, `project/build.properties`, `build.sc`, `pom.xml` |
 | Toolchain | `cl.exe` fallback in `infer_default_discovery`, real compiler from `compile_commands.json`, optional `clang-worker` sidecar (JSON request/response protocol unchanged) | `scalac` / `scala-cli` / `sbt` **optional**; absent ⇒ built-in parser + `Skipped` validation tier |
 | Atomic symbol groups | none beyond policy | companion object ↔ class, `sealed trait` ↔ direct subtypes (`ClusteringConstraints::colocated_groups`) |
-| Extraction target naming | `{symbol}_extracted.h` | `{symbol}.scala` in the same package dir (planner asks the plugin — M23) |
+| Extraction target naming | `{symbol}_extracted.h` (template provided by the plugin in M18 — `OptimizationPlanner::target_path_for`) | `{symbol}.scala` in the same package dir (same hook; §3.6) |
+| Isolation unit (§3.6) | the **declaration site** — extract from the header, that is what consumers pay for; definitions stay in their source files | the **whole top-level symbol** — single-file placement, one file becomes its own file |
 
 ### 3.5 Artifact & versioning changes (additive only — assumption A4)
 
@@ -250,7 +266,31 @@ Two facts make M18 cheaper than it looks:
 | `artifacts/includes/manifest.json` | `IncludeEdge` gains `language`; `IncludeKind { Local, System, External }` gains **one** additive variant `Import`; `External` is reused for unresolved/out-of-repo imports (`"Local"`/`"System"` strings unchanged) | `crates/graph/src/types.rs` |
 | `artifacts/load/manifest.json` | `LoadMetric` gains `aggregation_target`, `language`; field name `include_load` kept for compatibility | `crates/graph/src/load.rs` |
 | `artifacts/plans/*.json` | `OptimizationPlan` gains `language` | `crates/cluster/src/plan.rs` |
-| `artifacts/transactions/*.json` | `ValidationStatus` gains `Skipped(String)` | `crates/validate/src/lib.rs` |
+| `artifacts/transactions/*.json` | `ValidationStatus` gains `Skipped(String)`; `ValidationTier::GeneratedHeaders` + `ConsumerRewrite.old_includes`/`new_includes` + `MigrationPreview` keep their existing serde names (D5 legacy vocabulary) | `crates/validate/src/lib.rs`, `crates/transform/src/placement.rs` |
+| `artifacts/reduced/symbols.bin` | `ReducedSymbolRecord` gains `declaring_files: Vec<FileId>` and `defining_file` is resolved from the definition's `SymbolDecl.location` (fallback `owning_file`) — §3.6.1. **This is bincode, not JSON: `#[serde(default)]` does not help.** Safe *because and only with* the M18 `CURRENT_ANALYSIS_VERSION` `"2.0.0"` bump: `check_manifest` rejects stale epoch and the blob is regenerated. JSON goldens unchanged (manifest stores counts only) | `crates/graph/src/reduced.rs`, `crates/report/src/manager/graph_io.rs` |
+
+### 3.6 Symbol isolation — the language-neutral optimization primitive (D6)
+
+The product's core move is **not** "extract a C++ header". It is: *move symbol S out of shared file F into its own file F_S; consumers that use only S now depend on F_S instead of F.* In C++ this shrinks the include closure; in Scala/Go/TS/Python it shrinks import granularity — and in both cases it makes the **symbol→file relation 1:1**, which is what makes the per-file load metric actionable. `SymbolPlacement` (§3.2) only changes *what* gets isolated (§3.4 "Isolation unit" row), not the pipeline.
+
+**Division of labor (fixed in M18, executed for both languages in M23):**
+
+| Piece | Where | Notes |
+|---|---|---|
+| Isolation engine: group plan extractions per target file, compute dependency edges among extracted symbols over the reduced model, cycle-check the target graph, write files | `crates/transform` (stays neutral) | `HeaderExtractor` → renamed `IsolationEngine`; `GeneratedHeader{filename, pragma_once, required_includes}` → `GeneratedUnit{path, required_deps}`; `ExtractedSymbol.forward_declarable` moves into the C++ plugin's payload. These three types have **no serde derives** (verified) — rename cost is call-site only (`validate/src/lib.rs`, suites `m10`/`m14`/`m20`) |
+| New-file text rendering (pragma + includes / package + imports) | plugin: `lang::SourceExtractor` (already neutral in `crates/lang/src/extractor.rs`) | Today the engine itself emits `#pragma once` + `#include "…"` (`crates/transform/src/extractor.rs:157-163`); M18 moves that byte-emit into `lang-cpp::CppSourceExtractor` reproducing today's bytes exactly |
+| Consumer redirect (which old deps a consumer still needs; side-effect preservation) | engine computes `ConsumerRewrite` (neutral logic, serde names frozen per D5); directive *text* rewriting + diff rendering (`#include "…"` lines in `format_diff`, `crates/transform/src/placement.rs:26-43`) move behind the plugin's `DependencyRewriter` | C++ bytes must stay identical (`m14`/`m20` assert on preview JSON + diff text) |
+| Target file naming | plugin hook `OptimizationPlanner::target_path_for` (M18) | `{name}_extracted.h` becomes the C++ default, not an engine literal (`crates/cluster/src/planner.rs:97`) |
+| Validation tiers | already neutral + M18's `Skipped` | C++ tier 3 = real compile; Scala tier 3 = `Skipped` offline |
+
+**Known behaviour gap (fixed in M23, not M18):** today's engine does not copy real code — symbol bodies are placeholders (`format!("// Symbol: {} ({:?})", …)`, `crates/transform/src/extractor.rs:72`). M23 switches the engine to feed verbatim `SymbolBody` spans (parser span text) into the plugin extractor. This *changes C++ output* (generated files get real bodies), so M23 carries its own golden refresh — M18 stays byte-identical including the placeholders.
+
+#### 3.6.1 Symbol→file provenance fix (D7, lands in M18)
+
+- `ReducedSemanticModel::reduce` builds a `DeclId → FileId` map from each `tu.declarations` (`SymbolDecl.location.file_id` is already recorded) and sets `defining_file` = the defining decl's file, falling back to `owning_file` when the decl id is unknown — replacing the `owning_file` shortcut at `crates/graph/src/reduced.rs:141,148`.
+- `ReducedSymbolRecord` gains `declaring_files: Vec<FileId>` (deduped, sorted — the files that host any declaration of the symbol; small even under ODR because each file is analyzed once).
+- **Provably a no-op on current fixtures:** today's parser records every decl location in the file being analyzed, and each file in the include closure is analyzed exactly once, so definition-decl file == `owning_file` on both C++ fixtures → `defining_file` values are unchanged; only the added `declaring_files` field changes `symbols.bin` bytes (covered by the epoch bump, §3.5).
+- UI (`crates/ui/src/dto.rs`) surfaces **declared-in** vs **defined-in** on symbol nodes (M22) — the meaningfulness of the symbol-file relation the isolation primitive depends on.
 
 ---
 
@@ -261,8 +301,8 @@ New workspace members (`Cargo.toml` `members` list) and their dependency edges:
 | Crate | Package name | Depends on | Purpose |
 |---|---|---|---|
 | `crates/lang-api` | `ariadne-lang-api` | `ariadne-repo`, `serde`, `anyhow` | Moved index value types + `LanguageId`, `LanguageModeling`, `LanguageCapabilities`, `UnitDescriptor`, `FileCatalog`, `ResolveOutcome`, `ToolchainStatus` |
-| `crates/lang-cpp` | `ariadne-lang-cpp` | `lang-api`, `lang`, `repo`, `index`, `serde_json` | `CppPlugin` + `CppUnitShaper`; the `#include` parser and `IncludeResolver` logic moved out of `crates/graph/src/resolver.rs`; the `CppSemanticAnalyzer` tokenizer/`ParserCtx` moved out of `crates/index/src/analyzer.rs`; `ClangWorkerBackend` moved out of `crates/scheduler/src/worker.rs` |
-| `crates/lang-scala` | `ariadne-lang-scala` | `lang-api`, `lang`, `repo`, `serde`, `anyhow` | `ScalaPlugin`: detector, `ScalaUnitShaper`, import resolver, `ScalaSourceParser` (semantic analyzer), constraints (companion/sealed), later extractor/rewriter/validator |
+| `crates/lang-cpp` | `ariadne-lang-cpp` | `lang-api`, `lang`, `repo`, `index`, `serde_json` | `CppPlugin` (`symbol_placement = SplitDeclaration`) + `CppUnitShaper`; the `#include` parser and `IncludeResolver` logic moved out of `crates/graph/src/resolver.rs`; the `CppSemanticAnalyzer` tokenizer/`ParserCtx` moved out of `crates/index/src/analyzer.rs`; `ClangWorkerBackend` moved out of `crates/scheduler/src/worker.rs`; `CppSourceExtractor` (new-file text: `#pragma once` + `#include`) + `CppDependencyRewriter` (consumer redirect + diff text) moved out of `crates/transform` |
+| `crates/lang-scala` | `ariadne-lang-scala` | `lang-api`, `lang`, `repo`, `serde`, `anyhow` | `ScalaPlugin` (`symbol_placement = SingleFile`): detector, `ScalaUnitShaper`, import resolver, `ScalaSourceParser` (semantic analyzer), constraints (companion/sealed); `ScalaSourceExtractor`/`ScalaDependencyRewriter` arrive in M23 (§3.6) |
 
 Modified `Cargo.toml`s: `crates/lang` (`ariadne-index` → `ariadne-lang-api`), `crates/index` (+ `ariadne-lang-api`), `crates/build` (+ `ariadne-lang-api`, + `ariadne-lang`), `crates/graph` (+ `ariadne-lang-api`, + `ariadne-lang`), `crates/cluster`, `crates/transform`, `crates/validate` (+ `ariadne-lang-api`), `crates/cli` (+ `ariadne-lang`, `ariadne-lang-cpp`, `ariadne-lang-scala`), `crates/scheduler` (+ `ariadne-lang`), `crates/report` (+ `ariadne-lang-api`), root `[workspace] members`.
 
@@ -319,14 +359,17 @@ Dispatch rewiring (core crates stop containing C++):
 | `crates/graph/src/builder.rs` | `build_include_graph(repo_path)` (BFS + `IncludeResolver`) | add `build_dependency_graph(repo_path, &registry)`; the BFS becomes generic over `&dyn DependencyResolver` (`resolve_edges` + `resolve_target(&FileCatalog)`), `External` outcome comes from `ResolveOutcome::External` / `LanguageModeling::external_path_markers`; `build_include_graph` keeps delegating with the C++ resolver |
 | `crates/graph/src/graph.rs` | `map_header_consuming_tus` | add neutral alias `map_aggregation_consumers` (thin wrapper, zero logic change) and keep the old name for one milestone |
 | `crates/cluster/src/planner.rs` | `plan` (line 57 `map_header_consuming_tus`, line 97 `format!("{}_extracted.h", record.name)`) | new fields on `OptimizationPlanner`: `aggregation_filter: &dyn Fn(&Path) -> bool` (default: every file, as today), `target_path_for: &dyn Fn(&Path, &str) -> PathBuf` (default: `{name}_extracted.h`), `constraints: Option<&dyn ClusteringConstraints>`, `cycle_policy` — `crate::scc` stays as-is |
-| `crates/validate/src/lib.rs` | `ValidationStatus { Pass, Fail(String) }`, `TierValidator::*` | **M18 adds only** `ValidationStatus::Skipped(String)` + `format_output` handling + `CompilerValidator::toolchain_status()`; `TransactionApplier::apply` (the `#pragma once` / `content.replace("#include …")` block) is generalized in **M23**, because only Scala transforms need it |
+| `crates/graph/src/reduced.rs` | `merge_tu_symbols` (`defining_file = Some(sym.owning_file)`, line 141/148) | **§3.6.1 provenance fix:** build `DeclId → FileId` from each `tu.declarations`; `defining_file` = defining decl's file (fallback `owning_file`); add `declaring_files: Vec<FileId>` (sorted, deduped). No-op on current fixture values; `symbols.bin` (bincode) byte change is covered by the epoch bump below |
+| `crates/graph/src/load.rs` | `compute_load` | **no change** — already language-neutral (verified); vocabulary documented, not renamed |
+| `crates/transform/src/{lib.rs,extractor.rs}` | `GeneratedHeader`, `ExtractedSymbol.forward_declarable`, `HeaderExtractor`, `ExtractionResult::write_to_disk` (the `#pragma once` / `#include "…"` emit at extractor.rs:157-163) | neutral isolation engine (§3.6): `GeneratedUnit{path, symbols, required_deps}`; engine keeps grouping / inter-symbol dependency / cycle-check / disk-write, delegates new-file text to `plugin.extractor(): SourceExtractor`; C++ byte-emit → `lang-cpp::CppSourceExtractor` (reproduces today's bytes **including the placeholder bodies** — real verbatim bodies are an M23 change with its own golden refresh) |
+| `crates/transform/src/placement.rs` | `IncludeRewriter`, `ConsumerRewrite::format_diff` (`#include` text) | engine keeps the symbol→file redirect logic (serde names frozen, D5); the directive-text rewrite + diff rendering move behind `plugin.rewriter(): DependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` keep their serde shape |
+| `crates/validate/src/lib.rs` | `ValidationStatus { Pass, Fail(String) }`, `TierValidator::*` | **M18 adds only** `ValidationStatus::Skipped(String)` + `format_output` handling + `CompilerValidator::toolchain_status()`; `ValidationTier::GeneratedHeaders` keeps its serialized name (D5, asserted by `m20`); `TransactionApplier::apply` (the `#pragma once` / `content.replace("#include …")` block) is generalized in **M23** |
 | `crates/index/src/cache.rs` | `CURRENT_ANALYSIS_VERSION`, `TuCacheFingerprint::compute`, `TuCacheEntry::is_valid` | fingerprint gains `language` + `plugin_fingerprint`; epoch bump; `validate_and_get` unchanged |
 | `crates/scheduler/src/incremental.rs` | `IncrementalAnalyzer::analyze` (uses `CppSemanticAnalyzer` + `IncludeResolver`), `TuCacheFingerprint::compute` call site | analyzer + resolver come from the registry (`PluginWorkerBackend`, `CppDependencyResolver`); header-dependency invalidation (`test_header_modification`) becomes the C++ plugin's `dependents_of()` contribution |
 | `crates/scheduler/src/worker.rs` | `DefaultWorkerBackend::execute` | becomes `PluginWorkerBackend { registry }` (dispatch by `task.tu` language); `ClangWorkerBackend` → `lang-cpp` |
 | `crates/cli/src/registry.rs` | *new* | `pub fn default_registry() -> LanguageRegistry` — the **only** place plugins are enumerated (`CppPlugin::new()` now, `ScalaPlugin` in M19) |
-| `crates/graph/src/reduced.rs`, `crates/graph/src/load.rs` | `reduce`, `compute_load` | **no change** — both are already language-neutral (verified); only their vocabulary is misleading, which is documented, not renamed, in this milestone |
 
-Acceptance: golden artifact diff empty for both C++ fixtures; `m18_cpp_plugin_parity_test.rs` proves `CppDependencyResolver::resolve_edges`/`resolve_target` reproduce `parse_include_directives` + `IncludeResolver::resolve_file_includes` output on `tests/fixtures/basic` + `tests/fixtures/expensive`, and that `PluginWorkerBackend` reproduces `DefaultWorkerBackend::execute` byte-for-byte; source search for `clang` / `cl.exe` / `#include` / `".h"` in `index|graph|cluster|transform|validate|report` production code = 0 matches.
+Acceptance: golden artifact diff empty for both C++ fixtures; `m18_cpp_plugin_parity_test.rs` proves `CppDependencyResolver::resolve_edges`/`resolve_target` reproduce `parse_include_directives` + `IncludeResolver::resolve_file_includes` output on `tests/fixtures/basic` + `tests/fixtures/expensive`, that `PluginWorkerBackend` reproduces `DefaultWorkerBackend::execute` byte-for-byte, that the isolation engine + `CppSourceExtractor` + `CppDependencyRewriter` reproduce today's generated-file bytes and `MigrationPreview` JSON/diff text (`m10`/`m14`/`m20` untouched and green), and that reduced-model `defining_file` values are unchanged while `declaring_files` is populated (both fixtures); source search for `clang` / `cl.exe` / `#include` / `".h"` in `index|graph|cluster|transform|validate|report` production code = 0 matches.
 
 
 ### M19 — Scala plugin: discovery + build context (first Scala code)
@@ -374,13 +417,17 @@ Acceptance (`m21_scala_semantic_index_test.rs`): index contains `com.example.ser
 | `crates/cluster/src/planner.rs` (capability gate) | when `capabilities.planning == false`, emit one explanatory `PlanRejection` per language instead of silently returning `vec![]` |
 | `crates/report/src/{manifests.rs,manager.rs}` | additive `language` fields in repository / build / includes / load manifests |
 | `crates/cli/src/commands/analyze.rs` (+ `includes.rs`, `query.rs`) | `handle_analyze_load` / `handle_explain_load` wording comes from `LanguageModeling` ("package aggregation" instead of "header") |
-| `crates/ui/src/{dto.rs,export.rs}` | expose `language` + `unit_kind` on file nodes so the Graph UI can distinguish C++ from Scala |
+| `crates/ui/src/{dto.rs,export.rs}` | expose `language` + `unit_kind` on file nodes so the Graph UI can distinguish C++ from Scala; expose `defining_file` + `declaring_files` on symbol nodes so a C++ class renders "defined in `.cpp`, declared in `.h`" while a Scala symbol shows a single file (`symbol_placement` from §3.6.1) |
 
 Acceptance (`m22_scala_load_analysis_test.rs`): `ariadne load --symbol com.example.services.OrderService` reports non-zero collateral load attributed to `models/all.scala` (Scala analogue of the C++ "expensive" fixture); `ariadne explain` renders the import chain; `ariadne plan` prints the capability-gated rejection; C++ report/UI golden output unchanged.
 
 ### Deferred, specified but not executed here
 
-- **M23 — Scala transform + validation.** Needs M18 plus: `ScalaSourceExtractor: SourceExtractor` (package clause + minimal imports + bodies), `ScalaDependencyRewriter: DependencyRewriter` (import-line replacement preserving every other byte — `TransactionApplier::apply` must call `rewrite()` instead of `content.replace("#include …")`), planner target template `{symbol}.scala` in the source package dir, `ClusteringConstraints` enforcement (companion object ↔ class, `sealed trait` ↔ subtypes stay together), tiers 1–2 ported, tier 3 = `Skipped` without a Scala toolchain. Highest-risk milestone; approve separately.
+- **M23 — Symbol isolation, shared engine (C++ + Scala).** The *isolation* primitive (§3.6) is the point of the tool for every language, not just C++; M18 already makes the engine neutral, so M23 is "make it produce real code for both languages", executed under one approval gate.
+  - **Fix the C++ placeholder gap:** the engine today emits `// Symbol: {} ({:?})` bodies (`crates/transform/src/extractor.rs:72`), not real code. M23 feeds verbatim `SymbolBody` spans (from `CppSemanticAnalyzer` source ranges) into `CppSourceExtractor`. **This changes C++ output ⇒ its own golden refresh + reviewer sign-off, deliberately separated from the byte-identical M18.**
+  - **Scala:** `ScalaSourceExtractor: SourceExtractor` (package clause + minimal imports + real bodies), `ScalaDependencyRewriter: DependencyRewriter` (import-line replacement preserving every other byte — `TransactionApplier::apply` calls `rewrite()` instead of `content.replace("#include …")`), planner target `{symbol}.scala` in the source package dir (`target_path_for`, §3.4), `ClusteringConstraints` enforcement (companion object ↔ class, `sealed trait` ↔ subtypes stay together), tiers 1–2 ported, tier 3 = `Skipped` without a Scala toolchain.
+  - `SymbolPlacement` selects the isolation unit per language at plan time (§3.4 "Isolation unit" row): C++ isolates the declaration site (header), Scala isolates the whole top-level symbol.
+  - Highest-risk milestone; approve separately.
 - **M24 — out-of-process plugin host** (`libloading` / WASM). Worth it only when a plugin is built by another team; the trait boundary here is the precondition, nothing more.
 
 
@@ -396,6 +443,7 @@ Acceptance (`m22_scala_load_analysis_test.rs`): `ariadne load --symbol com.examp
 | Module | Tests |
 |---|---|
 | `lang-api::identity` | exhaustive `match` over every `FileKind` variant → expected `SourceLanguage` (`Header`/`Source`→`Cpp`, `ScalaSource`/`ScalaScript`/`BuildDefinition`→`Scala`, `Other`→`Other`) |
+| `lang-api::modeling` | `SymbolPlacement` round-trips through serde; C++/Scala modeling fixtures carry `SplitDeclaration` / `SingleFile` respectively |
 | `lang-api::catalog` | `by_rel_path` / `by_basename` / `by_module_path`; `/` vs `\` normalization on Windows |
 | `lang::registry` (extends its existing tests) | `plugin_for_id`, `languages`, `detect_language` precedence when two plugins claim a path, `SourceLanguage::Other` ⇒ `None` |
 | `lang-cpp::directive_parser` | port of every case in `crates/graph/src/resolver.rs`'s current tests (quoted vs angle, commented-out, `<>` system, `#  include` with whitespace) |
@@ -405,6 +453,8 @@ Acceptance (`m22_scala_load_analysis_test.rs`): `ariadne load --symbol com.examp
 | `lang-scala::parser` | class, trait, object, case class, `given`, companion pairing, `extends`/`with` edges, nested `package`, comments and string interpolation must not create symbols |
 | `lang-scala::shaper` | module naming, test-root tagging, empty `src/main/scala` ⇒ 0 units |
 | `cluster::planner` | `aggregation_filter` + `target_path_for` defaults reproduce today's plan set on both C++ fixtures; Scala filter selects only package-object files |
+| `graph::reduced` | `defining_file` resolved from the definition decl's file; fallback to `owning_file` when the decl id is unknown; `declaring_files` deduped + sorted; on fixture data `defining_file` equals the legacy `owning_file` value (§3.6.1) |
+| `transform::engine` | neutral engine + injected `CppSourceExtractor`/`CppDependencyRewriter` reproduce pre-M18 generated-file bytes, `MigrationPreview` JSON, and `format_diff` text byte-for-byte (incl. placeholder bodies); cycle check unchanged |
 | `index::cache` | `TuCacheFingerprint` with differing `language` / `plugin_fingerprint` ⇒ different digest; `TuCacheEntry::is_valid` regression |
 | `validate::lib` | `Skipped` propagation + `format_output`; rollback still fires on `Fail` |
 
@@ -449,10 +499,13 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 |---|---|---|
 | The M17 type move changes the serde shape of existing artifacts | medium | Move definitions verbatim (same field order + attributes); golden snapshot §6.1 catches any drift; `#[serde(default)]` only on genuinely new fields |
 | `#[serde(default)]` on `TuAnalysis.language` requires `Default` | certain | `ariadne_repo::SourceLanguage` gains `#[derive(Default)]` with `#[default] Cpp` — every pre-existing artifact keeps reading correctly, and no `rename_all` is introduced so the stored PascalCase names stay valid |
-| `#[deprecated]` shims in `graph`/`index` hide leftover C++ assumptions | medium | Shims are the only dual state; they are removed inside M18 itself (exit task M18.9), and the architecture guard excludes only files that carry an explicit `#[allow(deprecated)]` |
+| `#[deprecated]` shims in `graph`/`index` hide leftover C++ assumptions | medium | Shims are the only dual state; they are removed inside M18 itself (exit task M18.11), and the architecture guard excludes only files that carry an explicit `#[allow(deprecated)]` |
 | Scala heuristic parser produces wrong symbols → misleading load metrics | high (by design) | Parser never fabricates a symbol from the file stem; `ScalaSourceParser` reports only constructs it actually recognised, and Scala output is labelled heuristic in CLI/report for M21–M22; exact types arrive with the M23 toolchain analyzer |
 | Incremental cache poisoned across languages | medium | Cache key carries `language` + `plugin_fingerprint` + epoch bump; test asserts a Scala run cannot invalidate C++ entries and vice versa |
 | Refactor stalls half-way with two shapes of the same trait | medium | Every milestone is independently mergeable and green; deprecated shims are deleted in the milestone that introduces them |
+| `symbols.bin` is **bincode** — adding `declaring_files` shifts the byte layout and `#[serde(default)]` does **not** rescue it | certain | The M18 `CURRENT_ANALYSIS_VERSION` bump (`"2.0.0"`) is what forces regeneration; `report/.../graph_io.rs::check_manifest` rejects the stale epoch before `load_reduced_artifacts` deserializes, so a v1 blob never reaches the new struct. A test asserts a v1-era `symbols.bin` triggers reindex, not a serde error |
+| Isolation engine change silently breaks `m10`/`m14`/`m20` (they consume `transform` types) | medium | `GeneratedHeader`/`ExtractedSymbol`/`ExtractionResult` have no serde derives (verified), so the neutral rename is call-site-only; `ConsumerRewrite`/`MigrationPreview` keep their exact serde field names (D5); byte-identical parity test + those three suites run unmodified as the guard |
+| The real-bodies fix (§3.6) would change C++ generated output and blow the "byte-identical" promise | high if mixed into M18 | Deliberately deferred to M23 with its own golden refresh; M18 keeps the current placeholder bodies so the behaviour-preserving invariant holds |
 | C++ behaviour silently changes while `cluster`/`transform`/`validate` are generalized | high | The *current* C++ behaviour is injected as the default (`build_include_graph` keeps the `IncludeResolver` BFS, `BuildDiscoverer::discover` keeps compile_commands + `infer_default_discovery` when no shaper is injected, `OptimizationPlanner` defaults to `{name}_extracted.h`); Scala opts in explicitly instead of the other way round |
 
 **Review rules**
@@ -473,6 +526,8 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 | D3 | Scala semantic depth in the first slice? | **Built-in heuristic parser** (offline-deterministic); toolchain-backed analyzer deferred to M23 behind a probe |
 | D4 | Should `ariadne plan` emit Scala optimization plans in this slice? | **No** — capability-gated with an explicit rejection message, so output is never silently empty |
 | D5 | Keep `#include`-flavoured artifact field names (`include_load`, `tu_file_id`, `target_header`) for compatibility? | **Yes** in this plan (additive-only); renaming is a separate breaking milestone with an artifact-version bump |
+| D6 | How far does generalized **symbol isolation** (extract symbol → own file) go in this slice? | **Confirmed 2026-09-29: Option A** — M17/M18 define the neutral contract (§3.6) and prove C++ byte-parity through the seam; M23, re-framed as "symbol isolation — shared engine", executes real isolation for C++ *and* Scala under one gate. Scala isolation is *not* run inside M19–M22 |
+| D7 | How explicitly is the C++-specific declaration/definition split modeled? | **Confirmed 2026-09-29: Option A** — `LanguageModeling.symbol_placement` + reduced-model `declaring_files` and true `defining_file` (§3.6.1) + UI declared-vs-defined; existing serde names untouched, bincode risk covered by the epoch bump |
 
 ---
 
@@ -495,8 +550,10 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [ ] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs`
 - [ ] M18.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
 - [ ] M18.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
-- [ ] M18.8 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
-- [ ] M18.9 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` parity); remove the `#[deprecated]` shims; architecture guard passes; workspace green
+- [ ] M18.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies
+- [ ] M18.9 `reduced.rs` provenance fix (§3.6.1): `DeclId→FileId` map from `tu.declarations`, true `defining_file` (fallback `owning_file`), add `declaring_files`; epoch bump invalidates the bincode `symbols.bin`
+- [ ] M18.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
+- [ ] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
 
 **M19–M22 — Scala analysis slice**
 - [ ] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
@@ -507,15 +564,16 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [ ] M21.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
 - [ ] M21.2 `ScalaAnalyzer` + `handle_index_with_registry` + `PluginWorkerBackend` language dispatch; language-scoped cache key; `m21_scala_semantic_index_test.rs`
 - [ ] M22.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
-- [ ] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind`
+- [ ] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
 - [ ] M22.3 `m22_scala_load_analysis_test.rs`; golden re-check; workspace green
 
 **Docs**
 - [ ] D.1 Append M17–M22 to `Plan.md` using its Proves / Does-not-prove format
-- [ ] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + rules R1–R3
+- [ ] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + §3.6 isolation contract + rules R1–R3
 - [ ] D.3 "Adding a language in 5 steps" page (new crate → implement traits → register → fixture → tests)
+- [ ] D.4 `docs/adr/0002-symbol-placement-and-isolation.md` — C++ `SplitDeclaration` vs single-file placement; why isolation (symbol → own file) is the language-neutral primitive (D6/D7 rationale)
 
-**Sequencing note:** M17 is mostly mechanical; **M18 is the largest single block (~40 % of the work)**; M19–M20 are small; M21's parser is the second-largest item; M22 is medium. Each milestone should ship as its own reviewable PR set.
+**Sequencing note:** M17 is mostly mechanical; **M18 is the largest single block (~45 % of the work — the transform neutralization and provenance fix join the original dispatch rewiring)**; M19–M20 are small; M21's parser is the second-largest item; M22 is medium. Each milestone should ship as its own reviewable PR set.
 
 ---
 

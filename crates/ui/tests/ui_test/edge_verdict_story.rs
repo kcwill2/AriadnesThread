@@ -168,8 +168,8 @@ fn test_edge_verdict_legend_and_help_copy() {
         "amber verdict row needs its solid swatch class and rule"
     );
     assert!(
-        main.contains("Between two dependencies \u{2014} context only"),
-        "legend must explain grey context arrows"
+        main.contains("Transitive dependency \u{2014} no verdict vs selection"),
+        "legend must name grey arrows as transitive dependencies with no root-relative verdict"
     );
     assert!(
         main.contains("edge-style-context")

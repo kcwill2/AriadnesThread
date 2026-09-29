@@ -201,7 +201,7 @@
       const contextRow = `
         <div class="legend-row">
           <div class="legend-line edge-style-context"></div>
-          <span>Between two dependencies — context only</span>
+          <span>Transitive dependency — no verdict vs selection</span>
         </div>`;
       const cardRows = verdictCardLegendRows(hasJustifiedVerdict, hasUnusedVerdict);
       const heatHeader = `<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">`
