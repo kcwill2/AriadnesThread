@@ -176,10 +176,18 @@ pub struct GraphExportPayload {
     pub symbol_graph: Vec<CytoscapeElement>,
     pub call_graph: Vec<CytoscapeElement>,
     pub stats: SummaryStats,
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty",
+        serialize_with = "serialize_sorted_nested_maps"
+    )]
     pub file_collateral:
         std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::HashMap::is_empty",
+        serialize_with = "serialize_sorted_nested_maps"
+    )]
     pub file_justification: std::collections::HashMap<
         String,
         std::collections::HashMap<String, JustificationEntry>,
@@ -188,6 +196,51 @@ pub struct GraphExportPayload {
     /// absent from the JSON when empty, so older payloads round-trip (I2).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extraction_proposals: Vec<ExtractionProposalDto>,
+}
+
+/// Serialize a map with keys in ascending order: std `HashMap` iteration
+/// order comes from a per-process seed, so every map in the export payload
+/// must sort at emission for the `--export` bytes to be stable across
+/// processes. Deserialization keeps the plain impl — JSON object key order
+/// carries no semantics.
+fn serialize_sorted_map<K, V, S>(
+    map: &std::collections::HashMap<K, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    K: Ord + Serialize,
+    V: Serialize,
+    S: serde::Serializer,
+{
+    let mut entries: Vec<(&K, &V)> = map.iter().collect();
+    entries.sort_by_key(|(key, _)| *key);
+    serializer.collect_map(entries)
+}
+
+/// Ascending-key view of an inner payload map (see `serialize_sorted_map`).
+struct SortedInnerMap<'a, V>(&'a std::collections::HashMap<String, V>);
+
+impl<V: Serialize> Serialize for SortedInnerMap<'_, V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_sorted_map(self.0, serializer)
+    }
+}
+
+/// `serialize_with` helper for the payload's nested map fields: both the
+/// outer and the inner key level serialize in ascending order.
+fn serialize_sorted_nested_maps<V, S>(
+    map: &std::collections::HashMap<String, std::collections::HashMap<String, V>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    V: Serialize,
+    S: serde::Serializer,
+{
+    let sorted: std::collections::BTreeMap<&String, SortedInnerMap<'_, V>> = map
+        .iter()
+        .map(|(key, inner)| (key, SortedInnerMap(inner)))
+        .collect();
+    sorted.serialize(serializer)
 }
 
 /// Maps `root FileId -> source FileId -> per-edge justification`, keyed like
@@ -572,7 +625,15 @@ pub fn build_include_elements(
         }
     }
 
-    for (file_id, path) in &graph.file_paths {
+    // Canonical (path asc, file_id asc) emission: `file_paths` is a std
+    // HashMap whose seed is per-process, so raw iteration would shuffle the
+    // node array on every run — `--export` must be byte-stable across
+    // processes.
+    let mut ordered_files: Vec<(&ariadne_repo::FileId, &std::path::PathBuf)> =
+        graph.file_paths.iter().collect();
+    ordered_files.sort_by_key(|(file_id, path)| (*path, **file_id));
+
+    for (file_id, path) in ordered_files {
         let path_str = path.to_string_lossy();
         let fname = path
             .file_name()
