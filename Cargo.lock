@@ -115,6 +115,7 @@ dependencies = [
  "ariadne-graph",
  "ariadne-index",
  "ariadne-repo",
+ "rayon",
  "serde",
  "serde_json",
 ]

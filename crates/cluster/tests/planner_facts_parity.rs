@@ -16,7 +16,7 @@ use ariadne_cluster::planner::{
 use ariadne_graph::reduced::{ReducedSemanticEdge, ReducedSymbolRecord};
 use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_graph::{
-    IncludeGraph, LoadAnalyzer, LoadMetric, ReducedSemanticModel,
+    IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric, ReducedSemanticModel,
 };
 use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_repo::{FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy};
@@ -455,4 +455,213 @@ fn unregistered_metric_targets_are_never_candidates() {
         stray_plans.is_empty(),
         "a fact for an unregistered FileId must not produce any plan: {stray_plans:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// A2 locks: the rayon header loop (adjacency hoisted + order-preserving
+// collect + collect-then-enumerate PLAN numbering) must be byte-identical to
+// the pre-A2 serial loop, on the cold and the facts path alike.
+// ---------------------------------------------------------------------------
+
+/// > 64 header work items so the parallel driver must chunk and interleave
+/// across threads; screening classes are interleaved across the index range.
+const STRESS_HEADER_COUNT: usize = 84;
+const STRESS_ZERO_COLLATERAL_EVERY: usize = 13;
+const STRESS_FROZEN_EVERY: usize = 17;
+const STRESS_CYCLIC_EVERY: usize = 11;
+const STRESS_CYCLIC_REMAINDER: usize = 4;
+
+/// Order-stress fixture: 84 headers with cyclic fanout includes (dense
+/// closures ⇒ collateral > 0), three symbols per candidate header joined by
+/// strictly decreasing semantic edges (singleton SCCs ⇒ multiple extraction
+/// proposals per plan). Rejected classes are interleaved, never appended:
+/// - `index % 13 == 5`: symbol-rich but include-free ⇒ collateral 0, screened
+///   out before any SCC work.
+/// - `index % 17 == 7`: collateral > 0 but Frozen policy ⇒ screened out at
+///   the policy gate.
+/// - `index % 11 == 4`: its two symbols form one whole-file SCC ⇒ screened
+///   candidate that yields zero proposals ⇒ whole header dropped without
+///   burning a plan number (QUIRK locked by the A1 characterization).
+fn build_stress_fixture() -> ParityFixture {
+    let mut fixture = ParityFixture::new();
+
+    for index in 0..STRESS_HEADER_COUNT {
+        fixture.register(
+            header_id(index),
+            &header_name(index),
+            FileKind::Header,
+            if index % STRESS_FROZEN_EVERY == 7 {
+                OptimizationPolicy::Frozen
+            } else {
+                OptimizationPolicy::Optimizable
+            },
+        );
+    }
+    for index in 0..STRESS_HEADER_COUNT {
+        if index % STRESS_ZERO_COLLATERAL_EVERY == 5 {
+            continue; // include-free: zero-collateral reject
+        }
+        let target_a = (index + 11) % STRESS_HEADER_COUNT;
+        let target_b = (index + 23) % STRESS_HEADER_COUNT;
+        fixture.includes(header_id(index), header_id(target_a));
+        fixture.includes(header_id(index), header_id(target_b));
+    }
+
+    for slot in 0..2u64 {
+        fixture.register(
+            FileId(TU_ID_BASE + slot),
+            &format!("tu{slot}.cc"),
+            FileKind::Source,
+            OptimizationPolicy::Optimizable,
+        );
+        fixture.tu_file_ids.push(FileId(TU_ID_BASE + slot));
+    }
+    fixture.includes(FileId(TU_ID_BASE), header_id(0));
+    fixture.includes(FileId(TU_ID_BASE), header_id(5));
+    fixture.includes(FileId(TU_ID_BASE + 1), header_id(STRESS_HEADER_COUNT - 1));
+
+    for index in 0..STRESS_HEADER_COUNT {
+        let stem = format!("T{index:02}");
+        if index % STRESS_CYCLIC_EVERY == STRESS_CYCLIC_REMAINDER {
+            fixture.defines(header_id(index), &format!("{stem}_0"), true);
+            fixture.defines(header_id(index), &format!("{stem}_1"), true);
+            fixture.depends(&format!("{stem}_0"), &format!("{stem}_1"));
+            fixture.depends(&format!("{stem}_1"), &format!("{stem}_0"));
+        } else {
+            fixture.defines(header_id(index), &format!("{stem}_0"), true);
+            fixture.defines(header_id(index), &format!("{stem}_1"), true);
+            fixture.defines(header_id(index), &format!("{stem}_2"), true);
+            if index >= 1 {
+                fixture.depends(&format!("T{index:02}_0"), &format!("T{:02}_0", index - 1));
+            }
+            fixture.depends(&format!("T{index:02}_2"), &format!("T{index:02}_1"));
+        }
+    }
+
+    fixture
+}
+
+fn stress_planner<'a>(
+    fixture: &'a ParityFixture,
+    model: &'a ReducedSemanticModel,
+) -> OptimizationPlanner<'a> {
+    OptimizationPlanner::new(
+        &fixture.graph,
+        model,
+        &fixture.records,
+        &fixture.tu_file_ids,
+    )
+}
+
+fn facts_planner<'a>(
+    fixture: &'a ParityFixture,
+    model: &'a ReducedSemanticModel,
+    closures: &'a HashMap<FileId, IncludeClosure>,
+) -> OptimizationPlanner<'a> {
+    let file_metrics = stage_file_metrics(&fixture.graph, model);
+    let facts = screening_facts_from_metrics(&fixture.graph, &file_metrics);
+    OptimizationPlanner::with_screening_facts(
+        &fixture.graph,
+        model,
+        &fixture.records,
+        &fixture.tu_file_ids,
+        facts,
+        closures,
+    )
+}
+
+#[test]
+fn parallel_output_matches_serial() {
+    // (a) the existing 48-header fixture, cold and facts paths.
+    let fixture = build_fixture();
+    let model = fixture.model();
+    let closures = fixture.graph.compute_closures();
+    assert_eq!(
+        stress_planner(&fixture, &model).plan(),
+        stress_planner(&fixture, &model).plan_serial_for_test(),
+        "48-header cold path must match the serial driver"
+    );
+    assert_eq!(
+        facts_planner(&fixture, &model, &closures).plan(),
+        facts_planner(&fixture, &model, &closures).plan_serial_for_test(),
+        "48-header facts path must match the serial driver"
+    );
+
+    // (b) the 84-header order-stress fixture.
+    let stress = build_stress_fixture();
+    let stress_model = stress.model();
+    let parallel = stress_planner(&stress, &stress_model).plan();
+    let serial = stress_planner(&stress, &stress_model).plan_serial_for_test();
+    assert_eq!(parallel, serial, "stress fixture must match serial exactly");
+
+    let expected_ids: Vec<String> = (1..=parallel.len())
+        .map(|n| format!("PLAN-{n:03}"))
+        .collect();
+    assert_eq!(
+        plan_ids(&parallel),
+        expected_ids,
+        "ids must be dense PLAN-001.. over collected order"
+    );
+
+    // The stress fixture really exercises every class.
+    assert!(
+        parallel.len() > 60,
+        "most headers must plan, got {}",
+        parallel.len()
+    );
+    assert!(
+        parallel.iter().any(|plan| plan
+            .proposed_extractions
+            .iter()
+            .filter(|ext| ext.symbol_name.starts_with('T'))
+            .count()
+            >= 3),
+        "candidate headers must yield multiple SCC proposals each"
+    );
+    let planned_ids: Vec<u64> = parallel.iter().map(|plan| plan.target_file_id.0).collect();
+    assert!(
+        (0..STRESS_HEADER_COUNT)
+            .filter(|index| index % STRESS_CYCLIC_EVERY == STRESS_CYCLIC_REMAINDER)
+            .all(|index| !planned_ids.contains(&(HEADER_ID_BASE + index as u64))),
+        "single-SCC headers must be dropped without burning ids"
+    );
+    assert!(
+        (0..STRESS_HEADER_COUNT)
+            .filter(|index| index % STRESS_FROZEN_EVERY == 7)
+            .all(|index| !planned_ids.contains(&(HEADER_ID_BASE + index as u64))),
+        "frozen headers must never plan"
+    );
+    assert!(
+        (0..STRESS_HEADER_COUNT)
+            .filter(|index| index % STRESS_ZERO_COLLATERAL_EVERY == 5)
+            .all(|index| !planned_ids.contains(&(HEADER_ID_BASE + index as u64))),
+        "include-free headers must screen out on zero collateral"
+    );
+}
+
+#[test]
+fn plan_is_deterministic_across_repeats() {
+    // Guards rayon ordering flakiness: repeated plan() calls on one planner
+    // must return byte-equal output on both paths.
+    let stress = build_stress_fixture();
+    let stress_model = stress.model();
+    let closures = stress.graph.compute_closures();
+
+    let cold = stress_planner(&stress, &stress_model);
+    let cold_first = cold.plan();
+    let facts = facts_planner(&stress, &stress_model, &closures);
+    let facts_first = facts.plan();
+
+    for repeat in 1..10 {
+        assert_eq!(
+            cold.plan(),
+            cold_first,
+            "cold plan() must be byte-equal on repeat {repeat}"
+        );
+        assert_eq!(
+            facts.plan(),
+            facts_first,
+            "facts plan() must be byte-equal on repeat {repeat}"
+        );
+    }
 }

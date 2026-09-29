@@ -7,6 +7,7 @@ use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadMetric};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -92,6 +93,27 @@ struct HeaderCandidate {
     collateral_source_path: PathBuf,
 }
 
+/// A screened header plus its validated extractions, awaiting sequential plan
+/// assembly and dense `PLAN-{:03}` numbering. Kept id-free so the per-header
+/// step is pure and the parallel collect can renumber afterwards.
+struct PendingPlan {
+    candidate: HeaderCandidate,
+    proposed_extractions: Vec<ProposedExtraction>,
+}
+
+/// Read-only inputs shared by every per-header planning step, built once per
+/// planning run. Holds the hoisted model-wide symbol adjacency (A2: the SCC
+/// pass no longer rebuilds it per header) and the cold analyzer, which is
+/// `None` on the facts path.
+struct PlanningContext<'a> {
+    cold_analyzer: Option<LoadAnalyzer<'a>>,
+    frontier_analyzer: FrontierAnalyzer,
+    policies: FilePolicyMaps,
+    checker: ConstraintChecker,
+    adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
+    header_consumers: HashMap<FileId, Vec<FileId>>,
+}
+
 impl<'a> OptimizationPlanner<'a> {
     /// Cold path (CLI `tool optimize`/`plan`): screening re-analyzes each
     /// header serially with a fresh `LoadAnalyzer`. Behavior is untouched by
@@ -135,7 +157,39 @@ impl<'a> OptimizationPlanner<'a> {
         }
     }
 
+    /// Screening + proposal discovery run in parallel over sorted header ids
+    /// (`par_iter` collect preserves input order, mirroring
+    /// `collect_file_metrics` in the pipeline); assembly and dense
+    /// `PLAN-{:03}` numbering then follow collected order, so output is
+    /// byte-identical to the pre-A2 serial loop — locked against
+    /// [`plan_serial_for_test`] by `tests/planner_facts_parity.rs`.
     pub fn plan(&self) -> Vec<OptimizationPlan> {
+        let context = self.build_planning_context();
+        let pending: Vec<PendingPlan> = self
+            .sorted_header_ids()
+            .par_iter()
+            .filter_map(|&file_id| self.header_proposal(file_id, &context))
+            .collect();
+        self.number_pending_plans(pending, &context)
+    }
+
+    /// Characterization driver reproducing the pre-A2 serial loop verbatim
+    /// through the same shared steps, for the parallel-parity lock. Gate-less
+    /// `doc(hidden)`: integration tests compile against the non-test cfg
+    /// crate, so `#[cfg(test)]`/`pub(crate)` would not be visible to
+    /// `tests/planner_facts_parity.rs`.
+    #[doc(hidden)]
+    pub fn plan_serial_for_test(&self) -> Vec<OptimizationPlan> {
+        let context = self.build_planning_context();
+        let pending: Vec<PendingPlan> = self
+            .sorted_header_ids()
+            .into_iter()
+            .filter_map(|file_id| self.header_proposal(file_id, &context))
+            .collect();
+        self.number_pending_plans(pending, &context)
+    }
+
+    fn build_planning_context(&self) -> PlanningContext<'a> {
         // Facts path must never construct the cold analyzer: building it and
         // scanning every header serially is exactly the tail A1 removes.
         let cold_analyzer = if self.screening_facts.is_some() {
@@ -143,34 +197,62 @@ impl<'a> OptimizationPlanner<'a> {
         } else {
             Some(LoadAnalyzer::new(self.include_graph, self.model))
         };
-        let frontier_analyzer = FrontierAnalyzer::new();
         let policies = self.collect_file_policies();
         let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
-        let mapped_edges = self.model_edges_without_file_endpoints();
-        let header_consumers = self.map_header_consumers();
-
-        let mut plans = Vec::new();
-        for file_id in self.sorted_header_ids() {
-            let Some(candidate) = self.candidate_header(file_id, cold_analyzer.as_ref(), &policies)
-            else {
-                continue;
-            };
-            let proposed_extractions =
-                self.propose_extractions(&candidate, &mapped_edges, &checker);
-            if proposed_extractions.is_empty() {
-                continue;
-            }
-            plans.push(self.assemble_plan(
-                &candidate,
-                proposed_extractions,
-                plans.len() + 1,
-                &frontier_analyzer,
-                &policies,
-                &header_consumers,
-            ));
+        PlanningContext {
+            cold_analyzer,
+            frontier_analyzer: FrontierAnalyzer::new(),
+            policies,
+            checker,
+            adjacency: self.symbol_adjacency(),
+            header_consumers: self.map_header_consumers(),
         }
+    }
 
-        plans
+    /// The per-header step with no id assignment (pure over `context`):
+    /// screen, then propose extractions from the shared adjacency. Rejects
+    /// (unscreenable headers, zero-proposal candidates) collapse to `None`,
+    /// exactly like the old `continue`s.
+    fn header_proposal(
+        &self,
+        file_id: FileId,
+        context: &PlanningContext<'a>,
+    ) -> Option<PendingPlan> {
+        let candidate =
+            self.candidate_header(file_id, context.cold_analyzer.as_ref(), &context.policies)?;
+        let proposed_extractions =
+            self.propose_extractions(&candidate, &context.adjacency, &context.checker);
+        if proposed_extractions.is_empty() {
+            return None;
+        }
+        Some(PendingPlan {
+            candidate,
+            proposed_extractions,
+        })
+    }
+
+    /// Sequential assembly after collection: enumerating the collected
+    /// pending plans reproduces the serial loop's dense `plans.len() + 1`
+    /// numbering exactly.
+    fn number_pending_plans(
+        &self,
+        pending: Vec<PendingPlan>,
+        context: &PlanningContext<'a>,
+    ) -> Vec<OptimizationPlan> {
+        pending
+            .into_iter()
+            .enumerate()
+            .map(|(index, plan)| {
+                self.assemble_plan(
+                    &plan.candidate,
+                    plan.proposed_extractions,
+                    index + 1,
+                    &context.frontier_analyzer,
+                    &context.policies,
+                    &context.header_consumers,
+                )
+            })
+            .collect()
     }
 
     /// Consumer TUs per header: reuse the stage closure map on the facts
@@ -286,26 +368,25 @@ impl<'a> OptimizationPlanner<'a> {
             .unwrap_or_else(|| PathBuf::from("unknown"))
     }
 
-    /// Semantic edges with their file endpoints erased, as consumed by the
-    /// per-header SCC computation.
-    fn model_edges_without_file_endpoints(&self) -> Vec<ariadne_index::types::SemanticEdge> {
-        self.model
-            .edges
-            .iter()
-            .map(|e| ariadne_index::types::SemanticEdge {
-                src_symbol: e.src_symbol.clone(),
-                dst_symbol: e.dst_symbol.clone(),
-                kind: e.kind,
-                src_file: FileId(0),
-                dst_file: FileId(0),
-            })
-            .collect()
+    /// Model-wide symbol adjacency with file endpoints ignored (SCC uses only
+    /// symbol symbols), built once per planning run. Neighbor lists follow
+    /// `model.edges` iteration order — identical to the adjacency the old
+    /// per-candidate rebuild derived from the endpoint-erased edge clone.
+    fn symbol_adjacency(&self) -> HashMap<&'a SymbolId, Vec<&'a SymbolId>> {
+        let mut adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>> = HashMap::new();
+        for edge in self.model.edges.iter() {
+            adjacency
+                .entry(&edge.src_symbol)
+                .or_default()
+                .push(&edge.dst_symbol);
+        }
+        adjacency
     }
 
     fn propose_extractions(
         &self,
         candidate: &HeaderCandidate,
-        mapped_edges: &[ariadne_index::types::SemanticEdge],
+        adjacency: &HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
         checker: &ConstraintChecker,
     ) -> Vec<ProposedExtraction> {
         let file_syms = self
@@ -314,7 +395,7 @@ impl<'a> OptimizationPlanner<'a> {
             .get(&candidate.file_id)
             .cloned()
             .unwrap_or_default();
-        let sccs = scc::compute_symbol_sccs(&file_syms, mapped_edges);
+        let sccs = scc::compute_symbol_sccs_from_adj(&file_syms, adjacency);
 
         let mut proposed_extractions = Vec::new();
         for scc in &sccs {
