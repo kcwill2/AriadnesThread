@@ -1,0 +1,9 @@
+{
+  "analysis_version": "<ANALYSIS_VERSION>",
+  "input_fingerprint": "<INPUT_FINGERPRINT>",
+  "repository_root": "<ROOT>",
+  "total_edges": 19,
+  "total_indexed_files": 5,
+  "total_symbols": 7,
+  "total_tu_usages": 14
+}

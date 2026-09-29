@@ -1,0 +1,482 @@
+{
+  "complete_edges": 17,
+  "incomplete_edges": 1,
+  "repo_root": "<ROOT>",
+  "total_edges": 18,
+  "total_symbols": 7,
+  "tu_analyses": [
+    {
+      "call_sites": [
+        {
+          "callee_name": "do_something",
+          "caller_symbol": "heavy_func",
+          "location": {
+            "column": 7,
+            "file_id": 2171065965022647111,
+            "line": 19
+          }
+        },
+        {
+          "callee_name": "heavy_func",
+          "caller_symbol": "Thing::use_heavy",
+          "location": {
+            "column": 9,
+            "file_id": 5780424644969596122,
+            "line": 8
+          }
+        },
+        {
+          "callee_name": "heavy_func",
+          "caller_symbol": "another_func",
+          "location": {
+            "column": 5,
+            "file_id": 10757945787003264251,
+            "line": 8
+          }
+        },
+        {
+          "callee_name": "push_back",
+          "caller_symbol": "HeavyTemplate::do_something",
+          "location": {
+            "column": 38,
+            "file_id": 2171065965022647111,
+            "line": 13
+          }
+        },
+        {
+          "callee_name": "use_heavy",
+          "caller_symbol": "another_func",
+          "location": {
+            "column": 7,
+            "file_id": 10757945787003264251,
+            "line": 7
+          }
+        }
+      ],
+      "context_name": "Default|x64",
+      "declarations": [
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 6,
+            "file_id": 10757945787003264251,
+            "line": 5
+          },
+          "symbol_id": "another_func"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 7,
+            "file_id": 5780424644969596122,
+            "line": 5
+          },
+          "symbol_id": "Thing"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 2171065965022647111,
+            "line": 9
+          },
+          "symbol_id": "HeavyTemplate"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 10,
+            "file_id": 2171065965022647111,
+            "line": 11
+          },
+          "symbol_id": "HeavyTemplate::do_something"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 10,
+            "file_id": 5780424644969596122,
+            "line": 7
+          },
+          "symbol_id": "Thing::use_heavy"
+        },
+        {
+          "id": "decl_3",
+          "is_definition": true,
+          "location": {
+            "column": 13,
+            "file_id": 2171065965022647111,
+            "line": 17
+          },
+          "symbol_id": "heavy_func"
+        }
+      ],
+      "edges": [
+        {
+          "dst_file": 10757945787003264251,
+          "dst_symbol": "Thing",
+          "kind": "Complete",
+          "src_file": 10757945787003264251,
+          "src_symbol": "another_func"
+        },
+        {
+          "dst_file": 10757945787003264251,
+          "dst_symbol": "heavy_func",
+          "kind": "Complete",
+          "src_file": 10757945787003264251,
+          "src_symbol": "another_func"
+        },
+        {
+          "dst_file": 10757945787003264251,
+          "dst_symbol": "use_heavy",
+          "kind": "Complete",
+          "src_file": 10757945787003264251,
+          "src_symbol": "another_func"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "T",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "do_something",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_func"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "for",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "int",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "push_back",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "heavy_func",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        }
+      ],
+      "references": [],
+      "symbols": [
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "HeavyTemplate",
+          "kind": "Struct",
+          "name": "HeavyTemplate",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "Thing",
+          "kind": "Class",
+          "name": "Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "another_func",
+          "kind": "Function",
+          "name": "another_func",
+          "owning_file": 10757945787003264251
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "HeavyTemplate::do_something",
+          "kind": "Function",
+          "name": "HeavyTemplate::do_something",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "Thing::use_heavy",
+          "kind": "Function",
+          "name": "Thing::use_heavy",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_3"
+          ],
+          "definition": "decl_3",
+          "id": "heavy_func",
+          "kind": "Function",
+          "name": "heavy_func",
+          "owning_file": 2171065965022647111
+        }
+      ],
+      "tu_file_id": 10757945787003264251
+    },
+    {
+      "call_sites": [
+        {
+          "callee_name": "do_something",
+          "caller_symbol": "heavy_func",
+          "location": {
+            "column": 7,
+            "file_id": 2171065965022647111,
+            "line": 19
+          }
+        },
+        {
+          "callee_name": "heavy_func",
+          "caller_symbol": "Thing::use_heavy",
+          "location": {
+            "column": 9,
+            "file_id": 5780424644969596122,
+            "line": 8
+          }
+        },
+        {
+          "callee_name": "push_back",
+          "caller_symbol": "HeavyTemplate::do_something",
+          "location": {
+            "column": 38,
+            "file_id": 2171065965022647111,
+            "line": 13
+          }
+        },
+        {
+          "callee_name": "use_heavy",
+          "caller_symbol": "main",
+          "location": {
+            "column": 7,
+            "file_id": 15350901620175634748,
+            "line": 6
+          }
+        }
+      ],
+      "context_name": "Default|x64",
+      "declarations": [
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 5,
+            "file_id": 15350901620175634748,
+            "line": 4
+          },
+          "symbol_id": "main"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 7,
+            "file_id": 5780424644969596122,
+            "line": 5
+          },
+          "symbol_id": "Thing"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 2171065965022647111,
+            "line": 9
+          },
+          "symbol_id": "HeavyTemplate"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 10,
+            "file_id": 2171065965022647111,
+            "line": 11
+          },
+          "symbol_id": "HeavyTemplate::do_something"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 10,
+            "file_id": 5780424644969596122,
+            "line": 7
+          },
+          "symbol_id": "Thing::use_heavy"
+        },
+        {
+          "id": "decl_3",
+          "is_definition": true,
+          "location": {
+            "column": 13,
+            "file_id": 2171065965022647111,
+            "line": 17
+          },
+          "symbol_id": "heavy_func"
+        }
+      ],
+      "edges": [
+        {
+          "dst_file": 15350901620175634748,
+          "dst_symbol": "Thing",
+          "kind": "Complete",
+          "src_file": 15350901620175634748,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 15350901620175634748,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 15350901620175634748,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 15350901620175634748,
+          "dst_symbol": "use_heavy",
+          "kind": "Complete",
+          "src_file": 15350901620175634748,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "T",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "do_something",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_func"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "for",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "int",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "push_back",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyTemplate"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "heavy_func",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        }
+      ],
+      "references": [],
+      "symbols": [
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "HeavyTemplate",
+          "kind": "Struct",
+          "name": "HeavyTemplate",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "Thing",
+          "kind": "Class",
+          "name": "Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "main",
+          "kind": "Function",
+          "name": "main",
+          "owning_file": 15350901620175634748
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "HeavyTemplate::do_something",
+          "kind": "Function",
+          "name": "HeavyTemplate::do_something",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "Thing::use_heavy",
+          "kind": "Function",
+          "name": "Thing::use_heavy",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_3"
+          ],
+          "definition": "decl_3",
+          "id": "heavy_func",
+          "kind": "Function",
+          "name": "heavy_func",
+          "owning_file": 2171065965022647111
+        }
+      ],
+      "tu_file_id": 15350901620175634748
+    }
+  ]
+}

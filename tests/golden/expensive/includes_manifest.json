@@ -1,0 +1,12 @@
+{
+  "analysis_version": "<ANALYSIS_VERSION>",
+  "cycle_count": 0,
+  "external_headers_count": 0,
+  "input_fingerprint": "<INPUT_FINGERPRINT>",
+  "local_headers_count": 4,
+  "repository_root": "<ROOT>",
+  "system_headers_count": 4,
+  "total_edges": 8,
+  "unique_headers": 2,
+  "unresolved_includes_count": 4
+}

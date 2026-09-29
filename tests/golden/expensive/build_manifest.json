@@ -1,0 +1,10 @@
+{
+  "analysis_version": "<ANALYSIS_VERSION>",
+  "context_names": [
+    "Default|x64"
+  ],
+  "input_fingerprint": "<INPUT_FINGERPRINT>",
+  "repository_root": "<ROOT>",
+  "total_contexts": 1,
+  "total_translation_units": 2
+}

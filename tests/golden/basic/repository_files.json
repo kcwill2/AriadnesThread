@@ -1,0 +1,52 @@
+[
+  {
+    "canonical_path": "<ROOT>/include/heavy.h",
+    "content_hash": "5d474c64bd2d0ae633cb3a91ed5510a5b4d86eb787142666b343ee5c388ccfed",
+    "id": 2171065965022647111,
+    "kind": "Header",
+    "optimization_policy": "Optimizable",
+    "ownership": "Repository",
+    "path": "include/heavy.h",
+    "size": 229
+  },
+  {
+    "canonical_path": "<ROOT>/include/thing.h",
+    "content_hash": "80858dcd5bba4040c3f1efe4fd3a6251fe68193d3a4660fd0d0d2e03509b0842",
+    "id": 5780424644969596122,
+    "kind": "Header",
+    "optimization_policy": "Optimizable",
+    "ownership": "Repository",
+    "path": "include/thing.h",
+    "size": 234
+  },
+  {
+    "canonical_path": "<ROOT>/include/thing_types.h",
+    "content_hash": "919d11d92a2f572e1a2b73d67643669a182cb22206f9b285cb1904596505a632",
+    "id": 12813084605127730049,
+    "kind": "Header",
+    "optimization_policy": "Optimizable",
+    "ownership": "Repository",
+    "path": "include/thing_types.h",
+    "size": 78
+  },
+  {
+    "canonical_path": "<ROOT>/src/thing.cpp",
+    "content_hash": "7f65504ae41f6e559ececc74449c54c06960ad20280095de401589ad35d7bf50",
+    "id": 12388715314208539073,
+    "kind": "Source",
+    "optimization_policy": "Optimizable",
+    "ownership": "Repository",
+    "path": "src/thing.cpp",
+    "size": 135
+  },
+  {
+    "canonical_path": "<ROOT>/tests/consumer.cpp",
+    "content_hash": "01cf6653e96fc5a9aafa295a5dc00be8712143f94a190f32cc3b70a8dec1754f",
+    "id": 5683510519367502559,
+    "kind": "Source",
+    "optimization_policy": "Optimizable",
+    "ownership": "Repository",
+    "path": "tests/consumer.cpp",
+    "size": 139
+  }
+]

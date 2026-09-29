@@ -1,0 +1,36 @@
+{
+  "cycle_count": 0,
+  "external_headers_count": 0,
+  "local_headers_count": 4,
+  "system_headers_count": 0,
+  "top_headers_by_closure": [
+    [
+      "include/heavy.h",
+      0,
+      2171065965022647111
+    ],
+    [
+      "include/thing.h",
+      2,
+      5780424644969596122
+    ],
+    [
+      "include/thing_types.h",
+      0,
+      12813084605127730049
+    ],
+    [
+      "src/thing.cpp",
+      12388715314208539073,
+      3
+    ],
+    [
+      "tests/consumer.cpp",
+      3,
+      5683510519367502559
+    ]
+  ],
+  "total_edges": 4,
+  "unique_headers": 3,
+  "unresolved_includes_count": 0
+}

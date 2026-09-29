@@ -1,0 +1,26 @@
+[
+  {
+    "arguments": [
+      "/c",
+      "<ROOT>/src/consumer1.cpp",
+      "cl.exe"
+    ],
+    "command": "cl.exe /c <ROOT>/src/consumer1.cpp",
+    "context_name": "Default|x64",
+    "directory": "<ROOT>",
+    "file": "<ROOT>/src/consumer1.cpp",
+    "output": null
+  },
+  {
+    "arguments": [
+      "/c",
+      "<ROOT>/src/consumer2.cpp",
+      "cl.exe"
+    ],
+    "command": "cl.exe /c <ROOT>/src/consumer2.cpp",
+    "context_name": "Default|x64",
+    "directory": "<ROOT>",
+    "file": "<ROOT>/src/consumer2.cpp",
+    "output": null
+  }
+]

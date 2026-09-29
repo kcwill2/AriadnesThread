@@ -1,0 +1,634 @@
+{
+  "file_metrics": [
+    {
+      "collateral_load": 0,
+      "collateral_sources": [],
+      "collateral_symbols": [],
+      "include_load": 3,
+      "largest_collateral_source": null,
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 3,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something",
+            "heavy_func"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "heavy_func"
+      ],
+      "target_file": "include/heavy.h",
+      "target_name": "include/heavy.h",
+      "total_load": 3
+    },
+    {
+      "collateral_load": 2,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something"
+      ],
+      "include_load": 5,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 2,
+          "symbols": [
+            "Thing",
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "Thing::use_heavy",
+        "heavy_func"
+      ],
+      "target_file": "include/thing.h",
+      "target_name": "include/thing.h",
+      "total_load": 5
+    },
+    {
+      "collateral_load": 3,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing::use_heavy"
+      ],
+      "include_load": 6,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 10757945787003264251,
+          "path": "src/consumer2.cpp",
+          "symbol_count": 1,
+          "symbols": [
+            "another_func"
+          ]
+        },
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "another_func",
+        "heavy_func"
+      ],
+      "target_file": "src/consumer2.cpp",
+      "target_name": "src/consumer2.cpp",
+      "total_load": 6
+    },
+    {
+      "collateral_load": 3,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing::use_heavy"
+      ],
+      "include_load": 6,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 15350901620175634748,
+          "path": "src/consumer1.cpp",
+          "symbol_count": 1,
+          "symbols": [
+            "main"
+          ]
+        },
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "heavy_func",
+        "main"
+      ],
+      "target_file": "src/consumer1.cpp",
+      "target_name": "src/consumer1.cpp",
+      "total_load": 6
+    }
+  ],
+  "repository_root": "<ROOT>",
+  "symbol_metrics": [
+    {
+      "collateral_load": 2,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something"
+      ],
+      "include_load": 3,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 1,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "heavy_func"
+      ],
+      "target_file": "include/heavy.h",
+      "target_name": "heavy_func",
+      "total_load": 3
+    },
+    {
+      "collateral_load": 2,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "heavy_func"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "heavy_func"
+      ],
+      "include_load": 3,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "heavy_func"
+        ]
+      },
+      "semantic_load": 1,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "HeavyTemplate::do_something"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "HeavyTemplate::do_something"
+      ],
+      "target_file": "include/heavy.h",
+      "target_name": "HeavyTemplate::do_something",
+      "total_load": 3
+    },
+    {
+      "collateral_load": 2,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate::do_something",
+            "heavy_func"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate::do_something",
+        "heavy_func"
+      ],
+      "include_load": 3,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate::do_something",
+          "heavy_func"
+        ]
+      },
+      "semantic_load": 1,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "HeavyTemplate"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "HeavyTemplate"
+      ],
+      "target_file": "include/heavy.h",
+      "target_name": "HeavyTemplate",
+      "total_load": 3
+    },
+    {
+      "collateral_load": 3,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing::use_heavy"
+      ],
+      "include_load": 5,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 2,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "heavy_func"
+      ],
+      "target_file": "include/thing.h",
+      "target_name": "Thing",
+      "total_load": 5
+    },
+    {
+      "collateral_load": 3,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing::use_heavy"
+      ],
+      "include_load": 6,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 10757945787003264251,
+          "path": "src/consumer2.cpp",
+          "symbol_count": 1,
+          "symbols": [
+            "another_func"
+          ]
+        },
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "another_func",
+        "heavy_func"
+      ],
+      "target_file": "src/consumer2.cpp",
+      "target_name": "another_func",
+      "total_load": 6
+    },
+    {
+      "collateral_load": 3,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing::use_heavy"
+      ],
+      "include_load": 6,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 2,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something"
+        ]
+      },
+      "semantic_load": 3,
+      "semantic_sources": [
+        {
+          "file_id": 15350901620175634748,
+          "path": "src/consumer1.cpp",
+          "symbol_count": 1,
+          "symbols": [
+            "main"
+          ]
+        },
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 1,
+          "symbols": [
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing",
+        "heavy_func",
+        "main"
+      ],
+      "target_file": "src/consumer1.cpp",
+      "target_name": "main",
+      "total_load": 6
+    },
+    {
+      "collateral_load": 4,
+      "collateral_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 3,
+          "symbols": [
+            "HeavyTemplate",
+            "HeavyTemplate::do_something",
+            "heavy_func"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate",
+        "HeavyTemplate::do_something",
+        "Thing",
+        "heavy_func"
+      ],
+      "include_load": 5,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 3,
+        "symbols": [
+          "HeavyTemplate",
+          "HeavyTemplate::do_something",
+          "heavy_func"
+        ]
+      },
+      "semantic_load": 1,
+      "semantic_sources": [
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 1,
+          "symbols": [
+            "Thing::use_heavy"
+          ]
+        }
+      ],
+      "semantic_symbols": [
+        "Thing::use_heavy"
+      ],
+      "target_file": "include/thing.h",
+      "target_name": "Thing::use_heavy",
+      "total_load": 5
+    }
+  ]
+}

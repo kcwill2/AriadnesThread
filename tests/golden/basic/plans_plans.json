@@ -1,0 +1,41 @@
+[
+  {
+    "collateral_load_after": 0,
+    "collateral_load_before": 2,
+    "id": "PLAN-001",
+    "optimization_frontier": [
+      "include/thing.h"
+    ],
+    "problem": "2 symbols of collateral load",
+    "proposed_extractions": [
+      {
+        "symbol_id": "Thing",
+        "symbol_name": "Thing",
+        "target_header": "include/Thing_extracted.h"
+      },
+      {
+        "symbol_id": "Thing::Thing",
+        "symbol_name": "Thing::Thing",
+        "target_header": "include/Thing_Thing_extracted.h"
+      },
+      {
+        "symbol_id": "Thing::get_id",
+        "symbol_name": "Thing::get_id",
+        "target_header": "include/Thing_get_id_extracted.h"
+      },
+      {
+        "symbol_id": "ThingConfig",
+        "symbol_name": "ThingConfig",
+        "target_header": "include/ThingConfig_extracted.h"
+      }
+    ],
+    "rationale": "File include/thing.h has 2 collateral symbols mostly from include/heavy.h. Extracting independent symbols.",
+    "risk": "Conservative",
+    "target_file": "include/thing.h",
+    "target_file_id": 5780424644969596122,
+    "validation_required_tus": [
+      "src/thing.cpp",
+      "tests/consumer.cpp"
+    ]
+  }
+]

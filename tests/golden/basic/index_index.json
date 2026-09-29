@@ -1,0 +1,611 @@
+{
+  "complete_edges": 18,
+  "incomplete_edges": 19,
+  "repo_root": "<ROOT>",
+  "total_edges": 37,
+  "total_symbols": 7,
+  "tu_analyses": [
+    {
+      "call_sites": [],
+      "context_name": "Default|x64",
+      "declarations": [
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 7,
+            "file_id": 5780424644969596122,
+            "line": 6
+          },
+          "symbol_id": "Thing"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 12388715314208539073,
+            "line": 3
+          },
+          "symbol_id": "Thing::Thing"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 12813084605127730049,
+            "line": 3
+          },
+          "symbol_id": "ThingConfig"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 2171065965022647111,
+            "line": 4
+          },
+          "symbol_id": "HeavyData"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": false,
+          "location": {
+            "column": 14,
+            "file_id": 5780424644969596122,
+            "line": 8
+          },
+          "symbol_id": "Thing::Thing"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 12,
+            "file_id": 12388715314208539073,
+            "line": 5
+          },
+          "symbol_id": "Thing::get_id"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 13,
+            "file_id": 2171065965022647111,
+            "line": 9
+          },
+          "symbol_id": "heavy_computation"
+        },
+        {
+          "id": "decl_3",
+          "is_definition": false,
+          "location": {
+            "column": 9,
+            "file_id": 5780424644969596122,
+            "line": 9
+          },
+          "symbol_id": "Thing::get_id"
+        }
+      ],
+      "edges": [
+        {
+          "dst_file": 12388715314208539073,
+          "dst_symbol": "Thing",
+          "kind": "Complete",
+          "src_file": 12388715314208539073,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 12388715314208539073,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 12388715314208539073,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 12388715314208539073,
+          "dst_symbol": "ThingConfig",
+          "kind": "Incomplete",
+          "src_file": 12388715314208539073,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 12388715314208539073,
+          "dst_symbol": "config_",
+          "kind": "Complete",
+          "src_file": 12388715314208539073,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 12388715314208539073,
+          "dst_symbol": "get_id",
+          "kind": "Complete",
+          "src_file": 12388715314208539073,
+          "src_symbol": "Thing::get_id"
+        },
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "char",
+          "kind": "Incomplete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "const",
+          "kind": "Complete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "int",
+          "kind": "Complete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "HeavyData",
+          "kind": "Incomplete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_computation"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "HeavyData",
+          "kind": "Incomplete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_computation"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "char",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyData"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "double",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyData"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "explicit",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "explicit",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::get_id"
+        }
+      ],
+      "references": [],
+      "symbols": [
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "HeavyData",
+          "kind": "Struct",
+          "name": "HeavyData",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "Thing",
+          "kind": "Class",
+          "name": "Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "Thing::Thing",
+          "kind": "Function",
+          "name": "Thing::Thing",
+          "owning_file": 12388715314208539073
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "ThingConfig",
+          "kind": "Struct",
+          "name": "ThingConfig",
+          "owning_file": 12813084605127730049
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "Thing::get_id",
+          "kind": "Function",
+          "name": "Thing::get_id",
+          "owning_file": 12388715314208539073
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "heavy_computation",
+          "kind": "Function",
+          "name": "heavy_computation",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": null,
+          "id": "Thing::Thing",
+          "kind": "Function",
+          "name": "Thing::Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_3"
+          ],
+          "definition": null,
+          "id": "Thing::get_id",
+          "kind": "Function",
+          "name": "Thing::get_id",
+          "owning_file": 5780424644969596122
+        }
+      ],
+      "tu_file_id": 12388715314208539073
+    },
+    {
+      "call_sites": [
+        {
+          "callee_name": "get_id",
+          "caller_symbol": "main",
+          "location": {
+            "column": 14,
+            "file_id": 5683510519367502559,
+            "line": 6
+          }
+        },
+        {
+          "callee_name": "t",
+          "caller_symbol": "main",
+          "location": {
+            "column": 11,
+            "file_id": 5683510519367502559,
+            "line": 5
+          }
+        }
+      ],
+      "context_name": "Default|x64",
+      "declarations": [
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 5,
+            "file_id": 5683510519367502559,
+            "line": 3
+          },
+          "symbol_id": "main"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 7,
+            "file_id": 5780424644969596122,
+            "line": 6
+          },
+          "symbol_id": "Thing"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 12813084605127730049,
+            "line": 3
+          },
+          "symbol_id": "ThingConfig"
+        },
+        {
+          "id": "decl_1",
+          "is_definition": true,
+          "location": {
+            "column": 8,
+            "file_id": 2171065965022647111,
+            "line": 4
+          },
+          "symbol_id": "HeavyData"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": false,
+          "location": {
+            "column": 14,
+            "file_id": 5780424644969596122,
+            "line": 8
+          },
+          "symbol_id": "Thing::Thing"
+        },
+        {
+          "id": "decl_2",
+          "is_definition": true,
+          "location": {
+            "column": 13,
+            "file_id": 2171065965022647111,
+            "line": 9
+          },
+          "symbol_id": "heavy_computation"
+        },
+        {
+          "id": "decl_3",
+          "is_definition": false,
+          "location": {
+            "column": 9,
+            "file_id": 5780424644969596122,
+            "line": 9
+          },
+          "symbol_id": "Thing::get_id"
+        }
+      ],
+      "edges": [
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "char",
+          "kind": "Incomplete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "const",
+          "kind": "Complete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 12813084605127730049,
+          "dst_symbol": "int",
+          "kind": "Complete",
+          "src_file": 12813084605127730049,
+          "src_symbol": "ThingConfig"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "HeavyData",
+          "kind": "Incomplete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_computation"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "HeavyData",
+          "kind": "Incomplete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "heavy_computation"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "char",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyData"
+        },
+        {
+          "dst_file": 2171065965022647111,
+          "dst_symbol": "double",
+          "kind": "Complete",
+          "src_file": 2171065965022647111,
+          "src_symbol": "HeavyData"
+        },
+        {
+          "dst_file": 5683510519367502559,
+          "dst_symbol": "Thing",
+          "kind": "Incomplete",
+          "src_file": 5683510519367502559,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 5683510519367502559,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 5683510519367502559,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 5683510519367502559,
+          "dst_symbol": "get_id",
+          "kind": "Complete",
+          "src_file": 5683510519367502559,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 5683510519367502559,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 5683510519367502559,
+          "src_symbol": "main"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Complete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "ThingConfig",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "explicit",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "explicit",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing"
+        },
+        {
+          "dst_file": 5780424644969596122,
+          "dst_symbol": "int",
+          "kind": "Incomplete",
+          "src_file": 5780424644969596122,
+          "src_symbol": "Thing::get_id"
+        }
+      ],
+      "references": [],
+      "symbols": [
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "HeavyData",
+          "kind": "Struct",
+          "name": "HeavyData",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "Thing",
+          "kind": "Class",
+          "name": "Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "ThingConfig",
+          "kind": "Struct",
+          "name": "ThingConfig",
+          "owning_file": 12813084605127730049
+        },
+        {
+          "declarations": [
+            "decl_1"
+          ],
+          "definition": "decl_1",
+          "id": "main",
+          "kind": "Function",
+          "name": "main",
+          "owning_file": 5683510519367502559
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": "decl_2",
+          "id": "heavy_computation",
+          "kind": "Function",
+          "name": "heavy_computation",
+          "owning_file": 2171065965022647111
+        },
+        {
+          "declarations": [
+            "decl_2"
+          ],
+          "definition": null,
+          "id": "Thing::Thing",
+          "kind": "Function",
+          "name": "Thing::Thing",
+          "owning_file": 5780424644969596122
+        },
+        {
+          "declarations": [
+            "decl_3"
+          ],
+          "definition": null,
+          "id": "Thing::get_id",
+          "kind": "Function",
+          "name": "Thing::get_id",
+          "owning_file": 5780424644969596122
+        }
+      ],
+      "tu_file_id": 5683510519367502559
+    }
+  ]
+}
