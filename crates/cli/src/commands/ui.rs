@@ -115,7 +115,9 @@ fn step_percent(stage: usize, global_percent: usize) -> usize {
 }
 
 fn mapped_span_percent(lower: usize, upper: usize, done: usize, total: usize) -> usize {
-    if total == 0 { return lower; }
+    if total == 0 {
+        return lower;
+    }
     (lower + (upper - lower) * done / total).min(upper)
 }
 
@@ -222,9 +224,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
 
     let reduced_model = run_pipeline_stages(&mut pipeline, &progress)?;
-
-    let graph = pipeline.get_or_build_include_graph()?;
-    let (include_graph, closures) = graph;
+    // A3: graph/closures MOVE out of the single-use pipeline, no clone.
+    let (include_graph, closures) = pipeline.take_include_graph()?;
     let call_graph = pipeline.get_or_build_callgraph()?;
     let load_report = pipeline.get_or_build_load()?;
     let report = include_graph.generate_report();
@@ -274,7 +275,6 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         file_justification,
         extraction_proposals,
     };
-
     let status = stage_status_from_pipeline(&pipeline);
     progress(stage_report(
         5,

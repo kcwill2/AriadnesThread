@@ -273,8 +273,9 @@ fn run_assembly(
     pipeline: &mut Pipeline,
     reduced: &ariadne_graph::ReducedSemanticModel,
 ) -> AssemblyOutcome {
-    // Clone phases: first call right after the stage build (cold), second
-    // call immediately after (warm) — each get_or_build_* deep-clones.
+    // A3 hand-outs, cold then warm: `get_or_build_load` is now an Arc
+    // refcount bump (~0); the graph row still times the clone API boot no
+    // longer uses (boot moved to `take_include_graph`).
     let ((graph, closures), graph_cold_ms) =
         timed(|| pipeline.get_or_build_include_graph().unwrap());
     let (load_report, load_cold_ms) = timed(|| pipeline.get_or_build_load().unwrap());
@@ -295,8 +296,8 @@ fn run_assembly(
         (millis(started), path_to_id)
     };
 
-    // ui.rs:245 — boot seeds the ONE shared memo by MOVING the closures;
-    // same here (the clone cost above is boot-identical noise-free).
+    // ui.rs:250 — boot seeds the ONE shared memo by MOVING the closures
+    // (out of its take); this bench moves its cloned map here likewise.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
     let (justification, justification_ms) = timed(|| {
         ariadne_ui::build_file_justification_with_memo(

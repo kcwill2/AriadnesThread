@@ -262,9 +262,10 @@ fn test_hash_helper_consistency() {
     );
 }
 
-/// Runs every stage through a fresh cold pipeline and returns the load
-/// report exactly as `ensure_load` built it (not re-read from disk).
-fn cold_load_report(repo_path: &Path) -> LoadReport {
+/// Runs every stage through a fresh cold pipeline and returns the shared
+/// handle to the load report exactly as `ensure_load` built it (not
+/// re-read from disk).
+fn cold_load_report(repo_path: &Path) -> Arc<LoadReport> {
     let mut pipeline = Pipeline::new(repo_path, None).unwrap();
     pipeline.ensure_load().unwrap();
     pipeline.cached_load().unwrap()
@@ -354,13 +355,14 @@ fn test_load_report_matches_sequential_reference_with_scoped_pool() {
     );
 }
 
-/// Structural guard for the Arc-shared load cache: right after a cold
-/// `ensure_load` the cached Arc must have strong count exactly 1 — the
-/// report was MOVED into the cache (`Arc::new(report)`, not
-/// `report.clone()`), nothing else holds it — and cache reads must equal
-/// the stored content. The public `cached_load`/`get_or_build_load` still
-/// hand clones to callers (unchanged signature), but the stage itself
-/// performs no deep copy.
+/// Structural guard for the Arc-shared load cache (plan load-tail A3):
+/// right after a cold `ensure_load` the cached Arc must have strong count
+/// exactly 1 — the report was MOVED into the cache (`Arc::new(report)`,
+/// not `report.clone()`), nothing else holds it. The public
+/// `cached_load`/`get_or_build_load` hand out a SHARED `Arc` handle (a
+/// refcount bump, no deep copy): while a handle is alive, cache + handle
+/// = 2, and dropping the handle returns the cache to 1. Content equality
+/// against the cache is locked alongside.
 #[test]
 fn test_load_cache_is_arc_shared_not_deep_copied() {
     let dir = setup_repo();
@@ -373,23 +375,110 @@ fn test_load_cache_is_arc_shared_not_deep_copied() {
         "cold ensure_load must move the report into a lone cache Arc, not clone it"
     );
 
-    let cached = pipeline.cached_load().unwrap();
-    let first = pipeline.get_or_build_load().unwrap();
-    let second = pipeline.get_or_build_load().unwrap();
-    assert_eq!(first.repository_root, cached.repository_root);
+    let handle = pipeline.cached_load().unwrap();
     assert_eq!(
-        first.symbol_metrics, cached.symbol_metrics,
-        "get_or_build_load must return content equal to the cache"
+        std::sync::Arc::strong_count(pipeline.load_cache.as_ref().unwrap()),
+        2,
+        "a live cached_load handle means cache + handle = 2 references"
+    );
+    let built = pipeline.get_or_build_load().unwrap();
+    assert_eq!(
+        std::sync::Arc::strong_count(pipeline.load_cache.as_ref().unwrap()),
+        3,
+        "two live handles mean cache + 2 handles = 3 references"
+    );
+    assert_eq!(handle.repository_root, built.repository_root);
+    assert_eq!(
+        handle.symbol_metrics, built.symbol_metrics,
+        "hand-outs must equal the cached content"
     );
     assert_eq!(
-        second.file_metrics, cached.file_metrics,
-        "repeated get_or_build_load must stay equal to the cache"
+        handle.file_metrics, built.file_metrics,
+        "repeated hand-outs must stay equal to the cache"
     );
+    assert!(
+        Arc::ptr_eq(&handle, &built),
+        "hand-outs must share the ONE cached allocation, never deep copies"
+    );
+    drop(handle);
+    drop(built);
     assert_eq!(
         std::sync::Arc::strong_count(pipeline.load_cache.as_ref().unwrap()),
         1,
-        "reading the cache must not leak extra references into the pipeline"
+        "dropping every handle must return the cache to a lone reference"
     );
+}
+
+/// A3: `take_include_graph` must MOVE the pair out of the cache — a
+/// subsequent `cached_include_graph` read hits the documented missing-cache
+/// error (asserted as an error, never a panic), and the taken values must
+/// carry the full map a cold `ensure_include_graph` produces on the same
+/// fixture (a clone-less hand-out loses nothing).
+#[test]
+fn test_take_include_graph_empties_the_cache() {
+    let dir = setup_repo();
+    let mut pipeline = Pipeline::new(dir.path(), None).unwrap();
+    pipeline.ensure_include_graph().unwrap();
+
+    let (graph, closures) = pipeline.take_include_graph().unwrap();
+    assert!(
+        !graph.file_paths.is_empty() && !closures.is_empty(),
+        "take after ensure must hand out populated stage data"
+    );
+
+    assert!(
+        pipeline.include_cache.is_none(),
+        "take must empty the cache"
+    );
+    assert_missing_cache_error(
+        pipeline.cached_include_graph(),
+        "include stage cache must exist",
+    );
+}
+
+/// A3: taking before the stage ran must surface the documented missing-
+/// cache error instead of building or panicking.
+#[test]
+fn test_take_include_graph_before_ensure_errors() {
+    let dir = setup_repo();
+    let mut pipeline = Pipeline::new(dir.path(), None).unwrap();
+    assert_missing_cache_error(
+        pipeline.take_include_graph(),
+        "include stage cache must exist",
+    );
+}
+
+/// A3: the taken closures are exactly the stage closures — compare the
+/// moved-out map against the content a second, cold pipeline computes from
+/// the same fixture, so the hand-out is proven loss-free (move, not a
+/// partial drain).
+#[test]
+fn test_take_include_graph_moves_the_full_closures_map() {
+    let dir = setup_repo();
+    let mut cold = Pipeline::new(dir.path(), None).unwrap();
+    cold.ensure_include_graph().unwrap();
+    let (_graph, taken_closures) = cold.take_include_graph().unwrap();
+    drop(cold);
+
+    let mut reference = Pipeline::new(dir.path(), None).unwrap();
+    reference.ensure_include_graph().unwrap();
+    let expected_closures = reference.cached_include_graph().unwrap().1;
+
+    let mut taken_keys: Vec<_> = taken_closures.keys().copied().collect();
+    let mut expected_keys: Vec<_> = expected_closures.keys().copied().collect();
+    taken_keys.sort_by_key(|id| id.0);
+    expected_keys.sort_by_key(|id| id.0);
+    assert_eq!(
+        taken_keys, expected_keys,
+        "take must hand out every closure key the cache held"
+    );
+    for (id, expected) in &expected_closures {
+        assert_eq!(
+            taken_closures.get(id),
+            Some(expected),
+            "closure for {id:?} must be identical after the move"
+        );
+    }
 }
 
 /// Two independent cold pipelines over identical fixture content in

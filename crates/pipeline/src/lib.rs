@@ -272,6 +272,27 @@ impl Pipeline {
         self.cached_include_graph()
     }
 
+    /// MOVE the `(graph, closures)` pair out of the include cache — the
+    /// zero-copy hand-out for consumers that take ownership of the whole
+    /// stage output (UI payload assembly, plan load-tail A3). Returns the
+    /// same documented missing-cache error as `cached_include_graph` when
+    /// the stage has not run or was already taken.
+    ///
+    /// SAFETY PRECONDITION — nothing downstream may read `include_cache`
+    /// after a take. The only user, `build_ui_payload`, satisfies this:
+    /// every stage that consumes the include graph (`ensure_load` reads the
+    /// cache at `Self::ensure_load`) runs via `run_pipeline_stages` BEFORE
+    /// the take, and the moved graph/closures are used locally afterwards.
+    /// The watcher refresh is safe because each refresh constructs a FRESH
+    /// `Pipeline` (`spawn_watcher` -> `build_ui_payload` -> `Pipeline::new`).
+    pub fn take_include_graph(
+        &mut self,
+    ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
+        self.include_cache
+            .take()
+            .context("include stage cache must exist after ensure_include_graph")
+    }
+
     // ------------------------------------------------------------------
     // Index stage (TU-level reuse via the shard store)
     // ------------------------------------------------------------------
@@ -525,7 +546,8 @@ impl Pipeline {
         Ok(())
     }
 
-    pub fn get_or_build_load(&mut self) -> Result<LoadReport> {
+    /// A3: hands out a shared `Arc<LoadReport>` handle, not a copy.
+    pub fn get_or_build_load(&mut self) -> Result<Arc<LoadReport>> {
         self.ensure_load()?;
         self.cached_load()
     }
@@ -579,12 +601,13 @@ impl Pipeline {
             .context("callgraph stage cache must exist after ensure_callgraph")
     }
 
-    fn cached_load(&self) -> Result<LoadReport> {
-        let report = self
-            .load_cache
-            .as_ref()
-            .context("load stage cache must exist after ensure_load")?;
-        Ok(Arc::unwrap_or_clone(Arc::clone(report)))
+    fn cached_load(&self) -> Result<Arc<LoadReport>> {
+        // A3: hand out a shared `Arc` handle (refcount bump, no deep copy).
+        // The old `Arc::unwrap_or_clone` copied the whole report per call
+        // (~1 s on the UI boot fixture, plan load-tail A0).
+        self.load_cache
+            .clone()
+            .context("load stage cache must exist after ensure_load")
     }
 }
 
