@@ -29,6 +29,18 @@ pub fn print_progress(current: usize, total: usize, prefix: &str, unit: &str) {
     let _ = io::stdout().flush();
 }
 
+/// Formats elapsed wall-clock time of a load/boot as a terminal line,
+/// e.g. `Load complete in 1.2s`. Pure: used by print_load_complete and the
+/// unit test so the formatting contract is pinned byte-for-byte.
+pub fn format_load_time(elapsed: std::time::Duration) -> String {
+    format!("Load complete in {:.1}s", elapsed.as_secs_f64())
+}
+
+/// Prints the load-time line immediately after a load/build completes.
+pub fn print_load_complete(elapsed: std::time::Duration) {
+    println!("{}", format_load_time(elapsed));
+}
+
 pub const STEP_BAR_WIDTH: usize = 20;
 
 /// Remove a leading `[k/n] ` stage label from a phase string so renderers can
@@ -402,5 +414,13 @@ mod tests {
 
         let out3 = format_progress(0, 10, "Indexing", "TUs");
         assert_eq!(out3, "Indexing [                    ] 0% (0/10 TUs)");
+    }
+
+    #[test]
+    fn test_format_load_time() {
+        assert_eq!(format_load_time(std::time::Duration::from_millis(2500)), "Load complete in 2.5s");
+        assert_eq!(format_load_time(std::time::Duration::from_millis(500)), "Load complete in 0.5s");
+        assert_eq!(format_load_time(std::time::Duration::ZERO), "Load complete in 0.0s");
+        assert_eq!(format_load_time(std::time::Duration::from_millis(12300)), "Load complete in 12.3s");
     }
 }

@@ -529,7 +529,9 @@ pub async fn run_ui(
     };
 
     if let Some(path) = export_opt {
+        let load_started = std::time::Instant::now();
         let out = build_ui_payload(&repo_path, make_bar_progress())?;
+        crate::commands::progress::print_load_complete(load_started.elapsed());
         println!(
             "{} TUs reused, {} reanalyzed; stages: {}",
             out.status.reused_tus,
@@ -563,20 +565,24 @@ pub async fn run_ui(
 
         let boot_progress = make_boot_progress(boot_state.clone());
 
-        tokio::task::spawn_blocking(move || match build_ui_payload(&boot_repo, boot_progress) {
-            Ok(out) => {
-                let fps = swap_into_state(&boot_state, out);
-                let _ = fps_tx.send(Some(fps));
-            }
-            Err(e) => {
-                // `build_ui_payload` consumed the progress Arc, so its
-                // TerminalStepBars guard has already dropped and committed
-                // any half-drawn bar line; anything printed from here on,
-                // including this error report, starts on a fresh line.
-                let mut p = write_state(&boot_state.progress);
-                p.state = "error".to_string();
-                p.message = e.to_string();
-                let _ = fps_tx.send(None);
+        tokio::task::spawn_blocking(move || {
+            let load_started = std::time::Instant::now();
+            match build_ui_payload(&boot_repo, boot_progress) {
+                Ok(out) => {
+                    crate::commands::progress::print_load_complete(load_started.elapsed());
+                    let fps = swap_into_state(&boot_state, out);
+                    let _ = fps_tx.send(Some(fps));
+                }
+                Err(e) => {
+                    // `build_ui_payload` consumed the progress Arc, so its
+                    // TerminalStepBars guard has already dropped and committed
+                    // any half-drawn bar line; anything printed from here on,
+                    // including this error report, starts on a fresh line.
+                    let mut p = write_state(&boot_state.progress);
+                    p.state = "error".to_string();
+                    p.message = e.to_string();
+                    let _ = fps_tx.send(None);
+                }
             }
         });
 

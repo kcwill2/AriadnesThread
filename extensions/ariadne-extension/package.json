@@ -1,0 +1,110 @@
+{
+  "name": "ariadne-extension",
+  "displayName": "Ariadne Thread",
+  "description": "C++ dependency analysis and navigation for VS Code. Connects to Ariadne server for graph visualization and symbol navigation. Assumes server runs locally for path sharing.",
+  "version": "0.1.0",
+  "publisher": "ariadne",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization",
+    "Debuggers"
+  ],
+  "keywords": [
+    "cpp",
+    "c++",
+    "dependency",
+    "analysis",
+    "graph",
+    "navigation",
+    "ariadne"
+  ],
+  "activationEvents": [
+    "onCommand:ariadne.connect",
+    "onCommand:ariadne.goToDefinition",
+    "onCommand:ariadne.navigateToFile",
+    "onCommand:ariadne.showGraph"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ariadne.connect",
+        "title": "Connect to Ariadne Server",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.goToDefinition",
+        "title": "Go to Definition (Ariadne)",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.navigateToFile",
+        "title": "Navigate to File (Ariadne)",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.showGraph",
+        "title": "Show Dependency Graph",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.configureServer",
+        "title": "Configure Server URL",
+        "category": "Ariadne"
+      }
+    ],
+    "configuration": {
+      "title": "Ariadne",
+      "properties": {
+        "ariadne.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the Ariadne analysis server (defaults to localhost)"
+        },
+        "ariadne.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to server on startup"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "ariadne.hotspots",
+          "name": "Ariadne Hotspots",
+          "when": "ariadne.connected"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorFocus",
+          "command": "ariadne.goToDefinition",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "jest": "^29.0.0"
+  }
+}

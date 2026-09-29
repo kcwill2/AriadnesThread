@@ -132,6 +132,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/app/preview.js", get(asset_preview_js))
         .route("/app/main.js", get(asset_main_js))
         .route("/api/status", get(api_status))
+        .route("/api/repo-info", get(api_repo_info))
         .route("/api/graph/include", get(api_graph_include))
         .route("/api/graph/symbol", get(api_graph_symbol))
         .route("/api/graph/call", get(api_graph_call))
@@ -261,13 +262,27 @@ async fn api_graph_call(
 #[derive(Deserialize)]
 struct SourceQuery {
     file: String,
+    /// Optional local path prefix to map server paths to local paths.
+    /// If provided, the server strips its own `repo_root` prefix and
+    /// prepends `local_prefix` before reading the file.
+    local_prefix: Option<String>,
 }
 
 async fn api_source(
     State(state): State<Arc<UiState>>,
     Query(query): Query<SourceQuery>,
 ) -> Result<String, axum::http::StatusCode> {
-    let path = state.repo_root.join(&query.file);
+    let path = if let Some(prefix) = &query.local_prefix {
+        // Cross-environment navigation: strip server repo_root, apply local prefix.
+        let server_root = &state.repo_root;
+        let requested = std::path::Path::new(&query.file);
+        let relative = requested.strip_prefix(server_root).unwrap_or(requested);
+        let local_path = std::path::Path::new(prefix)
+            .join(relative.to_string_lossy().trim_start_matches('/'));
+        local_path
+    } else {
+        state.repo_root.join(&query.file)
+    };
     tokio::fs::read_to_string(path)
         .await
         .map_err(|_| axum::http::StatusCode::NOT_FOUND)
@@ -281,6 +296,38 @@ async fn api_export(
         .as_ref()
         .map(|p| Json(p.clone()))
         .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+}
+
+/// Repository metadata endpoint: exposes the server's `repo_root` and
+/// file-path mapping so extension hosts can reconcile server-side paths
+/// with their own local source tree (cross-environment navigation).
+#[derive(serde::Serialize)]
+pub struct RepoInfoResponse {
+    /// Absolute path on the server where the analysis was generated.
+    pub repo_root: String,
+    /// File paths relative to `repo_root` (as the server sees them).
+    pub file_paths: Vec<String>,
+}
+
+async fn api_repo_info(
+    State(state): State<Arc<UiState>>,
+) -> Json<RepoInfoResponse> {
+    let analysis = state.analysis();
+    let file_paths = analysis
+        .as_ref()
+        .map(|gen| {
+            gen.include_graph
+                .file_paths
+                .keys()
+                .map(|id| id.0.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Json(RepoInfoResponse {
+        repo_root: state.repo_root.to_string_lossy().into_owned(),
+        file_paths,
+    })
 }
 
 async fn api_graph_traverse(
