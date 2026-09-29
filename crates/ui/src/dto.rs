@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +211,18 @@ pub fn build_file_justification(
 /// pipeline stage output, so payload assembly and every later live route
 /// share one warm memo); `None` keeps the cold per-build analyzer, the
 /// behavior of the plain wrapper above.
+///
+/// A6: the per-file loop runs in parallel over `file_metrics` (rayon
+/// `par_iter`, the established repo pattern of cluster's planner and the
+/// pipeline's `collect_file_metrics`). Determinism is structural, not
+/// incidental: the payload is keyed by numeric file ids, every symbol /
+/// header / impact row inside one root group is canonically sorted by the
+/// graph and dto contracts, the per-file `impact_slots` budget is local to
+/// the unit, and the outer map's key order was never payload-meaningful.
+/// The only shared state is the `Sync` analyzer + `Arc<LoadMemo>` (OnceLock
+/// maps + Mutex guards held only for get/insert, never across derived work);
+/// no inner loop here spawns nested rayon work. Locked byte-for-byte by the
+/// golden/determinism tests in `tests/ui_test/justification_golden.rs`.
 pub fn build_file_justification_with_memo(
     file_metrics: &[ariadne_graph::LoadMetric],
     include_graph: &ariadne_graph::IncludeGraph,
@@ -228,80 +241,91 @@ pub fn build_file_justification_with_memo(
         ),
         None => ariadne_graph::LoadAnalyzer::new(include_graph, model),
     };
-    let mut out: std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, JustificationEntry>,
-    > = std::collections::HashMap::new();
-    for metric in file_metrics {
-        let Some(root_id) = metric
-            .target_file
-            .as_ref()
-            .and_then(|p| path_to_id.get(p))
-        else {
-            continue;
-        };
-        let sides = collect_source_sides(metric);
-        if sides.is_empty() {
-            continue;
-        }
-        let ranked = rank_source_ids(&sides);
+    let roots: Vec<(String, std::collections::HashMap<String, JustificationEntry>)> =
+        file_metrics
+            .par_iter()
+            .filter_map(|metric| justification_root(metric, &analyzer, model, path_to_id))
+            .collect();
+    roots.into_iter().collect()
+}
 
-        let mut per_root = std::collections::HashMap::new();
-        let mut impact_slots = 0usize;
-        for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
-            let s = &sides[&id];
-            let (justified_symbols, justified_truncated) =
-                justification_names(s.justified, model, JUSTIFICATION_MAX_NAMES);
-            let (collateral_symbols, collateral_truncated) =
-                justification_names(s.collateral, model, JUSTIFICATION_MAX_NAMES);
-            let required_headers = s
-                .justified
-                .map(|j| {
-                    justification_required_headers(
-                        &analyzer,
-                        &j.symbols,
-                        &j.path,
-                        JUSTIFICATION_MAX_HEADERS,
-                    )
-                })
-                .unwrap_or_default();
-            let justified_count = s.justified.map_or(0, |x| x.symbol_count);
-            let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
-            let mut impact = None;
-            if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
-                impact = entry_extraction_impact(
-                    &analyzer,
-                    ariadne_repo::FileId(*root_id),
-                    id,
-                    s.justified,
-                    justified_count,
-                    collateral_count,
-                )
-                .as_ref()
-                .map(impact_summary_from);
-                if impact.is_some() {
-                    impact_slots += 1;
-                }
-            }
-            per_root.insert(
-                id.to_string(),
-                JustificationEntry {
-                    justified_symbols,
-                    collateral_symbols,
-                    justified_count,
-                    collateral_count,
-                    justified_truncated,
-                    collateral_truncated,
-                    required_headers,
-                    impact,
-                },
-            );
-        }
-        if !per_root.is_empty() {
-            out.insert(root_id.to_string(), per_root);
-        }
+/// A6 rayon unit of work for one root file: the identical pre-A6 per-metric
+/// body (rank sources, build capped entries, spend the per-file impact-slot
+/// budget). `None` reproduces the serial loop's three `continue`s: target
+/// unregistered, sides empty after the E-I9 header filter, or no kept
+/// entries.
+fn justification_root(
+    metric: &ariadne_graph::LoadMetric,
+    analyzer: &ariadne_graph::LoadAnalyzer,
+    model: &ariadne_graph::ReducedSemanticModel,
+    path_to_id: &std::collections::HashMap<std::path::PathBuf, u64>,
+) -> Option<(String, std::collections::HashMap<String, JustificationEntry>)> {
+    let root_id = metric
+        .target_file
+        .as_ref()
+        .and_then(|p| path_to_id.get(p))?;
+    let sides = collect_source_sides(metric);
+    if sides.is_empty() {
+        return None;
     }
-    out
+    let ranked = rank_source_ids(&sides);
+
+    let mut per_root = std::collections::HashMap::new();
+    let mut impact_slots = 0usize;
+    for id in ranked.into_iter().take(JUSTIFICATION_MAX_SOURCES) {
+        let s = &sides[&id];
+        let (justified_symbols, justified_truncated) =
+            justification_names(s.justified, model, JUSTIFICATION_MAX_NAMES);
+        let (collateral_symbols, collateral_truncated) =
+            justification_names(s.collateral, model, JUSTIFICATION_MAX_NAMES);
+        let required_headers = s
+            .justified
+            .map(|j| {
+                justification_required_headers(
+                    analyzer,
+                    &j.symbols,
+                    &j.path,
+                    JUSTIFICATION_MAX_HEADERS,
+                )
+            })
+            .unwrap_or_default();
+        let justified_count = s.justified.map_or(0, |x| x.symbol_count);
+        let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
+        let mut impact = None;
+        if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
+            impact = entry_extraction_impact(
+                analyzer,
+                ariadne_repo::FileId(*root_id),
+                id,
+                s.justified,
+                justified_count,
+                collateral_count,
+            )
+            .as_ref()
+            .map(impact_summary_from);
+            if impact.is_some() {
+                impact_slots += 1;
+            }
+        }
+        per_root.insert(
+            id.to_string(),
+            JustificationEntry {
+                justified_symbols,
+                collateral_symbols,
+                justified_count,
+                collateral_count,
+                justified_truncated,
+                collateral_truncated,
+                required_headers,
+                impact,
+            },
+        );
+    }
+    if per_root.is_empty() {
+        None
+    } else {
+        Some((root_id.to_string(), per_root))
+    }
 }
 
 #[derive(Default)]

@@ -273,6 +273,7 @@ dependencies = [
  "ariadne-repo",
  "ariadne-report",
  "axum",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
