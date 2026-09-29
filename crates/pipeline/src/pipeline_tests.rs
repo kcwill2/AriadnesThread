@@ -507,6 +507,67 @@ fn test_load_deterministic_across_pipelines() {
     );
 }
 
+/// A4: the load stage must bracket its work with honest milestones. On a
+/// cold rebuild the emitted sequence must be: `SymbolsAnalyzed { symbols > 0 }`
+/// strictly before the first `CollateralFile` event (the symbol pass runs
+/// before any file event), a terminal `CollateralFile { done == total }`
+/// once the file loop has fully collected, and `ArtifactsSaved` LAST (after
+/// `save_load_artifacts` returns, so a client never sees the save claimed
+/// before the bytes are on disk).
+#[test]
+fn test_load_milestone_event_order() {
+    let dir = setup_repo();
+    let events: Arc<Mutex<Vec<ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = events.clone();
+    let mut pipeline = Pipeline::new(dir.path(), None)
+        .unwrap()
+        .with_progress(move |event| recorder.lock().unwrap().push(event.clone()));
+    pipeline.ensure_load().unwrap();
+
+    let recorded = events.lock().unwrap();
+    let symbols_at = recorded.iter().position(|event| {
+        matches!(
+            event,
+            ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed { symbols }) if *symbols > 0
+        )
+    });
+    let first_file_at = recorded
+        .iter()
+        .position(|event| matches!(event, ProgressEvent::CollateralFile { .. }));
+    let artifacts_at = recorded
+        .iter()
+        .position(|event| matches!(event, ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved)));
+
+    let symbols_at = symbols_at.expect("cold rebuild must emit SymbolsAnalyzed with symbols > 0");
+    let first_file_at = first_file_at.expect("cold rebuild must emit CollateralFile events");
+    assert!(
+        symbols_at < first_file_at,
+        "SymbolsAnalyzed must arrive strictly before the first CollateralFile, got order {symbols_at} vs {first_file_at}"
+    );
+
+    let last_file_at = recorded
+        .iter()
+        .rposition(|event| matches!(event, ProgressEvent::CollateralFile { .. }))
+        .expect("terminal CollateralFile event must arrive");
+    match &recorded[last_file_at] {
+        ProgressEvent::CollateralFile { done, total } => {
+            assert_eq!(done, total, "last CollateralFile must be the terminal done == total event");
+        }
+        other => panic!("expected CollateralFile at {last_file_at}, got {other:?}"),
+    }
+
+    let artifacts_at = artifacts_at.expect("save_load_artifacts completion must emit ArtifactsSaved");
+    assert!(
+        artifacts_at > last_file_at,
+        "ArtifactsSaved must follow the terminal CollateralFile event"
+    );
+    assert_eq!(
+        artifacts_at,
+        recorded.len() - 1,
+        "ArtifactsSaved must be the LAST load-stage event"
+    );
+}
+
 /// A2: `collect_file_metrics` must emit the exact metrics the sequential
 /// path round-trip produced, while keeping the old skip contract — an id
 /// present in `file_symbols` but unregistered in `file_paths` yields no

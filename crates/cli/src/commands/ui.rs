@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
-use ariadne_pipeline::{Pipeline, ProgressEvent};
+use ariadne_pipeline::{LoadMilestone, Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use crate::commands::ui_payload::{
@@ -91,9 +91,49 @@ const REDUCTION_PHASE: &str = "[3/5] Reducing semantic model...";
 const CALL_GRAPH_PHASE: &str = "[4/5] Building call graph...";
 const COLLATERAL_PHASE: &str = "[5/5] Analyzing collateral...";
 const STAGES_PER_RUN: usize = 5;
-/// Stage 5 reserves 95→100 for payload assembly; the assembly milestone
-/// finalizes the step-5 terminal bar at 100%.
-const COLLATERAL_MAPPED_PERCENT: usize = 95;
+
+// ---------------------------------------------------------------------------
+// A4: calibrated stage-5 sub-spans, replacing the old fixed [80,95] lie that
+// burned 75% of the stage on the ~75 ms file loop while the real tail ran
+// with a frozen bar. Calibration = the tail bench on the 520-header/40-TU
+// fixture (crates/cli/tests/payload_tail_bench.rs), post-A4 re-run table of
+// 2026-09-29: symbol_pass+prep 301ms · file_pass 75.4ms ·
+// save_load_artifacts+cache 1417.8ms · ensure_load total 1794.2ms (vs the
+// post-A6 runs 1893/1743 — milestone notifies cost nothing measurable) ·
+// generate_report+detect_cycles 4.7ms · build_include_elements 5.1ms ·
+// path_to_id+file_collateral 28.9ms · planner facts+closures 232.4ms ·
+// build_file_justification_with_memo 5313.4ms (DOMINANT) · conservative
+// 0.0ms. The stage-5 window totals ~7.38 s over the 20-point global span
+// [80,100], so 1 point ~= 0.37 s.
+// Every milestone sits at the nearest integer point of its CUMULATIVE
+// measured time (milestone boundaries within ~0.2 pt of measured reality).
+// The largest forward error is <=1 pt mid-file-loop, where the loop-end
+// rounding leads briefly and the save milestone reclaims the slack.
+// ---------------------------------------------------------------------------
+/// Symbol pass + analyzer prep (~301ms -> 0.8 pt, nearest integer 81): the
+/// bar leaves the stage-start tick only once the symbol pass has really
+/// collected.
+const SYMBOLS_ANALYZED_PERCENT: usize = 81;
+/// File loop upper bound (~75ms of events, rounded up to 1 pt; the loop is
+/// a fast pass since A2 — the old [80,95] span it owned is what made the
+/// bar look frozen everywhere else).
+const COLLATERAL_FILE_SPAN_END: usize = 82;
+/// `save_load_artifacts` + cache wrap complete (~1418ms; cumulative
+/// ~1794ms -> 84.9 pt). Emitted by the pipeline milestone only when the
+/// bytes are on disk.
+const ARTIFACTS_SAVED_PERCENT: usize = 85;
+/// Emitted right before `build_extraction_proposals`: the maps before the
+/// planner are ~39ms, so cumulative stays ~85.0 pt.
+const PLANNING_EXTRACTIONS_PERCENT: usize = 85;
+/// Emitted right before `build_file_justification_with_memo`: the planner
+/// facts+closures run just before (~232ms; cumulative ~2066ms -> 85.6).
+const JUSTIFYING_SYMBOLS_PERCENT: usize = 86;
+/// Emitted after the justification memo returns: the dominant tail
+/// (~5313ms ~= 14.4 of the 15 points left after the save) would run past
+/// 100 exactly, so it is capped one point short — the terminal 100% frame
+/// is reserved for "Payload assembled" (progress.rs finalizes only a
+/// step-5 100% frame, so the run must end on that milestone).
+const JUSTIFICATION_COMPLETE_PERCENT: usize = 99;
 /// Terminal milestone after payload assembly, before the build returns.
 /// `swap_into_state` separately marks the web state "Ready".
 const PAYLOAD_ASSEMBLED_PERCENT: usize = 100;
@@ -128,7 +168,12 @@ fn tu_index_percent(done: usize, total: usize) -> usize {
 }
 
 fn collateral_file_percent(done: usize, total: usize) -> usize {
-    mapped_span_percent(stage_start_percent(5), COLLATERAL_MAPPED_PERCENT, done, total)
+    mapped_span_percent(
+        SYMBOLS_ANALYZED_PERCENT,
+        COLLATERAL_FILE_SPAN_END,
+        done,
+        total,
+    )
 }
 
 /// Drive the five artifact-backed stages, emitting start/end milestones that
@@ -196,33 +241,64 @@ fn run_pipeline_stages(
         "Load analysis",
     ));
     pipeline.ensure_load()?;
+    // A4: on a cold rebuild the pipeline callback has already emitted the
+    // "Load artifacts saved" milestone at 85; this frame repeats that
+    // percent under the stage's own label. On a warm load-stage reuse no
+    // pipeline events fire at all, so this is the only load-complete marker
+    // and the bar honestly jumps 80 -> 85 once the cached stage returned.
     progress(stage_report(
         5,
-        COLLATERAL_MAPPED_PERCENT,
+        ARTIFACTS_SAVED_PERCENT,
         COLLATERAL_PHASE,
         "Collateral mapped",
     ));
     Ok(reduced_model)
 }
 
-/// Run every pipeline stage (loading artifact-backed stages when their input
-/// fingerprint is fresh) and assemble the UI payload from the results.
-fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
-    let cb_progress = progress.clone();
-    let progress_cb = move |event: &ProgressEvent| match event {
+/// Map one pipeline `ProgressEvent` onto the stage-owned report. A4: the
+/// load milestones become named stage-5 reports at their calibrated points;
+/// the new-variant arm is enforced by the compiler, so a future event can
+/// never be silently dropped on the floor here.
+fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent) + Send {
+    move |event| match event {
         ProgressEvent::TuIndex { done, total } => (cb_progress)(stage_report(
             2,
             tu_index_percent(*done, *total),
             TU_INDEX_PHASE,
-            &format!("{}/{} TUs", done, total),
+            &format!("{done}/{total} TUs"),
         )),
         ProgressEvent::CollateralFile { done, total } => (cb_progress)(stage_report(
             5,
             collateral_file_percent(*done, *total),
             COLLATERAL_PHASE,
-            &format!("{}/{} files", done, total),
+            &format!("{done}/{total} files"),
         )),
-    };
+        ProgressEvent::LoadMilestone(milestone) => (cb_progress)(match milestone {
+            LoadMilestone::SymbolsAnalyzed { symbols } => stage_report(
+                5,
+                SYMBOLS_ANALYZED_PERCENT,
+                COLLATERAL_PHASE,
+                &format!("{symbols} symbols analyzed"),
+            ),
+            LoadMilestone::ArtifactsSaved => stage_report(
+                5,
+                ARTIFACTS_SAVED_PERCENT,
+                COLLATERAL_PHASE,
+                "Load artifacts saved",
+            ),
+        }),
+    }
+}
+
+/// One of build_ui_payload's own stage-5 assembly milestones.
+fn stage5_report(progress: &ProgressFn, percent: usize, message: &str) {
+    progress(stage_report(5, percent, COLLATERAL_PHASE, message));
+}
+
+/// Run every pipeline stage (loading artifact-backed stages when their input
+/// fingerprint is fresh) and assemble the UI payload from the results.
+fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
+    let progress_cb = stage_progress_callback(progress.clone());
     let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
 
     let reduced_model = run_pipeline_stages(&mut pipeline, &progress)?;
@@ -237,6 +313,15 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
     // A1: planner candidates are screened from the stage's load metrics and
     // reuse the stage closures, before the memo below takes them.
+    // Milestones follow the CALL ORDER, not the cost order: the planner
+    // really runs before the justification memo, so "Planning extractions"
+    // is emitted here (A4 honesty rule — the boot-time ms table in the
+    // constants block shows why the planner earns only ~0.6 pt).
+    stage5_report(
+        &progress,
+        PLANNING_EXTRACTIONS_PERCENT,
+        "Planning extractions",
+    );
     let extraction_proposals = build_extraction_proposals(
         &include_graph,
         &reduced_model,
@@ -249,6 +334,13 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
     // live route share it; rebuilds swap graph+model+memo as one unit.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
+    // Span floor of the dominant tail: the memo call emits no per-file
+    // events, so 86 -> 99 is one honest span, not a frozen 12-point jump.
+    stage5_report(
+        &progress,
+        JUSTIFYING_SYMBOLS_PERCENT,
+        "Justifying symbols...",
+    );
     let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
         &include_graph,
@@ -256,6 +348,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         &path_to_id,
         Some(&load_memo),
     );
+    stage5_report(&progress, JUSTIFICATION_COMPLETE_PERCENT, "Symbols justified");
     let payload = GraphExportPayload {
         repo_name: pipeline
             .repo
@@ -278,12 +371,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         extraction_proposals,
     };
     let status = stage_status_from_pipeline(&pipeline);
-    progress(stage_report(
-        5,
-        PAYLOAD_ASSEMBLED_PERCENT,
-        COLLATERAL_PHASE,
-        "Payload assembled",
-    ));
+    stage5_report(&progress, PAYLOAD_ASSEMBLED_PERCENT, "Payload assembled");
     Ok(UiBuildResult {
         include_graph,
         reduced_model,
@@ -548,18 +636,25 @@ mod tests {
 #[cfg(test)]
 mod progress_contract_tests {
     use super::{
-        collateral_file_percent, stage_end_percent, stage_start_percent, step_percent,
-        tu_index_percent, ARTIFACTS_PHASE, CALL_GRAPH_PHASE, COLLATERAL_MAPPED_PERCENT,
-        COLLATERAL_PHASE, REDUCTION_PHASE, STAGES_PER_RUN, TU_INDEX_PHASE,
+        collateral_file_percent, stage_end_percent, stage_progress_callback, stage_report,
+        stage_start_percent, step_percent, tu_index_percent, ARTIFACTS_PHASE,
+        ARTIFACTS_SAVED_PERCENT, CALL_GRAPH_PHASE, COLLATERAL_FILE_SPAN_END, COLLATERAL_PHASE,
+        JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT, PAYLOAD_ASSEMBLED_PERCENT,
+        PLANNING_EXTRACTIONS_PERCENT, ProgressFn, ProgressReport, REDUCTION_PHASE, STAGES_PER_RUN,
+        SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
     };
+    use ariadne_pipeline::{LoadMilestone, ProgressEvent};
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     const POINTS_PER_STAGE: usize = 100 / STAGES_PER_RUN;
 
     /// The ordered static milestones exactly as `build_ui_payload` emits them,
     /// built from the same constants and helpers the real code path calls.
-    /// Stage 5's milestone set is {80 start, 80–95 event span, 95 "Collateral
-    /// mapped", 100 payload finalization}, all within [80, 100].
+    /// A4: stage 5's milestone set is {80 start, 81 "Symbols analyzed",
+    /// [81,82] file-event span, 85 artifacts-saved / "Collateral mapped" /
+    /// "Planning extractions", 86 "Justifying symbols...", 99 "Symbols
+    /// justified", 100 payload finalization}, all within [80, 100].
     fn emitted_milestones() -> Vec<(usize, &'static str)> {
         vec![
             (stage_start_percent(1), ARTIFACTS_PHASE),
@@ -571,7 +666,11 @@ mod progress_contract_tests {
             (stage_start_percent(4), CALL_GRAPH_PHASE),
             (stage_end_percent(4), CALL_GRAPH_PHASE),
             (stage_start_percent(5), COLLATERAL_PHASE),
-            (COLLATERAL_MAPPED_PERCENT, COLLATERAL_PHASE),
+            (SYMBOLS_ANALYZED_PERCENT, COLLATERAL_PHASE),
+            (ARTIFACTS_SAVED_PERCENT, COLLATERAL_PHASE),
+            (PLANNING_EXTRACTIONS_PERCENT, COLLATERAL_PHASE),
+            (JUSTIFYING_SYMBOLS_PERCENT, COLLATERAL_PHASE),
+            (JUSTIFICATION_COMPLETE_PERCENT, COLLATERAL_PHASE),
             (100, COLLATERAL_PHASE),
         ]
     }
@@ -649,18 +748,124 @@ mod progress_contract_tests {
     fn test_collateral_events_stay_in_stage_five_span() {
         assert_eq!(
             collateral_file_percent(0, 0),
-            80,
-            "empty collateral set must sit at stage start"
+            81,
+            "empty collateral set must sit at the file-loop floor"
         );
-        assert_eq!(collateral_file_percent(0, 7), 80);
-        assert_eq!(collateral_file_percent(7, 7), 95);
+        assert_eq!(collateral_file_percent(0, 7), 81);
+        assert_eq!(collateral_file_percent(7, 7), COLLATERAL_FILE_SPAN_END);
         let mut previous = collateral_file_percent(0, 9);
         for done in 1..=9 {
             let percent = collateral_file_percent(done, 9);
-            assert!((80..=95).contains(&percent), "{done}/9 mapped to {percent}%");
+            assert!(
+                (SYMBOLS_ANALYZED_PERCENT..=COLLATERAL_FILE_SPAN_END).contains(&percent),
+                "{done}/9 mapped to {percent}%"
+            );
             assert!(percent >= previous, "percent regressed at {done}/9");
             previous = percent;
         }
+    }
+
+    /// A4: replay the exact stage-5 emission order of `run_pipeline_stages`
+    /// and `stage_progress_callback` and `build_ui_payload` (static
+    /// milestones through the same `stage_report` helper, pipeline events
+    /// through the real callback mapping) and pin the produced report
+    /// sequence: percent monotonic non-decreasing, every report inside
+    /// [80, 100], and exactly one 100% frame — the terminal "Payload
+    /// assembled" (progress.rs finalizes only a step-5 100% frame, so this
+    /// is the contract that keeps the finalize at the true end of the
+    /// build).
+    #[test]
+    fn test_stage_five_milestone_sequence_is_monotonic_and_contained() {
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut event_cb = stage_progress_callback(progress.clone());
+
+        progress(stage_report(5, stage_start_percent(5), COLLATERAL_PHASE, "Load analysis"));
+        event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
+            symbols: 21,
+        }));
+        for done in 0..=4 {
+            event_cb(&ProgressEvent::CollateralFile { done, total: 4 });
+        }
+        event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
+        progress(stage_report(
+            5,
+            ARTIFACTS_SAVED_PERCENT,
+            COLLATERAL_PHASE,
+            "Collateral mapped",
+        ));
+        progress(stage_report(
+            5,
+            PLANNING_EXTRACTIONS_PERCENT,
+            COLLATERAL_PHASE,
+            "Planning extractions",
+        ));
+        progress(stage_report(
+            5,
+            JUSTIFYING_SYMBOLS_PERCENT,
+            COLLATERAL_PHASE,
+            "Justifying symbols...",
+        ));
+        progress(stage_report(
+            5,
+            JUSTIFICATION_COMPLETE_PERCENT,
+            COLLATERAL_PHASE,
+            "Symbols justified",
+        ));
+        progress(stage_report(
+            5,
+            PAYLOAD_ASSEMBLED_PERCENT,
+            COLLATERAL_PHASE,
+            "Payload assembled",
+        ));
+
+        let reports = collected.lock().unwrap();
+        let sequence: Vec<(usize, &str)> = reports
+            .iter()
+            .map(|report| (report.percent, report.message.as_str()))
+            .collect();
+        assert_eq!(
+            sequence,
+            vec![
+                (80, "Load analysis"),
+                (81, "21 symbols analyzed"),
+                (81, "0/4 files"),
+                (81, "1/4 files"),
+                (81, "2/4 files"),
+                (81, "3/4 files"),
+                (82, "4/4 files"),
+                (85, "Load artifacts saved"),
+                (85, "Collateral mapped"),
+                (85, "Planning extractions"),
+                (86, "Justifying symbols..."),
+                (99, "Symbols justified"),
+                (100, "Payload assembled"),
+            ],
+            "stage-5 emission order must be the calibrated milestone sequence"
+        );
+        for pair in reports.windows(2) {
+            assert!(
+                pair[0].percent <= pair[1].percent,
+                "percent regressed: {} -> {}",
+                pair[0].percent,
+                pair[1].percent
+            );
+        }
+        for report in reports.iter() {
+            assert_eq!(report.stage, 5, "every stage-5 report stays on step 5");
+            assert!(
+                (80..=100).contains(&report.percent),
+                "{}% escapes the stage-5 span",
+                report.percent
+            );
+        }
+        let terminals = reports.iter().filter(|r| r.percent == 100).count();
+        assert_eq!(
+            terminals, 1,
+            "only the terminal 'Payload assembled' may show 100%"
+        );
+        assert_eq!(reports.last().unwrap().message, "Payload assembled");
     }
 
     #[test]
