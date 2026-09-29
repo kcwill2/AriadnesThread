@@ -4,7 +4,7 @@ use crate::plan::{OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, R
 use crate::scc;
 use ariadne_graph::load::LoadAnalyzer;
 use ariadne_graph::reduced::ReducedSemanticModel;
-use ariadne_graph::IncludeGraph;
+use ariadne_graph::{IncludeClosure, IncludeGraph, LoadMetric};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
@@ -17,11 +17,62 @@ pub fn is_header_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Precomputed candidate-screening inputs for one header, decoupled from the
+/// load DTOs: the stage's load pass already knows a header's collateral load
+/// and dominant collateral source, so `with_screening_facts` never re-runs
+/// the cold `LoadAnalyzer` scan per header. Field types mirror `LoadMetric`
+/// (`collateral_load: usize`, largest source keyed by `FileId` — its path is
+/// re-resolved from the include graph, the same way `LoadAnalyzer` derived
+/// it in `contributing_sources`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderScreeningFacts {
+    pub collateral_load: usize,
+    pub largest_collateral_source: Option<FileId>,
+}
+
+/// Build the header screening facts map from a stage `LoadReport`'s
+/// `file_metrics`: each metric's `target_file` path is resolved to its
+/// `FileId` through the include graph, and metrics whose target path is
+/// unregistered (or absent) are skipped — an unregistered target can never
+/// be a candidate. Metrics exist exactly for files with symbols, so headers
+/// without symbols end up fact-less and are screened as load 0, matching the
+/// cold path's outcome of zero proposals (no own symbols ⇒ no extraction).
+pub fn screening_facts_from_metrics(
+    include_graph: &IncludeGraph,
+    file_metrics: &[LoadMetric],
+) -> HashMap<FileId, HeaderScreeningFacts> {
+    let id_by_path: HashMap<&Path, FileId> = include_graph
+        .file_paths
+        .iter()
+        .map(|(id, path)| (path.as_path(), *id))
+        .collect();
+    file_metrics
+        .iter()
+        .filter_map(|metric| {
+            let file_id = *id_by_path.get(metric.target_file.as_deref()?)?;
+            Some((
+                file_id,
+                HeaderScreeningFacts {
+                    collateral_load: metric.collateral_load,
+                    largest_collateral_source: metric
+                        .largest_collateral_source
+                        .as_ref()
+                        .map(|source| source.file_id),
+                },
+            ))
+        })
+        .collect()
+}
+
 pub struct OptimizationPlanner<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
     pub file_records: &'a [FileRecord],
     pub tu_file_ids: &'a [FileId],
+    /// `Some` on the UI fast path: per-header screening inputs and the
+    /// stage's include closures, precomputed by the pipeline stages.
+    screening_facts: Option<HashMap<FileId, HeaderScreeningFacts>>,
+    stage_closures: Option<&'a HashMap<FileId, IncludeClosure>>,
 }
 
 /// Optimization policy and ownership views built once per planning run.
@@ -42,6 +93,9 @@ struct HeaderCandidate {
 }
 
 impl<'a> OptimizationPlanner<'a> {
+    /// Cold path (CLI `tool optimize`/`plan`): screening re-analyzes each
+    /// header serially with a fresh `LoadAnalyzer`. Behavior is untouched by
+    /// the facts fast path below.
     pub fn new(
         include_graph: &'a IncludeGraph,
         model: &'a ReducedSemanticModel,
@@ -53,22 +107,52 @@ impl<'a> OptimizationPlanner<'a> {
             model,
             file_records,
             tu_file_ids,
+            screening_facts: None,
+            stage_closures: None,
+        }
+    }
+
+    /// Facts path (UI payload build): candidate screening reads the stage's
+    /// precomputed [`HeaderScreeningFacts`] and consumer mapping reuses the
+    /// stage's include `closures`, so `plan()` never constructs the cold
+    /// `LoadAnalyzer` and never recomputes closures. Plan output is parity-
+    /// locked against the cold path by `tests/planner_facts_parity.rs`.
+    pub fn with_screening_facts(
+        include_graph: &'a IncludeGraph,
+        model: &'a ReducedSemanticModel,
+        file_records: &'a [FileRecord],
+        tu_file_ids: &'a [FileId],
+        screening_facts: HashMap<FileId, HeaderScreeningFacts>,
+        closures: &'a HashMap<FileId, IncludeClosure>,
+    ) -> Self {
+        Self {
+            include_graph,
+            model,
+            file_records,
+            tu_file_ids,
+            screening_facts: Some(screening_facts),
+            stage_closures: Some(closures),
         }
     }
 
     pub fn plan(&self) -> Vec<OptimizationPlan> {
-        let load_analyzer = LoadAnalyzer::new(self.include_graph, self.model);
+        // Facts path must never construct the cold analyzer: building it and
+        // scanning every header serially is exactly the tail A1 removes.
+        let cold_analyzer = if self.screening_facts.is_some() {
+            None
+        } else {
+            Some(LoadAnalyzer::new(self.include_graph, self.model))
+        };
         let frontier_analyzer = FrontierAnalyzer::new();
         let policies = self.collect_file_policies();
         let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
         let mapped_edges = self.model_edges_without_file_endpoints();
-        let header_consumers = self
-            .include_graph
-            .map_header_consuming_tus(self.tu_file_ids);
+        let header_consumers = self.map_header_consumers();
 
         let mut plans = Vec::new();
         for file_id in self.sorted_header_ids() {
-            let Some(candidate) = self.candidate_header(file_id, &load_analyzer, &policies) else {
+            let Some(candidate) = self.candidate_header(file_id, cold_analyzer.as_ref(), &policies)
+            else {
                 continue;
             };
             let proposed_extractions =
@@ -87,6 +171,19 @@ impl<'a> OptimizationPlanner<'a> {
         }
 
         plans
+    }
+
+    /// Consumer TUs per header: reuse the stage closure map on the facts
+    /// path; recompute closures on the cold path, as before.
+    fn map_header_consumers(&self) -> HashMap<FileId, Vec<FileId>> {
+        match self.stage_closures {
+            Some(closures) => self
+                .include_graph
+                .map_header_consuming_tus_with_closures(self.tu_file_ids, closures),
+            None => self
+                .include_graph
+                .map_header_consuming_tus(self.tu_file_ids),
+        }
     }
 
     fn collect_file_policies(&self) -> FilePolicyMaps {
@@ -128,15 +225,17 @@ impl<'a> OptimizationPlanner<'a> {
     fn candidate_header(
         &self,
         file_id: FileId,
-        load_analyzer: &LoadAnalyzer,
+        cold_analyzer: Option<&LoadAnalyzer>,
         policies: &FilePolicyMaps,
     ) -> Option<HeaderCandidate> {
         let path = self.include_graph.file_paths.get(&file_id)?.clone();
-        let metric = load_analyzer.analyze_file_load(&path).ok()?;
-        if metric.collateral_load == 0 {
+        let (collateral_load, collateral_source_id) = match &self.screening_facts {
+            Some(facts) => self.screen_from_facts(file_id, facts)?,
+            None => self.screen_cold(&path, cold_analyzer?)?,
+        };
+        if collateral_load == 0 {
             return None;
         }
-        let largest_collateral_source = metric.largest_collateral_source.as_ref()?;
 
         let policy = policies
             .by_id
@@ -150,10 +249,41 @@ impl<'a> OptimizationPlanner<'a> {
         Some(HeaderCandidate {
             file_id,
             path,
-            collateral_load: metric.collateral_load,
-            collateral_source_id: largest_collateral_source.file_id,
-            collateral_source_path: largest_collateral_source.path.clone(),
+            collateral_load,
+            collateral_source_id,
+            collateral_source_path: self.collateral_source_path(collateral_source_id),
         })
+    }
+
+    /// Facts screening: no metric means the header has no symbols, which on
+    /// the cold path yields no proposals and therefore no plan — screening
+    /// it out here is the same observable outcome.
+    fn screen_from_facts(
+        &self,
+        file_id: FileId,
+        facts: &HashMap<FileId, HeaderScreeningFacts>,
+    ) -> Option<(usize, FileId)> {
+        let fact = facts.get(&file_id)?;
+        Some((fact.collateral_load, fact.largest_collateral_source?))
+    }
+
+    /// Cold screening: the original per-header `analyze_file_load` scan,
+    /// kept verbatim so `new()`-constructed plans stay byte-identical.
+    fn screen_cold(&self, path: &Path, cold_analyzer: &LoadAnalyzer) -> Option<(usize, FileId)> {
+        let metric = cold_analyzer.analyze_file_load(path).ok()?;
+        let source = metric.largest_collateral_source.as_ref()?;
+        Some((metric.collateral_load, source.file_id))
+    }
+
+    /// Same path derivation `LoadAnalyzer::contributing_sources` used when
+    /// it built `largest_collateral_source`, keeping the rationale text
+    /// byte-identical between the cold and facts paths.
+    fn collateral_source_path(&self, source_id: FileId) -> PathBuf {
+        self.include_graph
+            .file_paths
+            .get(&source_id)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("unknown"))
     }
 
     /// Semantic edges with their file endpoints erased, as consumed by the

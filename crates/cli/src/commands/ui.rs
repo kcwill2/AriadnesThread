@@ -114,20 +114,17 @@ fn step_percent(stage: usize, global_percent: usize) -> usize {
     (within * 100 / span).min(100)
 }
 
-fn tu_index_percent(done: usize, total: usize) -> usize {
-    let (lower, upper) = (stage_start_percent(2), stage_end_percent(2));
-    if total == 0 {
-        return lower;
-    }
+fn mapped_span_percent(lower: usize, upper: usize, done: usize, total: usize) -> usize {
+    if total == 0 { return lower; }
     (lower + (upper - lower) * done / total).min(upper)
 }
 
+fn tu_index_percent(done: usize, total: usize) -> usize {
+    mapped_span_percent(stage_start_percent(2), stage_end_percent(2), done, total)
+}
+
 fn collateral_file_percent(done: usize, total: usize) -> usize {
-    let (lower, upper) = (stage_start_percent(5), COLLATERAL_MAPPED_PERCENT);
-    if total == 0 {
-        return lower;
-    }
-    (lower + (upper - lower) * done / total).min(upper)
+    mapped_span_percent(stage_start_percent(5), COLLATERAL_MAPPED_PERCENT, done, total)
 }
 
 /// Drive the five artifact-backed stages, emitting start/end milestones that
@@ -149,7 +146,6 @@ fn run_pipeline_stages(
         ARTIFACTS_PHASE,
         "Include graph ready",
     ));
-
     progress(stage_report(
         2,
         stage_start_percent(2),
@@ -163,7 +159,6 @@ fn run_pipeline_stages(
         TU_INDEX_PHASE,
         "Index complete",
     ));
-
     progress(stage_report(
         3,
         stage_start_percent(3),
@@ -177,7 +172,6 @@ fn run_pipeline_stages(
         REDUCTION_PHASE,
         "Model reduced",
     ));
-
     progress(stage_report(
         4,
         stage_start_percent(4),
@@ -191,7 +185,6 @@ fn run_pipeline_stages(
         CALL_GRAPH_PHASE,
         "Call graph ready",
     ));
-
     progress(stage_report(
         5,
         stage_start_percent(5),
@@ -234,18 +227,25 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let (include_graph, closures) = graph;
     let call_graph = pipeline.get_or_build_callgraph()?;
     let load_report = pipeline.get_or_build_load()?;
-
     let report = include_graph.generate_report();
     let cycles = include_graph.detect_cycles();
     let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
-
+    let path_to_id = build_path_to_id(&include_graph);
+    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
+    // A1: planner candidates are screened from the stage's load metrics and
+    // reuse the stage closures, before the memo below takes them.
+    let extraction_proposals = build_extraction_proposals(
+        &include_graph,
+        &reduced_model,
+        &pipeline.discovery.files,
+        &translation_unit_file_ids(&pipeline.build),
+        &load_report.file_metrics,
+        &closures,
+    );
     // C1: ONE memo for the whole generation, seeded with the stage closures
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
     // live route share it; rebuilds swap graph+model+memo as one unit.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
-
-    let path_to_id = build_path_to_id(&include_graph);
-    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
     let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
         &include_graph,
@@ -253,13 +253,6 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         &path_to_id,
         Some(&load_memo),
     );
-    let extraction_proposals = build_extraction_proposals(
-        &include_graph,
-        &reduced_model,
-        &pipeline.discovery.files,
-        &translation_unit_file_ids(&pipeline.build),
-    );
-
     let payload = GraphExportPayload {
         repo_name: pipeline
             .repo
@@ -345,18 +338,24 @@ fn translation_unit_file_ids(
 
 /// Conservative extraction proposals for the payload (I8): runs the same
 /// planner as `tool optimize` and applies the identical Conservative filter
-/// as `plan_safe_extractions`; display-only, no behavior coupling.
+/// as `plan_safe_extractions`; display-only, no behavior coupling. The
+/// header screening itself consumes the stage's file metrics and closures
+/// (plan load-tail A1) instead of re-running the load analysis cold.
 fn build_extraction_proposals(
     include_graph: &ariadne_graph::IncludeGraph,
     reduced_model: &ariadne_graph::ReducedSemanticModel,
     discovery_files: &[ariadne_repo::FileRecord],
     tu_file_ids: &[ariadne_repo::FileId],
+    file_metrics: &[ariadne_graph::LoadMetric],
+    closures: &HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
-    let planner = ariadne_cluster::planner::OptimizationPlanner::new(
+    let planner = ariadne_cluster::planner::OptimizationPlanner::with_screening_facts(
         include_graph,
         reduced_model,
         discovery_files,
         tu_file_ids,
+        ariadne_cluster::planner::screening_facts_from_metrics(include_graph, file_metrics),
+        closures,
     );
     conservative_proposals(planner.plan())
 }
@@ -813,7 +812,7 @@ mod builder_tests {
     use ariadne_graph::{IncludeGraph, ReducedSemanticModel};
     use ariadne_index::types::SymbolId;
     use ariadne_repo::FileId;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
 
     fn plan_with(id: &str, before: usize, after: usize, risk: RiskLevel) -> OptimizationPlan {
@@ -948,6 +947,7 @@ mod builder_tests {
 
     #[test]
     fn test_planner_wiring_on_empty_inputs_yields_no_proposals() {
+        let graph = IncludeGraph::new();
         let model = ReducedSemanticModel {
             repo_root: PathBuf::from("."),
             symbols: BTreeMap::new(),
@@ -955,7 +955,7 @@ mod builder_tests {
             tu_usage: BTreeMap::new(),
             file_symbols: BTreeMap::new(),
         };
-        let out = build_extraction_proposals(&IncludeGraph::new(), &model, &[], &[]);
+        let out = build_extraction_proposals(&graph, &model, &[], &[], &[], &HashMap::new());
         assert!(out.is_empty());
     }
 

@@ -185,6 +185,19 @@ impl IncludeGraph {
     /// Maps each header file to the set of translation units (sources) that include it directly or transitively.
     pub fn map_header_consuming_tus(&self, tu_file_ids: &[FileId]) -> HashMap<FileId, Vec<FileId>> {
         let closures = self.compute_closures();
+        self.map_header_consuming_tus_with_closures(tu_file_ids, &closures)
+    }
+
+    /// Same mapping as [`Self::map_header_consuming_tus`] but reading
+    /// `closures` supplied by the caller — pipeline stages keep the closure
+    /// map from `compute_closures()` and hand it to consumers (plan
+    /// load-tail A1) instead of paying a full recompute per call. The
+    /// per-header consumer sorting is identical either way.
+    pub fn map_header_consuming_tus_with_closures(
+        &self,
+        tu_file_ids: &[FileId],
+        closures: &HashMap<FileId, IncludeClosure>,
+    ) -> HashMap<FileId, Vec<FileId>> {
         let mut header_consumers: HashMap<FileId, HashSet<FileId>> = HashMap::new();
 
         for &tu_id in tu_file_ids {
