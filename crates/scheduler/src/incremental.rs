@@ -1,11 +1,15 @@
 use anyhow::Result;
 use ariadne_build::BuildDiscoveryResult;
-use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
+use ariadne_index::{
+    IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
+};
+use ariadne_lang::{DependencyResolver, SemanticAnalyzer};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::tu_store::{
-    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint,
-    SharedTuStoreContext, TuStoreContext,
+    analyze_closure, analyze_closure_with, compute_tu_closure, compute_tu_closure_plugin,
+    load_shard, save_shard, shard_dir, ShardCheckpoint, SharedTuStoreContext, TuClosure,
+    TuStoreContext,
 };
 
 pub struct IncrementalAnalysisResult {
@@ -40,6 +44,8 @@ pub struct IncrementalAnalyzer<'a> {
     repo_discovery: &'a RepositoryDiscoveryResult,
     build_result: &'a BuildDiscoveryResult,
     analysis_version: String,
+    analyzer: Option<&'a dyn SemanticAnalyzer>,
+    resolver: Option<&'a dyn DependencyResolver>,
 }
 
 impl<'a> IncrementalAnalyzer<'a> {
@@ -53,12 +59,59 @@ impl<'a> IncrementalAnalyzer<'a> {
             repo_discovery,
             build_result,
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+            analyzer: None,
+            resolver: None,
         }
     }
 
     pub fn with_analysis_version(mut self, version: impl Into<String>) -> Self {
         self.analysis_version = version.into();
         self
+    }
+
+    /// Inject the plugin semantic analyzer (plan M18.2): `analyze` then
+    /// parses each closure file through `&dyn SemanticAnalyzer` instead of
+    /// the hardcoded C++ analyzer. For the C++ plugin the injected adapter
+    /// produces byte-identical analyses. When unset, the transitional
+    /// hardcoded path runs (removed in M18.11; callers reach this seam via
+    /// `LanguageRegistry::plugin_for_id(...).analyzer()`, wired up in
+    /// M18.3's registry-aware `handle_index_with_registry`).
+    pub fn with_analyzer(mut self, analyzer: &'a dyn SemanticAnalyzer) -> Self {
+        self.analyzer = Some(analyzer);
+        self
+    }
+
+    /// Inject the plugin directive resolver (plan M18.2/M18.5): `analyze`
+    /// then computes TU closures through `&dyn DependencyResolver` +
+    /// `FileCatalog` instead of the transitional `IncludeResolver`. When
+    /// unset, the transitional path runs (same removal milestone).
+    pub fn with_resolver(mut self, resolver: &'a dyn DependencyResolver) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+
+    fn closure_for(
+        &self,
+        tu: &ariadne_build::TranslationUnit,
+        store_ctx: &SharedTuStoreContext,
+    ) -> Result<TuClosure> {
+        match self.resolver {
+            Some(resolver) => compute_tu_closure_plugin(
+                tu,
+                &self.repo.root,
+                store_ctx,
+                &self.analysis_version,
+                resolver,
+            ),
+            None => compute_tu_closure(tu, &self.repo.root, store_ctx, &self.analysis_version),
+        }
+    }
+
+    fn analysis_for(&self, tu: &ariadne_build::TranslationUnit, closure: &TuClosure) -> TuAnalysis {
+        match self.analyzer {
+            Some(analyzer) => analyze_closure_with(tu, closure, analyzer),
+            None => analyze_closure(tu, closure),
+        }
     }
 
     pub fn analyze(&mut self) -> Result<IncrementalAnalysisResult> {
@@ -71,16 +124,16 @@ impl<'a> IncrementalAnalyzer<'a> {
         let store_dir = shard_dir(&self.repo.root);
 
         for tu in &self.build_result.translation_units {
-            let closure =
-                compute_tu_closure(tu, &self.repo.root, &store_ctx, &self.analysis_version)?;
+            let closure = self.closure_for(tu, &store_ctx)?;
 
-            let analysis = if let Some(shard) = load_shard(&store_dir, tu.file_id) {
-                if shard.fingerprint == closure.fingerprint.combined_hash {
+            let analysis = match load_shard(&store_dir, tu.file_id) {
+                Some(shard) if shard.fingerprint == closure.fingerprint.combined_hash => {
                     reused += 1;
                     shard.analysis
-                } else {
+                }
+                _ => {
                     reanalyzed += 1;
-                    let analysis = analyze_closure(tu, &closure);
+                    let analysis = self.analysis_for(tu, &closure);
                     save_shard(
                         &store_dir,
                         &ShardCheckpoint {
@@ -90,17 +143,6 @@ impl<'a> IncrementalAnalyzer<'a> {
                     )?;
                     analysis
                 }
-            } else {
-                reanalyzed += 1;
-                let analysis = analyze_closure(tu, &closure);
-                save_shard(
-                    &store_dir,
-                    &ShardCheckpoint {
-                        fingerprint: closure.fingerprint.combined_hash.clone(),
-                        analysis: analysis.clone(),
-                    },
-                )?;
-                analysis
             };
 
             tu_analyses.push(analysis);

@@ -13,3 +13,5 @@ bincode.workspace = true
 ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-lang-api = { path = "../lang-api" }
+# TODO(M18.11): remove transitional shim dep (analyzer re-export only)
+ariadne-lang-cpp = { path = "../lang-cpp" }

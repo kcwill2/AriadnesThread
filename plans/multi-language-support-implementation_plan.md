@@ -341,6 +341,8 @@ Acceptance: workspace compiles; M17 tests pass; the 15 pre-existing suites are *
 
 ### M18 — C++ becomes a plugin (behaviour-preserving)
 
+> EXECUTION NOTES (M18.1–M18.2, reviewer-APPROVED): (a) `IncludeKind`/`SourceLocation`/`IncludeEdge` moved to `lang-api` (plugin crates may not depend on `graph`; serde/bincode shapes unchanged, graph re-exports original paths — rename deferred to a D5 milestone); (b) `ClangWorkerBackend` stays in `scheduler/worker.rs` until M18.11 — relocation needs `lang-cpp→scheduler` as a *normal* dep while `index→lang-cpp` shim exists (hard cargo cycle); unblocked when shims drop; (c) `lang-cpp` normal-deps `ariadne-build` (not in §4 table; acyclic, guard passes).
+
 **Objective:** delete coupling rows #3–#10 of §1 by dispatching through the registry, with the C++ implementation *relocated* into `ariadne-lang-cpp`.
 
 Relocations (code move, not rewrite):
@@ -547,7 +549,7 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [ ] M18.2 Move `CppSemanticAnalyzer` (tokenizer + `ParserCtx`) from `crates/index/src/analyzer.rs` → `lang-cpp/src/analyzer.rs` with the `lang::SemanticAnalyzer` adapter impl; `index` re-exports; move `ClangWorkerBackend` out of `crates/scheduler/src/worker.rs`
 - [ ] M18.3 `crates/cli/src/registry.rs::default_registry()` + registry-aware `handle_index_with_registry` / `build_dependency_graph` variants + `--lang` flag
 - [ ] M18.4 Inject `UnitShaper` into `BuildDiscoverer`; move the `"cl.exe"` / `cpp|cc|cxx|c` / `Default|x64` literals from `infer_default_discovery` into `lang-cpp::CppUnitShaper`
-- [ ] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs`
+- [ ] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs` — MUST reconcile documented divergences from M18.2 review: legacy closure includes ThirdParty headers while plugin walk drops `ResolveOutcome::External`; `PluginWorkerBackend` context path must not run hardcoded-C++ `analyze_tu_full` for non-C++ languages; angle style/include-dir fallback unmodeled in `ResolveOutcome`
 - [ ] M18.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
 - [ ] M18.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
 - [ ] M18.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies

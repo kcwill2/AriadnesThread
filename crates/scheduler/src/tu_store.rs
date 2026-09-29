@@ -14,9 +14,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ariadne_build::{CompilationContext, TranslationUnit};
+// TODO(M18.11): `IncludeResolver`/`CppSemanticAnalyzer` are transitional
+// `#[deprecated]` shims for the relocated `ariadne-lang-cpp` components; the
+// registry-driven variants below (`*_plugin` / `*_with`) supersede them.
 use ariadne_graph::IncludeResolver;
 use ariadne_index::{
     CppSemanticAnalyzer, TuAnalysis, TuCacheFingerprint, CURRENT_ANALYSIS_VERSION,
+};
+use ariadne_lang::{
+    DependencyResolver, FileCatalog, ResolutionContext, ResolveOutcome, SemanticAnalyzer,
 };
 use ariadne_repo::{compute_file_hash, FileId, RepositoryDiscoveryResult, SourceLanguage};
 
@@ -130,6 +136,16 @@ fn record_hash(
     unreadable_hash(*file_id)
 }
 
+/// Compilation context a TU's closure analysis runs under: the context with
+/// the matching name, or a bare one named after the TU.
+fn context_for_tu(tu: &TranslationUnit, ctx: &TuStoreContext) -> CompilationContext {
+    ctx.contexts
+        .iter()
+        .find(|c| c.name == tu.context_name)
+        .cloned()
+        .unwrap_or_else(|| CompilationContext::new(&tu.context_name, "clang++"))
+}
+
 /// Walk a TU's include closure (canonical semantics: TU body plus every
 /// transitive header, all parsed and merged) and compute its fingerprint
 /// without running the semantic parser.
@@ -139,12 +155,7 @@ pub fn compute_tu_closure(
     ctx: &TuStoreContext,
     analysis_version: &str,
 ) -> Result<TuClosure> {
-    let context = ctx
-        .contexts
-        .iter()
-        .find(|c| c.name == tu.context_name)
-        .cloned()
-        .unwrap_or_else(|| CompilationContext::new(&tu.context_name, "clang++"));
+    let context = context_for_tu(tu, ctx);
 
     let resolver = IncludeResolver::new(repo_root)
         .with_repo_discovery(&ctx.discovery)
@@ -253,6 +264,160 @@ pub fn analyze_tu_full(
     let closure = compute_tu_closure(tu, repo_root, ctx, CURRENT_ANALYSIS_VERSION)?;
     let analysis = analyze_closure(tu, &closure);
     Ok((analysis, closure.fingerprint))
+}
+
+/// Registry-driven merge (plan M18.2): identical merge order and merged
+/// fields to [`analyze_closure`], with each file parsed through the injected
+/// [`SemanticAnalyzer`]. For C++ the plugin adapter is the same
+/// `CppSemanticAnalyzer::analyze_source`, so the result is byte-identical;
+/// the `language` stamp comes from the TU body's own analysis (also C++ for
+/// the C++ plugin).
+pub fn analyze_closure_with(
+    tu: &TranslationUnit,
+    closure: &TuClosure,
+    analyzer: &dyn SemanticAnalyzer,
+) -> TuAnalysis {
+    let mut combined_symbols = Vec::new();
+    let mut combined_declarations = Vec::new();
+    let mut combined_edges = Vec::new();
+    let mut combined_call_sites = Vec::new();
+    let mut combined_references = Vec::new();
+    let mut language = SourceLanguage::default();
+
+    for (index, (file_id, _, file_content)) in closure.files.iter().enumerate() {
+        let mut file_analysis = analyzer.analyze(*file_id, file_content, &tu.context_name);
+        if index == 0 {
+            language = file_analysis.language;
+        }
+        combined_symbols.append(&mut file_analysis.symbols);
+        combined_declarations.append(&mut file_analysis.declarations);
+        combined_edges.append(&mut file_analysis.edges);
+        combined_call_sites.append(&mut file_analysis.call_sites);
+        combined_references.append(&mut file_analysis.references);
+    }
+
+    TuAnalysis {
+        tu_file_id: tu.file_id,
+        context_name: tu.context_name.clone(),
+        symbols: combined_symbols,
+        declarations: combined_declarations,
+        edges: combined_edges,
+        references: combined_references,
+        call_sites: combined_call_sites,
+        language,
+    }
+}
+
+/// Source-relative on-disk fallback for a directive the neutral resolver
+/// could not map: mirrors the legacy resolver's filesystem fallback for the
+/// quoted include-dir case when the target is not in discovery. Returns
+/// `(FileId, repo-relative path)`.
+fn source_relative_on_disk(
+    repo_root: &Path,
+    includer_rel: &Path,
+    raw_target: &str,
+) -> Option<(FileId, PathBuf)> {
+    let candidate = includer_rel.parent()?.join(raw_target);
+    let norm = ariadne_graph::IncludeResolver::normalize_path(&candidate);
+    if !repo_root.join(&norm).exists() {
+        return None;
+    }
+    let rel_str = norm.to_string_lossy().replace('\\', "/");
+    Some((FileId::from_relative_path(&rel_str), PathBuf::from(rel_str)))
+}
+
+/// Registry-driven closure walk (plan M18.2 / M18.5 seam): same file order
+/// and fingerprint inputs as [`compute_tu_closure`], but directive resolution
+/// runs through an injected [`DependencyResolver`] + [`FileCatalog`] instead
+/// of the transitional `IncludeResolver`.
+///
+/// Outcome mapping (see the `lang-cpp::resolver` module docs for the full
+/// parity table): `Resolved`/`Wildcard` are visited via their discovery
+/// paths; `External`/`Unresolved` fall back to the source-relative on-disk
+/// check (the neutral trait stays filesystem-free).
+pub fn compute_tu_closure_plugin(
+    tu: &TranslationUnit,
+    repo_root: &Path,
+    ctx: &TuStoreContext,
+    analysis_version: &str,
+    resolver: &dyn DependencyResolver,
+) -> Result<TuClosure> {
+    let context = context_for_tu(tu, ctx);
+    let resolution = ResolutionContext { repo_root };
+    let catalog = FileCatalog::from_records(&ctx.discovery.files);
+
+    let source_abs = repo_root.join(&tu.source_path);
+    // Unreadable TU source is a normal miss: same sentinel as the legacy path.
+    let (source_content, source_hash) = match fs::read_to_string(&source_abs) {
+        Ok(content) => (
+            content,
+            record_hash(ctx, repo_root, &tu.file_id, Some(&tu.source_path)),
+        ),
+        Err(_) => (String::new(), unreadable_hash(tu.file_id)),
+    };
+
+    let mut files = vec![(tu.file_id, tu.source_path.clone(), source_content)];
+    let mut visited: HashSet<FileId> = HashSet::new();
+    visited.insert(tu.file_id);
+    let mut header_hashes: Vec<(FileId, String)> = Vec::new();
+
+    let mut queue = vec![(tu.file_id, tu.source_path.clone(), files[0].2.clone())];
+    while let Some((file_id, rel_path, content)) = queue.pop() {
+        for edge in resolver.resolve_edges(file_id, &rel_path, &content, &resolution) {
+            let mut destinations: Vec<(FileId, PathBuf)> = Vec::new();
+            match resolver.resolve_target(&edge, &catalog, &resolution) {
+                ResolveOutcome::Resolved(id) => {
+                    if let Some(path) = ctx.path_by_id.get(&id) {
+                        destinations.push((id, path.clone()));
+                    }
+                }
+                ResolveOutcome::Wildcard(ids) => {
+                    for id in ids {
+                        if let Some(path) = ctx.path_by_id.get(&id) {
+                            destinations.push((id, path.clone()));
+                        }
+                    }
+                }
+                ResolveOutcome::External | ResolveOutcome::Unresolved => {
+                    if let Some(hit) =
+                        source_relative_on_disk(repo_root, &rel_path, &edge.raw_target)
+                    {
+                        destinations.push(hit);
+                    }
+                }
+            }
+            for (dest_id, dest_path) in destinations {
+                if !visited.insert(dest_id) {
+                    continue;
+                }
+                let header_abs = repo_root.join(&dest_path);
+                match fs::read_to_string(&header_abs) {
+                    Ok(header_content) => {
+                        files.push((dest_id, dest_path.clone(), header_content.clone()));
+                        header_hashes.push((
+                            dest_id,
+                            record_hash(ctx, repo_root, &dest_id, Some(&dest_path)),
+                        ));
+                        queue.push((dest_id, dest_path, header_content));
+                    }
+                    Err(_) => {
+                        header_hashes.push((dest_id, unreadable_hash(dest_id)));
+                    }
+                }
+            }
+        }
+    }
+
+    let fingerprint = TuCacheFingerprint::compute(
+        analysis_version,
+        &context,
+        &tu.file_id,
+        &source_hash,
+        &header_hashes,
+        None,
+    );
+
+    Ok(TuClosure { files, fingerprint })
 }
 
 #[cfg(test)]

@@ -1,5 +1,8 @@
+//! C++ `ParserCtx` state machine (plan M18.2: relocated verbatim from
+//! `crates/index/src/parser.rs`; only the value-type import changed).
+
 use crate::tokenizer::{Token, TokenKind};
-use crate::types::*;
+use ariadne_lang_api::types::*;
 use ariadne_repo::FileId;
 
 const RESERVED_DECL_INTRODUCERS: [&str; 14] = [

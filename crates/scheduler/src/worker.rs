@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::queue::TuTask;
 use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
+use ariadne_lang::LanguageRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerStatus {
@@ -15,6 +16,13 @@ pub trait WorkerBackend: Send + Sync {
     fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis>;
 }
 
+/// Transitional (`#[deprecated]`): the pre-M18 hardcoded C++ backend, kept
+/// byte-identical so `engine.rs`, `pool` tests and the m13/m16 suites keep
+/// passing unchanged until M18.11. New call sites must use
+/// [`PluginWorkerBackend`], which resolves the analyzer through the registry.
+#[deprecated(
+    note = "superseded by PluginWorkerBackend (registry dispatch); removed in M18.11"
+)]
 pub struct DefaultWorkerBackend;
 
 impl WorkerBackend for DefaultWorkerBackend {
@@ -37,6 +45,64 @@ impl WorkerBackend for DefaultWorkerBackend {
     }
 }
 
+/// Registry-dispatching worker backend (plan M18.2, replaces
+/// `DefaultWorkerBackend`): the analyzer is resolved from
+/// [`LanguageRegistry`] by the unit's language. Dispatch mechanism:
+/// `registry.detect_language(&task.tu.source_path)` — the extension →
+/// `FileKind` mapping lives in `ariadne-repo` (no extension literals here)
+/// and each plugin's detector must claim the path.
+///
+/// Byte-for-byte equal to the deprecated `DefaultWorkerBackend` for tasks
+/// whose language maps to a registered plugin: the body-only path calls the
+/// plugin's `SemanticAnalyzer` (for C++ the three-line adapter over the same
+/// `CppSemanticAnalyzer::analyze_source`), and the closure path runs the
+/// same canonical `tu_store` merge (plugin-driven closure invalidation is
+/// contributed in M18.10 per plan §M18). An unhandled language is reported
+/// as an error instead of being silently parsed as C++ (plan §3.3 fact 3).
+pub struct PluginWorkerBackend<'a> {
+    pub registry: &'a LanguageRegistry,
+}
+
+impl<'a> PluginWorkerBackend<'a> {
+    pub fn new(registry: &'a LanguageRegistry) -> Self {
+        Self { registry }
+    }
+}
+
+impl WorkerBackend for PluginWorkerBackend<'_> {
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+        let language = self
+            .registry
+            .detect_language(&task.tu.source_path)
+            .ok_or_else(|| {
+                anyhow::anyhow!("unhandled language for {:?}", task.tu.source_path)
+            })?;
+        if let Some(ctx) = &task.context {
+            let (analysis, _fingerprint) =
+                crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
+            return Ok(analysis);
+        }
+        let plugin = self.registry.plugin_for_id(language).ok_or_else(|| {
+            anyhow::anyhow!("no plugin registered for language {language:?}")
+        })?;
+        let full_path = repo_root.join(&task.tu.source_path);
+        let source_code = std::fs::read_to_string(&full_path).unwrap_or_default();
+        Ok(plugin.analyzer().analyze(
+            task.tu.file_id.clone(),
+            &source_code,
+            &task.tu.context_name,
+        ))
+    }
+}
+
+/// C++ clang-worker sidecar backend.
+///
+/// TODO(M18.11): relocate verbatim to `ariadne-lang-cpp` (`src/backend.rs`).
+/// The move is blocked today by the transitional shim edges:
+/// `lang-cpp -> scheduler -> index -> lang-cpp` would be a hard cargo cycle
+/// (`ClangWorkerBackend` needs `scheduler::TuTask`/`WorkerBackend` as real
+/// deps, and `scheduler -> index` is permanent). Scheduler must not depend on
+/// lang-cpp, so this stays until the `index -> lang-cpp` shim dep is removed.
 pub struct ClangWorkerBackend;
 
 impl ClangWorkerBackend {

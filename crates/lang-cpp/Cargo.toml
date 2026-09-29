@@ -1,0 +1,27 @@
+[package]
+name = "ariadne-lang-cpp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Plugin crate (plan §3.1): depends inward only. Deliberately NOT depended on:
+# ariadne-graph / ariadne-cluster / ariadne-transform / ariadne-validate
+# (enforced by the m17 architecture guard). The Include-graph DTOs the
+# transitional resolver returns live in ariadne-lang-api.
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-build = { path = "../build" }
+ariadne-lang-api = { path = "../lang-api" }
+ariadne-lang = { path = "../lang" }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+# Parity tests compare the relocated C++ pipeline pieces against the
+# transitional (`#[deprecated]`) surfaces still exported by these crates.
+# Dev-only edges may close the index/graph -> lang-cpp transitional shim
+# cycle (cargo allows cycles with a dev edge). Removed with the shims (M18.11).
+ariadne-index = { path = "../index" }
+ariadne-scheduler = { path = "../scheduler" }

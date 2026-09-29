@@ -6,6 +6,7 @@
 
 use ariadne_repo::{FileId, SourceLanguage};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SymbolId(pub String);
@@ -183,5 +184,74 @@ impl Default for TuAnalysis {
             call_sites: Vec::new(),
             language: SourceLanguage::default(),
         }
+    }
+}
+
+// ── Include-graph DTOs moved from `crates/graph/src/types.rs` (plan M18.1) ──
+// The transitional `ariadne-lang-cpp` resolver produces `IncludeEdge` values
+// and a plugin crate may not depend on `ariadne-graph`, so these pure data
+// types live with the rest of the shared artifact vocabulary; `graph`
+// re-exports them at their original paths (serde/paths unchanged).
+
+/// Classification of an included header file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum IncludeKind {
+    /// Local header found via relative search or local `-I` directory.
+    Local,
+    /// System header found via `<...>` or system include paths.
+    System,
+    /// External third-party library header.
+    External,
+}
+
+/// Source location of an include directive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SourceLocation {
+    pub line: u32,
+    pub column: u32,
+}
+
+impl SourceLocation {
+    pub fn new(line: u32, column: u32) -> Self {
+        Self { line, column }
+    }
+}
+
+/// Directed include edge representing a dependency directive from source to
+/// destination file.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct IncludeEdge {
+    pub source: FileId,
+    pub destination: Option<FileId>,
+    pub context_name: String,
+    pub source_location: SourceLocation,
+    pub kind: IncludeKind,
+    pub raw_path: String,
+    pub resolved_path: Option<PathBuf>,
+}
+
+#[cfg(test)]
+mod include_dto_tests {
+    use super::*;
+
+    #[test]
+    fn test_include_edge_serialization() {
+        let edge = IncludeEdge {
+            source: FileId(10),
+            destination: Some(FileId(20)),
+            context_name: "Debug|x64".to_string(),
+            source_location: SourceLocation::new(4, 1),
+            kind: IncludeKind::Local,
+            raw_path: "thing_types.h".to_string(),
+            resolved_path: Some(PathBuf::from("include/thing_types.h")),
+        };
+
+        let json = serde_json::to_string(&edge).unwrap();
+        let decoded: IncludeEdge = serde_json::from_str(&json).unwrap();
+        assert_eq!(edge, decoded);
+
+        let bin = bincode::serialize(&edge).unwrap();
+        let decoded_bin: IncludeEdge = bincode::deserialize(&bin).unwrap();
+        assert_eq!(edge, decoded_bin);
     }
 }
