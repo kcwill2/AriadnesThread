@@ -92,6 +92,7 @@ impl Fixture {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         self.file_symbols.entry(file).or_default().push(sym);

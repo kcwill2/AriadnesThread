@@ -13,10 +13,19 @@ use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     GuardKind, LanguageCapabilities, LanguageDetector, LanguageId, LanguageModeling, LanguagePlugin,
     SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId, SymbolPlacement, SymbolRecord,
-    UnitKind, UnitShaper,
+    ToolchainStatus, UnitKind, UnitShaper,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+/// Single source of truth (plan §3.5 cache row, M18.10) for the C++
+/// `plugin_fingerprint` ingredient of `TuCacheFingerprint`: both the
+/// registry-driven walk (via [`CppPlugin::analysis_fingerprint`]) and the
+/// transitional legacy shim walk (re-exported through `ariadne-index`)
+/// feed this exact value, which keeps `m18_parity_interim_test`'s
+/// cross-walk shard equality intact. Bump whenever tokenizer/`ParserCtx`/
+/// analyzer behaviour changes (same rule as `analysis_fingerprint`).
+pub const CPP_ANALYSIS_FINGERPRINT: &str = "cpp-analyzer-1";
 
 /// Classifies C/C++ sources and headers by extension.
 pub struct CppDetector;
@@ -57,13 +66,47 @@ impl ClusteringConstraints for CppClusteringConstraints {
 pub use crate::dependency_rewriter::CppDependencyRewriter;
 
 /// Placeholder for real compiler invocation: `validate_compile` reports a
-/// failure (never a silent pass) until tier-3 wiring lands in M18.10/M23.
-/// `toolchain_status()` keeps the trait default (`Unknown`).
+/// failure (never a silent pass) until tier-3 wiring lands in M23. M18.10
+/// landed `toolchain_status()` below so the compile tier can report
+/// `Skipped` — not a vacuous `Pass` — when no compiler exists.
 pub struct CppCompilerValidator;
+
+/// Probes one compiler binary the way `tools/clang-worker/src/main.rs::
+/// check_clang_available` does (spawn `--version`, success if the process
+/// could run): a usable compiler yields `Available(<version banner line>)`,
+/// an unrunnable one `Missing` — never a panic (spawn errors are plain
+/// `io::Error`s mapped to `Missing`).
+pub(crate) fn probe_compiler_status(binary: &str) -> ToolchainStatus {
+    match std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+    {
+        Ok(out) => {
+            let banner = String::from_utf8_lossy(&out.stdout);
+            let version = banner
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or(binary);
+            ToolchainStatus::Available(version.to_string())
+        }
+        Err(_) => ToolchainStatus::Missing,
+    }
+}
 
 impl CompilerValidator for CppCompilerValidator {
     fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
-        Err("C++ CompilerValidator not wired yet (M18.10/M23)".to_string())
+        Err("C++ CompilerValidator not wired yet (M23)".to_string())
+    }
+
+    /// M18.10 (plan §3.4 toolchain row): probes the clang driver exactly as
+    /// the clang-worker sidecar does. The worker mirrors an MSVC-compatible
+    /// clang invocation (`tools/clang-worker/src/main.rs::check_clang_available`
+    /// only ever consults `clang`), so absence of clang means this pipeline
+    /// has no compiler it could run — the probe reports `Missing` and the
+    /// affected-TU tier `Skipped`s instead of pretending to have compiled.
+    fn toolchain_status(&self) -> ToolchainStatus {
+        probe_compiler_status("clang")
     }
 }
 
@@ -186,9 +229,11 @@ impl LanguagePlugin for CppPlugin {
         }
     }
 
-    /// Bump when the tokenizer/`ParserCtx`/analyzer behaviour changes.
+    /// Bump when the tokenizer/`ParserCtx`/analyzer behaviour changes —
+    /// the value lives in [`CPP_ANALYSIS_FINGERPRINT`] so the transitional
+    /// legacy cache walk can feed the identical string (M18.10).
     fn analysis_fingerprint(&self) -> String {
-        "cpp-analyzer-1".to_string()
+        CPP_ANALYSIS_FINGERPRINT.to_string()
     }
 
     /// The C++ shaper owns every build literal that used to sit in
@@ -213,6 +258,43 @@ mod tests {
         assert_eq!(
             plugin.shaper().unwrap().build_markers(),
             vec!["CMakeLists.txt", "compile_commands.json", ".vcxproj"]
+        );
+    }
+
+    #[test]
+    fn toolchain_status_reports_a_concrete_probe_never_unknown() {
+        // Mirror of `clang-worker`'s `check_clang_available` semantics without
+        // requiring any toolchain on PATH: the probe must answer quickly and
+        // concretely (Available or Missing) on machines with no compiler.
+        let start = std::time::Instant::now();
+        let status = CppCompilerValidator.toolchain_status();
+        assert!(
+            matches!(status, ToolchainStatus::Available(_) | ToolchainStatus::Missing),
+            "C++ probe must report a concrete status, got {status:?}"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "toolchain probe must return promptly"
+        );
+    }
+
+    #[test]
+    fn probe_of_absent_binary_is_missing_and_graceful() {
+        // Deterministic Missing path — no PATH manipulation required.
+        assert_eq!(
+            probe_compiler_status("definitely-not-a-compiler-xyzzy"),
+            ToolchainStatus::Missing
+        );
+    }
+
+    #[test]
+    fn analysis_fingerprint_backed_by_shared_const() {
+        // Single source of truth for the cache fingerprint (M18.10): both the
+        // legacy shim walk and `analysis_fingerprint()` must feed the SAME
+        // value into `TuCacheFingerprint`.
+        assert_eq!(
+            CppPlugin::new().analysis_fingerprint(),
+            crate::CPP_ANALYSIS_FINGERPRINT
         );
     }
 

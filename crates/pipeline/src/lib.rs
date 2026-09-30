@@ -705,6 +705,11 @@ fn index_unit_with_plugin(
         store_ctx,
         CURRENT_ANALYSIS_VERSION,
         plugin.resolver(),
+        // M18.10 fingerprint identity: `LanguageId` IS `SourceLanguage`
+        // (plan §3.2), and for C++ these two values equal the constants the
+        // legacy shim walk feeds — keeping shard envelopes byte-identical.
+        plugin.id(),
+        &plugin.analysis_fingerprint(),
     )?;
     sharded_analysis(tu, &closure, store_dir, || {
         analyze_closure_with(tu, &closure, plugin.analyzer())

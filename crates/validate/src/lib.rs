@@ -1,7 +1,7 @@
 //! Validation harness and transactional verification.
 
 use anyhow::Result;
-use ariadne_lang::{DependencyRewriter, RewriteSpec};
+use ariadne_lang::{CompilerValidator, DependencyRewriter, RewriteSpec, ToolchainStatus};
 use ariadne_transform::{ExtractionResult, MigrationPreview};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -21,6 +21,18 @@ pub enum ValidationTier {
 pub enum ValidationStatus {
     Pass,
     Fail(String),
+    /// M18.10 (plan §3.5 transactions row): the tier could not run at all
+    /// (e.g. the language toolchain is legitimately absent). NOT a failure —
+    /// rollback fires only on [`ValidationStatus::Fail`].
+    Skipped(String),
+}
+
+impl ValidationStatus {
+    /// Single source of the rollback decision (plan §6.2 `validate::lib` row):
+    /// only a `Fail` counts as failure — `Pass` and `Skipped` never roll back.
+    pub fn is_fail(&self) -> bool {
+        matches!(self, ValidationStatus::Fail(_))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,9 +83,10 @@ fn format_tier(tr: &TierResult) -> String {
         ValidationTier::GeneratedHeaders => "Generated header validation",
         ValidationTier::AffectedTUs => "Affected TU validation",
     };
-    let status = match tr.status {
-        ValidationStatus::Pass => "PASS",
-        ValidationStatus::Fail(_) => "FAIL",
+    let status = match &tr.status {
+        ValidationStatus::Pass => "PASS".to_string(),
+        ValidationStatus::Fail(_) => "FAIL".to_string(),
+        ValidationStatus::Skipped(reason) => format!("SKIPPED: {}", reason),
     };
     format!("{}: {}\n", name, status)
 }
@@ -290,9 +303,19 @@ impl TierValidator {
         }
     }
 
+    /// Tier 3. Pre-M18.10 behavior was the include-existence walk only — this
+    /// tier never ran a compiler (the real compile wiring lands in M23).
+    /// M18.10 adds the honest skip: when the injected plugin validator's
+    /// [`CompilerValidator::toolchain_status`] reports `Missing`, a would-be
+    /// `Pass` becomes `Skipped`, so this tier can no longer claim a TU
+    /// compiles when no compiler was consulted. Existence-check `Fail`s are
+    /// toolchain-independent and unchanged, so rollback semantics are
+    /// identical. `Unknown`/absent validator keeps today's `Pass` behavior
+    /// (absence unproven); probing lives in the plugin, never here.
     pub fn validate_affected_tus(
         migration: &MigrationPreview,
         header_output_dir: &Path,
+        validator: Option<&dyn CompilerValidator>,
     ) -> TierResult {
         for rw in &migration.rewrites {
             for new_inc in &rw.new_includes {
@@ -313,9 +336,15 @@ impl TierValidator {
                 }
             }
         }
+        let status = match validator.map(|v| v.toolchain_status()) {
+            Some(ToolchainStatus::Missing) => ValidationStatus::Skipped(
+                "no compiler toolchain available to compile affected TUs".into(),
+            ),
+            _ => ValidationStatus::Pass,
+        };
         TierResult {
             tier: ValidationTier::AffectedTUs,
-            status: ValidationStatus::Pass,
+            status,
         }
     }
 }
@@ -323,6 +352,7 @@ impl TierValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_lang::{CompilerValidator, ToolchainStatus};
     use ariadne_lang_cpp::CppDependencyRewriter;
     use ariadne_transform::{ConsumerRewrite, GeneratedUnit};
 
@@ -484,5 +514,145 @@ mod tests {
         TransactionApplier::rollback(&snap, &new_paths).unwrap();
         assert!(TransactionApplier::verify_restored(&snap).is_ok());
         assert!(!repo.join("generated/new.h").exists());
+    }
+
+    // ── M18.10: ValidationStatus::Skipped (§6.2 `validate::lib` row) ────────
+
+    fn tier3_migration(new_include: &str) -> MigrationPreview {
+        MigrationPreview {
+            plan_id: "P1".into(),
+            rewrites: vec![ConsumerRewrite {
+                consumer_file: PathBuf::from("src/main.cpp"),
+                old_includes: vec![PathBuf::from("old.h")],
+                new_includes: vec![PathBuf::from(new_include)],
+                side_effect_preservations: vec![],
+            }],
+        }
+    }
+
+    struct FixedToolchain(ToolchainStatus);
+
+    impl CompilerValidator for FixedToolchain {
+        fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
+            Ok(())
+        }
+        fn toolchain_status(&self) -> ToolchainStatus {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn skipped_status_formats_distinctly() {
+        let outcome = ApplyOutcome::Committed {
+            tiers_passed: vec![
+                TierResult {
+                    tier: ValidationTier::Structural,
+                    status: ValidationStatus::Pass,
+                },
+                TierResult {
+                    tier: ValidationTier::GeneratedHeaders,
+                    status: ValidationStatus::Pass,
+                },
+                TierResult {
+                    tier: ValidationTier::AffectedTUs,
+                    status: ValidationStatus::Skipped("no compiler toolchain".into()),
+                },
+            ],
+        };
+        assert_eq!(
+            outcome.format_output(),
+            "Structural validation: PASS\nGenerated header validation: PASS\n\
+             Affected TU validation: SKIPPED: no compiler toolchain\n\nCommitted."
+        );
+    }
+
+    #[test]
+    fn status_serde_names_stable_and_skipped_is_additive() {
+        assert_eq!(
+            serde_json::to_string(&ValidationStatus::Pass).unwrap(),
+            "\"Pass\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationStatus::Fail("boom".into())).unwrap(),
+            "{\"Fail\":\"boom\"}"
+        );
+        let skipped = ValidationStatus::Skipped("toolchain missing".into());
+        let json = serde_json::to_string(&skipped).unwrap();
+        assert_eq!(json, "{\"Skipped\":\"toolchain missing\"}");
+        assert_eq!(
+            serde_json::from_str::<ValidationStatus>(&json).unwrap(),
+            skipped
+        );
+    }
+
+    #[test]
+    fn rollback_predicate_fires_only_on_fail() {
+        assert!(ValidationStatus::Fail("x".into()).is_fail());
+        assert!(!ValidationStatus::Pass.is_fail());
+        assert!(!ValidationStatus::Skipped("toolchain missing".into()).is_fail());
+    }
+
+    #[test]
+    fn affected_tier_skips_when_injected_toolchain_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+        fs::write(gen.join("new.h"), "#pragma once\n").unwrap();
+
+        let result = TierValidator::validate_affected_tus(
+            &tier3_migration("new.h"),
+            &gen,
+            Some(&FixedToolchain(ToolchainStatus::Missing)),
+        );
+        assert_eq!(result.tier, ValidationTier::AffectedTUs);
+        match &result.status {
+            ValidationStatus::Skipped(reason) => assert!(!reason.is_empty()),
+            other => panic!("missing toolchain must yield Skipped, got {other:?}"),
+        }
+        assert!(!result.status.is_fail(), "Skipped must never roll back");
+    }
+
+    #[test]
+    fn affected_tier_fail_precedes_toolchain_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+
+        let result = TierValidator::validate_affected_tus(
+            &tier3_migration("ghost.h"),
+            &gen,
+            Some(&FixedToolchain(ToolchainStatus::Missing)),
+        );
+        match &result.status {
+            ValidationStatus::Fail(msg) => assert!(msg.contains("ghost.h")),
+            other => panic!("missing include must still Fail with no toolchain: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn affected_tier_keeps_pass_for_available_unknown_or_absent_validator() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+        fs::write(gen.join("new.h"), "#pragma once\n").unwrap();
+
+        for validator in [
+            None,
+            Some(Box::new(FixedToolchain(ToolchainStatus::Unknown)) as Box<dyn CompilerValidator>),
+            Some(Box::new(FixedToolchain(ToolchainStatus::Available(
+                "clang 1.2".into(),
+            )))),
+        ] {
+            let result = TierValidator::validate_affected_tus(
+                &tier3_migration("new.h"),
+                &gen,
+                validator.as_deref(),
+            );
+            assert_eq!(
+                result.status,
+                ValidationStatus::Pass,
+                "pre-existing behavior must survive for this toolchain case"
+            );
+        }
     }
 }

@@ -51,6 +51,7 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -315,6 +316,7 @@ fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -364,6 +366,7 @@ fn setup_tiebreak_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -518,6 +521,7 @@ fn setup_ei9_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id

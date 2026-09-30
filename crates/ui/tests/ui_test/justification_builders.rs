@@ -18,6 +18,7 @@ fn sym(id: &str, file: u64) -> ReducedSymbolRecord {
         defining_file: Some(FileId(file)),
         declarations: vec![],
         definition: None,
+        declaring_files: vec![],
     }
 }
 

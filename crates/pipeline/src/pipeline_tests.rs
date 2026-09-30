@@ -451,6 +451,7 @@ fn test_collect_file_metrics_matches_path_reference_and_skips_unregistered() {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         model.file_symbols.entry(file).or_default().push(id);

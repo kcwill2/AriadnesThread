@@ -26,7 +26,7 @@ pub use analyzer::CppSemanticAnalyzer;
 pub use dependency_rewriter::CppDependencyRewriter;
 pub use directive_parser::{parse_include_directives, RawIncludeDirective};
 pub use planning::{cpp_aggregation_filter, cpp_target_path_for};
-pub use plugin::CppPlugin;
+pub use plugin::{CppPlugin, CPP_ANALYSIS_FINGERPRINT};
 pub use source_extractor::CppSourceExtractor;
 pub use resolver::{CppDependencyResolver, IncludeResolver};
 pub use shaper::CppUnitShaper;

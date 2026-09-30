@@ -313,6 +313,7 @@ fn justification_sym(id: &str, file: u64) -> ariadne_graph::ReducedSymbolRecord 
         defining_file: Some(ariadne_repo::FileId(file)),
         declarations: vec![],
         definition: None,
+        declaring_files: vec![],
     }
 }
 

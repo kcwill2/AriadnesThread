@@ -52,6 +52,7 @@ fn setup_chain_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -122,6 +123,7 @@ fn setup_seed_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -299,6 +301,7 @@ pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id

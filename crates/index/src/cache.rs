@@ -1,12 +1,18 @@
 use crate::TuAnalysis;
 use ariadne_build::CompilationContext;
-use ariadne_repo::FileId;
+use ariadne_repo::{FileId, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-pub const CURRENT_ANALYSIS_VERSION: &str = "1.0.0";
+/// Cache epoch (plan §3.5 cache-epoch row, §9 M18.10). Bumped 1.0.0 → 2.0.0:
+/// the bincode `artifacts/reduced/symbols.bin` layout changed with M18.9
+/// (`ReducedSymbolRecord::declaring_files`; `#[serde(default)]` cannot rescue
+/// bincode) AND `TuCacheFingerprint` gained the language/plugin inputs below.
+/// `ArtifactManager::check_manifest` rejects the stale epoch before any blob
+/// deserialization, forcing a fresh rebuild.
+pub const CURRENT_ANALYSIS_VERSION: &str = "2.0.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TuCacheFingerprint {
@@ -15,10 +21,19 @@ pub struct TuCacheFingerprint {
     pub source_hash: String,
     pub header_hashes: Vec<(FileId, String)>,
     pub config_hash: String,
+    /// M18.10: owning language, so one store cannot poison entries across
+    /// languages. `serde(default)` keeps v1 `cache.json` files readable (⇒ Cpp).
+    #[serde(default)]
+    pub language: SourceLanguage,
+    /// M18.10: the owning plugin's `analysis_fingerprint()`; bumping a plugin
+    /// invalidates exactly its language's shard entries.
+    #[serde(default)]
+    pub plugin_fingerprint: String,
     pub combined_hash: String,
 }
 
 impl TuCacheFingerprint {
+    #[allow(clippy::too_many_arguments)]
     pub fn compute(
         analysis_version: &str,
         context: &CompilationContext,
@@ -26,6 +41,8 @@ impl TuCacheFingerprint {
         source_hash: &str,
         headers: &[(FileId, String)],
         config_str: Option<&str>,
+        language: SourceLanguage,
+        plugin_fingerprint: &str,
     ) -> Self {
         // Serialize context for context_hash
         let context_str = bincode::serialize(context).unwrap_or_default();
@@ -54,6 +71,13 @@ impl TuCacheFingerprint {
         }
         hasher.update(b"|");
         hasher.update(config_hash.as_bytes());
+        // M18.10: language + plugin fingerprint join the digest (appended
+        // after config_hash), so a Scala run can neither collide with nor
+        // invalidate C++ entries (§7 cache-poisoning risk row).
+        hasher.update(b"|");
+        hasher.update(format!("{language:?}").as_bytes());
+        hasher.update(b"|");
+        hasher.update(plugin_fingerprint.as_bytes());
 
         let combined_hash = format!("{:x}", hasher.finalize());
 
@@ -63,6 +87,8 @@ impl TuCacheFingerprint {
             source_hash: source_hash.to_string(),
             header_hashes: sorted_headers,
             config_hash,
+            language,
+            plugin_fingerprint: plugin_fingerprint.to_string(),
             combined_hash,
         }
     }
@@ -188,6 +214,8 @@ mod tests {
             "src_hash",
             &hdrs,
             Some("cfg"),
+            ariadne_repo::SourceLanguage::Cpp,
+            "test-plugin",
         );
         let fp2 = TuCacheFingerprint::compute(
             CURRENT_ANALYSIS_VERSION,
@@ -196,6 +224,8 @@ mod tests {
             "src_hash",
             &hdrs,
             Some("cfg"),
+            ariadne_repo::SourceLanguage::Cpp,
+            "test-plugin",
         );
         assert_eq!(fp1, fp2);
         // They are ordered by FileId, which is an opaque hash, so we just check it sorted them.
@@ -213,6 +243,8 @@ mod tests {
             "src_hash",
             &[],
             None,
+            ariadne_repo::SourceLanguage::Cpp,
+            "test-plugin",
         );
 
         let fp2 = TuCacheFingerprint::compute(
@@ -222,6 +254,8 @@ mod tests {
             "different",
             &[],
             None,
+            ariadne_repo::SourceLanguage::Cpp,
+            "test-plugin",
         );
 
         assert!(TuCacheEntry {
@@ -259,6 +293,62 @@ mod tests {
             },
         }
         .is_valid(&fp2));
+    }
+
+    fn fingerprint_with(
+        language: ariadne_repo::SourceLanguage,
+        plugin_fingerprint: &str,
+    ) -> TuCacheFingerprint {
+        TuCacheFingerprint::compute(
+            CURRENT_ANALYSIS_VERSION,
+            &create_test_context(),
+            &FileId::from_relative_path("src/main.cpp"),
+            "src_hash",
+            &[],
+            None,
+            language,
+            plugin_fingerprint,
+        )
+    }
+
+    #[test]
+    fn test_epoch_bumped_for_m18() {
+        // §9 M18.10: bincode symbols.bin layout change (M18.9) + fingerprint
+        // input change (this milestone) force cache-wide regeneration.
+        assert_eq!(CURRENT_ANALYSIS_VERSION, "2.0.0");
+    }
+
+    #[test]
+    fn test_differing_language_or_plugin_fingerprint_changes_digest() {
+        let cpp = fingerprint_with(ariadne_repo::SourceLanguage::Cpp, "fp-a");
+        let scala = fingerprint_with(ariadne_repo::SourceLanguage::Scala, "fp-a");
+        let other_plugin = fingerprint_with(ariadne_repo::SourceLanguage::Cpp, "fp-b");
+        let same = fingerprint_with(ariadne_repo::SourceLanguage::Cpp, "fp-a");
+
+        assert_eq!(cpp, same, "identical inputs must be deterministic");
+        assert_ne!(
+            cpp.combined_hash, scala.combined_hash,
+            "differing language must produce a different digest"
+        );
+        assert_ne!(
+            cpp.combined_hash, other_plugin.combined_hash,
+            "differing plugin_fingerprint must produce a different digest"
+        );
+        assert_eq!(cpp.language, ariadne_repo::SourceLanguage::Cpp);
+        assert_eq!(cpp.plugin_fingerprint, "fp-a");
+    }
+
+    #[test]
+    fn test_v1_fingerprint_json_still_deserializes() {
+        // cache.json is additive: v1 files lack the two new fields.
+        let legacy = fingerprint_with(ariadne_repo::SourceLanguage::Cpp, "fp-a");
+        let mut value = serde_json::to_value(&legacy).unwrap();
+        value.as_object_mut().unwrap().remove("language");
+        value.as_object_mut().unwrap().remove("plugin_fingerprint");
+        let back: TuCacheFingerprint = serde_json::from_value(value).unwrap();
+        assert_eq!(back.language, ariadne_repo::SourceLanguage::Cpp);
+        assert_eq!(back.plugin_fingerprint, "");
+        assert_eq!(back.combined_hash, legacy.combined_hash);
     }
 
     #[test]

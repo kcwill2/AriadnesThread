@@ -6,3 +6,9 @@
 
 #[deprecated(note = "moved to ariadne-lang-cpp; shim removed in M18.11")]
 pub use ariadne_lang_cpp::analyzer::CppSemanticAnalyzer;
+
+/// M18.10: transitional re-export (same TODO) of the single source of truth
+/// for the C++ `plugin_fingerprint` cache input, so the legacy shim walk in
+/// `scheduler::tu_store` and the registry walk via `CppPlugin` provably feed
+/// the identical string without new crate edges.
+pub use ariadne_lang_cpp::CPP_ANALYSIS_FINGERPRINT;

@@ -51,6 +51,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
             defining_file: Some(FileId(1)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model
@@ -67,6 +68,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
             defining_file: Some(FileId(3)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(3), vec![sym_huge.clone()]);
@@ -303,6 +305,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
             defining_file: Some(FileId(10)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     let sym_sidecar = SymbolId::new("Sidecar");
@@ -315,6 +318,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
             defining_file: Some(FileId(10)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model
@@ -399,6 +403,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -477,6 +482,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
             defining_file: Some(FileId(40)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     let odd = SymbolId::new("Odd");
@@ -489,6 +495,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
             defining_file: Some(FileId(41)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(40), vec![host]);
@@ -542,6 +549,7 @@ fn test_missing_defining_file_yields_err_not_panic() {
             defining_file: None,
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(50), vec![ghost]);

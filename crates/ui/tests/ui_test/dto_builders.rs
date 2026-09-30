@@ -100,6 +100,7 @@ fn test_build_symbol_elements_filters_unindexed() {
             defining_file: None,
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     symbols.insert(
@@ -111,6 +112,7 @@ fn test_build_symbol_elements_filters_unindexed() {
             defining_file: None,
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
 

@@ -191,6 +191,13 @@ fn fingerprint_scoped_context(context: &CompilationContext, repo_root: &Path) ->
 /// Walk a TU's include closure (canonical semantics: TU body plus every
 /// transitive header, all parsed and merged) and compute its fingerprint
 /// without running the semantic parser.
+///
+/// The legacy walk is C++-only (`analyze_closure` merges with the C++
+/// analyzer), so its M18.10 fingerprint inputs are fixed to
+/// (`Cpp`, [`ariadne_index::CPP_ANALYSIS_FINGERPRINT`]) — the same
+/// `plugin_fingerprint` value `CppPlugin::analysis_fingerprint()` feeds on
+/// the registry path, which is what keeps the interim parity contract
+/// (`m18_parity_interim_test`) byte-equal across both walks.
 pub fn compute_tu_closure(
     tu: &TranslationUnit,
     repo_root: &Path,
@@ -262,6 +269,8 @@ pub fn compute_tu_closure(
         &source_hash,
         &header_hashes,
         None,
+        SourceLanguage::Cpp,
+        ariadne_index::CPP_ANALYSIS_FINGERPRINT,
     );
 
     Ok(TuClosure { files, fingerprint })
@@ -435,12 +444,19 @@ fn edge_destinations(
 /// plus every compilation-context search path, style-agnostic, so angled
 /// `<hdr>` includes found only under an `-I`/system dir are visited exactly as
 /// the transitional `IncludeResolver` visited them.
+///
+/// `language`/`plugin_fingerprint` (M18.10) are the fingerprint's language
+/// inputs: callers must feed the unit's plugin `id()`/`analysis_fingerprint()`
+/// — for C++ that is exactly the `(Cpp, CPP_ANALYSIS_FINGERPRINT)` tuple the
+/// legacy shim walk hardcodes, preserving shard-envelope parity.
 pub fn compute_tu_closure_plugin(
     tu: &TranslationUnit,
     repo_root: &Path,
     ctx: &TuStoreContext,
     analysis_version: &str,
     resolver: &dyn DependencyResolver,
+    language: SourceLanguage,
+    plugin_fingerprint: &str,
 ) -> Result<TuClosure> {
     let context = context_for_tu(tu, ctx);
     // M18.5: the stateless plugin resolver receives the compilation
@@ -512,6 +528,8 @@ pub fn compute_tu_closure_plugin(
         &source_hash,
         &header_hashes,
         None,
+        language,
+        plugin_fingerprint,
     );
 
     Ok(TuClosure { files, fingerprint })

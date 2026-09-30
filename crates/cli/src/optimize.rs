@@ -103,7 +103,7 @@ use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 use ariadne_transform::{ExtractionResult, GeneratedUnit, IncludeRewriter, IsolationEngine};
-use ariadne_validate::{TierValidator, TransactionApplier, ValidationStatus};
+use ariadne_validate::{TierValidator, TransactionApplier};
 
 pub struct EndToEndOptimizer {
     pub repo_path: PathBuf,
@@ -372,14 +372,18 @@ fn apply_safe_plan(
     let (snapshot, new_paths) =
         TransactionApplier::apply_with(&repo.root, &extraction, &migration, text_rewriter)?;
 
+    // M18.10: the tier-3 skip decision uses the injected plugin validator's
+    // toolchain status (probe lives in lang-cpp), and a Skipped tier counts
+    // as NOT-failed — rollback/validation failure fires only on Fail
+    // (rollback predicate `ValidationStatus::is_fail`).
+    let compiler_validator = plugin_registry.sole_plugin().map(|plugin| plugin.validator());
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");
     let t2 = TierValidator::validate_generated_headers(&extraction, &header_output_dir);
-    let t3 = TierValidator::validate_affected_tus(&migration, &header_output_dir);
+    let t3 = TierValidator::validate_affected_tus(&migration, &header_output_dir, compiler_validator);
 
-    let validation_passed = t1.status == ValidationStatus::Pass
-        && t2.status == ValidationStatus::Pass
-        && t3.status == ValidationStatus::Pass;
+    let validation_passed =
+        !t1.status.is_fail() && !t2.status.is_fail() && !t3.status.is_fail();
 
     if !validation_passed {
         TransactionApplier::rollback(&snapshot, &new_paths)?;
@@ -533,6 +537,7 @@ mod tests {
                     defining_file,
                     declarations: vec![],
                     definition: None,
+                    declaring_files: vec![],
                 },
             );
             if let Some(file) = defining_file {

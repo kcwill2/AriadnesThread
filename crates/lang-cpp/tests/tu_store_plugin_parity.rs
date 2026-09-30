@@ -9,8 +9,10 @@
 //! fixture below includes a third-party header and still expects parity.
 
 use ariadne_build::{CompilationContext, CompileCommand, TranslationUnit};
-use ariadne_lang_cpp::{analyzer::CppSemanticAnalyzer, CppDependencyResolver};
-use ariadne_repo::FileId;
+use ariadne_lang_cpp::{
+    analyzer::CppSemanticAnalyzer, CppDependencyResolver, CPP_ANALYSIS_FINGERPRINT,
+};
+use ariadne_repo::{FileId, SourceLanguage};
 use ariadne_scheduler::{
     analyze_closure, analyze_closure_with, compute_tu_closure, compute_tu_closure_plugin,
     TuStoreContext,
@@ -106,12 +108,28 @@ fn plugin_closure_matches_legacy_closure_and_fingerprint() {
     for rel in ["src/tu1.cpp", "src/tu2.cpp"] {
         let tu = translation_unit(rel);
         let legacy = compute_tu_closure(&tu, root, &store_ctx, VERSION).unwrap();
-        let plugin =
-            compute_tu_closure_plugin(&tu, root, &store_ctx, VERSION, &plugin_resolver).unwrap();
+        let plugin = compute_tu_closure_plugin(
+            &tu,
+            root,
+            &store_ctx,
+            VERSION,
+            &plugin_resolver,
+            SourceLanguage::Cpp,
+            CPP_ANALYSIS_FINGERPRINT,
+        )
+        .unwrap();
 
         assert_eq!(
             legacy.fingerprint.combined_hash, plugin.fingerprint.combined_hash,
             "cache fingerprint must be identical for {rel}"
+        );
+        assert_eq!(
+            legacy.fingerprint.language, plugin.fingerprint.language,
+            "fingerprint language input must be identical for {rel}"
+        );
+        assert_eq!(
+            legacy.fingerprint.plugin_fingerprint, plugin.fingerprint.plugin_fingerprint,
+            "fingerprint plugin_fingerprint input must be identical for {rel}"
         );
         assert_eq!(
             sorted_files(&legacy),
@@ -135,8 +153,16 @@ fn plugin_closure_matches_legacy_closure_and_fingerprint() {
     // M18.5 reconciliation: the third-party header stays in BOTH closures
     // (legacy `External`-kind edge and plugin `Resolved` outcome coincide).
     let tu = translation_unit("src/tu1.cpp");
-    let closure =
-        compute_tu_closure_plugin(&tu, root, &store_ctx, VERSION, &plugin_resolver).unwrap();
+    let closure = compute_tu_closure_plugin(
+        &tu,
+        root,
+        &store_ctx,
+        VERSION,
+        &plugin_resolver,
+        SourceLanguage::Cpp,
+        CPP_ANALYSIS_FINGERPRINT,
+    )
+    .unwrap();
     let third_party = FileId::from_relative_path("third_party/vendored/blind.h");
     assert!(
         closure.files.iter().any(|(id, _, _)| *id == third_party),
@@ -187,10 +213,18 @@ fn plugin_fingerprint_for(root: &Path, include_dirs: Vec<PathBuf>) -> String {
     context.include_dirs = include_dirs;
     let store_ctx = TuStoreContext::new(&discovery, vec![context.clone()]);
     let tu = translation_unit("src/chain.cpp");
-    compute_tu_closure_plugin(&tu, root, &store_ctx, VERSION, &CppDependencyResolver::new())
-        .unwrap()
-        .fingerprint
-        .combined_hash
+    compute_tu_closure_plugin(
+        &tu,
+        root,
+        &store_ctx,
+        VERSION,
+        &CppDependencyResolver::new(),
+        SourceLanguage::Cpp,
+        CPP_ANALYSIS_FINGERPRINT,
+    )
+    .unwrap()
+    .fingerprint
+    .combined_hash
 }
 
 /// M18.5 Finding 1 lock: an angled `<hdr>` include whose only candidate is an
@@ -235,8 +269,16 @@ fn plugin_closure_resolves_angled_include_from_out_of_root_search_path() {
 
     let tu = translation_unit("src/uses_sdk.cpp");
     let legacy = compute_tu_closure(&tu, root, &store_ctx, VERSION).unwrap();
-    let plugin =
-        compute_tu_closure_plugin(&tu, root, &store_ctx, VERSION, &plugin_resolver).unwrap();
+    let plugin = compute_tu_closure_plugin(
+        &tu,
+        root,
+        &store_ctx,
+        VERSION,
+        &plugin_resolver,
+        SourceLanguage::Cpp,
+        CPP_ANALYSIS_FINGERPRINT,
+    )
+    .unwrap();
 
     // The out-of-discovery header must have been VISITED (not merely named by an
     // unresolved edge) on both walks, in identical order, with identical digest.

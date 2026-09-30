@@ -253,8 +253,18 @@ fn commit_or_rollback(
 ) -> Result<()> {
     let mut tiers_passed = Vec::new();
 
+    // M18.10 (§6.2 `validate::lib`): rollback fires ONLY on Fail — a Skipped
+    // tier (e.g. no compiler toolchain) commits like a Pass. The tier-3
+    // skip decision runs through the injected plugin validator's
+    // `toolchain_status()`, never a probe inside `ariadne-validate`.
+    // Multi-language registries dispatch per-unit in M19; until then the
+    // sole plugin owns the tier-3 toolchain, and `None` keeps the
+    // pre-M18.10 pass-through behavior.
+    let registry = crate::registry::default_registry();
+    let compiler_validator = registry.sole_plugin().map(|plugin| plugin.validator());
+
     let t1 = ariadne_validate::TierValidator::validate_structural(extraction);
-    if t1.status == ariadne_validate::ValidationStatus::Pass {
+    if !t1.status.is_fail() {
         tiers_passed.push(t1);
     } else {
         return report_rollback(artifacts, plan_id, t1, tiers_passed, snapshot, new_paths);
@@ -263,14 +273,15 @@ fn commit_or_rollback(
     let header_output_dir = repository.root.join("generated");
     let t2 =
         ariadne_validate::TierValidator::validate_generated_headers(extraction, &header_output_dir);
-    if t2.status == ariadne_validate::ValidationStatus::Pass {
+    if !t2.status.is_fail() {
         tiers_passed.push(t2);
     } else {
         return report_rollback(artifacts, plan_id, t2, tiers_passed, snapshot, new_paths);
     }
 
-    let t3 = ariadne_validate::TierValidator::validate_affected_tus(migration, &header_output_dir);
-    if t3.status == ariadne_validate::ValidationStatus::Pass {
+    let t3 =
+        ariadne_validate::TierValidator::validate_affected_tus(migration, &header_output_dir, compiler_validator);
+    if !t3.status.is_fail() {
         tiers_passed.push(t3);
     } else {
         return report_rollback(artifacts, plan_id, t3, tiers_passed, snapshot, new_paths);

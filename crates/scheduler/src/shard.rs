@@ -85,6 +85,7 @@ impl ShardedReducer {
                     defining_file: None,
                     declarations: Vec::new(),
                     definition: None,
+                    declaring_files: Vec::new(),
                 });
 
             for decl in sym.declarations {
@@ -416,6 +417,7 @@ mod reduce_characterization {
                 defining_file: None,
                 declarations: vec![DeclId::new("ch_decl_a1")],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         symbols.insert(
@@ -427,6 +429,7 @@ mod reduce_characterization {
                 defining_file: Some(gamma),
                 declarations: vec![],
                 definition: Some(DeclId::new("ch_def_beta")),
+                declaring_files: vec![],
             },
         );
         symbols.insert(
@@ -438,6 +441,7 @@ mod reduce_characterization {
                 defining_file: None,
                 declarations: vec![DeclId::new("ch_decl_g1")],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         // First-wins merge: Function kind/name/definition from the first TU record,
@@ -455,6 +459,7 @@ mod reduce_characterization {
                     DeclId::new("ch_decl_3"),
                 ],
                 definition: Some(DeclId::new("ch_def_shared_first")),
+                declaring_files: vec![],
             },
         );
         symbols

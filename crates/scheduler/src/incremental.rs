@@ -4,7 +4,7 @@ use ariadne_index::{
     IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
 };
 use ariadne_lang::{DependencyResolver, SemanticAnalyzer};
-use ariadne_repo::{Repository, RepositoryDiscoveryResult};
+use ariadne_repo::{Repository, RepositoryDiscoveryResult, SourceLanguage};
 
 use crate::tu_store::{
     analyze_closure, analyze_closure_with, compute_tu_closure, compute_tu_closure_plugin,
@@ -46,6 +46,7 @@ pub struct IncrementalAnalyzer<'a> {
     analysis_version: String,
     analyzer: Option<&'a dyn SemanticAnalyzer>,
     resolver: Option<&'a dyn DependencyResolver>,
+    plugin_identity: Option<(SourceLanguage, String)>,
 }
 
 impl<'a> IncrementalAnalyzer<'a> {
@@ -61,6 +62,7 @@ impl<'a> IncrementalAnalyzer<'a> {
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
             analyzer: None,
             resolver: None,
+            plugin_identity: None,
         }
     }
 
@@ -90,19 +92,37 @@ impl<'a> IncrementalAnalyzer<'a> {
         self
     }
 
+    /// Inject the fingerprint identity of the plugin whose analyzer/resolver
+    /// were injected (M18.10): the plugin's language id and
+    /// `analysis_fingerprint()` join every shard-cache fingerprint this run
+    /// computes. Without it the plugin walk falls back to the C++ shim
+    /// identity — byte-identical to the transitional path (parity contract).
+    pub fn with_plugin_identity(mut self, language: SourceLanguage, fingerprint: String) -> Self {
+        self.plugin_identity = Some((language, fingerprint));
+        self
+    }
+
     fn closure_for(
         &self,
         tu: &ariadne_build::TranslationUnit,
         store_ctx: &SharedTuStoreContext,
     ) -> Result<TuClosure> {
         match self.resolver {
-            Some(resolver) => compute_tu_closure_plugin(
-                tu,
-                &self.repo.root,
-                store_ctx,
-                &self.analysis_version,
-                resolver,
-            ),
+            Some(resolver) => {
+                let (language, fingerprint) = self.plugin_identity.clone().unwrap_or((
+                    SourceLanguage::Cpp,
+                    ariadne_index::CPP_ANALYSIS_FINGERPRINT.to_string(),
+                ));
+                compute_tu_closure_plugin(
+                    tu,
+                    &self.repo.root,
+                    store_ctx,
+                    &self.analysis_version,
+                    resolver,
+                    language,
+                    &fingerprint,
+                )
+            }
             None => compute_tu_closure(tu, &self.repo.root, store_ctx, &self.analysis_version),
         }
     }

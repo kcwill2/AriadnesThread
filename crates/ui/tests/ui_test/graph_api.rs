@@ -103,6 +103,7 @@ fn given_mock_search_graphs() -> (IncludeGraph, CallGraph, ReducedSemanticModel)
                 defining_file: Some(file1),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         )]),
         edges: vec![],

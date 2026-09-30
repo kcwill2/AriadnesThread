@@ -230,6 +230,48 @@ fn test_fingerprintless_manifest_is_stale() {
 }
 
 #[test]
+fn stale_analysis_epoch_is_rejected_before_blob_read() {
+    // §7 risk row + §9 M18.10: `symbols.bin` is bincode, so a v1-era blob must
+    // NEVER reach the new struct — the manifest epoch gate must fire first.
+    // Scope honesty: constructing a byte-authentic v1 `symbols.bin` requires
+    // the pre-M18.9 `ReducedSymbolRecord` layout (changed by the parallel M18.9
+    // task), so this test plants an intentionally undecodable blob and locks
+    // the ORDER of the checks: a stale epoch yields a StaleArtifact (rebuild
+    // trigger), never a bincode/serde error.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let repo = Repository::locate(root).unwrap();
+    let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+    let index_result = ariadne_index::IndexResult::new(repo.root.clone(), vec![]);
+    let reduced = ariadne_graph::ReducedSemanticModel::reduce(&index_result);
+    mgr.save_reduced_artifacts(&reduced, FP).unwrap();
+
+    let reduced_dir = mgr.artifact_root.join("reduced");
+    fs::write(reduced_dir.join("symbols.bin"), b"definitely-not-v1-bincode").unwrap();
+    let manifest_path = reduced_dir.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["analysis_version"] = serde_json::Value::String("1.0.0".to_string());
+    fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+    let err = mgr.load_reduced_checked(FP).unwrap_err();
+    assert!(
+        is_stale(&err),
+        "stale epoch must report StaleArtifact (rebuild trigger): {err}"
+    );
+    assert!(
+        err.to_string().contains("analysis version mismatch"),
+        "error must name the epoch gate: {err}"
+    );
+    assert!(
+        !err.to_string().contains("eserialize"),
+        "blob must never be deserialized once the epoch is stale: {err}"
+    );
+    assert!(!mgr.stage_is_fresh("reduced", FP));
+}
+
+#[test]
 fn test_save_and_load_load_artifacts() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -579,7 +621,10 @@ fn test_save_load_callgraph_artifacts() {
 
 const LOCK_REPORT_JSON_HASH: u64 = 0x70c9_1d07_9946_f7d9;
 const LOCK_REPORT_BIN_HASH: u64 = 0x7a12_1e91_0cbf_2e00;
-const LOCK_MANIFEST_JSON_HASH: u64 = 0x8555_8c5e_b51e_12b1;
+// Resynced for the M18.10 cache-epoch bump ("1.0.0" → "2.0.0"): the load
+// manifest embeds `analysis_version`, so its bytes legitimately shift while
+// the report json/bin locks stay pinned (they carry no version).
+const LOCK_MANIFEST_JSON_HASH: u64 = 0xddc3_f9ee_566b_5ea6;
 
 fn fnv1a64_hash(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

@@ -52,6 +52,7 @@ fn add_sym(model: &mut ReducedSemanticModel, name: &str, file: FileId) -> Symbol
             defining_file: Some(file),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     id
