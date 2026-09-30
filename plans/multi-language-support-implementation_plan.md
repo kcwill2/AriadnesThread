@@ -557,6 +557,8 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [x] M18.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
 - [x] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
 
+> EXECUTION NOTES (M18.11, reviewer-APPROVED 2026-09-30 at 3b06e54): (a) the permanent suite's body-only worker oracle shares `CppSemanticAnalyzer::analyze_source` with the subject, so it locks dispatch/shape only — analyzer-semantics locking lives in the m00 goldens; (b) `core_crates_do_not_name_languages` has two admitted gaps: core-crate *test* code imports plugin type names (`CppDependencyRewriter`/`CppSourceExtractor`) and `"c++20"` literals pass the 4-token FORBIDDEN list — widening tokens (`Cpp`/`lang_cpp`/`c++`) or moving byte-fixture tests out of core src is an M23 item; the `concat!` literal scrub is byte-identical in assertion semantics and judged acceptable; (c) `pipeline::default_registry()` duplicates the `cli::registry::default_registry()` enumeration — keep in sync at M19 or share one helper; (d) relocation edge is `lang-cpp → scheduler` (verified `cargo tree -e normal`: no scheduler→lang-cpp normal edge); validate's 3-arg `apply` shim intentionally survives until M23.
+
 **M19–M22 — Scala analysis slice**
 - [ ] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
 - [ ] M19.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
