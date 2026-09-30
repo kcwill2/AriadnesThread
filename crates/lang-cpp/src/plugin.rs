@@ -6,15 +6,14 @@
 //! reached; their milestones are named on each stub.
 
 use crate::analyzer::CppSemanticAnalyzer;
-use crate::directive_parser::parse_include_directives;
+use crate::resolver::CppDependencyResolver;
+use crate::shaper::CppUnitShaper;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     GeneratedSourceFile, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, RawDepEdge, ResolutionContext, RewriteSpec, SemanticAnalyzer,
-    SourceExtractor, SourceFileKind, SymbolBody, SymbolId, SymbolPlacement, SymbolRecord, UnitKind,
-    UnitShaper,
+    LanguageModeling, LanguagePlugin, RewriteSpec, SemanticAnalyzer, SourceExtractor,
+    SourceFileKind, SymbolBody, SymbolId, SymbolPlacement, SymbolRecord, UnitKind, UnitShaper,
 };
-use ariadne_repo::FileId;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -86,53 +85,26 @@ impl ariadne_lang::DependencyRewriter for CppDependencyRewriter {
 pub struct CppCompilerValidator;
 
 impl CompilerValidator for CppCompilerValidator {
-    fn validate_compile(
-        &self,
-        _files: &[PathBuf],
-        _args: &[String],
-    ) -> Result<(), String> {
+    fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
         Err("C++ CompilerValidator not wired yet (M18.10/M23)".to_string())
     }
 }
 
-/// Stateless directive parsing behind [`LanguagePlugin::resolver`].
-///
-/// Full target resolution needs repository state (discovery records and a
-/// compilation context), so pipeline callers construct
-/// [`crate::resolver::CppDependencyResolver`] per repository; this unit
-/// resolver only parses directives, which is repository-independent.
-pub struct CppDirectiveScanner;
-
-impl DependencyResolver for CppDirectiveScanner {
-    fn resolve_edges(
-        &self,
-        file_id: FileId,
-        _rel_path: &Path,
-        source: &str,
-        _ctx: &ResolutionContext<'_>,
-    ) -> Vec<RawDepEdge> {
-        parse_include_directives(source)
-            .into_iter()
-            .map(|dir| RawDepEdge {
-                source_file: file_id,
-                raw_target: dir.raw_path,
-                is_wildcard: false,
-                line: dir.line,
-            })
-            .collect()
-    }
-    // resolve_target keeps the default (Unresolved): see struct docs.
-}
-
 /// The C++ language plugin (plan §3.4 lifecycle mapping table).
+///
+/// [`CppDependencyResolver`] is stateless (M18.5): directive parsing carries
+/// the includer path and spelling on each [`RawDepEdge`](ariadne_lang::RawDepEdge),
+/// and per-repository inputs (catalog, search paths) arrive per call through
+/// the trait arguments — so one instance serves every repository.
 pub struct CppPlugin {
     detector: CppDetector,
     analyzer: CppSemanticAnalyzer,
-    resolver: CppDirectiveScanner,
+    resolver: CppDependencyResolver,
     constraints: CppClusteringConstraints,
     extractor: CppSourceExtractor,
     rewriter: CppDependencyRewriter,
     validator: CppCompilerValidator,
+    shaper: CppUnitShaper,
 }
 
 impl CppPlugin {
@@ -140,11 +112,12 @@ impl CppPlugin {
         Self {
             detector: CppDetector,
             analyzer: CppSemanticAnalyzer,
-            resolver: CppDirectiveScanner,
+            resolver: CppDependencyResolver::new(),
             constraints: CppClusteringConstraints,
             extractor: CppSourceExtractor,
             rewriter: CppDependencyRewriter,
             validator: CppCompilerValidator,
+            shaper: CppUnitShaper,
         }
     }
 }
@@ -229,24 +202,29 @@ impl LanguagePlugin for CppPlugin {
         "cpp-analyzer-1".to_string()
     }
 
+    /// The C++ shaper owns every build literal that used to sit in
+    /// `ariadne-build` (plan M18.4).
     fn shaper(&self) -> Option<&dyn UnitShaper> {
-        // TODO(M18.4): CppUnitShaper (move "cl.exe" / cpp|cc|cxx|c /
-        // Default|x64 literals out of build::infer_default_discovery).
-        None
+        Some(&self.shaper)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_lang::LanguageRegistry;
+    use ariadne_lang::{DirectiveStyle, LanguageRegistry, ResolutionContext};
+    use ariadne_repo::FileId;
 
     #[test]
     fn plugin_identity_and_fingerprint() {
         let plugin = CppPlugin::new();
         assert_eq!(plugin.id(), LanguageId::Cpp);
         assert_eq!(plugin.analysis_fingerprint(), "cpp-analyzer-1");
-        assert!(plugin.shaper().is_none(), "CppUnitShaper lands in M18.4");
+        assert!(plugin.shaper().is_some(), "CppUnitShaper landed in M18.4");
+        assert_eq!(
+            plugin.shaper().unwrap().build_markers(),
+            vec!["CMakeLists.txt", "compile_commands.json", ".vcxproj"]
+        );
     }
 
     #[test]
@@ -257,10 +235,7 @@ mod tests {
         assert_eq!(modeling.aggregation, AggregationKind::Header);
         assert!(modeling.aggregation_reexports);
         assert_eq!(modeling.guard, GuardKind::PragmaOnce);
-        assert_eq!(
-            modeling.symbol_placement,
-            SymbolPlacement::SplitDeclaration
-        );
+        assert_eq!(modeling.symbol_placement, SymbolPlacement::SplitDeclaration);
         assert_eq!(modeling.cycle_policy, CyclePolicy::Reject);
         assert_eq!(
             modeling.external_path_markers,
@@ -290,15 +265,42 @@ mod tests {
     #[test]
     fn detector_classifies_cpp_kinds() {
         let detector = CppDetector;
-        assert_eq!(detector.detect(Path::new("a/main.cpp")), SourceFileKind::Source);
-        assert_eq!(detector.detect(Path::new("a/main.cc")), SourceFileKind::Source);
-        assert_eq!(detector.detect(Path::new("a/main.cxx")), SourceFileKind::Source);
-        assert_eq!(detector.detect(Path::new("a/main.c")), SourceFileKind::Source);
-        assert_eq!(detector.detect(Path::new("a/main.h")), SourceFileKind::Header);
-        assert_eq!(detector.detect(Path::new("a/main.hpp")), SourceFileKind::Header);
-        assert_eq!(detector.detect(Path::new("a/main.hxx")), SourceFileKind::Header);
-        assert_eq!(detector.detect(Path::new("a/Main.scala")), SourceFileKind::Other);
-        assert_eq!(detector.detect(Path::new("README.txt")), SourceFileKind::Other);
+        assert_eq!(
+            detector.detect(Path::new("a/main.cpp")),
+            SourceFileKind::Source
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.cc")),
+            SourceFileKind::Source
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.cxx")),
+            SourceFileKind::Source
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.c")),
+            SourceFileKind::Source
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.h")),
+            SourceFileKind::Header
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.hpp")),
+            SourceFileKind::Header
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/main.hxx")),
+            SourceFileKind::Header
+        );
+        assert_eq!(
+            detector.detect(Path::new("a/Main.scala")),
+            SourceFileKind::Other
+        );
+        assert_eq!(
+            detector.detect(Path::new("README.txt")),
+            SourceFileKind::Other
+        );
     }
 
     #[test]
@@ -328,9 +330,7 @@ mod tests {
     #[test]
     fn plugin_resolver_scans_directives() {
         let plugin = CppPlugin::new();
-        let ctx = ResolutionContext {
-            repo_root: Path::new("."),
-        };
+        let ctx = ResolutionContext::default();
         let edges = plugin.resolver().resolve_edges(
             FileId::from_relative_path("a.cpp"),
             Path::new("a.cpp"),
@@ -339,6 +339,42 @@ mod tests {
         );
         assert_eq!(edges.len(), 2);
         assert_eq!(edges[0].raw_target, "a.h");
+        assert_eq!(edges[0].style, DirectiveStyle::Quoted);
         assert_eq!(edges[1].raw_target, "vector");
+        assert_eq!(edges[1].style, DirectiveStyle::Angled);
+    }
+
+    #[test]
+    fn plugin_resolver_targets_resolve_through_caller_catalog() {
+        // The stateless plugin resolver answers `resolve_target` from the
+        // arguments alone (M18.3 seam): no per-repository construction.
+        use ariadne_lang::{FileCatalog, ResolveOutcome};
+        let plugin = CppPlugin::new();
+        let record = ariadne_repo::FileRecord {
+            id: ariadne_repo::FileId::from_relative_path("src/a.h"),
+            path: PathBuf::from("src/a.h"),
+            canonical_path: PathBuf::from("src/a.h"),
+            kind: ariadne_repo::FileKind::Header,
+            size: 0,
+            content_hash: String::new(),
+            ownership: ariadne_repo::FileOwnership::Repository,
+            optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
+        };
+        let catalog = FileCatalog::from_records(std::slice::from_ref(&record));
+        let ctx = ResolutionContext::default();
+        let edge = plugin
+            .resolver()
+            .resolve_edges(
+                FileId::from_relative_path("src/a.cpp"),
+                Path::new("src/a.cpp"),
+                "#include \"a.h\"\n",
+                &ctx,
+            )
+            .remove(0);
+        assert_eq!(
+            plugin.resolver().resolve_target(&edge, &catalog, &ctx),
+            ResolveOutcome::Resolved(record.id)
+        );
     }
 }

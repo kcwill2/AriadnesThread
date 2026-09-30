@@ -1,10 +1,11 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ariadne_build::BuildDiscoveryResult;
+use ariadne_build::{BuildDiscoveryResult, TranslationUnit};
 use ariadne_graph::ReducedSemanticModel;
 use ariadne_index::{IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
@@ -15,7 +16,11 @@ use crate::shard::ShardedReducer;
 use crate::tu_store::{
     compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint, TuStoreContext,
 };
+// Transitional: the no-backend default keeps the deprecated C++ backend
+// until M18.11; registry-backed callers inject `SharedPluginWorkerBackend`.
+#[allow(deprecated)]
 use crate::worker::DefaultWorkerBackend;
+use crate::worker::WorkerBackend;
 
 #[derive(Debug, Clone)]
 pub struct ProductionAnalysisStats {
@@ -74,6 +79,43 @@ pub struct ProductionAnalysisResult {
     pub stats: ProductionAnalysisStats,
 }
 
+/// Outcome of the shard prepass: checkpointed analyses that could be reused
+/// plus the TUs that must run through the worker pool, each with the
+/// fingerprint its result shard will be enveloped with.
+struct ShardPrepass {
+    reused_analyses: Vec<TuAnalysis>,
+    pending_tus: Vec<TranslationUnit>,
+    pending_fingerprints: HashMap<u64, String>,
+}
+
+/// Check for existing checkpointed shards; a shard is reused only when its
+/// envelope fingerprint still matches the code on disk.
+fn shard_prepass(
+    translation_units: &[TranslationUnit],
+    repo_root: &Path,
+    store_ctx: &TuStoreContext,
+    checkpoint_dir: &Path,
+) -> Result<ShardPrepass> {
+    let mut prepass = ShardPrepass {
+        reused_analyses: Vec::new(),
+        pending_tus: Vec::new(),
+        pending_fingerprints: HashMap::new(),
+    };
+    for tu in translation_units {
+        let closure = compute_tu_closure(tu, repo_root, store_ctx, CURRENT_ANALYSIS_VERSION)?;
+        let fp = closure.fingerprint.combined_hash.clone();
+        if let Some(shard) = load_shard(checkpoint_dir, tu.file_id) {
+            if shard.fingerprint == fp {
+                prepass.reused_analyses.push(shard.analysis);
+                continue;
+            }
+        }
+        prepass.pending_fingerprints.insert(tu.file_id.0, fp);
+        prepass.pending_tus.push(tu.clone());
+    }
+    Ok(prepass)
+}
+
 pub struct ProductionAnalyzer<'a> {
     pub repo: &'a Repository,
     pub repo_discovery: &'a RepositoryDiscoveryResult,
@@ -81,6 +123,10 @@ pub struct ProductionAnalyzer<'a> {
     pub num_workers: usize,
     pub num_reducers: usize,
     pub checkpoint_dir: Option<PathBuf>,
+    /// M18.3: worker backend selected by the caller (a registry-backed
+    /// `SharedPluginWorkerBackend`); `None` keeps the deprecated
+    /// `DefaultWorkerBackend` until M18.11.
+    backend: Option<Arc<dyn WorkerBackend>>,
 }
 
 impl<'a> ProductionAnalyzer<'a> {
@@ -96,7 +142,14 @@ impl<'a> ProductionAnalyzer<'a> {
             num_workers: 4,
             num_reducers: 4,
             checkpoint_dir: None,
+            backend: None,
         }
+    }
+
+    /// Run the worker pool through this backend (plan M18.3 registry wiring).
+    pub fn with_backend(mut self, backend: Arc<dyn WorkerBackend>) -> Self {
+        self.backend = Some(backend);
+        self
     }
 
     pub fn with_workers(mut self, workers: usize) -> Self {
@@ -127,30 +180,18 @@ impl<'a> ProductionAnalyzer<'a> {
         let store_ctx =
             TuStoreContext::new(self.repo_discovery, self.build_discovery.contexts.clone());
 
-        let mut completed_analyses: Vec<TuAnalysis> = Vec::new();
-        let mut remaining_tus = Vec::new();
-        let mut reused = 0usize;
-        let mut reanalyzed = 0usize;
-        // Fingerprints of queued TUs, used to envelope their results.
-        let mut pending_fingerprints: HashMap<u64, String> = HashMap::new();
-
-        // Check for existing checkpointed shards; a shard is reused only when
-        // its envelope fingerprint still matches the code on disk.
-        for tu in &self.build_discovery.translation_units {
-            let closure =
-                compute_tu_closure(tu, &self.repo.root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
-            let fp = closure.fingerprint.combined_hash.clone();
-            if let Some(shard) = load_shard(&checkpoint_dir, tu.file_id) {
-                if shard.fingerprint == fp {
-                    completed_analyses.push(shard.analysis);
-                    reused += 1;
-                    continue;
-                }
-            }
-            reanalyzed += 1;
-            pending_fingerprints.insert(tu.file_id.0, fp);
-            remaining_tus.push(tu.clone());
-        }
+        // Reuse checkpointed shards; only fingerprint misses go to the pool.
+        let prepass = shard_prepass(
+            &self.build_discovery.translation_units,
+            &self.repo.root,
+            &store_ctx,
+            &checkpoint_dir,
+        )?;
+        let mut completed_analyses = prepass.reused_analyses;
+        let reused = completed_analyses.len();
+        let remaining_tus = prepass.pending_tus;
+        let reanalyzed = remaining_tus.len();
+        let mut pending_fingerprints = prepass.pending_fingerprints;
 
         let mut peak_mem: u64 = 0;
 
@@ -160,8 +201,15 @@ impl<'a> ProductionAnalyzer<'a> {
                 remaining_tus,
                 Some(store_ctx.clone()),
             );
+            // M18.3: registry-backed backend when the caller supplied one;
+            // otherwise the transitional C++ default (removed M18.11). The
+            // legacy closure prepass above keeps byte-identical C++ shards
+            // either way; per-language closures are M18.5 territory.
+            #[allow(deprecated)]
+            let backend: Arc<dyn WorkerBackend> =
+                self.backend.clone().unwrap_or_else(|| Arc::new(DefaultWorkerBackend));
             let pool = WorkerPool::new(
-                DefaultWorkerBackend,
+                backend,
                 WorkerPoolConfig {
                     num_workers: self.num_workers,
                     max_retries: 3,
@@ -333,12 +381,14 @@ mod tests {
                     source_path: PathBuf::from("src/a.cpp"),
                     context_name: "default".into(),
                     compile_command: cmd.clone(),
+                    language: Default::default(),
                 },
                 TranslationUnit {
                     file_id: f2_id.clone(),
                     source_path: PathBuf::from("src/b.cpp"),
                     context_name: "default".into(),
                     compile_command: cmd,
+                    language: Default::default(),
                 },
             ],
         };

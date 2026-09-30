@@ -91,6 +91,7 @@ impl PlannerFixture {
             kind: IncludeKind::Local,
             raw_path: raw_path.clone(),
             resolved_path: Some(PathBuf::from(raw_path)),
+            language: ariadne_repo::SourceLanguage::Cpp,
         });
         self
     }
@@ -332,7 +333,9 @@ fn test_planner_only_considers_header_files() {
     // Only header files should have proposals, not .cc files
     let target_files: Vec<_> = plans.iter().map(|p| p.target_file.clone()).collect();
     assert!(
-        !target_files.iter().any(|p| p.to_string_lossy().ends_with(".cc")),
+        !target_files
+            .iter()
+            .any(|p| p.to_string_lossy().ends_with(".cc")),
         "Implementation files should not have extraction proposals"
     );
 }

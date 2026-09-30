@@ -20,6 +20,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         kind: IncludeKind::Local,
         raw_path: "graphics.h".to_string(),
         resolved_path: Some(PathBuf::from("graphics.h")),
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
     ig.add_edge(IncludeEdge {
         source: FileId(2),
@@ -29,6 +30,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         kind: IncludeKind::Local,
         raw_path: "HugeThirdParty.h".to_string(),
         resolved_path: Some(PathBuf::from("HugeThirdParty.h")),
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
 
     let mut model = ReducedSemanticModel {
@@ -280,6 +282,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
         kind: IncludeKind::Local,
         raw_path: "Dep.h".to_string(),
         resolved_path: Some(PathBuf::from("Dep.h")),
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
 
     let mut model = ReducedSemanticModel {
@@ -364,6 +367,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         kind: IncludeKind::Local,
         raw_path: "edge.h".to_string(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
     ig.add_edge(IncludeEdge {
         source: FileId(20),
@@ -373,6 +377,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         kind: IncludeKind::Local,
         raw_path: "edge.h".to_string(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
 
     let mut model = ReducedSemanticModel {
@@ -451,6 +456,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
         kind: IncludeKind::Local,
         raw_path: "..".to_string(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
 
     let mut model = ReducedSemanticModel {

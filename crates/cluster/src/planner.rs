@@ -338,6 +338,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "col.h".into(),
             resolved_path: Some(PathBuf::from("col.h")),
+            language: ariadne_repo::SourceLanguage::Cpp,
         });
 
         let mut model = ReducedSemanticModel {

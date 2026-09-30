@@ -32,5 +32,12 @@ bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ariadne-ui = { path = "../ui" }
+# M18.3: lang-cpp is referenced only to enumerate `CppPlugin` in
+# src/registry.rs (the single plugin enumeration site); no other CLI code
+# touches a concrete plugin. TODO(M18.11): drop once plugin enumeration is
+# fully registry-external.
+ariadne-lang-cpp = { path = "../lang-cpp" }
+# M18.3: registry.rs is the single plugin enumeration site.
+ariadne-lang = { path = "../lang" }
 open = "5.1.2"
 axum = { version = "0.7", features = ["tokio"] }

@@ -177,8 +177,11 @@ fn find_plan_consumers(
     plan: &ariadne_cluster::plan::OptimizationPlan,
 ) -> Result<PlanConsumers> {
     let repo_discovery = repository.discover()?;
-    let build_discoverer =
-        BuildDiscoverer::new(&repository.root).with_repo_discovery(&repo_discovery);
+    // M18.3: registry-selected unit shaper (single plugin with a shaper wins).
+    let registry = crate::registry::default_registry();
+    let build_discoverer = BuildDiscoverer::new(&repository.root)
+        .with_repo_discovery(&repo_discovery)
+        .with_unit_shaper(registry.unit_shaper_for());
     let build_result = build_discoverer.discover()?;
 
     let target_include = plan

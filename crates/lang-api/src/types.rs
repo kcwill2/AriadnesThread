@@ -228,6 +228,10 @@ pub struct IncludeEdge {
     pub kind: IncludeKind,
     pub raw_path: String,
     pub resolved_path: Option<PathBuf>,
+    /// Language the edge was produced for. Additive (plan §3.5, M18.5):
+    /// `#[serde(default)]` ⇒ pre-existing artifacts read back as `Cpp`.
+    #[serde(default)]
+    pub language: SourceLanguage,
 }
 
 #[cfg(test)]
@@ -244,6 +248,7 @@ mod include_dto_tests {
             kind: IncludeKind::Local,
             raw_path: "thing_types.h".to_string(),
             resolved_path: Some(PathBuf::from("include/thing_types.h")),
+            language: SourceLanguage::Cpp,
         };
 
         let json = serde_json::to_string(&edge).unwrap();
@@ -253,5 +258,12 @@ mod include_dto_tests {
         let bin = bincode::serialize(&edge).unwrap();
         let decoded_bin: IncludeEdge = bincode::deserialize(&bin).unwrap();
         assert_eq!(edge, decoded_bin);
+
+        // Additive-field contract (plan §3.5): artifacts written before the
+        // `language` key existed must keep deserializing, reading as Cpp.
+        let json_no_lang = json.replace(",\"language\":\"Cpp\"", "");
+        let pre: IncludeEdge = serde_json::from_str(&json_no_lang).unwrap();
+        assert_eq!(pre.language, SourceLanguage::Cpp);
+        assert_eq!(pre.source, edge.source);
     }
 }

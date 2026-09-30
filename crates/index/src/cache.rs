@@ -169,6 +169,7 @@ mod tests {
             system_include_dirs: vec![],
             forced_includes: vec![],
             raw_flags: vec!["-O2".into()],
+            language: Default::default(),
         }
     }
 

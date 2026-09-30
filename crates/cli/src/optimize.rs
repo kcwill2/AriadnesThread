@@ -96,7 +96,7 @@ use std::path::{Path, PathBuf};
 
 use ariadne_build::{BuildDiscoveryResult, BuildMeasurer};
 use ariadne_cluster::plan::{OptimizationPlan, RiskLevel};
-use ariadne_cluster::planner::{OptimizationPlanner, is_header_file};
+use ariadne_cluster::planner::{is_header_file, OptimizationPlanner};
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadAnalyzer, ReducedSemanticModel};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
@@ -115,7 +115,12 @@ impl EndToEndOptimizer {
     }
 
     pub fn optimize_repository(&self) -> Result<OptimizationReport> {
-        let mut pipeline = Pipeline::new(&self.repo_path, Some(4))?;
+        // M18.3: production path routes the index stage through the plugin
+        // registry (byte-identical for C++); the worker pool backend is
+        // registry-dispatching.
+        let registry = std::sync::Arc::new(crate::registry::default_registry());
+        let mut pipeline =
+            Pipeline::with_registry(&self.repo_path, Some(4), registry)?;
         let repo = pipeline.repo.clone();
         let repo_discovery = pipeline.discovery.clone();
         let build_discovery = pipeline.build.clone();
@@ -481,6 +486,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: raw_path.to_string(),
             resolved_path: Some(PathBuf::from(raw_path)),
+            language: ariadne_repo::SourceLanguage::Cpp,
         };
         graph.add_edge(link(FileId(1), FileId(2), "graphics.h"));
         graph.add_edge(link(FileId(2), FileId(3), "HugeThirdParty.h"));

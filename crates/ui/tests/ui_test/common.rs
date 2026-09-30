@@ -99,6 +99,7 @@ pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     };
     graph.edges.push(edge(1, 2));
     graph.edges.push(edge(2, 3));

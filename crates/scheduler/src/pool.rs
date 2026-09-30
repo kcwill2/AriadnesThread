@@ -297,6 +297,7 @@ mod fake_process_tests {
                 context_name: source_rel.to_string(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 
@@ -406,6 +407,7 @@ mod fake_process_tests {
 mod tests {
     use super::*;
     use crate::queue::TuTask;
+    #[allow(deprecated)]
     use crate::worker::DefaultWorkerBackend;
     use ariadne_build::{CompileCommand, TranslationUnit};
     use ariadne_index::CppSemanticAnalyzer;
@@ -426,6 +428,7 @@ mod tests {
                 context_name: "test".to_string(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 
@@ -456,6 +459,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_worker_pool_success() {
         let tus = vec![
             TuTask {
@@ -551,6 +555,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_worker_pool_memory_tracking() {
         let tus = vec![TuTask {
             task_id: 1,

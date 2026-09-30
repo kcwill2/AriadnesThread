@@ -1,5 +1,8 @@
 use ariadne_build::{CompileCommand, TranslationUnit};
 use ariadne_repo::FileId;
+// Transitional: this suite compares against the deprecated default backend
+// until it is removed in M18.11 (engine.rs:22 pattern).
+#[allow(deprecated)]
 use ariadne_scheduler::{
     ClangWorkerBackend, DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerPool,
     WorkerPoolConfig,
@@ -24,6 +27,7 @@ fn make_tu(path: &str) -> TranslationUnit {
             context_name: "test".to_string(),
             output: None,
         },
+        language: Default::default(),
     }
 }
 
@@ -65,6 +69,7 @@ async fn test_clang_worker_backend_fallback_succeeds() {
 
 /// ClangWorkerBackend and DefaultWorkerBackend both produce non-None analyses for the same TU.
 #[tokio::test]
+#[allow(deprecated)]
 async fn test_clang_and_default_backends_produce_consistent_results() {
     let root = fixture_root();
 

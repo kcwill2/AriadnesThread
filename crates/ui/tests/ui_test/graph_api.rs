@@ -473,6 +473,7 @@ async fn test_graph_entrypoints_reports_empty_cycles_even_for_cyclic_graph() {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     });
     let call_graph = CallGraph::default();
     let app = build_router(common::ready_state(

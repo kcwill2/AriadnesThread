@@ -16,6 +16,10 @@ ariadne-graph = { path = "../graph" }
 ariadne-index = { path = "../index" }
 ariadne-report = { path = "../report" }
 ariadne-scheduler = { path = "../scheduler" }
+# M18.4: C++ unit shaping default until registry injection (M18.3/M18.5).
+ariadne-lang-cpp = { path = "../lang-cpp" }
+# M18.3: registry-driven index stage (LanguageRegistry/LanguagePlugin).
+ariadne-lang = { path = "../lang" }
 
 [dev-dependencies]
 tempfile.workspace = true

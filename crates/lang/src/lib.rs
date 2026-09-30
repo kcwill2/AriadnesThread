@@ -19,7 +19,7 @@ pub mod validator;
 // names) keep `ariadne_lang::SymbolId`, `ariadne_lang::TuAnalysis`, ...
 // resolving for existing users after the `lang -> index` edge was removed.
 pub use ariadne_lang_api::capability::{LanguageCapabilities, ToolchainStatus};
-pub use ariadne_lang_api::catalog::{FileCatalog, ResolveOutcome};
+pub use ariadne_lang_api::catalog::{normalize_relative_path, FileCatalog, ResolveOutcome};
 pub use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
 pub use ariadne_lang_api::modeling::{
     AggregationKind, CyclePolicy, GuardKind, LanguageModeling, SymbolPlacement, UnitKind,
@@ -35,7 +35,10 @@ pub use constraints::ClusteringConstraints;
 pub use detector::{LanguageDetector, SourceFileKind};
 pub use extractor::{GeneratedSourceFile, SourceExtractor, SymbolBody};
 pub use registry::{LanguagePlugin, LanguageRegistry};
-pub use resolver::{DependencyResolver, RawDepEdge, ResolutionContext};
+pub use resolver::{
+    first_ondisk_include_candidate, DependencyResolver, DirectiveStyle, RawDepEdge,
+    ResolutionContext,
+};
 pub use rewriter::{DependencyRewriter, RewriteSpec};
 pub use unit::UnitShaper;
 pub use validator::CompilerValidator;

@@ -8,6 +8,9 @@ use tempfile::TempDir;
 use ariadne_build::TranslationUnit;
 use ariadne_cli::run_production_scale_analysis;
 use ariadne_repo::FileId;
+// Transitional: the failure-recovery test exercises the deprecated default
+// backend as a worker; removed with the shim in M18.11 (engine.rs:22 pattern).
+#[allow(deprecated)]
 use ariadne_scheduler::{
     DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerBackend, WorkerPool, WorkerPoolConfig,
 };
@@ -115,6 +118,7 @@ async fn test_m13_failure_recovery() {
     }
 
     impl WorkerBackend for FaultyWorkerBackend {
+        #[allow(deprecated)]
         fn analyze_task(
             &self,
             task: &TuTask,
@@ -146,6 +150,7 @@ async fn test_m13_failure_recovery() {
                 context_name: "default".into(),
                 output: None,
             },
+            language: Default::default(),
         },
         estimated_cost: 100,
         context: None,
@@ -191,6 +196,7 @@ fn test_m13_straggler_scheduling() {
                 context_name: "default".into(),
                 output: None,
             },
+            language: Default::default(),
         },
         estimated_cost: 50,
         context: None,
@@ -210,6 +216,7 @@ fn test_m13_straggler_scheduling() {
                 context_name: "default".into(),
                 output: None,
             },
+            language: Default::default(),
         },
         estimated_cost: 10000,
         context: None,

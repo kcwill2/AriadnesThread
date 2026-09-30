@@ -22,7 +22,7 @@ use ariadne_index::{
     CppSemanticAnalyzer, TuAnalysis, TuCacheFingerprint, CURRENT_ANALYSIS_VERSION,
 };
 use ariadne_lang::{
-    DependencyResolver, FileCatalog, ResolutionContext, ResolveOutcome, SemanticAnalyzer,
+    DependencyResolver, FileCatalog, RawDepEdge, ResolutionContext, ResolveOutcome, SemanticAnalyzer,
 };
 use ariadne_repo::{compute_file_hash, FileId, RepositoryDiscoveryResult, SourceLanguage};
 
@@ -146,6 +146,48 @@ fn context_for_tu(tu: &TranslationUnit, ctx: &TuStoreContext) -> CompilationCont
         .unwrap_or_else(|| CompilationContext::new(&tu.context_name, "clang++"))
 }
 
+/// Rewrite one context path into its repo-relative form when it lies under
+/// `repo_root` (raw, or after filesystem canonicalization to match the
+/// `\\?\`-verbatim paths discovery emits); `None` keeps it verbatim.
+fn repo_relative_form(path: &Path, repo_root: &Path, canonical_root: &Path) -> Option<PathBuf> {
+    for root in [repo_root, canonical_root] {
+        if let Ok(relative) = path.strip_prefix(root) {
+            return Some(relative.to_path_buf());
+        }
+    }
+    let canonical = fs::canonicalize(path).ok()?;
+    canonical
+        .strip_prefix(canonical_root)
+        .ok()
+        .map(|relative| relative.to_path_buf())
+}
+
+/// Context form fed to the TU cache fingerprint. Paths under `repo_root` are
+/// rewritten repo-relative so the fingerprint keys on repository CONTENT and
+/// configuration, never on the machine-specific location of the checkout:
+/// the shard store is content-keyed (module docs), and M18's byte-parity
+/// contract compares cold runs of repo copies in different roots (a raw
+/// temp-root inside the bincode-hashed context would make that impossible).
+/// Paths outside the root (system SDK includes) stay verbatim; both closure
+/// walks (`compute_tu_closure` and `compute_tu_closure_plugin`) scope the
+/// context identically, so C++ fingerprints agree across the registry seam.
+fn fingerprint_scoped_context(context: &CompilationContext, repo_root: &Path) -> CompilationContext {
+    let canonical_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let mut scoped = context.clone();
+    for dirs in [
+        &mut scoped.include_dirs,
+        &mut scoped.system_include_dirs,
+        &mut scoped.forced_includes,
+    ] {
+        for dir in dirs {
+            if let Some(relative) = repo_relative_form(dir, repo_root, &canonical_root) {
+                *dir = relative;
+            }
+        }
+    }
+    scoped
+}
+
 /// Walk a TU's include closure (canonical semantics: TU body plus every
 /// transitive header, all parsed and merged) and compute its fingerprint
 /// without running the semantic parser.
@@ -215,7 +257,7 @@ pub fn compute_tu_closure(
 
     let fingerprint = TuCacheFingerprint::compute(
         analysis_version,
-        &context,
+        &fingerprint_scoped_context(&context, repo_root),
         &tu.file_id,
         &source_hash,
         &header_hashes,
@@ -308,33 +350,91 @@ pub fn analyze_closure_with(
     }
 }
 
-/// Source-relative on-disk fallback for a directive the neutral resolver
-/// could not map: mirrors the legacy resolver's filesystem fallback for the
-/// quoted include-dir case when the target is not in discovery. Returns
+/// On-disk fallback for a directive the neutral resolver could not map, shared
+/// with the graph BFS via [`ariadne_lang::first_ondisk_include_candidate`].
+/// Reproduces the legacy resolver's full search-path candidate loop (includer
+/// directory for quoted spellings plus every compilation-context search path,
+/// style-agnostic) so the plugin closure agrees with `compute_tu_closure` and
+/// `graph::builder` — an angled `<hdr>` reachable only through an `-I`/system
+/// dir outside repo discovery still resolves and enters the closure. Returns
 /// `(FileId, repo-relative path)`.
-fn source_relative_on_disk(
+fn on_disk_include_fallback(
+    edge: &RawDepEdge,
+    resolution: &ResolutionContext<'_>,
     repo_root: &Path,
-    includer_rel: &Path,
-    raw_target: &str,
 ) -> Option<(FileId, PathBuf)> {
-    let candidate = includer_rel.parent()?.join(raw_target);
-    let norm = ariadne_graph::IncludeResolver::normalize_path(&candidate);
-    if !repo_root.join(&norm).exists() {
-        return None;
-    }
-    let rel_str = norm.to_string_lossy().replace('\\', "/");
-    Some((FileId::from_relative_path(&rel_str), PathBuf::from(rel_str)))
+    ariadne_lang::first_ondisk_include_candidate(
+        &edge.raw_target,
+        edge.style,
+        &edge.source_rel_path,
+        &resolution.search_paths,
+        repo_root,
+        &|path: &Path| path.exists(),
+    )
 }
 
-/// Registry-driven closure walk (plan M18.2 / M18.5 seam): same file order
-/// and fingerprint inputs as [`compute_tu_closure`], but directive resolution
-/// runs through an injected [`DependencyResolver`] + [`FileCatalog`] instead
-/// of the transitional `IncludeResolver`.
+/// Resolve one directive edge to the `(FileId, repo-relative path)` pairs the
+/// plugin walk must visit, through the outcome-parity table documented on
+/// [`compute_tu_closure_plugin`].
+fn edge_destinations(
+    edge: &RawDepEdge,
+    resolver: &dyn DependencyResolver,
+    catalog: &FileCatalog,
+    resolution: &ResolutionContext,
+    ctx: &TuStoreContext,
+    repo_root: &Path,
+) -> Vec<(FileId, PathBuf)> {
+    let mut destinations = Vec::new();
+    match resolver.resolve_target(edge, catalog, resolution) {
+        ResolveOutcome::Resolved(id) => {
+            if let Some(path) = ctx.path_by_id.get(&id) {
+                destinations.push((id, path.clone()));
+            }
+        }
+        ResolveOutcome::Wildcard(ids) => {
+            for id in ids {
+                if let Some(path) = ctx.path_by_id.get(&id) {
+                    destinations.push((id, path.clone()));
+                }
+            }
+        }
+        // Legacy resolver's on-disk fallback: the includer directory (quoted
+        // only) plus EVERY compilation-context search path, style-agnostic —
+        // shared with `graph::builder` via [`on_disk_include_fallback`] so both
+        // plugin walks reproduce the transitional `IncludeResolver`. This is
+        // the M18.5 finding-1 fix: the pre-M18.3 walk here checked only the
+        // includer directory, so angled `<hdr>` hits in `-I` dirs (out-of-root
+        // SDK/vcpkg paths) were dropped from the plugin closure while legacy
+        // and the graph BFS visited them.
+        ResolveOutcome::External | ResolveOutcome::Unresolved => {
+            if let Some(hit) = on_disk_include_fallback(edge, resolution, repo_root) {
+                destinations.push(hit);
+            }
+        }
+    }
+    destinations
+}
+
+/// Registry-driven closure walk (plan M18.2 / M18.3 / M18.5 seam): byte-for-byte
+/// the same closure `files` order, membership, and fingerprint inputs as
+/// [`compute_tu_closure`], but directive resolution runs through an injected
+/// [`DependencyResolver`] + [`FileCatalog`] instead of the transitional
+/// `IncludeResolver`.
+///
+/// Order contract (M18.3): the legacy walk is a LIFO stack of *edges*, so the
+/// last directive of the most recently visited file is always visited first
+/// and that chain's descendants are appended before earlier siblings. The
+/// stack below mirrors that shape exactly — merged-analysis concatenation
+/// order (part of every shard envelope and `index.json`) depends on it.
 ///
 /// Outcome mapping (see the `lang-cpp::resolver` module docs for the full
-/// parity table): `Resolved`/`Wildcard` are visited via their discovery
-/// paths; `External`/`Unresolved` fall back to the source-relative on-disk
-/// check (the neutral trait stays filesystem-free).
+/// parity table, applied via [`edge_destinations`]): `Resolved`/`Wildcard`
+/// are visited via their discovery paths; `External`/`Unresolved` directives
+/// run the legacy filesystem fallback shared with `graph::builder`
+/// ([`on_disk_include_fallback`]) — the includer directory for quoted spellings
+/// plus every compilation-context search path, style-agnostic, so angled
+/// `<hdr>` includes found only under an `-I`/system dir are visited exactly as
+/// the transitional `IncludeResolver` visited them.
 pub fn compute_tu_closure_plugin(
     tu: &TranslationUnit,
     repo_root: &Path,
@@ -343,7 +443,19 @@ pub fn compute_tu_closure_plugin(
     resolver: &dyn DependencyResolver,
 ) -> Result<TuClosure> {
     let context = context_for_tu(tu, ctx);
-    let resolution = ResolutionContext { repo_root };
+    // M18.5: the stateless plugin resolver receives the compilation
+    // context's search paths per call (include dirs then system include
+    // dirs, the legacy `collect_include_candidates` order).
+    let search_paths: Vec<PathBuf> = context
+        .include_dirs
+        .iter()
+        .chain(context.system_include_dirs.iter())
+        .cloned()
+        .collect();
+    let resolution = ResolutionContext {
+        repo_root,
+        search_paths,
+    };
     let catalog = FileCatalog::from_records(&ctx.discovery.files);
 
     let source_abs = repo_root.join(&tu.source_path);
@@ -361,48 +473,33 @@ pub fn compute_tu_closure_plugin(
     visited.insert(tu.file_id);
     let mut header_hashes: Vec<(FileId, String)> = Vec::new();
 
-    let mut queue = vec![(tu.file_id, tu.source_path.clone(), files[0].2.clone())];
-    while let Some((file_id, rel_path, content)) = queue.pop() {
-        for edge in resolver.resolve_edges(file_id, &rel_path, &content, &resolution) {
-            let mut destinations: Vec<(FileId, PathBuf)> = Vec::new();
-            match resolver.resolve_target(&edge, &catalog, &resolution) {
-                ResolveOutcome::Resolved(id) => {
-                    if let Some(path) = ctx.path_by_id.get(&id) {
-                        destinations.push((id, path.clone()));
-                    }
-                }
-                ResolveOutcome::Wildcard(ids) => {
-                    for id in ids {
-                        if let Some(path) = ctx.path_by_id.get(&id) {
-                            destinations.push((id, path.clone()));
-                        }
-                    }
-                }
-                ResolveOutcome::External | ResolveOutcome::Unresolved => {
-                    if let Some(hit) =
-                        source_relative_on_disk(repo_root, &rel_path, &edge.raw_target)
-                    {
-                        destinations.push(hit);
-                    }
-                }
+    let mut stack: Vec<RawDepEdge> =
+        resolver.resolve_edges(tu.file_id, &tu.source_path, &files[0].2, &resolution);
+    while let Some(edge) = stack.pop() {
+        let destinations = edge_destinations(&edge, resolver, &catalog, &resolution, ctx, repo_root);
+        for (dest_id, dest_path) in destinations {
+            if !visited.insert(dest_id) {
+                continue;
             }
-            for (dest_id, dest_path) in destinations {
-                if !visited.insert(dest_id) {
-                    continue;
+            let header_abs = repo_root.join(&dest_path);
+            match fs::read_to_string(&header_abs) {
+                Ok(header_content) => {
+                    files.push((dest_id, dest_path.clone(), header_content.clone()));
+                    header_hashes.push((
+                        dest_id,
+                        record_hash(ctx, repo_root, &dest_id, Some(&dest_path)),
+                    ));
+                    // Legacy appends the visited file's edges to the queue
+                    // tail and pops from the tail: same stack, same order.
+                    stack.extend(resolver.resolve_edges(
+                        dest_id,
+                        &dest_path,
+                        &header_content,
+                        &resolution,
+                    ));
                 }
-                let header_abs = repo_root.join(&dest_path);
-                match fs::read_to_string(&header_abs) {
-                    Ok(header_content) => {
-                        files.push((dest_id, dest_path.clone(), header_content.clone()));
-                        header_hashes.push((
-                            dest_id,
-                            record_hash(ctx, repo_root, &dest_id, Some(&dest_path)),
-                        ));
-                        queue.push((dest_id, dest_path, header_content));
-                    }
-                    Err(_) => {
-                        header_hashes.push((dest_id, unreadable_hash(dest_id)));
-                    }
+                Err(_) => {
+                    header_hashes.push((dest_id, unreadable_hash(dest_id)));
                 }
             }
         }
@@ -410,7 +507,7 @@ pub fn compute_tu_closure_plugin(
 
     let fingerprint = TuCacheFingerprint::compute(
         analysis_version,
-        &context,
+        &fingerprint_scoped_context(&context, repo_root),
         &tu.file_id,
         &source_hash,
         &header_hashes,
@@ -444,6 +541,7 @@ mod tests {
                 context_name: "default".into(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 
@@ -508,6 +606,39 @@ mod tests {
             .unwrap()
             .fingerprint;
         assert_ne!(fp1.combined_hash, fp2.combined_hash);
+    }
+
+    #[test]
+    fn test_fingerprint_survives_repo_copy() {
+        // M18.3 byte-parity contract: the fingerprint keys on content and
+        // configuration, not on the absolute location of the checkout — the
+        // same repo copied to a second root must hash identically (cold
+        // parity runs happen in fresh temp roots).
+        let original = tempfile::tempdir().unwrap();
+        let copy = tempfile::tempdir().unwrap();
+        for root in [original.path(), copy.path()] {
+            fs::create_dir_all(root.join("include")).unwrap();
+            fs::write(root.join("include/common.h"), "struct Common {};").unwrap();
+            fs::write(
+                root.join("a.cpp"),
+                "#include \"common.h\"\nvoid use(Common) {}",
+            )
+            .unwrap();
+        }
+
+        let fingerprints = [original.path(), copy.path()].map(|root| {
+            let files = ariadne_repo::discover_repository_files(root).unwrap();
+            let discovery = ariadne_repo::build_discovery_result(root.to_path_buf(), files);
+            let mut context = CompilationContext::new("default", "clang++");
+            context.include_dirs = vec![root.canonicalize().unwrap().join("include")];
+            let ctx = TuStoreContext::new(&discovery, vec![context]);
+            let tu = tu_for(root, "a.cpp");
+            compute_tu_closure(&tu, root, &ctx, CURRENT_ANALYSIS_VERSION)
+                .unwrap()
+                .fingerprint
+        });
+
+        assert_eq!(fingerprints[0].combined_hash, fingerprints[1].combined_hash);
     }
 
     #[test]

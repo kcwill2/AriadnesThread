@@ -5,6 +5,7 @@
 
 use ariadne_repo::{FileId, FileRecord};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Outcome of mapping one raw directive to repository files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +29,10 @@ pub enum ResolveOutcome {
 #[derive(Debug, Clone, Default)]
 pub struct FileCatalog {
     by_rel_path: HashMap<String, FileId>,
+    by_canonical_path: HashMap<String, FileId>,
     by_basename: HashMap<String, FileId>,
     by_module_path: HashMap<String, FileId>,
+    records: HashMap<FileId, FileRecord>,
 }
 
 impl FileCatalog {
@@ -46,11 +49,44 @@ impl FileCatalog {
         let rel = normalize_path(&record.path.to_string_lossy());
         self.by_rel_path.entry(rel.clone()).or_insert(record.id);
         if let Some(basename) = rel.rsplit('/').next() {
-            self.by_basename.entry(basename.to_string()).or_insert(record.id);
+            self.by_basename
+                .entry(basename.to_string())
+                .or_insert(record.id);
         }
         self.by_module_path
             .entry(module_key(&rel))
             .or_insert(record.id);
+        self.by_canonical_path
+            .entry(canonical_key(&record.canonical_path))
+            .or_insert(record.id);
+        self.records
+            .entry(record.id)
+            .or_insert_with(|| record.clone());
+    }
+
+    /// Resolve a candidate path against the catalog the way a resolver
+    /// compares candidates to discovered files: component-normalized
+    /// relative-path match first, then canonical-path match (M18.5: closes
+    /// the legacy resolver's second match arm so absolute include-dir
+    /// candidates behave identically through the neutral trait).
+    pub fn by_path(&self, candidate: &Path) -> Option<FileId> {
+        let key = canonical_key(candidate);
+        self.by_rel_path
+            .get(&key)
+            .or_else(|| self.by_canonical_path.get(&key))
+            .copied()
+    }
+
+    /// The full record for a resolved id (plan M18.5: the graph layer needs
+    /// ownership + path to classify a resolved outcome without touching the
+    /// filesystem or naming languages).
+    pub fn record(&self, file_id: FileId) -> Option<&FileRecord> {
+        self.records.get(&file_id)
+    }
+
+    /// Repository-relative path of a resolved id, as discovered.
+    pub fn rel_path(&self, file_id: FileId) -> Option<&Path> {
+        self.records.get(&file_id).map(|r| r.path.as_path())
     }
 
     /// Exact lookup by repository-relative path (`/` or `\` separated).
@@ -92,9 +128,48 @@ fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Catalog key for any path: `.`/`..` components resolved (without touching
+/// the filesystem), separators unified to `/`.
+fn canonical_key(path: &Path) -> String {
+    normalize_relative_path(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Resolves `.` and `..` relative components of a path without requiring the
+/// file to exist (plan M18.5: neutral home for the path-collapsing that the
+/// relocated directive resolvers and the generic graph builder share).
+pub fn normalize_relative_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match components.last() {
+                Some(&std::path::Component::ParentDir) | None => components.push(component),
+                Some(&std::path::Component::RootDir) | Some(&std::path::Component::Prefix(_)) => {
+                    // Cannot resolve `..` above root, so do nothing.
+                }
+                Some(&std::path::Component::Normal(_)) => {
+                    components.pop();
+                }
+                _ => {}
+            },
+            c => components.push(c),
+        }
+    }
+    let mut normalized = PathBuf::new();
+    for c in components {
+        normalized.push(c.as_os_str());
+    }
+    normalized
+}
+
 /// Unifies path separators and dots into a single dotted key form.
 fn unify_segments(path: &str) -> String {
-    normalize_path(path).replace('/', ".").trim_matches('.').to_string()
+    normalize_path(path)
+        .replace('/', ".")
+        .trim_matches('.')
+        .to_string()
 }
 
 /// Drops the final dotted segment (the file extension for stored paths).
@@ -203,5 +278,61 @@ mod tests {
             ResolveOutcome::Resolved(file)
         );
         assert_ne!(ResolveOutcome::External, ResolveOutcome::Unresolved);
+    }
+
+    #[test]
+    fn record_and_rel_path_expose_ownership_for_resolved_ids() {
+        let mut record = record("third_party/lib/lib.h");
+        record.ownership = ariadne_repo::FileOwnership::ThirdParty;
+        let catalog = FileCatalog::from_records(&[record.clone()]);
+        let id = record.id;
+        assert_eq!(
+            catalog.record(id).map(|r| r.ownership),
+            Some(ariadne_repo::FileOwnership::ThirdParty)
+        );
+        assert_eq!(
+            catalog.rel_path(id),
+            Some(Path::new("third_party/lib/lib.h"))
+        );
+        assert!(catalog.record(FileId(9999)).is_none());
+    }
+
+    #[test]
+    fn by_path_matches_rel_and_canonical_like_the_legacy_resolver() {
+        let mut record = record("include/thing.h");
+        record.canonical_path = PathBuf::from("/repo/abs/thing.h");
+        record.path = PathBuf::from("include/thing.h");
+        record.id = FileId::from_relative_path("include/thing.h");
+        let id = record.id;
+        let catalog = FileCatalog::from_records(&[record]);
+        // Relative candidate, including one with `..` components to collapse.
+        assert_eq!(catalog.by_path(Path::new("include/thing.h")), Some(id));
+        assert_eq!(
+            catalog.by_path(Path::new("src/../include/thing.h")),
+            Some(id)
+        );
+        // Canonical candidate (absolute include-dir form).
+        assert_eq!(catalog.by_path(Path::new("/repo/abs/thing.h")), Some(id));
+        assert_eq!(catalog.by_path(Path::new("include/missing.h")), None);
+    }
+
+    #[test]
+    fn normalize_relative_path_collapses_dots_without_touching_disk() {
+        assert_eq!(
+            normalize_relative_path(Path::new("a/./b/../c")),
+            PathBuf::from("a/c")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("a/b/../../c")),
+            PathBuf::from("c")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("../a")),
+            PathBuf::from("../a")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("a//b///c")),
+            PathBuf::from("a/b/c")
+        );
     }
 }

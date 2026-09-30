@@ -20,7 +20,11 @@ ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-index = { path = "../index" }
 ariadne-lang-api = { path = "../lang-api" }
-# TODO(M18.11): remove transitional shim dep (resolver re-export only)
+# M18.5: registry trait types for `build_dependency_graph` (plugin selection
+# goes through these traits only — no language names in graph code).
+ariadne-lang = { path = "../lang" }
+# TODO(M18.11): remove transitional shim dep (resolver re-export + the one
+# grandfathered C++ capability injection in builder.rs)
 ariadne-lang-cpp = { path = "../lang-cpp" }
 
 [dev-dependencies]

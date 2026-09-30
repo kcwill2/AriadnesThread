@@ -28,3 +28,5 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 [dev-dependencies]
 ariadne-lang-api = { path = "../../crates/lang-api" }
 ariadne-lang = { path = "../../crates/lang" }
+# M18.4: fingerprint helpers must inject the same C++ shaper the pipeline does.
+ariadne-lang-cpp = { path = "../../crates/lang-cpp" }

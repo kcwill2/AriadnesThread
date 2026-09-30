@@ -86,7 +86,10 @@ pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
     let repo_discovery = repository.discover().ok();
 
-    let discoverer = BuildDiscoverer::new(&repository.root);
+    // M18.3: the unit shaper is selected through the registry (single
+    // registered plugin with a shaper ⇒ that shaper).
+    let registry = crate::registry::default_registry();
+    let discoverer = BuildDiscoverer::new(&repository.root).with_unit_shaper(registry.unit_shaper_for());
     let build_result = if let Some(ref disc) = repo_discovery {
         discoverer.with_repo_discovery(disc).discover()?
     } else {

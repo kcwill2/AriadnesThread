@@ -1,4 +1,4 @@
-use ariadne_repo::FileId;
+use ariadne_repo::{FileId, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -14,6 +14,11 @@ pub struct CompilationContext {
     pub system_include_dirs: Vec<PathBuf>,
     pub forced_includes: Vec<PathBuf>,
     pub raw_flags: Vec<String>,
+    /// Plan §3.5 additive artifact field: artifacts written before this key
+    /// existed read as `Cpp` (`SourceLanguage::default()`), the only language
+    /// the pipeline could produce then.
+    #[serde(default)]
+    pub language: SourceLanguage,
 }
 
 impl CompilationContext {
@@ -28,6 +33,7 @@ impl CompilationContext {
             system_include_dirs: Vec::new(),
             forced_includes: Vec::new(),
             raw_flags: Vec::new(),
+            language: SourceLanguage::default(),
         }
     }
 
@@ -68,6 +74,10 @@ pub struct TranslationUnit {
     pub source_path: PathBuf,
     pub context_name: String,
     pub compile_command: CompileCommand,
+    /// Plan §3.5 additive artifact field; `#[serde(default)]` keeps old
+    /// JSON reading back as `Cpp`.
+    #[serde(default)]
+    pub language: SourceLanguage,
 }
 
 /// Aggregated result of build context discovery across a repository.
@@ -151,13 +161,15 @@ mod tests {
             source_path: file_path.clone(),
             context_name: "Release|x64".into(),
             compile_command: cmd1,
+            language: SourceLanguage::Cpp,
         };
 
         let tu2 = TranslationUnit {
-            file_id: file_id.clone(),
+            file_id,
             source_path: file_path.clone(),
             context_name: "Debug|x64".into(),
             compile_command: cmd2,
+            language: SourceLanguage::Cpp,
         };
 
         let mut discovery_result = BuildDiscoveryResult {

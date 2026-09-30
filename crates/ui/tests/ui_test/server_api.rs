@@ -348,9 +348,7 @@ fn justification_state() -> Arc<UiState> {
         .into_iter()
         .chain(drop_paths.into_iter().map(|(id, p)| (id, p.into())))
     {
-        graph
-            .file_paths
-            .insert(ariadne_repo::FileId(id), path);
+        graph.file_paths.insert(ariadne_repo::FileId(id), path);
     }
     let include_edge = |source: u64, destination: u64| ariadne_graph::IncludeEdge {
         source: ariadne_repo::FileId(source),
@@ -360,6 +358,7 @@ fn justification_state() -> Arc<UiState> {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     };
     graph.edges.push(include_edge(1, 2));
     graph.edges.push(include_edge(1, 3));
@@ -448,8 +447,7 @@ fn sorted_keys(value: &serde_json::Value) -> Vec<String> {
 #[tokio::test]
 async fn test_justification_route_returns_unbounded_detail() {
     let app = build_router(justification_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/justification?file=1").await;
+    let (status, _headers, body) = common::request_route(app, "/api/justification?file=1").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["target_id"], "1");
 
@@ -511,11 +509,15 @@ async fn test_justification_route_returns_unbounded_detail() {
 #[tokio::test]
 async fn test_justification_route_locks_response_keys() {
     let app = build_router(justification_state());
-    let (_status, _headers, body) =
-        common::request_route(app, "/api/justification?file=1").await;
+    let (_status, _headers, body) = common::request_route(app, "/api/justification?file=1").await;
     assert_eq!(
         sorted_keys(&body),
-        vec!["entries", "target_id", "total_collateral", "total_justified"]
+        vec![
+            "entries",
+            "target_id",
+            "total_collateral",
+            "total_justified"
+        ]
     );
     // The eligible entry (huge.h: justified>0 and collateral>0, root!=source)
     // gains the full impact sub-object on the SOURCE row (not the entry).
@@ -566,8 +568,7 @@ async fn test_justification_route_locks_response_keys() {
 #[tokio::test]
 async fn test_justification_route_impact_is_unbounded_full_lists() {
     let app = build_router(justification_state());
-    let (_status, _headers, body) =
-        common::request_route(app, "/api/justification?file=1").await;
+    let (_status, _headers, body) = common::request_route(app, "/api/justification?file=1").await;
 
     // huge.h entry is index 0. Its subtree under drop (dropped_directly) is the
     // whole {d0,d1,d2,d3,mid,d4,d5,d6,d7,d8} = 10 headers. The sibling edge
@@ -619,10 +620,12 @@ async fn test_justification_route_impact_is_unbounded_full_lists() {
 #[tokio::test]
 async fn test_justification_route_non_numeric_file_returns_empty_detail() {
     let app = build_router(justification_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/justification?file=abc").await;
+    let (status, _headers, body) = common::request_route(app, "/api/justification?file=abc").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["target_id"], "abc", "the raw file value is echoed back");
+    assert_eq!(
+        body["target_id"], "abc",
+        "the raw file value is echoed back"
+    );
     assert_eq!(body["total_justified"], 0);
     assert_eq!(body["total_collateral"], 0);
     assert_eq!(body["entries"], serde_json::json!([]));
@@ -631,8 +634,7 @@ async fn test_justification_route_non_numeric_file_returns_empty_detail() {
 #[tokio::test]
 async fn test_justification_route_unknown_file_returns_empty_detail() {
     let app = build_router(justification_state());
-    let (status, _headers, body) =
-        common::request_route(app, "/api/justification?file=999").await;
+    let (status, _headers, body) = common::request_route(app, "/api/justification?file=999").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["target_id"], "999");
     assert_eq!(body["total_justified"], 0);
@@ -677,7 +679,11 @@ async fn test_justification_route_second_request_reuses_shared_memo() {
         "fixture must serve real detail, not an empty body"
     );
 
-    let memo = state.analysis().expect("loaded generation exposes memo").memo.clone();
+    let memo = state
+        .analysis()
+        .expect("loaded generation exposes memo")
+        .memo
+        .clone();
     let after_first = memo_counters(&memo);
     assert_eq!(
         after_first.0, 1,
@@ -711,11 +717,7 @@ async fn test_rebuild_swap_installs_fresh_cold_memo() {
         common::request_route(app.clone(), "/api/justification?file=1").await;
     assert_eq!(body["total_justified"], 15);
 
-    let old_memo = state
-        .analysis()
-        .expect("generation 1")
-        .memo
-        .clone();
+    let old_memo = state.analysis().expect("generation 1").memo.clone();
     assert_eq!(
         old_memo.closure_computation_count(),
         1,

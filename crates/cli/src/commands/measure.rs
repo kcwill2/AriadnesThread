@@ -9,7 +9,10 @@ pub fn measure_build_performance(repo_path: &PathBuf) -> Result<ariadne_build::B
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
     let repo_discovery = repository.discover().ok();
-    let mut build_discoverer = BuildDiscoverer::new(&repository.root);
+    // M18.3: registry-selected unit shaper (single plugin with a shaper wins).
+    let registry = crate::registry::default_registry();
+    let mut build_discoverer =
+        BuildDiscoverer::new(&repository.root).with_unit_shaper(registry.unit_shaper_for());
     if let Some(ref disc) = repo_discovery {
         build_discoverer = build_discoverer.with_repo_discovery(disc);
     }

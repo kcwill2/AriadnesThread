@@ -255,6 +255,7 @@ mod tests {
                 context_name: context_name.to_string(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 

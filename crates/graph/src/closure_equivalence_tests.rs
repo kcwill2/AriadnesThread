@@ -30,6 +30,7 @@ fn edge(source: u64, destination: Option<u64>) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: format!("f{source}.h"),
         resolved_path: None,
+        language: ariadne_repo::SourceLanguage::Cpp,
     }
 }
 
@@ -55,8 +56,7 @@ fn existing_fixture_graphs() -> Vec<(&'static str, IncludeGraph)> {
 
 /// Load-analysis suite shapes: the graph.rs fixtures, the chain/seed/
 /// tiebreak/justification/ei9 shapes, concurrency, and the impact variants.
-fn core_fixture_shapes(
-) -> Vec<(&'static str, Vec<u64>, Vec<FixtureShape>)> {
+fn core_fixture_shapes() -> Vec<(&'static str, Vec<u64>, Vec<FixtureShape>)> {
     vec![
         (
             "graph.rs closure/explain fixture",
@@ -131,14 +131,17 @@ fn core_fixture_shapes(
                 (1, Some(4)),
             ],
         ),
-        ("ei9 fixture (edgeless registered)", vec![1, 2, 3, 4, 5], vec![]),
+        (
+            "ei9 fixture (edgeless registered)",
+            vec![1, 2, 3, 4, 5],
+            vec![],
+        ),
     ]
 }
 
 /// Characterization-suite shapes plus the unresolved-edge cases: single-hop,
 /// same-file collateral, unregistered edge-only ids, pathless host.
-fn characterization_fixture_shapes(
-) -> Vec<(&'static str, Vec<u64>, Vec<FixtureShape>)> {
+fn characterization_fixture_shapes() -> Vec<(&'static str, Vec<u64>, Vec<FixtureShape>)> {
     vec![
         (
             "characterization mock data",
@@ -255,10 +258,7 @@ fn test_two_cycle_member_closure_contains_sibling_and_excludes_self() {
 
 #[test]
 fn test_three_cycle_member_closure_lists_both_siblings_without_self() {
-    let graph = graph_from_shapes(
-        &[1, 2, 3],
-        &[(1, Some(2)), (2, Some(3)), (3, Some(1))],
-    );
+    let graph = graph_from_shapes(&[1, 2, 3], &[(1, Some(2)), (2, Some(3)), (3, Some(1))]);
     let expected: HashMap<FileId, Vec<FileId>> = HashMap::from([
         (FileId(1), vec![FileId(2), FileId(3)]),
         (FileId(2), vec![FileId(1), FileId(3)]),
@@ -405,7 +405,12 @@ enum Topology {
 const RANDOM_FIXTURES: [(u64, usize, Topology, &str); 5] = [
     (0x0D10_D000_0000_00A6, 20, Topology::PureDag, "pure-dag"),
     (0xC0FF_EE00_0000_0011, 18, Topology::BigCycle, "big-cycle"),
-    (0xBADC_AFE0_0000_0002, 21, Topology::TwoSccsBridge, "two-sccs-bridge"),
+    (
+        0xBADC_AFE0_0000_0002,
+        21,
+        Topology::TwoSccsBridge,
+        "two-sccs-bridge",
+    ),
     (0x5E1F_10AD_0000_0003, 16, Topology::SelfLoops, "self-loops"),
     (0xB10B_10B0_0000_0004, 12, Topology::FullBlob, "full-blob"),
 ];
@@ -485,7 +490,13 @@ fn random_graph(seed: u64, file_count: usize, topology: Topology) -> IncludeGrap
 }
 
 /// Cycle plus skip chords over `files[start..end]`, used for the two SCCs.
-fn cyclic_chain(graph: &mut IncludeGraph, rng: &mut InlineLcg, files: &[u64], start: usize, end: usize) {
+fn cyclic_chain(
+    graph: &mut IncludeGraph,
+    rng: &mut InlineLcg,
+    files: &[u64],
+    start: usize,
+    end: usize,
+) {
     debug_assert!(end - start >= 2);
     for k in start..end {
         let next = start + (k - start + 1) % (end - start);

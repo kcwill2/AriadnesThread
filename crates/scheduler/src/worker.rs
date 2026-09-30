@@ -1,9 +1,44 @@
 use anyhow::Result;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::queue::TuTask;
 use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
-use ariadne_lang::LanguageRegistry;
+use ariadne_lang::{LanguageId, LanguageRegistry};
+
+/// Registry-backed backends must outlive the tokio worker tasks that hold
+/// them (`WorkerPool` requires `B: 'static`), so the shared-ownership variant
+/// of [`PluginWorkerBackend`] carries the registry as an [`Arc`] (plan M18.3
+/// cli wiring). Dispatch, byte-parity, and the unhandled-language error are
+/// identical to the borrowed variant — it just delegates.
+pub struct SharedPluginWorkerBackend {
+    registry: Arc<LanguageRegistry>,
+}
+
+impl SharedPluginWorkerBackend {
+    pub fn new(registry: Arc<LanguageRegistry>) -> Self {
+        Self { registry }
+    }
+
+    pub fn registry(&self) -> &LanguageRegistry {
+        &self.registry
+    }
+}
+
+impl WorkerBackend for SharedPluginWorkerBackend {
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+        PluginWorkerBackend::new(&self.registry).analyze_task(task, repo_root)
+    }
+}
+
+/// `WorkerPool` stores backends as `Arc<B>`, and the registry wiring hands it
+/// an `Arc<dyn WorkerBackend>` (M18.3): dispatch through the `Arc` to the
+/// wrapped backend.
+impl<T: WorkerBackend + ?Sized> WorkerBackend for Arc<T> {
+    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
+        T::analyze_task(self, task, repo_root)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerStatus {
@@ -20,11 +55,10 @@ pub trait WorkerBackend: Send + Sync {
 /// byte-identical so `engine.rs`, `pool` tests and the m13/m16 suites keep
 /// passing unchanged until M18.11. New call sites must use
 /// [`PluginWorkerBackend`], which resolves the analyzer through the registry.
-#[deprecated(
-    note = "superseded by PluginWorkerBackend (registry dispatch); removed in M18.11"
-)]
+#[deprecated(note = "superseded by PluginWorkerBackend (registry dispatch); removed in M18.11")]
 pub struct DefaultWorkerBackend;
 
+#[allow(deprecated)]
 impl WorkerBackend for DefaultWorkerBackend {
     fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
         if let Some(ctx) = &task.context {
@@ -74,24 +108,28 @@ impl WorkerBackend for PluginWorkerBackend<'_> {
         let language = self
             .registry
             .detect_language(&task.tu.source_path)
-            .ok_or_else(|| {
-                anyhow::anyhow!("unhandled language for {:?}", task.tu.source_path)
-            })?;
-        if let Some(ctx) = &task.context {
-            let (analysis, _fingerprint) =
-                crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
-            return Ok(analysis);
+            .ok_or_else(|| anyhow::anyhow!("unhandled language for {:?}", task.tu.source_path))?;
+        if language == LanguageId::Cpp {
+            if let Some(ctx) = &task.context {
+                // C++ closure merge keeps the SAME canonical code path the
+                // legacy backend used (byte parity through the deprecated
+                // shim). Non-C++ units must not be run through the
+                // hardcoded-C++ merge; they analyze body-only below until
+                // their plugin contributes a closure walk.
+                let (analysis, _fingerprint) =
+                    crate::tu_store::analyze_tu_full(&task.tu, repo_root, ctx)?;
+                return Ok(analysis);
+            }
         }
-        let plugin = self.registry.plugin_for_id(language).ok_or_else(|| {
-            anyhow::anyhow!("no plugin registered for language {language:?}")
-        })?;
+        let plugin = self
+            .registry
+            .plugin_for_id(language)
+            .ok_or_else(|| anyhow::anyhow!("no plugin registered for language {language:?}"))?;
         let full_path = repo_root.join(&task.tu.source_path);
         let source_code = std::fs::read_to_string(&full_path).unwrap_or_default();
-        Ok(plugin.analyzer().analyze(
-            task.tu.file_id.clone(),
-            &source_code,
-            &task.tu.context_name,
-        ))
+        Ok(plugin
+            .analyzer()
+            .analyze(task.tu.file_id.clone(), &source_code, &task.tu.context_name))
     }
 }
 
@@ -241,6 +279,9 @@ impl ClangWorkerBackend {
 }
 
 impl WorkerBackend for ClangWorkerBackend {
+    // The in-process fallback intentionally reuses the deprecated
+    // `DefaultWorkerBackend` (same transitional grace as `engine.rs:22`).
+    #[allow(deprecated)]
     fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
         let full_path = repo_root.join(&task.tu.source_path);
         let req = Self::build_analyze_request(task, &full_path);
@@ -281,6 +322,7 @@ fn fake_worker_cmd_override() -> Option<(std::path::PathBuf, Vec<std::ffi::OsStr
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod fake_process_tests {
     //! Characterization: ClangWorkerBackend::execute driven by a fake worker process
     //! (cmd.exe /c type <response file>).
@@ -401,6 +443,7 @@ mod fake_process_tests {
                     context_name: "fake-probe".to_string(),
                     output: None,
                 },
+                language: Default::default(),
             },
             estimated_cost: 10,
             context: None,

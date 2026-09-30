@@ -36,6 +36,7 @@ fn make_task(task_id: usize, rel: &str, context: Option<SharedTuStoreContext>) -
                 context_name: "parity".to_string(),
                 output: None,
             },
+            language: Default::default(),
         },
         estimated_cost: 10,
         context,
@@ -49,11 +50,7 @@ fn write_file(root: &Path, rel: &str, content: &str) {
 }
 
 fn sample_repo(root: &Path) {
-    write_file(
-        root,
-        "include/common.h",
-        "struct Common { int id; };",
-    );
+    write_file(root, "include/common.h", "struct Common { int id; };");
     write_file(
         root,
         "src/tu1.cpp",

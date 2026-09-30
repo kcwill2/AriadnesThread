@@ -6,67 +6,59 @@
 //! * [`IncludeResolver`] — the transitional, byte-identical public API kept so
 //!   existing call sites compile unchanged through the `#[deprecated]`
 //!   `ariadne-graph` re-export (removed in M18.11).
-//! * [`CppDependencyResolver`] — the plugin implementation of
+//! * [`CppDependencyResolver`] — the stateless plugin implementation of
 //!   `ariadne_lang::DependencyResolver` (`resolve_edges` = parse,
-//!   `resolve_target` = the same include-directory search logic adapted to
-//!   [`FileCatalog`]/[`ResolveOutcome`] per plan §3.3.
+//!   `resolve_target` = the same include-directory search logic driven
+//!   through [`FileCatalog`]/[`ResolveOutcome`] per plan §3.3.
 //!
-//! Mapping decisions for `resolve_target` (vs today's `resolve_directive`):
-//! * candidate search order is identical (source dir for quoted directives,
-//!   then context user/system include dirs);
-//! * a repository-record match owned by `Repository`/`Toolchain` maps to
-//!   `Resolved(FileId)` — today's `Local` **and** `System` edges both carry a
-//!   destination `FileId`, and `ResolveOutcome` has no "system" flavour;
-//! * a `ThirdParty` match maps to `External` (the out-of-repo boundary, plan
-//!   §3.4); today the same edge additionally carries the destination id — the
-//!   neutral outcome intentionally drops it (graph builder adoption is
-//!   M18.5's job);
-//! * no match maps to `Unresolved` (today: `destination: None`). The on-disk
-//!   fallback of the legacy resolver needs the *including file's* directory,
-//!   which `RawDepEdge` does not carry; closure-merge callers apply their own
-//!   source-relative fallback (see `scheduler::tu_store`), so the trait stays
-//!   filesystem-free like its default implementation.
-//! * `RawDepEdge` does not model angle-vs-quote style, so a *quoted*-style
-//!   candidate search is applied; an angled directive could therefore only
-//!   diverge where a same-named file sits next to the includer (none in any
-//!   fixture). Widening `RawDepEdge` is M18.5 follow-up material.
+//! `resolve_target` mapping (M18.5 reconciliation, closes the M18.2-review
+//! "External-drop" divergence):
+//! * candidate search order is identical to `resolve_directive`: source dir
+//!   first for quoted directives (the directive's spelling travels on the
+//!   edge as `DirectiveStyle`, so angled directives no longer borrow the
+//!   quoted source-dir candidate — the M18.2 divergence is closed), then the
+//!   caller-supplied search paths in `ResolutionContext::search_paths`
+//!   (the compilation context's include dirs followed by system include
+//!   dirs, the same order `collect_include_candidates` uses);
+//! * any [`FileCatalog`] hit — repository, toolchain, or third-party record —
+//!   maps to `Resolved(FileId)`. The legacy walk visited every directive
+//!   whose `resolve_directive` produced a destination `FileId`, including
+//!   `Local`/`System` *and* `External`(ThirdParty)-kind edges, and merged
+//!   them into closures/graphs; returning `External` (which carries no id)
+//!   for third-party records dropped exactly those files from the plugin
+//!   walk. Kind classification (Local/System/External) is a property of the
+//!   *edge*, derived from catalog ownership by the graph layer — not a
+//!   reason to hide the destination;
+//! * `External` is reserved for a genuinely out-of-repo boundary — a file
+//!   the resolver locates outside `repo_root` (legacy attached only a
+//!   synthetic in-repo path id, so no legacy fixture behavior maps to it;
+//!   Scala's unresolved package prefix will, M20);
+//! * no match maps to `Unresolved`. The trait stays filesystem-free like its
+//!   default: the legacy resolver's on-disk fallback needs the filesystem,
+//!   so closure-merge and graph-walk callers run the legacy full candidate
+//!   loop themselves through the shared
+//!   `ariadne_lang::first_ondisk_include_candidate` (`scheduler::tu_store` and
+//!   `graph::builder`): includer directory for quoted spellings plus every
+//!   search path, style-agnostic. An include-dir candidate that exists on disk
+//!   but is absent from the catalog is therefore visited on BOTH plugin walks —
+//!   the M18.5 finding-1 divergence (the plugin closure walk checked only the
+//!   includer directory, dropping the search-path fallback and angled `<hdr>`
+//!   hits from `-I` dirs) is CLOSED and locked by the `tu_store_plugin_parity`
+//!   search-path fixture.
 
 use crate::directive_parser::{parse_include_directives, RawIncludeDirective};
 use ariadne_build::CompilationContext;
-use ariadne_lang::{DependencyResolver, FileCatalog, RawDepEdge, ResolutionContext, ResolveOutcome};
+use ariadne_lang::{
+    normalize_relative_path, DependencyResolver, DirectiveStyle, FileCatalog, RawDepEdge,
+    ResolutionContext, ResolveOutcome,
+};
 use ariadne_lang_api::types::{IncludeEdge, IncludeKind, SourceLocation};
-use ariadne_repo::{FileId, FileOwnership, FileRecord, RepositoryDiscoveryResult};
+use ariadne_repo::{FileId, FileOwnership, FileRecord, RepositoryDiscoveryResult, SourceLanguage};
 use std::path::{Path, PathBuf};
 
 /// Normalizes a path by resolving `.` and `..` relative components without requiring existing files.
 pub fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                match components.last() {
-                    Some(&std::path::Component::ParentDir) | None => {
-                        components.push(component);
-                    }
-                    Some(&std::path::Component::RootDir)
-                    | Some(&std::path::Component::Prefix(_)) => {
-                        // Cannot resolve `..` above root, so do nothing.
-                    }
-                    Some(&std::path::Component::Normal(_)) => {
-                        components.pop();
-                    }
-                    _ => {}
-                }
-            }
-            c => components.push(c),
-        }
-    }
-    let mut normalized = PathBuf::new();
-    for c in components {
-        normalized.push(c.as_os_str());
-    }
-    normalized
+    normalize_relative_path(path)
 }
 
 /// Ordered include search paths for one directive: source dir first for
@@ -236,6 +228,7 @@ impl<'a> IncludeResolver<'a> {
             kind,
             raw_path: directive.raw_path.clone(),
             resolved_path,
+            language: SourceLanguage::Cpp,
         }
     }
 
@@ -254,65 +247,59 @@ impl<'a> IncludeResolver<'a> {
     }
 }
 
-/// Plugin-side `DependencyResolver` for C++ (plan M18.1): `resolve_edges`
-/// parses `#include` directives into [`RawDepEdge`]s and `resolve_target`
-/// applies the same include-directory search logic through
-/// [`FileCatalog`]/[`ResolveOutcome`].
-#[derive(Clone)]
-pub struct CppDependencyResolver<'a> {
-    repo_root: &'a Path,
-    repo_discovery: Option<&'a RepositoryDiscoveryResult>,
-    context: Option<&'a CompilationContext>,
-}
+/// Plugin-side `DependencyResolver` for C++ (plan M18.1/M18.3): `resolve_edges`
+/// parses `#include` directives into [`RawDepEdge`]s (carrying the includer
+/// path, directive spelling, and column so the trait needs no repository
+/// state) and `resolve_target` applies the legacy include-directory search
+/// through the caller's [`FileCatalog`] + [`ResolutionContext::search_paths`].
+///
+/// Stateless by design: a single instance backs
+/// [`crate::plugin::CppPlugin::resolver`]`()` for every repository; all
+/// per-repository inputs arrive per call.
+#[derive(Clone, Copy, Default)]
+pub struct CppDependencyResolver;
 
-impl<'a> CppDependencyResolver<'a> {
-    pub fn new(repo_root: &'a Path) -> Self {
-        Self {
-            repo_root,
-            repo_discovery: None,
-            context: None,
+impl CppDependencyResolver {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Legacy-shaped ordered candidates (module docs): quoted directives get
+    /// the includer's directory first; search paths (the compilation
+    /// context's include dirs then system include dirs) follow, each
+    /// absolute path under `repo_root` reduced to repository-relative form
+    /// exactly like `collect_include_candidates`.
+    fn candidates_for(&self, edge: &RawDepEdge, ctx: &ResolutionContext<'_>) -> Vec<PathBuf> {
+        let source_dir = edge
+            .source_rel_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        let is_angled = matches!(edge.style, DirectiveStyle::Angled);
+        let mut candidates = Vec::new();
+        if !is_angled {
+            candidates.push(source_dir.join(Path::new(&edge.raw_target)));
         }
-    }
-
-    pub fn with_repo_discovery(mut self, repo_discovery: &'a RepositoryDiscoveryResult) -> Self {
-        self.repo_discovery = Some(repo_discovery);
-        self
-    }
-
-    pub fn with_context(mut self, context: &'a CompilationContext) -> Self {
-        self.context = Some(context);
-        self
-    }
-
-    /// Directory of the includer, derived from the resolver's own discovery
-    /// (`RawDepEdge` only carries the source [`FileId`]); empty when the
-    /// source is unknown to discovery.
-    fn source_dir_of(&self, source_file: &FileId) -> PathBuf {
-        self.repo_discovery
-            .and_then(|disc| disc.files.iter().find(|f| f.id == *source_file))
-            .and_then(|f| f.path.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default()
-    }
-
-    fn candidates_for(&self, source_file: &FileId, raw_target: &str) -> Vec<PathBuf> {
-        // RawDepEdge models no angle/quote style: search quoted-style (source
-        // dir first). See the module docs for the divergence analysis.
-        collect_include_candidates(
-            self.repo_root,
-            self.context,
-            &self.source_dir_of(source_file),
-            Path::new(raw_target),
-            false,
-        )
+        let include_raw = Path::new(&edge.raw_target);
+        for search_dir in &ctx.search_paths {
+            let candidate = if search_dir.is_absolute() {
+                match search_dir.strip_prefix(ctx.repo_root) {
+                    Ok(rel) => rel.join(include_raw),
+                    Err(_) => search_dir.join(include_raw),
+                }
+            } else {
+                search_dir.join(include_raw)
+            };
+            candidates.push(candidate);
+        }
+        candidates
     }
 }
 
-impl<'a> DependencyResolver for CppDependencyResolver<'a> {
+impl DependencyResolver for CppDependencyResolver {
     fn resolve_edges(
         &self,
         file_id: FileId,
-        _rel_path: &Path,
+        rel_path: &Path,
         source: &str,
         _ctx: &ResolutionContext<'_>,
     ) -> Vec<RawDepEdge> {
@@ -320,9 +307,16 @@ impl<'a> DependencyResolver for CppDependencyResolver<'a> {
             .into_iter()
             .map(|dir| RawDepEdge {
                 source_file: file_id,
+                source_rel_path: rel_path.to_path_buf(),
                 raw_target: dir.raw_path,
                 is_wildcard: false,
+                style: if dir.is_angled {
+                    DirectiveStyle::Angled
+                } else {
+                    DirectiveStyle::Quoted
+                },
                 line: dir.line,
+                column: dir.column,
             })
             .collect()
     }
@@ -331,29 +325,15 @@ impl<'a> DependencyResolver for CppDependencyResolver<'a> {
         &self,
         edge: &RawDepEdge,
         catalog: &FileCatalog,
-        _ctx: &ResolutionContext<'_>,
+        ctx: &ResolutionContext<'_>,
     ) -> ResolveOutcome {
-        let candidates = self.candidates_for(&edge.source_file, &edge.raw_target);
-
-        // Discovery (when wired) keeps the legacy path/canonical match and
-        // exposes the ownership needed for the External boundary decision.
-        if let Some(disc) = self.repo_discovery {
-            if let Some(record) = find_in_discovery(disc, &candidates) {
-                return match record.ownership {
-                    FileOwnership::ThirdParty => ResolveOutcome::External,
-                    _ => ResolveOutcome::Resolved(record.id),
-                };
-            }
-        } else {
-            // Catalog-only configuration: first candidate present in the
-            // catalog wins (no ownership data available ⇒ always Resolved).
-            for cand in &candidates {
-                if let Some(id) = catalog.by_rel_path(&cand.to_string_lossy()) {
-                    return ResolveOutcome::Resolved(id);
-                }
+        for candidate in self.candidates_for(edge, ctx) {
+            // `FileCatalog::by_path` reproduces the legacy two-way match
+            // (normalized relative path, then canonical path) verbatim.
+            if let Some(id) = catalog.by_path(&candidate) {
+                return ResolveOutcome::Resolved(id);
             }
         }
-
         ResolveOutcome::Unresolved
     }
 }
@@ -436,13 +416,10 @@ mod tests {
 
         let mut files = Vec::new();
         // The includer itself is a discovery record: real call sites always
-        // have TU sources discovered, and `resolve_target` recovers the
-        // includer directory (which `RawDepEdge` does not carry) from it.
-        files.push(mock_file(
-            root,
-            "src/main.cpp",
-            FileOwnership::Repository,
-        ));
+        // have TU sources discovered, so catalog and legacy discovery lookups
+        // see the same file set (the plugin gets the includer directory from
+        // `RawDepEdge::source_rel_path` instead).
+        files.push(mock_file(root, "src/main.cpp", FileOwnership::Repository));
         files.push(mock_file(
             root,
             "common/helper.h",
@@ -600,17 +577,36 @@ mod tests {
 
     // ── CppDependencyResolver parity table vs the legacy IncludeResolver ────
 
-    fn res_ctx(root: &Path) -> ResolutionContext<'_> {
-        ResolutionContext { repo_root: root }
+    fn res_ctx<'a>(root: &'a Path, search_paths: Vec<PathBuf>) -> ResolutionContext<'a> {
+        ResolutionContext {
+            repo_root: root,
+            search_paths,
+        }
     }
 
-    fn raw_edge(rel_source: &str, raw_target: &str) -> RawDepEdge {
+    fn raw_edge(rel_source: &str, raw_target: &str, angled: bool) -> RawDepEdge {
         RawDepEdge {
             source_file: FileId::from_relative_path(rel_source),
+            source_rel_path: PathBuf::from(rel_source),
             raw_target: raw_target.into(),
             is_wildcard: false,
+            style: if angled {
+                DirectiveStyle::Angled
+            } else {
+                DirectiveStyle::Quoted
+            },
             line: 1,
+            column: 1,
         }
+    }
+
+    fn fixture_search_paths(context: &CompilationContext) -> Vec<PathBuf> {
+        context
+            .include_dirs
+            .iter()
+            .chain(context.system_include_dirs.iter())
+            .cloned()
+            .collect()
     }
 
     #[test]
@@ -618,20 +614,22 @@ mod tests {
         let (temp, discovery, context) = given_resolver_fixture();
         let root = temp.path();
         let catalog = FileCatalog::from_records(&discovery.files);
-        let ctx = res_ctx(root);
+        let ctx = res_ctx(root, fixture_search_paths(&context));
 
         let legacy = IncludeResolver::new(root)
             .with_repo_discovery(&discovery)
             .with_context(&context);
-        let plugin = CppDependencyResolver::new(root)
-            .with_repo_discovery(&discovery)
-            .with_context(&context);
+        let plugin = CppDependencyResolver::new();
         let source = Path::new("src/main.cpp");
 
         // Repository match: Local + destination id == Resolved(same id)
         let helper = FileId::from_relative_path("common/helper.h");
-        let edge = raw_edge("src/main.cpp", "../common/helper.h");
-        let legacy_edge = legacy.resolve_directive(edge.source_file, source, &include_directive("../common/helper.h", false, 1));
+        let edge = raw_edge("src/main.cpp", "../common/helper.h", false);
+        let legacy_edge = legacy.resolve_directive(
+            edge.source_file,
+            source,
+            &include_directive("../common/helper.h", false, 1),
+        );
         assert_eq!(legacy_edge.kind, IncludeKind::Local);
         assert_eq!(
             plugin.resolve_target(&edge, &catalog, &ctx),
@@ -640,8 +638,12 @@ mod tests {
 
         // Toolchain match: System + destination id == Resolved(same id)
         let sys = FileId::from_relative_path("usr/include/system.h");
-        let edge = raw_edge("src/main.cpp", "system.h");
-        let legacy_edge = legacy.resolve_directive(edge.source_file, source, &include_directive("system.h", true, 1));
+        let edge = raw_edge("src/main.cpp", "system.h", true);
+        let legacy_edge = legacy.resolve_directive(
+            edge.source_file,
+            source,
+            &include_directive("system.h", true, 1),
+        );
         assert_eq!(legacy_edge.kind, IncludeKind::System);
         assert_eq!(legacy_edge.destination, Some(sys));
         assert_eq!(
@@ -649,18 +651,38 @@ mod tests {
             ResolveOutcome::Resolved(sys)
         );
 
-        // ThirdParty match: kind External + destination id == External (no id)
-        let edge = raw_edge("src/main.cpp", "lib.h");
-        let legacy_edge = legacy.resolve_directive(edge.source_file, source, &include_directive("lib.h", true, 1));
+        // ThirdParty match: legacy kind External + destination id ==
+        // Resolved(same id). The M18.2 "External-drop" divergence is closed:
+        // the destination travels, and kind classification is the graph
+        // layer's job via `FileCatalog::record(...).ownership`.
+        let third_party = FileId::from_relative_path("third_party/lib/lib.h");
+        let edge = raw_edge("src/main.cpp", "lib.h", true);
+        let legacy_edge = legacy.resolve_directive(
+            edge.source_file,
+            source,
+            &include_directive("lib.h", true, 1),
+        );
         assert_eq!(legacy_edge.kind, IncludeKind::External);
         assert_eq!(
             plugin.resolve_target(&edge, &catalog, &ctx),
-            ResolveOutcome::External
+            ResolveOutcome::Resolved(third_party)
+        );
+        assert_eq!(
+            catalog
+                .record(third_party)
+                .map(|r| r.ownership)
+                .unwrap_or(FileOwnership::Repository),
+            FileOwnership::ThirdParty,
+            "catalog ownership lets the graph layer re-derive kind External"
         );
 
         // Miss: destination None == Unresolved
-        let edge = raw_edge("src/main.cpp", "nonexistent.h");
-        let legacy_edge = legacy.resolve_directive(edge.source_file, source, &include_directive("nonexistent.h", false, 1));
+        let edge = raw_edge("src/main.cpp", "nonexistent.h", false);
+        let legacy_edge = legacy.resolve_directive(
+            edge.source_file,
+            source,
+            &include_directive("nonexistent.h", false, 1),
+        );
         assert_eq!(legacy_edge.destination, None);
         assert_eq!(
             plugin.resolve_target(&edge, &catalog, &ctx),
@@ -669,8 +691,12 @@ mod tests {
 
         // On-disk fallback (sibling.h): legacy resolves via filesystem; the
         // trait path stays filesystem-free (caller-side fallback documented).
-        let edge = raw_edge("src/main.cpp", "sibling.h");
-        let legacy_edge = legacy.resolve_directive(edge.source_file, source, &include_directive("sibling.h", false, 1));
+        let edge = raw_edge("src/main.cpp", "sibling.h", false);
+        let legacy_edge = legacy.resolve_directive(
+            edge.source_file,
+            source,
+            &include_directive("sibling.h", false, 1),
+        );
         assert_eq!(
             legacy_edge.destination,
             Some(FileId::from_relative_path("src/sibling.h"))
@@ -682,31 +708,30 @@ mod tests {
     }
 
     #[test]
-    fn resolve_target_catalog_only_config_resolves_without_discovery() {
+    fn resolve_target_search_paths_resolve_without_context_state() {
         let (temp, discovery, _fixture_context) = given_resolver_fixture();
         let root = temp.path();
         let catalog = FileCatalog::from_records(&discovery.files);
-        let ctx = res_ctx(root);
 
-        // No repo_discovery on the resolver: the FileCatalog alone answers the
-        // candidate paths. With the source directory unknown (RawDepEdge
-        // carries no path and there is no discovery to recover it from), a
-        // bare `"helper.h"` can only resolve through an include dir, mirroring
-        // the legacy search that runs the compilation-context include dirs.
-        let mut context = CompilationContext::new("catalog-only", "clang");
-        context.include_dirs = vec![PathBuf::from("common"), PathBuf::from("third_party/lib")];
-        let plugin = CppDependencyResolver::new(root).with_context(&context);
+        // The resolver holds no compilation state: the caller's search
+        // paths alone drive the include-dir candidates (M18.5 stateless
+        // surface, mirroring the legacy compilation-context search order).
+        let ctx = res_ctx(
+            root,
+            vec![PathBuf::from("common"), PathBuf::from("third_party/lib")],
+        );
+        let plugin = CppDependencyResolver::new();
 
-        let edge = raw_edge("src/main.cpp", "helper.h");
+        let edge = raw_edge("src/main.cpp", "helper.h", false);
         assert_eq!(
             plugin.resolve_target(&edge, &catalog, &ctx),
             ResolveOutcome::Resolved(FileId::from_relative_path("common/helper.h"))
         );
 
-        // Catalog-only never sees ownership, so a third-party file reached via
-        // its include dir still resolves (never External) — the documented
-        // difference from the discovery-backed path.
-        let edge = raw_edge("src/main.cpp", "lib.h");
+        // A third-party record reached via a search path resolves like any
+        // other hit (kind classification happens at the graph layer, not in
+        // the outcome).
+        let edge = raw_edge("src/main.cpp", "lib.h", true);
         assert_eq!(
             plugin.resolve_target(&edge, &catalog, &ctx),
             ResolveOutcome::Resolved(FileId::from_relative_path("third_party/lib/lib.h"))
@@ -714,31 +739,63 @@ mod tests {
     }
 
     #[test]
+    fn angled_style_skips_the_source_dir_candidate() {
+        // M18.5 angle-style reconciliation: a same-named file next to the
+        // includer is only a candidate for quoted directives, matching
+        // `collect_include_candidates`' `is_angled` gate.
+        let (temp, discovery, _fixture_context) = given_resolver_fixture();
+        let root = temp.path();
+        let mut record = mock_file(root, "src/helper.h", FileOwnership::Repository);
+        record.canonical_path = root.join("src/helper.h");
+        let mut records = discovery.files.clone();
+        records.push(record);
+        let catalog = FileCatalog::from_records(&records);
+        let plugin = CppDependencyResolver::new();
+
+        // Quoted: includer directory wins.
+        let quoted = raw_edge("src/main.cpp", "helper.h", false);
+        assert_eq!(
+            plugin.resolve_target(&quoted, &catalog, &res_ctx(root, vec![])),
+            ResolveOutcome::Resolved(FileId::from_relative_path("src/helper.h"))
+        );
+
+        // Angled: no source-dir candidate and no search paths ⇒ no match.
+        let angled = raw_edge("src/main.cpp", "helper.h", true);
+        assert_eq!(
+            plugin.resolve_target(&angled, &catalog, &res_ctx(root, vec![])),
+            ResolveOutcome::Unresolved
+        );
+    }
+
+    #[test]
     fn resolve_edges_maps_parse_output_to_raw_dep_edges() {
         let temp = tempfile::tempdir().unwrap();
-        let plugin = CppDependencyResolver::new(temp.path());
-        let ctx = ResolutionContext {
-            repo_root: temp.path(),
-        };
+        let plugin = CppDependencyResolver::new();
+        let ctx = res_ctx(temp.path(), vec![]);
         let content = r#"
 #include "thing_types.h"
 #  include <vector>
 #include "heavy.h" // comment
 "#;
         let file_id = FileId::from_relative_path("src/thing.cpp");
-        let edges = plugin.resolve_edges(
-            file_id,
-            Path::new("src/thing.cpp"),
-            content,
-            &ctx,
-        );
+        let edges = plugin.resolve_edges(file_id, Path::new("src/thing.cpp"), content, &ctx);
         let parsed = parse_include_directives(content);
         assert_eq!(edges.len(), parsed.len());
         for (edge, parsed) in edges.iter().zip(&parsed) {
             assert_eq!(edge.source_file, file_id);
+            assert_eq!(edge.source_rel_path, PathBuf::from("src/thing.cpp"));
             assert_eq!(edge.raw_target, parsed.raw_path);
             assert!(!edge.is_wildcard);
             assert_eq!(edge.line, parsed.line);
+            assert_eq!(edge.column, parsed.column);
+            assert_eq!(
+                edge.style,
+                if parsed.is_angled {
+                    DirectiveStyle::Angled
+                } else {
+                    DirectiveStyle::Quoted
+                }
+            );
         }
     }
 
@@ -758,7 +815,7 @@ mod tests {
         let files = ariadne_repo::discover_repository_files(&root).unwrap();
         let discovery = ariadne_repo::build_discovery_result(root.clone(), files);
         let catalog = FileCatalog::from_records(&discovery.files);
-        let ctx = res_ctx(&root);
+        let ctx = res_ctx(&root, vec![PathBuf::from("include")]);
 
         let mut context = CompilationContext::new("parity", "clang++");
         context.include_dirs = vec![PathBuf::from("include")];
@@ -766,9 +823,7 @@ mod tests {
         let legacy = IncludeResolver::new(&root)
             .with_repo_discovery(&discovery)
             .with_context(&context);
-        let plugin = CppDependencyResolver::new(&root)
-            .with_repo_discovery(&discovery)
-            .with_context(&context);
+        let plugin = CppDependencyResolver::new();
 
         let analyzable = discovery
             .files
@@ -782,23 +837,35 @@ mod tests {
             let content = std::fs::read_to_string(record.canonical_path.clone()).unwrap();
             let directives = parse_include_directives(&content);
             for directive in &directives {
-                let legacy_edge =
-                    legacy.resolve_directive(record.id, &record.path, directive);
+                let legacy_edge = legacy.resolve_directive(record.id, &record.path, directive);
                 let edge = RawDepEdge {
                     source_file: record.id,
+                    source_rel_path: record.path.clone(),
                     raw_target: directive.raw_path.clone(),
                     is_wildcard: false,
+                    style: if directive.is_angled {
+                        DirectiveStyle::Angled
+                    } else {
+                        DirectiveStyle::Quoted
+                    },
                     line: directive.line,
+                    column: directive.column,
                 };
                 let outcome = plugin.resolve_target(&edge, &catalog, &ctx);
-                match (legacy_edge.kind, legacy_edge.destination) {
-                    (IncludeKind::External, Some(_)) => {
-                        assert_eq!(outcome, ResolveOutcome::External);
+                match legacy_edge.destination {
+                    // Every destination id (Local, System, and External /
+                    // ThirdParty) maps to Resolved(same id): the M18.2
+                    // External-drop divergence is closed.
+                    Some(dest) => {
+                        assert_eq!(
+                            outcome,
+                            ResolveOutcome::Resolved(dest),
+                            "{}: {}",
+                            record.path.display(),
+                            directive.raw_path
+                        );
                     }
-                    (_, Some(dest)) => {
-                        assert_eq!(outcome, ResolveOutcome::Resolved(dest));
-                    }
-                    (_, None) => {
+                    None => {
                         assert_eq!(outcome, ResolveOutcome::Unresolved);
                     }
                 }

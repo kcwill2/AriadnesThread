@@ -14,8 +14,10 @@ use ariadne_report::ArtifactManager;
 fn reduced_fingerprint(repo_path: &std::path::Path) -> Result<String> {
     let repo = ariadne_repo::Repository::locate(repo_path)?;
     let discovery = repo.discover()?;
+    // M18.4: must match the pipeline's injection so fingerprints agree.
     let build = ariadne_build::BuildDiscoverer::new(&repo.root)
         .with_repo_discovery(&discovery)
+        .with_unit_shaper(Some(ariadne_lang_cpp::cpp_default_shaper()))
         .discover()?;
     let fps = ariadne_index::StageFingerprints::from_inputs(
         &repo.root,
@@ -128,8 +130,10 @@ fn test_m6_file_load_analysis() -> Result<()> {
 fn load_fingerprint(repo_path: &std::path::Path) -> Result<String> {
     let repo = ariadne_repo::Repository::locate(repo_path)?;
     let discovery = repo.discover()?;
+    // M18.4: must match the pipeline's injection so fingerprints agree.
     let build = ariadne_build::BuildDiscoverer::new(&repo.root)
         .with_repo_discovery(&discovery)
+        .with_unit_shaper(Some(ariadne_lang_cpp::cpp_default_shaper()))
         .discover()?;
     let fps = ariadne_index::StageFingerprints::from_inputs(
         &repo.root,

@@ -95,6 +95,7 @@ fn test_save_build_context_artifacts() {
         source_path: root.join("src/main.cpp"),
         context_name: "Debug|x64".into(),
         compile_command: cmd,
+        language: Default::default(),
     };
 
     let build_result = BuildDiscoveryResult {

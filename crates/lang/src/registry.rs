@@ -111,6 +111,29 @@ impl LanguageRegistry {
         }
         self.plugin_for(path).map(|plugin| plugin.id())
     }
+
+    /// Build-stage unit shaper for registry-driven discovery (plan M18.3):
+    /// the single registered plugin with a shaper — today exactly one — wins.
+    /// With several shaper-providing plugins the FIRST registered wins as a
+    /// deterministic placeholder; marker-based precedence (build markers
+    /// matched against the repository) is M18.5.
+    pub fn unit_shaper_for(&self) -> Option<&dyn UnitShaper> {
+        self.plugins.iter().find_map(|p| p.shaper())
+    }
+
+    /// The only registered plugin (M18.3): `Some` exactly when the registry
+    /// holds one plugin, backing the single-language call sites (e.g.
+    /// `IncrementalAnalyzer`'s one injected analyzer/resolver) without a
+    /// hidden C++ default. Multi-language registries dispatch per unit via
+    /// `detect_language`/`plugin_for_id` instead (`IncrementalAnalyzer`'s
+    /// per-language split lands with M19).
+    pub fn sole_plugin(&self) -> Option<&dyn LanguagePlugin> {
+        if self.plugins.len() == 1 {
+            Some(self.plugins[0].as_ref())
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for LanguageRegistry {
@@ -374,5 +397,23 @@ mod tests {
         assert!(registry.plugin_for(Path::new("src/main.mock")).is_some());
         assert_eq!(registry.detect_language(Path::new("src/main.mock")), None);
         assert_eq!(registry.detect_language(Path::new("notes.txt")), None);
+    }
+
+    #[test]
+    fn unit_shaper_for_tracks_plugin_shapers() {
+        // MockPlugin never overrides `shaper()`, so the trait default (None)
+        // must surface as "no shaper" rather than a hidden C++ fallback.
+        assert!(LanguageRegistry::new().unit_shaper_for().is_none());
+        let registry = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
+        assert!(registry.unit_shaper_for().is_none());
+    }
+
+    #[test]
+    fn sole_plugin_requires_exactly_one_registered_plugin() {
+        assert!(LanguageRegistry::new().sole_plugin().is_none());
+        let one = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
+        assert_eq!(one.sole_plugin().unwrap().id(), LanguageId::Cpp);
+        let two = one.register(Box::new(MockPlugin::with_extension("scala", LanguageId::Scala)));
+        assert!(two.sole_plugin().is_none());
     }
 }

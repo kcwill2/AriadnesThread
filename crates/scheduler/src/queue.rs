@@ -142,6 +142,7 @@ mod tests {
                 context_name: "test".to_string(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 
