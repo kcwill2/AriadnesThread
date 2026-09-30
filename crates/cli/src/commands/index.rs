@@ -7,8 +7,8 @@ use ariadne_repo::{Repository, SourceLanguage};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// The `index` command's stdout contract — identical text for the registry
-/// path and the transitional legacy path (byte-identical CLI output).
+/// The `index` command's stdout contract (stable across the registry and
+/// `--lang` filtered paths).
 fn report_index_result(pipeline: &Pipeline, index_result: &IndexResult) {
     println!(
         "Indexed {} translation units",
@@ -43,9 +43,9 @@ fn index_progress_cb(event: &ProgressEvent) {
 /// the unit's language. A language no registered plugin claims is reported
 /// as "unhandled language" (§3.3 fact 3), never silently parsed as C++.
 ///
-/// C++ output is byte-identical to the transitional registry-less path
-/// (closure order, merge order, cache fingerprints), locked by
-/// `m18_parity_interim_test`.
+/// C++ output is byte-identical to the pre-M18 hardcoded walk (closure
+/// order, merge order, cache fingerprints), locked by the m00 goldens and
+/// the vendored oracles in `m18_cpp_plugin_parity_test`.
 pub fn handle_index_with_registry(
     repo_path: &Path,
     registry: Arc<LanguageRegistry>,
@@ -92,22 +92,6 @@ pub fn build_source_index_filtered(
         Arc::new(crate::registry::default_registry()),
         language,
     )
-}
-
-/// Transitional (until the M18.11 final parity suite): the pre-M18.3
-/// registry-less index path, byte-for-byte the old `build_source_index`
-/// body. `m18_parity_interim_test` holds it against
-/// [`handle_index_with_registry`] on both fixtures; delete it when the M18.11
-/// suite (and the `#[deprecated]` shims) replace this seam.
-#[deprecated(
-    note = "pre-M18.3 registry-less path; retained only for interim old-vs-new parity (removed in M18.11)"
-)]
-pub fn build_source_index_legacy_for_parity(repo_path: &PathBuf) -> Result<IndexResult> {
-    let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(index_progress_cb);
-
-    let index_result = pipeline.get_or_build_index()?;
-    report_index_result(&pipeline, &index_result);
-    Ok(index_result)
 }
 
 pub fn get_or_build_reduced_model(

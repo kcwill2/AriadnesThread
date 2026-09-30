@@ -34,8 +34,8 @@ serde_json.workspace = true
 ariadne-ui = { path = "../ui" }
 # M18.3: lang-cpp is referenced only to enumerate `CppPlugin` in
 # src/registry.rs (the single plugin enumeration site); no other CLI code
-# touches a concrete plugin. TODO(M18.11): drop once plugin enumeration is
-# fully registry-external.
+# touches a concrete plugin. Enumeration stays here by design — the core
+# pipeline crates must stay plugin-free (plan §7 rule R2).
 ariadne-lang-cpp = { path = "../lang-cpp" }
 # M18.3: registry.rs is the single plugin enumeration site.
 ariadne-lang = { path = "../lang" }

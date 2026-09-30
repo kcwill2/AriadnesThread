@@ -705,100 +705,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_fixture_basic_defining_file_matches_legacy_owning_file() {
-        let fixture_root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/basic");
-        let mut paths: Vec<PathBuf> = Vec::new();
-        let mut stack = vec![fixture_root.clone()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir).unwrap() {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                if path.is_dir() {
-                    if path.file_name().map(|n| n != "artifacts").unwrap_or(true) {
-                        stack.push(path);
-                    }
-                } else if matches!(
-                    path.extension().and_then(|e| e.to_str()),
-                    Some("h") | Some("hpp") | Some("cpp")
-                ) {
-                    paths.push(path);
-                }
-            }
-        }
-        paths.sort();
-        assert!(!paths.is_empty());
-
-        let mut analyses = Vec::new();
-        for path in &paths {
-            let rel = fixture_relative_path(path, &fixture_root);
-            let source = std::fs::read_to_string(path).unwrap();
-            let file_id = ariadne_repo::FileId::from_relative_path(&rel);
-            analyses.push(ariadne_lang_cpp::CppSemanticAnalyzer::analyze_source(
-                file_id, &source, "test",
-            ));
-        }
-
-        let index = IndexResult::new(fixture_root.clone(), analyses.clone());
-        let reduced = ReducedSemanticModel::reduce(&index);
-
-        // Legacy M5 rule: defining_file was the owning_file of the first
-        // accepted definition, with Class/Struct upgrading a weaker definition.
-        let legacy = legacy_owning_file_projection(&analyses);
-        for (id, rec) in &reduced.symbols {
-            if rec.definition.is_some() {
-                assert_eq!(
-                    rec.defining_file, legacy.get(id).copied(),
-                    "fixture symbol {id:?} defining_file drifted from the legacy owning_file value"
-                );
-            }
-        }
-
-        let thing = reduced.find_symbol("Thing").expect("Thing symbol");
-        assert!(
-            !thing.declaring_files.is_empty(),
-            "fixture symbols must record declaring files"
-        );
-        assert!(thing.declaring_files.windows(2).all(|w| w[0] <= w[1]));
-        let mut deduped = thing.declaring_files.clone();
-        deduped.dedup();
-        assert_eq!(deduped.len(), thing.declaring_files.len());
-
-        let second = ReducedSemanticModel::reduce(&index);
-        assert_eq!(reduced, second, "reduce must stay deterministic");
-    }
-
-    fn fixture_relative_path(path: &std::path::Path, root: &std::path::Path) -> String {
-        path.strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/")
-    }
-
-    fn legacy_owning_file_projection(
-        analyses: &[TuAnalysis],
-    ) -> std::collections::BTreeMap<SymbolId, FileId> {
-        let mut result = std::collections::BTreeMap::new();
-        let mut kinds: std::collections::BTreeMap<SymbolId, SymbolKind> =
-            std::collections::BTreeMap::new();
-        for analysis in analyses {
-            for rec in &analysis.symbols {
-                if rec.definition.is_none() {
-                    continue;
-                }
-                let entry_kind = kinds.get(&rec.id).copied().unwrap_or(rec.kind);
-                let has_def = result.contains_key(&rec.id);
-                let upgradeable = !matches!(entry_kind, SymbolKind::Class | SymbolKind::Struct)
-                    && matches!(rec.kind, SymbolKind::Class | SymbolKind::Struct);
-                if !has_def || upgradeable {
-                    result.insert(rec.id.clone(), rec.owning_file);
-                    kinds.insert(rec.id.clone(), rec.kind);
-                }
-            }
-        }
-        result
-    }
+    // The fixture-based `defining_file`-vs-legacy projection lock moved to
+    // the permanent M18.11 suite (`m18_cpp_plugin_parity::provenance_lock`),
+    // which drives the real analyzer through `ariadne-lang-cpp` — graph must
+    // not depend on a language plugin even in tests (plan §6.3 R1 spirit).
 
     #[test]
     fn test_query_helpers() {

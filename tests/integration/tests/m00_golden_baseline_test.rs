@@ -64,12 +64,13 @@ fn run_fixture_baseline(fixture: &str) -> Result<()> {
 /// discover → build → graph → index → reduce → load → plan, via the exact
 /// `ariadne_cli` handler entry points the m6/m7/m14 suites use. The graph
 /// stage's persisted artifacts are written by the Pipeline when load/plan
-/// rebuild it (the free `build_include_graph` returns the graph in memory).
+/// rebuild it.
 fn run_full_pipeline(repo_path: &Path) -> Result<()> {
     let repo_path_buf = repo_path.to_path_buf();
     ariadne_cli::discover_repository_files(&repo_path_buf)?;
     ariadne_cli::discover_build_contexts(&repo_path_buf)?;
-    ariadne_cli::build_include_graph(repo_path)?;
+    let mut pipeline = ariadne_pipeline::Pipeline::new(repo_path, None)?;
+    pipeline.get_or_build_include_graph()?;
     ariadne_cli::build_source_index(&repo_path_buf)?;
     ariadne_cli::get_or_build_reduced_model(&repo_path_buf)?;
     ariadne_cli::analyze_dependency_load(&repo_path_buf, None, None)?;

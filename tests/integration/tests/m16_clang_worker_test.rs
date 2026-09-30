@@ -1,18 +1,19 @@
 use ariadne_build::{CompileCommand, TranslationUnit};
+use ariadne_lang::LanguageRegistry;
 use ariadne_repo::FileId;
-// Transitional: this suite compares against the deprecated default backend
-// until it is removed in M18.11 (engine.rs:22 pattern).
-#[allow(deprecated)]
-use ariadne_scheduler::{
-    ClangWorkerBackend, DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerPool,
-    WorkerPoolConfig,
-};
+use ariadne_scheduler::{PrioritizedTuQueue, SharedPluginWorkerBackend, TuTask, WorkerPool,
+    WorkerPoolConfig};
+use ariadne_lang_cpp::ClangWorkerBackend;
 /// m16 — ClangWorkerBackend Integration Test
 ///
 /// Verifies that ClangWorkerBackend gracefully degrades to the built-in
 /// CppSemanticAnalyzer when the `clang-worker` binary / Clang is not available,
 /// and that WorkerPool still produces valid TuAnalysis results.
 use std::path::PathBuf;
+
+fn cpp_registry() -> LanguageRegistry {
+    LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new()))
+}
 
 fn make_tu(path: &str) -> TranslationUnit {
     TranslationUnit {
@@ -67,9 +68,8 @@ async fn test_clang_worker_backend_fallback_succeeds() {
     assert_eq!(analyses.len(), 1, "Expected exactly one analysis result");
 }
 
-/// ClangWorkerBackend and DefaultWorkerBackend both produce non-None analyses for the same TU.
+/// ClangWorkerBackend and the registry plugin backend both produce non-None analyses for the same TU.
 #[tokio::test]
-#[allow(deprecated)]
 async fn test_clang_and_default_backends_produce_consistent_results() {
     let root = fixture_root();
 
@@ -93,7 +93,10 @@ async fn test_clang_and_default_backends_produce_consistent_results() {
         context: None,
     }];
     let mut queue_default = PrioritizedTuQueue::new(tasks_default);
-    let pool_default = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
+    let pool_default = WorkerPool::new(
+        SharedPluginWorkerBackend::new(std::sync::Arc::new(cpp_registry())),
+        WorkerPoolConfig::default(),
+    );
     let default_results = pool_default
         .run_worker_pool(&root, &mut queue_default)
         .await

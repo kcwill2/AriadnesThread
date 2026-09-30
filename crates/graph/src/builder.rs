@@ -1,9 +1,9 @@
 use anyhow::Result;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{IncludeClosure, IncludeGraph, IncludeReport};
+use crate::IncludeGraph;
 use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_build::BuildDiscoverer;
 use ariadne_lang::{
@@ -12,51 +12,20 @@ use ariadne_lang::{
 };
 use ariadne_repo::{FileId, FileOwnership, Repository, SourceLanguage};
 
-/// Transitional registry-less entry point (plan M18.5): identical signature
-/// and output to the pre-M18 BFS, now delegating through the registry-driven
-/// [`build_dependency_graph`] with the same C++ capability set the CLI
-/// boundary registers via `ariadne_cli::registry::default_registry`.
-/// TODO(M18.11): remove with the `#[deprecated]` shims once every caller
-/// passes a registry explicitly — building a plugin set here is language
-/// injection inside `graph`, grandfathered only for this milestone.
-pub fn build_include_graph(
-    repo_path: &Path,
-) -> Result<(
-    Repository,
-    IncludeGraph,
-    HashMap<FileId, IncludeClosure>,
-    IncludeReport,
-)> {
-    let registry = transitional_cpp_registry();
-    let repository = Repository::locate(repo_path)?;
-    let graph = dependency_graph(&repository, &registry)?;
-    let closures = graph.compute_closures();
-    let report = graph.generate_report();
-    Ok((repository, graph, closures, report))
-}
-
 /// Registry-driven dependency graph (plan M18.5): the BFS walks each file's
 /// directives through the [`ariadne_lang::DependencyResolver`] of the plugin
 /// the registry detects for that file, with per-unit shaping and search-path
 /// context supplied by the registry as well. With no plugin registered the
 /// walk honestly yields an edgeless graph (no units to seed it) — never a
 /// silently-C++-parsed one (§3.3 fact 3). C++ output is byte-identical to
-/// the transitional [`build_include_graph`] (locked by
-/// `m18_graph_parity_test`).
+/// the pre-M18 BFS (locked by the vendored oracles in
+/// `m18_cpp_plugin_parity_test` and the `m00` include-graph goldens).
 pub fn build_dependency_graph(
     repo_path: &Path,
     registry: &LanguageRegistry,
 ) -> Result<IncludeGraph> {
     let repository = Repository::locate(repo_path)?;
     dependency_graph(&repository, registry)
-}
-
-/// The one grandfathered `lang-cpp` edge in `graph` production code: the
-/// registry-less [`build_include_graph`] entry point needs *a* plugin set,
-/// and today's C++-only callers expect the C++ one.
-/// TODO(M18.11): delete with the transitional shims.
-fn transitional_cpp_registry() -> LanguageRegistry {
-    LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new()))
 }
 
 /// The language-neutral BFS: register every discovered file as a node, seed

@@ -71,6 +71,68 @@ impl FileKind {
     }
 }
 
+/// E-I9 (plan 1790521470000): needs-sets carry includable headers only —
+/// `.h`/`.hpp`/`.hxx`, case-sensitive, mirroring the ui node-kind detection
+/// in `dto.rs`. `.ipp`/`.inl` template-impl files are deliberately OUT for
+/// now: whether they belong in the includable set is a future question, not
+/// today's. Paths without a final component (e.g. `..`, empty) are never
+/// includable.
+///
+/// The file-name taxonomy lives in `ariadne-repo` (plan §6.3 rule R2 keeps
+/// suffix knowledge out of the core pipeline crates); `graph` re-exports
+/// this predicate for its load-justification consumers.
+pub fn is_includable_header(path: &Path) -> bool {
+    match path.file_name() {
+        Some(name) => {
+            let name = name.to_string_lossy();
+            name.ends_with(".h") || name.ends_with(".hpp") || name.ends_with(".hxx")
+        }
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod includable_header_tests {
+    use super::is_includable_header;
+    use std::path::Path;
+
+    #[test]
+    fn test_is_includable_header_predicate() {
+        let cases: Vec<(&str, bool)> = vec![
+            ("a.h", true),
+            ("a.hpp", true),
+            ("a.hxx", true),
+            ("inc/util.h", true),
+            // Final component ends in .h, so this IS a header regardless of the
+            // embedded .cpp: e.g. a hand-written header living beside worker.cpp.
+            ("x.cpp.h", true),
+            // Decision, documented here: a file literally named ".h" is treated
+            // as a header — the predicate is ends_with on the file name (same
+            // rule as the dto.rs node-kind check), and ".h" satisfies it.
+            (".h", true),
+            ("a.cc", false),
+            ("a.cpp", false),
+            ("a.c", false),
+            // Template-impl files are deliberately OUT for now — future question.
+            ("a.ipp", false),
+            ("a.inl", false),
+            // Case-sensitive, matching dto.rs kind detection.
+            ("a.H", false),
+            ("a.txt", false),
+            // No final component at all: not includable.
+            ("..", false),
+            ("", false),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(
+                is_includable_header(Path::new(name)),
+                expected,
+                "is_includable_header({name:?})"
+            );
+        }
+    }
+}
+
 /// The programming language associated with a file.
 ///
 /// Derived `Ord` gives a stable order for report grouping; `#[default] Cpp`

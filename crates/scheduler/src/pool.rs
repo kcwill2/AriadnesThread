@@ -407,10 +407,7 @@ mod fake_process_tests {
 mod tests {
     use super::*;
     use crate::queue::TuTask;
-    #[allow(deprecated)]
-    use crate::worker::DefaultWorkerBackend;
     use ariadne_build::{CompileCommand, TranslationUnit};
-    use ariadne_index::CppSemanticAnalyzer;
     use ariadne_repo::FileId;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicUsize;
@@ -432,6 +429,16 @@ mod tests {
         }
     }
 
+    /// Minimal successful analysis: the pool mechanics under test (queueing,
+    /// retries, memory tracking) do not depend on real parsing.
+    fn empty_analysis(task: &TuTask) -> TuAnalysis {
+        TuAnalysis {
+            tu_file_id: task.tu.file_id.clone(),
+            context_name: task.tu.context_name.clone(),
+            ..Default::default()
+        }
+    }
+
     struct FlakyBackend {
         attempts: AtomicUsize,
     }
@@ -442,11 +449,7 @@ mod tests {
             if task.task_id == 1 && attempt == 0 {
                 return Err(anyhow!("Transient worker failure"));
             }
-            Ok(CppSemanticAnalyzer::analyze_source(
-                task.tu.file_id.clone(),
-                "class Foo {};",
-                &task.tu.context_name,
-            ))
+            Ok(empty_analysis(task))
         }
     }
 
@@ -458,8 +461,15 @@ mod tests {
         }
     }
 
+    struct StaticBackend;
+
+    impl WorkerBackend for StaticBackend {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+            Ok(empty_analysis(task))
+        }
+    }
+
     #[tokio::test]
-    #[allow(deprecated)]
     async fn test_worker_pool_success() {
         let tus = vec![
             TuTask {
@@ -483,7 +493,7 @@ mod tests {
         ];
         let mut queue = PrioritizedTuQueue::new(tus);
         let pool = WorkerPool::new(
-            DefaultWorkerBackend,
+            StaticBackend,
             WorkerPoolConfig {
                 num_workers: 2,
                 ..Default::default()
@@ -555,7 +565,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(deprecated)]
     async fn test_worker_pool_memory_tracking() {
         let tus = vec![TuTask {
             task_id: 1,
@@ -564,7 +573,7 @@ mod tests {
             context: None,
         }];
         let mut queue = PrioritizedTuQueue::new(tus);
-        let pool = WorkerPool::new(DefaultWorkerBackend, WorkerPoolConfig::default());
+        let pool = WorkerPool::new(StaticBackend, WorkerPoolConfig::default());
         let temp_dir = tempfile::tempdir().unwrap();
         let _ = pool
             .run_worker_pool(temp_dir.path(), &mut queue)

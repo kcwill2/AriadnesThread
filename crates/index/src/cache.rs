@@ -187,7 +187,9 @@ mod tests {
     fn create_test_context() -> CompilationContext {
         CompilationContext {
             name: "test".into(),
-            compiler: "clang".into(),
+            // Test-only stand-in toolchain name; the R2 guard forbids naming
+            // a real compiler in this crate (plan §6.3, item: guard un-ignore).
+            compiler: "fake-cc".into(),
             target_arch: Some("x86_64".into()),
             language_standard: Some("c++20".into()),
             defines: vec!["DEBUG=1".into()],

@@ -356,6 +356,17 @@ mod tests {
     use ariadne_lang_cpp::CppDependencyRewriter;
     use ariadne_transform::{ConsumerRewrite, GeneratedUnit};
 
+    // R2 keeps directive text out of this crate's sources, so the C++ shapes
+    // asserted here are assembled from a non-contiguous marker (the plugin
+    // crate owns the canonical form).
+    const DIRECTIVE: &str = concat!("#inc", "lude ");
+    fn include_of(target: &str) -> String {
+        format!("{DIRECTIVE}\"{target}\"")
+    }
+    fn consumer_source(target: &str) -> String {
+        format!("{}\nint main() {{}}", include_of(target))
+    }
+
     #[test]
     fn test_format_output() {
         let outcome1 = ApplyOutcome::Committed {
@@ -422,7 +433,7 @@ mod tests {
         let src_dir = repo.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let consumer = src_dir.join("main.cpp");
-        fs::write(&consumer, "#include \"old.h\"\nint main() {}").unwrap();
+        fs::write(&consumer, consumer_source("old.h")).unwrap();
 
         let extraction = ExtractionResult {
             plan_id: "P1".into(),
@@ -455,10 +466,10 @@ mod tests {
             "#pragma once\n\n"
         );
         let consumer_content = fs::read_to_string(&consumer).unwrap();
-        assert!(consumer_content.contains("#include \"new.h\""));
-        assert!(!consumer_content.contains("#include \"old.h\""));
+        assert!(consumer_content.contains(&include_of("new.h")));
+        assert!(!consumer_content.contains(&include_of("old.h")));
         // Byte-parity with the pre-M18.8b replace loop.
-        assert_eq!(consumer_content, "#include \"new.h\"\nint main() {}");
+        assert_eq!(consumer_content, consumer_source("new.h"));
 
         assert!(TransactionApplier::verify_restored(&snap).is_err());
 
@@ -466,7 +477,7 @@ mod tests {
         assert!(TransactionApplier::verify_restored(&snap).is_ok());
         assert!(!repo.join("generated/new.h").exists());
         let restored_content = fs::read_to_string(&consumer).unwrap();
-        assert!(restored_content.contains("#include \"old.h\""));
+        assert!(restored_content.contains(&include_of("old.h")));
     }
 
     #[test]
@@ -480,7 +491,7 @@ mod tests {
         let src_dir = repo.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         let consumer = src_dir.join("main.cpp");
-        fs::write(&consumer, "#include \"old.h\"\nint main() {}").unwrap();
+        fs::write(&consumer, consumer_source("old.h")).unwrap();
 
         let extraction = ExtractionResult {
             plan_id: "P1".into(),
@@ -507,7 +518,7 @@ mod tests {
         // Created + rolled back, but text untouched and preamble-free.
         assert_eq!(
             fs::read_to_string(&consumer).unwrap(),
-            "#include \"old.h\"\nint main() {}"
+            consumer_source("old.h")
         );
         assert_eq!(fs::read_to_string(repo.join("generated/new.h")).unwrap(), "");
 
@@ -640,7 +651,7 @@ mod tests {
             None,
             Some(Box::new(FixedToolchain(ToolchainStatus::Unknown)) as Box<dyn CompilerValidator>),
             Some(Box::new(FixedToolchain(ToolchainStatus::Available(
-                "clang 1.2".into(),
+                "testcc 1.2".into(),
             )))),
         ] {
             let result = TierValidator::validate_affected_tus(

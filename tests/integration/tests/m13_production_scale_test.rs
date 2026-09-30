@@ -7,12 +7,11 @@ use tempfile::TempDir;
 
 use ariadne_build::TranslationUnit;
 use ariadne_cli::run_production_scale_analysis;
+use ariadne_lang::LanguageRegistry;
 use ariadne_repo::FileId;
-// Transitional: the failure-recovery test exercises the deprecated default
-// backend as a worker; removed with the shim in M18.11 (engine.rs:22 pattern).
-#[allow(deprecated)]
 use ariadne_scheduler::{
-    DefaultWorkerBackend, PrioritizedTuQueue, TuTask, WorkerBackend, WorkerPool, WorkerPoolConfig,
+    PrioritizedTuQueue, SharedPluginWorkerBackend, TuTask, WorkerBackend, WorkerPool,
+    WorkerPoolConfig,
 };
 
 fn setup_production_fixture() -> TempDir {
@@ -115,10 +114,10 @@ fn test_m13_determinism_workers_comparison() {
 async fn test_m13_failure_recovery() {
     struct FaultyWorkerBackend {
         attempts: Arc<AtomicUsize>,
+        fallback: SharedPluginWorkerBackend,
     }
 
     impl WorkerBackend for FaultyWorkerBackend {
-        #[allow(deprecated)]
         fn analyze_task(
             &self,
             task: &TuTask,
@@ -129,7 +128,7 @@ async fn test_m13_failure_recovery() {
             if task.task_id == 1 && attempt == 0 {
                 return Err(anyhow!("Simulated worker crash"));
             }
-            DefaultWorkerBackend.analyze_task(task, repo_root)
+            self.fallback.analyze_task(task, repo_root)
         }
     }
 
@@ -157,8 +156,12 @@ async fn test_m13_failure_recovery() {
     };
 
     let mut queue = PrioritizedTuQueue::new(vec![t1]);
+    let cpp_registry = Arc::new(
+        LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new())),
+    );
     let backend = FaultyWorkerBackend {
         attempts: Arc::new(AtomicUsize::new(0)),
+        fallback: SharedPluginWorkerBackend::new(cpp_registry),
     };
     let pool = WorkerPool::new(
         backend,

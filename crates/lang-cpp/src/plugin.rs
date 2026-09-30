@@ -19,12 +19,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Single source of truth (plan §3.5 cache row, M18.10) for the C++
-/// `plugin_fingerprint` ingredient of `TuCacheFingerprint`: both the
-/// registry-driven walk (via [`CppPlugin::analysis_fingerprint`]) and the
-/// transitional legacy shim walk (re-exported through `ariadne-index`)
-/// feed this exact value, which keeps `m18_parity_interim_test`'s
-/// cross-walk shard equality intact. Bump whenever tokenizer/`ParserCtx`/
-/// analyzer behaviour changes (same rule as `analysis_fingerprint`).
+/// `plugin_fingerprint` ingredient of `TuCacheFingerprint`: every registry
+/// walk feeds [`CppPlugin::analysis_fingerprint`], which returns this value.
+/// Bump whenever tokenizer/`ParserCtx`/analyzer behaviour changes (same rule
+/// as `analysis_fingerprint`).
 pub const CPP_ANALYSIS_FINGERPRINT: &str = "cpp-analyzer-1";
 
 /// Classifies C/C++ sources and headers by extension.

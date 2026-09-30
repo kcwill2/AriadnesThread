@@ -1,4 +1,5 @@
-use ariadne_index::{CppSemanticAnalyzer, TuAnalysis};
+use ariadne_index::TuAnalysis;
+use ariadne_lang_cpp::CppSemanticAnalyzer;
 use ariadne_repo::FileId;
 use clap::Parser;
 use serde::{Deserialize, Serialize};

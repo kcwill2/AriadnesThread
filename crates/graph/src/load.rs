@@ -15,21 +15,12 @@ fn path_basename(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
-/// E-I9 (plan 1790521470000): needs-sets carry includable headers only —
-/// `.h`/`.hpp`/`.hxx`, case-sensitive, mirroring the ui node-kind detection
-/// in `dto.rs`. `.ipp`/`.inl` template-impl files are deliberately OUT for
-/// now: whether they belong in the includable set is a future question, not
-/// today's. Paths without a final component (e.g. `..`, empty) are never
-/// includable.
-pub fn is_includable_header(path: &Path) -> bool {
-    match path.file_name() {
-        Some(name) => {
-            let name = name.to_string_lossy();
-            name.ends_with(".h") || name.ends_with(".hpp") || name.ends_with(".hxx")
-        }
-        None => false,
-    }
-}
+/// E-I9 (plan 1790521470000): needs-sets carry includable headers only. The
+/// suffix predicate itself lives in `ariadne-repo::types` (plan §6.3 rule R2
+/// keeps header-suffix taxonomy out of the core pipeline crates); this
+/// re-export keeps `ariadne_graph::is_includable_header` (ui dto.rs, load
+/// justification) as the stable consumer path.
+pub use ariadne_repo::is_includable_header;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributingSource {

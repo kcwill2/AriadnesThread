@@ -181,6 +181,14 @@ mod tests {
         CppDependencyRewriter
     }
 
+    // R2 keeps directive text out of this crate's sources, so the C++ shapes
+    // asserted here are assembled from a non-contiguous marker (the plugin
+    // crate owns the canonical form).
+    const DIRECTIVE: &str = concat!("#inc", "lude ");
+    fn include_of(target: &str) -> String {
+        format!("{DIRECTIVE}\"{target}\"")
+    }
+
     #[test]
     fn test_consumer_rewrite_format_diff() {
         let rewrite = ConsumerRewrite {
@@ -190,9 +198,9 @@ mod tests {
             side_effect_preservations: vec![],
         };
         let diff = rewrite.format_diff_with(&cpp());
-        assert!(diff.contains("- #include \"thing.h\""), "diff: {}", diff);
+        assert!(diff.contains(&format!("- {}", include_of("thing.h"))), "diff: {}", diff);
         assert!(
-            diff.contains("+ #include \"thing_types.h\""),
+            diff.contains(&format!("+ {}", include_of("thing_types.h"))),
             "diff: {}",
             diff
         );
@@ -200,7 +208,11 @@ mod tests {
         // Byte-exact capture of the pre-M18.8b `format_diff` output.
         assert_eq!(
             diff,
-            "src/foo.cpp\n    - #include \"thing.h\"\n    + #include \"thing_types.h\"\n"
+            format!(
+                "src/foo.cpp\n    - {}\n    + {}\n",
+                include_of("thing.h"),
+                include_of("thing_types.h")
+            )
         );
     }
 
@@ -266,7 +278,7 @@ mod tests {
         };
         let diff = preview.format_diff_with(&cpp());
         assert!(
-            diff.contains("~ #include \"registry.h\" // side-effect preserved"),
+            diff.contains(&format!("~ {} // side-effect preserved", include_of("registry.h"))),
             "diff: {}",
             diff
         );

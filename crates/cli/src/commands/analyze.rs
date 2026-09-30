@@ -45,11 +45,12 @@ pub fn run_incremental_analysis_filtered(
     let plugin = registry
         .sole_plugin()
         .ok_or_else(|| anyhow!("incremental indexing needs exactly one registered language plugin (multi-language lands in M19)"))?;
-    let mut analyzer =
-        ariadne_scheduler::IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-            .with_analyzer(plugin.analyzer())
-            .with_resolver(plugin.resolver())
-            .with_plugin_identity(plugin.id(), plugin.analysis_fingerprint());
+    let mut analyzer = ariadne_scheduler::IncrementalAnalyzer::new(
+        &repo,
+        &repo_discovery,
+        &build_discovery,
+        plugin,
+    );
     let result = analyzer.analyze()?;
     if authoritative {
         result.save_artifacts(&repo)?;

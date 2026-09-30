@@ -4,9 +4,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use ariadne_cli::{
-    analyze_dependency_load, build_include_graph, build_source_index, get_or_build_reduced_model,
+    analyze_dependency_load, build_source_index, get_or_build_reduced_model,
 };
 use ariadne_graph::{LoadAnalyzer, ReducedSemanticModel};
+use ariadne_pipeline::Pipeline;
 use ariadne_report::ArtifactManager;
 
 /// The real reduced-stage fingerprint, matching every other writer of this
@@ -47,7 +48,10 @@ fn test_m6_symbol_load_and_collateral_quantification() -> Result<()> {
     let reduced_fp = reduced_fingerprint(&repo_path)?;
     artifacts.save_reduced_artifacts(&model, &reduced_fp)?;
 
-    let (_, graph, _closures, _report) = build_include_graph(&repo_path)?;
+    let graph = {
+        let mut pipeline = Pipeline::new(&repo_path, None)?;
+        pipeline.get_or_build_include_graph()?.0
+    };
     let analyzer = LoadAnalyzer::new(&graph, &model);
     let metric = analyzer.analyze_symbol_load("Thing")?;
 
@@ -80,7 +84,10 @@ fn test_m6_symbol_load_and_collateral_quantification() -> Result<()> {
 fn test_m6_explain_provenance() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
 
-    let (_, graph, _closures, _report) = build_include_graph(&repo_path)?;
+    let graph = {
+        let mut pipeline = Pipeline::new(&repo_path, None)?;
+        pipeline.get_or_build_include_graph()?.0
+    };
     let (_, model) = get_or_build_reduced_model(&repo_path)?;
     let analyzer = LoadAnalyzer::new(&graph, &model);
 
@@ -104,7 +111,10 @@ fn test_m6_explain_provenance() -> Result<()> {
 fn test_m6_file_load_analysis() -> Result<()> {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/basic");
 
-    let (_, graph, _closures, _report) = build_include_graph(&repo_path)?;
+    let graph = {
+        let mut pipeline = Pipeline::new(&repo_path, None)?;
+        pipeline.get_or_build_include_graph()?.0
+    };
     let (_, model) = get_or_build_reduced_model(&repo_path)?;
     let analyzer = LoadAnalyzer::new(&graph, &model);
 

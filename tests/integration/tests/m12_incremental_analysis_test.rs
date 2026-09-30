@@ -184,15 +184,18 @@ fn test_m12_incremental_analysis_version_mismatch() {
     let repo_discovery = repo.discover().unwrap();
     let build_discovery = BuildDiscoverer::new(root).discover().unwrap();
 
-    let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery);
+    let cpp_plugin = ariadne_lang_cpp::CppPlugin::new();
+    let mut analyzer1 =
+        IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery, &cpp_plugin);
     let result1 = analyzer1.analyze().unwrap();
     result1.save_artifacts(&repo).unwrap();
 
     // Second run with a version distinct from CURRENT_ANALYSIS_VERSION
     // ("2.0.0" since the M18.10 epoch bump, so the old sentinel value is
     // stale here — any never-current version keeps the mismatch semantics).
-    let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-        .with_analysis_version("9.9.9");
+    let mut analyzer2 =
+        IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery, &cpp_plugin)
+            .with_analysis_version("9.9.9");
     let result2 = analyzer2.analyze().unwrap();
 
     assert_eq!(result2.stats.reused_tus, 0);

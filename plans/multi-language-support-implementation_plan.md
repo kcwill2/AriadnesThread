@@ -536,26 +536,26 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 ## 9. Implementation order (todo list)
 
 **M17 — API seam**
-- [ ] M17.0 Capture golden artifacts for `tests/fixtures/basic` + `tests/fixtures/expensive` (`m00_golden_baseline_test.rs`, `tests/golden/`)
-- [ ] M17.1 Create `crates/lang-api`; move the 11 value types out of `crates/index/src/types.rs` (`IndexResult` stays); `index` re-exports them
-- [ ] M17.2 Add `identity.rs` (`SourceLanguage` alias + `language_of_file_kind`), `modeling.rs`, `capability.rs`, `unit.rs`, `catalog.rs` + unit tests; additive `repo` edits (`SourceLanguage` derives `PartialOrd, Ord, Default`, `FileRecord.language`)
-- [ ] M17.3 Flip `crates/lang/Cargo.toml` from `ariadne-index` to `ariadne-lang-api`; add `unit.rs` (`UnitShaper`)
-- [ ] M17.4 Extend `LanguagePlugin` (`id`, `modeling`, `capabilities`, `analysis_fingerprint`, `shaper`) + registry lookups (`plugin_for_id`, `languages`, `detect_language`) + tests
-- [ ] M17.5 Add `DependencyResolver::resolve_target`, `FileCatalog`, `ResolveOutcome`, `CompilerValidator::toolchain_status`, `ToolchainStatus`
-- [ ] M17.6 `m17_plugin_seam_test.rs` incl. architecture guards → `cargo test --workspace` green, golden diff empty
+- [x] M17.0 Capture golden artifacts for `tests/fixtures/basic` + `tests/fixtures/expensive` (`m00_golden_baseline_test.rs`, `tests/golden/`)
+- [x] M17.1 Create `crates/lang-api`; move the 11 value types out of `crates/index/src/types.rs` (`IndexResult` stays); `index` re-exports them
+- [x] M17.2 Add `identity.rs` (`SourceLanguage` alias + `language_of_file_kind`), `modeling.rs`, `capability.rs`, `unit.rs`, `catalog.rs` + unit tests; additive `repo` edits (`SourceLanguage` derives `PartialOrd, Ord, Default`, `FileRecord.language`)
+- [x] M17.3 Flip `crates/lang/Cargo.toml` from `ariadne-index` to `ariadne-lang-api`; add `unit.rs` (`UnitShaper`)
+- [x] M17.4 Extend `LanguagePlugin` (`id`, `modeling`, `capabilities`, `analysis_fingerprint`, `shaper`) + registry lookups (`plugin_for_id`, `languages`, `detect_language`) + tests
+- [x] M17.5 Add `DependencyResolver::resolve_target`, `FileCatalog`, `ResolveOutcome`, `CompilerValidator::toolchain_status`, `ToolchainStatus`
+- [x] M17.6 `m17_plugin_seam_test.rs` incl. architecture guards → `cargo test --workspace` green, golden diff empty
 
 **M18 — C++ becomes a plugin**
-- [ ] M18.1 Create `crates/lang-cpp`; move `crates/graph/src/resolver.rs` (`parse_include_directives`, `IncludeResolver`) → `directive_parser.rs` / `resolver.rs` (`CppDependencyResolver`, `CppUnitShaper`); `#[deprecated]` shims in `graph`
-- [ ] M18.2 Move `CppSemanticAnalyzer` (tokenizer + `ParserCtx`) from `crates/index/src/analyzer.rs` → `lang-cpp/src/analyzer.rs` with the `lang::SemanticAnalyzer` adapter impl; `index` re-exports; move `ClangWorkerBackend` out of `crates/scheduler/src/worker.rs`
-- [ ] M18.3 `crates/cli/src/registry.rs::default_registry()` + registry-aware `handle_index_with_registry` / `build_dependency_graph` variants + `--lang` flag
-- [ ] M18.4 Inject `UnitShaper` into `BuildDiscoverer`; move the `"cl.exe"` / `cpp|cc|cxx|c` / `Default|x64` literals from `infer_default_discovery` into `lang-cpp::CppUnitShaper`
-- [ ] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs` — MUST reconcile documented divergences from M18.2 review: legacy closure includes ThirdParty headers while plugin walk drops `ResolveOutcome::External`; `PluginWorkerBackend` context path must not run hardcoded-C++ `analyze_tu_full` for non-C++ languages; angle style/include-dir fallback unmodeled in `ResolveOutcome`
-- [ ] M18.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
-- [ ] M18.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
-- [ ] M18.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies
-- [ ] M18.9 `reduced.rs` provenance fix (§3.6.1): `DeclId→FileId` map from `tu.declarations`, true `defining_file` (fallback `owning_file`), add `declaring_files`; epoch bump invalidates the bincode `symbols.bin`
-- [ ] M18.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
-- [ ] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
+- [x] M18.1 Create `crates/lang-cpp`; move `crates/graph/src/resolver.rs` (`parse_include_directives`, `IncludeResolver`) → `directive_parser.rs` / `resolver.rs` (`CppDependencyResolver`, `CppUnitShaper`); `#[deprecated]` shims in `graph`
+- [x] M18.2 Move `CppSemanticAnalyzer` (tokenizer + `ParserCtx`) from `crates/index/src/analyzer.rs` → `lang-cpp/src/analyzer.rs` with the `lang::SemanticAnalyzer` adapter impl; `index` re-exports; move `ClangWorkerBackend` out of `crates/scheduler/src/worker.rs`
+- [x] M18.3 `crates/cli/src/registry.rs::default_registry()` + registry-aware `handle_index_with_registry` / `build_dependency_graph` variants + `--lang` flag
+- [x] M18.4 Inject `UnitShaper` into `BuildDiscoverer`; move the `"cl.exe"` / `cpp|cc|cxx|c` / `Default|x64` literals from `infer_default_discovery` into `lang-cpp::CppUnitShaper`
+- [x] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs` — MUST reconcile documented divergences from M18.2 review: legacy closure includes ThirdParty headers while plugin walk drops `ResolveOutcome::External`; `PluginWorkerBackend` context path must not run hardcoded-C++ `analyze_tu_full` for non-C++ languages; angle style/include-dir fallback unmodeled in `ResolveOutcome`
+- [x] M18.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
+- [x] M18.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
+- [x] M18.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies
+- [x] M18.9 `reduced.rs` provenance fix (§3.6.1): `DeclId→FileId` map from `tu.declarations`, true `defining_file` (fallback `owning_file`), add `declaring_files`; epoch bump invalidates the bincode `symbols.bin`
+- [x] M18.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
+- [x] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
 
 **M19–M22 — Scala analysis slice**
 - [ ] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members

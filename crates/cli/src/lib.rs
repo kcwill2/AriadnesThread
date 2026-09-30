@@ -13,8 +13,6 @@ pub use commands::transform::*;
 pub use commands::ui::*;
 pub use optimize::*;
 
-pub use ariadne_graph::build_include_graph;
-
 use anyhow::{bail, Result};
 use ariadne_repo::SourceLanguage;
 use clap::{Parser, Subcommand};

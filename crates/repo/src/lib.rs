@@ -7,8 +7,8 @@ pub mod types;
 pub use discovery::{build_discovery_result, compute_file_hash, discover_repository_files};
 pub use policy::classify_ownership_and_policy;
 pub use types::{
-    FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, RepositoryDiscoveryResult,
-    SourceLanguage,
+    is_includable_header, FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
+    RepositoryDiscoveryResult, SourceLanguage,
 };
 
 use anyhow::{Context, Result};

@@ -1,11 +1,11 @@
 //! C++ include search-path resolver (plan M18.1: relocated verbatim from
-//! `crates/graph/src/resolver.rs`).
+//! the former `crates/graph/src/resolver.rs`).
 //!
 //! Two surfaces live here:
 //!
-//! * [`IncludeResolver`] — the transitional, byte-identical public API kept so
-//!   existing call sites compile unchanged through the `#[deprecated]`
-//!   `ariadne-graph` re-export (removed in M18.11).
+//! * [`IncludeResolver`] — the byte-identical pre-M18 public API (driven by
+//!   the vendored oracles in `m18_cpp_plugin_parity_test`; the deprecated
+//!   `ariadne-graph` re-export that used to front it was removed in M18.11).
 //! * [`CppDependencyResolver`] — the stateless plugin implementation of
 //!   `ariadne_lang::DependencyResolver` (`resolve_edges` = parse,
 //!   `resolve_target` = the same include-directory search logic driven

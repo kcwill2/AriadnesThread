@@ -8,19 +8,17 @@ use std::time::{Duration, Instant};
 use ariadne_build::{BuildDiscoveryResult, TranslationUnit};
 use ariadne_graph::ReducedSemanticModel;
 use ariadne_index::{IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
+use ariadne_lang::{LanguagePlugin, LanguageRegistry};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::pool::{WorkerPool, WorkerPoolConfig};
 use crate::queue::PrioritizedTuQueue;
 use crate::shard::ShardedReducer;
 use crate::tu_store::{
-    compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint, TuStoreContext,
+    compute_tu_closure_plugin, load_shard, save_shard, shard_dir, ShardCheckpoint,
+    TuStoreContext,
 };
-// Transitional: the no-backend default keeps the deprecated C++ backend
-// until M18.11; registry-backed callers inject `SharedPluginWorkerBackend`.
-#[allow(deprecated)]
-use crate::worker::DefaultWorkerBackend;
-use crate::worker::WorkerBackend;
+use crate::worker::{SharedPluginWorkerBackend, WorkerBackend};
 
 #[derive(Debug, Clone)]
 pub struct ProductionAnalysisStats {
@@ -89,12 +87,15 @@ struct ShardPrepass {
 }
 
 /// Check for existing checkpointed shards; a shard is reused only when its
-/// envelope fingerprint still matches the code on disk.
+/// envelope fingerprint still matches the code on disk. The closure walk runs
+/// through the unit's language plugin (M18.11: the registry path is the only
+/// path), so shard fingerprints match what the plugin workers re-stamp.
 fn shard_prepass(
     translation_units: &[TranslationUnit],
     repo_root: &Path,
     store_ctx: &TuStoreContext,
     checkpoint_dir: &Path,
+    registry: &LanguageRegistry,
 ) -> Result<ShardPrepass> {
     let mut prepass = ShardPrepass {
         reused_analyses: Vec::new(),
@@ -102,7 +103,16 @@ fn shard_prepass(
         pending_fingerprints: HashMap::new(),
     };
     for tu in translation_units {
-        let closure = compute_tu_closure(tu, repo_root, store_ctx, CURRENT_ANALYSIS_VERSION)?;
+        let plugin = plugin_for_tu(registry, tu)?;
+        let closure = compute_tu_closure_plugin(
+            tu,
+            repo_root,
+            store_ctx,
+            CURRENT_ANALYSIS_VERSION,
+            plugin.resolver(),
+            plugin.id(),
+            &plugin.analysis_fingerprint(),
+        )?;
         let fp = closure.fingerprint.combined_hash.clone();
         if let Some(shard) = load_shard(checkpoint_dir, tu.file_id) {
             if shard.fingerprint == fp {
@@ -116,6 +126,23 @@ fn shard_prepass(
     Ok(prepass)
 }
 
+/// The plugin that owns a unit's language; an unclaimed path is a clear
+/// "unhandled language" error (§3.3 fact 3), never a silent C++ analysis.
+fn plugin_for_tu<'a>(
+    registry: &'a LanguageRegistry,
+    tu: &TranslationUnit,
+) -> Result<&'a dyn LanguagePlugin> {
+    let language = registry.detect_language(&tu.source_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unhandled language for {} (no registered plugin claims it)",
+            tu.source_path.display()
+        )
+    })?;
+    registry
+        .plugin_for_id(language)
+        .ok_or_else(|| anyhow::anyhow!("language plugin not registered: {language:?}"))
+}
+
 pub struct ProductionAnalyzer<'a> {
     pub repo: &'a Repository,
     pub repo_discovery: &'a RepositoryDiscoveryResult,
@@ -123,10 +150,13 @@ pub struct ProductionAnalyzer<'a> {
     pub num_workers: usize,
     pub num_reducers: usize,
     pub checkpoint_dir: Option<PathBuf>,
-    /// M18.3: worker backend selected by the caller (a registry-backed
-    /// `SharedPluginWorkerBackend`); `None` keeps the deprecated
-    /// `DefaultWorkerBackend` until M18.11.
+    /// M18.3/M18.11: worker backend selected by the caller; when unset the
+    /// pool runs a [`SharedPluginWorkerBackend`] over the injected registry.
     backend: Option<Arc<dyn WorkerBackend>>,
+    /// M18.11: the language registry whose plugins own every unit's closure
+    /// walk, fingerprint, and analysis. Required (the pre-M11 hardcoded-C++
+    /// default is removed); `analyze` errors when nothing was injected.
+    registry: Option<Arc<LanguageRegistry>>,
 }
 
 impl<'a> ProductionAnalyzer<'a> {
@@ -143,12 +173,20 @@ impl<'a> ProductionAnalyzer<'a> {
             num_reducers: 4,
             checkpoint_dir: None,
             backend: None,
+            registry: None,
         }
     }
 
     /// Run the worker pool through this backend (plan M18.3 registry wiring).
     pub fn with_backend(mut self, backend: Arc<dyn WorkerBackend>) -> Self {
         self.backend = Some(backend);
+        self
+    }
+
+    /// Drive the shard prepass (and the default pool backend) through these
+    /// plugins (plan M18.3, required since M18.11).
+    pub fn with_registry(mut self, registry: Arc<LanguageRegistry>) -> Self {
+        self.registry = Some(registry);
         self
     }
 
@@ -168,6 +206,11 @@ impl<'a> ProductionAnalyzer<'a> {
     }
 
     pub async fn analyze(&self) -> Result<ProductionAnalysisResult> {
+        let registry = Arc::clone(
+            self.registry
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("ProductionAnalyzer requires with_registry(..): the hardcoded-C++ default was removed in M18.11"))?,
+        );
         let start_time = Instant::now();
         let total_tus = self.build_discovery.translation_units.len();
 
@@ -186,6 +229,7 @@ impl<'a> ProductionAnalyzer<'a> {
             &self.repo.root,
             &store_ctx,
             &checkpoint_dir,
+            &registry,
         )?;
         let mut completed_analyses = prepass.reused_analyses;
         let reused = completed_analyses.len();
@@ -201,13 +245,13 @@ impl<'a> ProductionAnalyzer<'a> {
                 remaining_tus,
                 Some(store_ctx.clone()),
             );
-            // M18.3: registry-backed backend when the caller supplied one;
-            // otherwise the transitional C++ default (removed M18.11). The
-            // legacy closure prepass above keeps byte-identical C++ shards
-            // either way; per-language closures are M18.5 territory.
-            #[allow(deprecated)]
-            let backend: Arc<dyn WorkerBackend> =
-                self.backend.clone().unwrap_or_else(|| Arc::new(DefaultWorkerBackend));
+            // M18.11: the default pool backend is the registry-dispatching
+            // plugin backend over the injected registry; callers may still
+            // inject a custom backend via `with_backend`.
+            let backend: Arc<dyn WorkerBackend> = self
+                .backend
+                .clone()
+                .unwrap_or_else(|| Arc::new(SharedPluginWorkerBackend::new(Arc::clone(&registry))));
             let pool = WorkerPool::new(
                 backend,
                 WorkerPoolConfig {
@@ -394,8 +438,13 @@ mod tests {
         };
 
         let checkpoint_dir = repo_root.join("artifacts").join("shards");
+        let registry = Arc::new(
+            ariadne_lang::LanguageRegistry::new()
+                .register(Box::new(ariadne_lang_cpp::CppPlugin::new())),
+        );
         let analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-            .with_checkpoint_dir(checkpoint_dir.clone());
+            .with_checkpoint_dir(checkpoint_dir.clone())
+            .with_registry(registry);
 
         // First run: cold run, creates checkpoints
         let res1 = analyzer.analyze().await.unwrap();

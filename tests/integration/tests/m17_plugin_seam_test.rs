@@ -7,10 +7,9 @@
 //!   depend on `graph`/`cluster`/`transform`/`validate`. The plugin crates
 //!   (`lang-cpp`, `lang-scala`) do not exist yet: the test skips an absent
 //!   `Cargo.toml` and starts asserting the moment they appear (M18/M19).
-//! * `core_crates_do_not_name_languages` — implemented in full but `#[ignore]`
-//!   because `index`/`graph`/`cluster`/`transform`/`validate`/`report` still
-//!   contain C++ literals until the shim removal; **M18.11 un-ignores it**
-//!   when the `#[deprecated]` shims are removed.
+//! * `core_crates_do_not_name_languages` — the R2 guard: the six core
+//!   pipeline crates contain no C++ literals in any source line; enabled
+//!   unconditionally since the M18.11 shim removal.
 
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyRewriter,
@@ -289,12 +288,9 @@ fn plugin_crates_do_not_depend_on_core_pipeline() {
 /// Production lines of the core pipeline crates must not name any concrete
 /// language, compiler binary, directive syntax, or header suffix.
 ///
-/// **M18.11 un-ignores this test** when the C++ code moves into
-/// `ariadne-lang-cpp` and the `#[deprecated]` re-export shims are removed:
-/// until then the coupling documented in plan §1 (rows 3–10) still lives in
-/// these crates, so the guard cannot pass yet.
+/// M18.11 un-ignored this test once the C++ code moved into
+/// `ariadne-lang-cpp` and the `#[deprecated]` re-export shims were removed.
 #[test]
-#[ignore = "enabled in M18.11 when shims are removed"]
 fn core_crates_do_not_name_languages() {
     const CORE_CRATES: [&str; 6] = [
         "crates/index",
