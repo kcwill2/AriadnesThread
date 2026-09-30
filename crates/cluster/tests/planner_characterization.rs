@@ -1,9 +1,28 @@
-use super::*;
-use ariadne_graph::reduced::{ReducedSemanticEdge, ReducedSymbolRecord};
+//! Characterization suite for `OptimizationPlanner::plan` — relocated from
+//! `crates/cluster/src/planner_characterization_tests.rs` for the M18.11
+//! architecture guard (`m17_plugin_seam_test.rs::core_crates_do_not_name_languages`
+//! walks `crates/*/src` and only skips comment lines, so `.h` fixture paths
+//! must not live in cluster's src). The C++ aggregation filter and
+//! `*_extracted.h` target template are injected from `ariadne-lang-cpp`
+//! (dev-only dependency) with `constraints: None` and `CyclePolicy::Reject`,
+//! so these byte-for-byte assertions simultaneously lock the generalized
+//! engine and the relocated C++ naming.
+
+use ariadne_cluster::plan::{OptimizationPlan, PlanId, ProposedExtraction, RiskLevel};
+use ariadne_cluster::planner::OptimizationPlanner;
+use ariadne_graph::reduced::{
+    ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord,
+};
 use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
-use ariadne_index::types::{DependencyKind, SymbolKind};
-use ariadne_repo::{FileKind, FileOwnership};
+use ariadne_graph::IncludeGraph;
+use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
+use ariadne_lang::CyclePolicy;
+use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
+use ariadne_repo::{
+    FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
+};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 /// Small-graph fixture builder for `OptimizationPlanner::plan` cases.
 #[derive(Default)]
@@ -130,7 +149,17 @@ impl PlannerFixture {
             tu_usage: BTreeMap::new(),
             file_symbols: self.file_symbols.clone(),
         };
-        OptimizationPlanner::new(&self.graph, &model, &self.records, &self.tu_file_ids).plan()
+        OptimizationPlanner::new(
+            &self.graph,
+            &model,
+            &self.records,
+            &self.tu_file_ids,
+            &cpp_aggregation_filter,
+            &cpp_target_path_for,
+            None,
+            CyclePolicy::Reject,
+        )
+        .plan()
     }
 }
 
@@ -338,4 +367,14 @@ fn test_planner_only_considers_header_files() {
             .any(|p| p.to_string_lossy().ends_with(".cc")),
         "Implementation files should not have extraction proposals"
     );
+}
+
+#[test]
+fn plan_locks_plan_identity_and_target_file_id() {
+    // Relocated from the planner.rs cfg(test) module (M18.6): locks plan id
+    // and target_file_id on the canonical collateral fixture.
+    let plans = collateral_header().plan();
+    assert_eq!(plans.len(), 1, "Should generate exactly one plan");
+    assert_eq!(plans[0].id.0, "PLAN-001");
+    assert_eq!(plans[0].target_file_id, FileId(1));
 }

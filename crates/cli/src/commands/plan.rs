@@ -22,6 +22,10 @@ pub fn plan_extractions(
         &model,
         &pipeline.discovery.files,
         &tu_file_ids,
+        &ariadne_lang_cpp::cpp_aggregation_filter,
+        &ariadne_lang_cpp::cpp_target_path_for,
+        None,
+        ariadne_lang::CyclePolicy::Reject,
     );
     let plans = planner.plan();
 

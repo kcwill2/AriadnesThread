@@ -118,6 +118,8 @@ dependencies = [
  "anyhow",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "serde",
  "serde_json",

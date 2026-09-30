@@ -96,8 +96,10 @@ use std::path::{Path, PathBuf};
 
 use ariadne_build::{BuildDiscoveryResult, BuildMeasurer};
 use ariadne_cluster::plan::{OptimizationPlan, RiskLevel};
-use ariadne_cluster::planner::{is_header_file, OptimizationPlanner};
+use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadAnalyzer, ReducedSemanticModel};
+use ariadne_lang::CyclePolicy;
+use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 use ariadne_transform::{ExtractionResult, GeneratedHeader, HeaderExtractor, IncludeRewriter};
@@ -243,7 +245,9 @@ fn analyze_collateral_opportunities(
 
     let mut collateral_opportunities: Vec<CollateralOpportunity> = header_collateral_map
         .into_iter()
-        .filter(|(header_name, _)| is_header_file(std::path::Path::new(header_name)))
+        .filter(|(header_name, _)| {
+            cpp_aggregation_filter(std::path::Path::new(header_name))
+        })
         .map(|(header_name, collateral_symbols)| CollateralOpportunity {
             header_name,
             collateral_symbols,
@@ -268,7 +272,16 @@ fn plan_safe_extractions(
         .iter()
         .map(|tu| tu.file_id)
         .collect();
-    let planner = OptimizationPlanner::new(graph, model, &repo_discovery.files, &tu_file_ids);
+    let planner = OptimizationPlanner::new(
+        graph,
+        model,
+        &repo_discovery.files,
+        &tu_file_ids,
+        &cpp_aggregation_filter,
+        &cpp_target_path_for,
+        None,
+        CyclePolicy::Reject,
+    );
     planner
         .plan()
         .into_iter()

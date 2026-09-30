@@ -14,6 +14,7 @@
 pub mod analyzer;
 pub mod directive_parser;
 pub mod parser;
+pub mod planning;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
@@ -21,6 +22,7 @@ mod tokenizer;
 
 pub use analyzer::CppSemanticAnalyzer;
 pub use directive_parser::{parse_include_directives, RawIncludeDirective};
+pub use planning::{cpp_aggregation_filter, cpp_target_path_for};
 pub use plugin::CppPlugin;
 pub use resolver::{CppDependencyResolver, IncludeResolver};
 pub use shaper::CppUnitShaper;

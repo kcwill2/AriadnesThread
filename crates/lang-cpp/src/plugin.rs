@@ -120,6 +120,18 @@ impl CppPlugin {
             shaper: CppUnitShaper,
         }
     }
+
+    /// C++ planner hook (plan M18.6): header extensions are the aggregation
+    /// units the planner may propose against.
+    pub fn aggregation_filter(&self, path: &Path) -> bool {
+        crate::planning::cpp_aggregation_filter(path)
+    }
+
+    /// C++ planner hook (plan M18.6/§3.6): extracted symbols land in a
+    /// `{symbol}_extracted.h` beside the aggregation file.
+    pub fn target_path_for(&self, aggregation_path: &Path, symbol_name: &str) -> PathBuf {
+        crate::planning::cpp_target_path_for(aggregation_path, symbol_name)
+    }
 }
 
 impl Default for CppPlugin {

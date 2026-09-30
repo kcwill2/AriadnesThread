@@ -6,22 +6,40 @@ use ariadne_graph::load::LoadAnalyzer;
 use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::SymbolId;
+use ariadne_lang::{ClusteringConstraints, CyclePolicy, SymbolRecord};
 use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub fn is_header_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| matches!(ext, "h" | "hpp" | "hxx" | "hh" | "inl"))
-        .unwrap_or(false)
-}
-
+/// Builds extraction plans for one repository snapshot (plan §3.4).
+///
+/// The engine is language-neutral (plan §7 rule R2): which files are
+/// aggregation units and what an extraction target is called are injected
+/// per language (`aggregation_filter`, `target_path_for`); for C++ the
+/// plugin supplies `ariadne_lang_cpp::{cpp_aggregation_filter,
+/// cpp_target_path_for}`.
 pub struct OptimizationPlanner<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
     pub file_records: &'a [FileRecord],
     pub tu_file_ids: &'a [FileId],
+    /// Only files passing this filter become candidate aggregation units
+    /// (plan M18.6); the pipeline supplies it from the language plugin.
+    pub aggregation_filter: &'a dyn Fn(&Path) -> bool,
+    /// Produces the proposal target path for one co-proposed batch, called
+    /// with (candidate aggregation file path, batch anchor symbol name)
+    /// (plan M18.6, §3.6 "Target file naming").
+    pub target_path_for: &'a dyn Fn(&Path, &str) -> PathBuf,
+    /// Optional language clustering constraints (plan M18.7): colocated
+    /// groups union-merge SCC proposal batches; frozen symbols are skipped.
+    pub constraints: Option<&'a dyn ClusteringConstraints>,
+    /// Cycle stance (plan M18.7): `Reject` rejects any proposal that would
+    /// split an SCC via `ConstraintChecker`. `Tolerate` and
+    /// `TolerateWithinPackage` currently share that path — SCC members are
+    /// already co-proposed as one batch, so cycles are never split;
+    /// package-scoped informational cycle reporting lands in M20
+    /// (`graph.rs` cycle reporting), not here.
+    pub cycle_policy: CyclePolicy,
 }
 
 /// Optimization policy and ownership views built once per planning run.
@@ -31,9 +49,9 @@ struct FilePolicyMaps {
     policy_by_path: HashMap<PathBuf, OptimizationPolicy>,
 }
 
-/// A header that passed the load, collateral-source, and policy screens and
+/// A file that passed the load, collateral-source, and policy screens and
 /// is eligible for extraction proposals.
-struct HeaderCandidate {
+struct AggregationCandidate {
     file_id: FileId,
     path: PathBuf,
     collateral_load: usize,
@@ -42,17 +60,26 @@ struct HeaderCandidate {
 }
 
 impl<'a> OptimizationPlanner<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         include_graph: &'a IncludeGraph,
         model: &'a ReducedSemanticModel,
         file_records: &'a [FileRecord],
         tu_file_ids: &'a [FileId],
+        aggregation_filter: &'a dyn Fn(&Path) -> bool,
+        target_path_for: &'a dyn Fn(&Path, &str) -> PathBuf,
+        constraints: Option<&'a dyn ClusteringConstraints>,
+        cycle_policy: CyclePolicy,
     ) -> Self {
         Self {
             include_graph,
             model,
             file_records,
             tu_file_ids,
+            aggregation_filter,
+            target_path_for,
+            constraints,
+            cycle_policy,
         }
     }
 
@@ -62,13 +89,14 @@ impl<'a> OptimizationPlanner<'a> {
         let policies = self.collect_file_policies();
         let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
         let mapped_edges = self.model_edges_without_file_endpoints();
-        let header_consumers = self
+        let aggregation_consumers = self
             .include_graph
-            .map_header_consuming_tus(self.tu_file_ids);
+            .map_aggregation_consumers(self.tu_file_ids);
 
         let mut plans = Vec::new();
-        for file_id in self.sorted_header_ids() {
-            let Some(candidate) = self.candidate_header(file_id, &load_analyzer, &policies) else {
+        for file_id in self.sorted_candidate_file_ids() {
+            let Some(candidate) = self.candidate_aggregation_file(file_id, &load_analyzer, &policies)
+            else {
                 continue;
             };
             let proposed_extractions =
@@ -82,7 +110,7 @@ impl<'a> OptimizationPlanner<'a> {
                 plans.len() + 1,
                 &frontier_analyzer,
                 &policies,
-                &header_consumers,
+                &aggregation_consumers,
             ));
         }
 
@@ -113,24 +141,24 @@ impl<'a> OptimizationPlanner<'a> {
         }
     }
 
-    fn sorted_header_ids(&self) -> Vec<FileId> {
-        let mut sorted_headers: Vec<FileId> = self
+    fn sorted_candidate_file_ids(&self) -> Vec<FileId> {
+        let mut sorted: Vec<FileId> = self
             .include_graph
             .file_paths
             .iter()
-            .filter(|(_, path)| is_header_file(path))
+            .filter(|(_, path)| (self.aggregation_filter)(path))
             .map(|(id, _)| *id)
             .collect();
-        sorted_headers.sort();
-        sorted_headers
+        sorted.sort();
+        sorted
     }
 
-    fn candidate_header(
+    fn candidate_aggregation_file(
         &self,
         file_id: FileId,
         load_analyzer: &LoadAnalyzer,
         policies: &FilePolicyMaps,
-    ) -> Option<HeaderCandidate> {
+    ) -> Option<AggregationCandidate> {
         let path = self.include_graph.file_paths.get(&file_id)?.clone();
         let metric = load_analyzer.analyze_file_load(&path).ok()?;
         if metric.collateral_load == 0 {
@@ -147,7 +175,7 @@ impl<'a> OptimizationPlanner<'a> {
             return None;
         }
 
-        Some(HeaderCandidate {
+        Some(AggregationCandidate {
             file_id,
             path,
             collateral_load: metric.collateral_load,
@@ -157,7 +185,7 @@ impl<'a> OptimizationPlanner<'a> {
     }
 
     /// Semantic edges with their file endpoints erased, as consumed by the
-    /// per-header SCC computation.
+    /// per-file SCC computation.
     fn model_edges_without_file_endpoints(&self) -> Vec<ariadne_index::types::SemanticEdge> {
         self.model
             .edges
@@ -172,58 +200,124 @@ impl<'a> OptimizationPlanner<'a> {
             .collect()
     }
 
+    /// One proposal batch per SCC (union-merged by colocated constraints);
+    /// every batch is co-proposed to one shared target path. Members of a
+    /// multi-symbol SCC keep today's `splits_scc` rejection regardless of
+    /// `cycle_policy` — see the field docs for the M18.7 stance.
     fn propose_extractions(
         &self,
-        candidate: &HeaderCandidate,
+        candidate: &AggregationCandidate,
         mapped_edges: &[ariadne_index::types::SemanticEdge],
         checker: &ConstraintChecker,
     ) -> Vec<ProposedExtraction> {
-        let file_syms = self
+        let file_symbols = self
             .model
             .file_symbols
             .get(&candidate.file_id)
             .cloned()
             .unwrap_or_default();
-        let sccs = scc::compute_symbol_sccs(&file_syms, mapped_edges);
+        let sccs = scc::compute_symbol_sccs(&file_symbols, mapped_edges);
+        let cycle_members: HashSet<&SymbolId> = sccs
+            .iter()
+            .filter(|component| component.symbols.len() > 1)
+            .flat_map(|component| &component.symbols)
+            .collect();
+
+        let mut batches: Vec<Vec<SymbolId>> = sccs.iter().map(|component| component.symbols.clone()).collect();
+        let colocated_groups = self
+            .constraints
+            .map(|constraints| constraints.colocated_groups(&self.symbol_records(&file_symbols)))
+            .unwrap_or_default();
+        merge_colocated_batches(&mut batches, &colocated_groups);
+        let frozen = self.frozen_symbol_set(&file_symbols);
 
         let mut proposed_extractions = Vec::new();
-        for scc in &sccs {
-            for sym_id in &scc.symbols {
-                if let Some(record) = self.model.symbols.get(sym_id) {
-                    let new_header_path = candidate.path.with_file_name(format!(
-                        "{}_extracted.h",
-                        sanitize_header_stem(&record.name)
-                    ));
-                    if checker
-                        .validate_extraction(
-                            sym_id,
-                            &new_header_path,
-                            scc.symbols.len() > 1,
-                            false,
-                            None,
-                        )
-                        .is_ok()
-                    {
-                        proposed_extractions.push(ProposedExtraction {
-                            symbol_name: record.name.clone(),
-                            symbol_id: sym_id.clone(),
-                            target_header: new_header_path,
-                        });
-                    }
-                }
-            }
+        for batch in &batches {
+            proposed_extractions.extend(self.propose_batch(
+                batch,
+                candidate,
+                &cycle_members,
+                &frozen,
+                checker,
+            ));
         }
         proposed_extractions
     }
 
+    /// Emits one [`ProposedExtraction`] per batch member, all targeting the
+    /// path produced from the batch's anchor symbol (its first member with a
+    /// symbol record). A batch holding a frozen symbol is skipped whole:
+    /// colocated members must move together, and one immovable member makes
+    /// that impossible.
+    fn propose_batch(
+        &self,
+        batch: &[SymbolId],
+        candidate: &AggregationCandidate,
+        cycle_members: &HashSet<&SymbolId>,
+        frozen: &HashSet<SymbolId>,
+        checker: &ConstraintChecker,
+    ) -> Vec<ProposedExtraction> {
+        if batch.iter().any(|symbol| frozen.contains(symbol)) {
+            return Vec::new();
+        }
+        let members: Vec<(&SymbolId, _)> = batch
+            .iter()
+            .filter_map(|symbol| Some((symbol, self.model.symbols.get(symbol)?)))
+            .collect();
+        let Some((_, anchor)) = members.first() else {
+            return Vec::new();
+        };
+        let target_path = (self.target_path_for)(&candidate.path, &anchor.name);
+        members
+            .into_iter()
+            .filter_map(|(symbol, record)| {
+                let splits_scc = cycle_members.contains(symbol);
+                checker
+                    .validate_extraction(symbol, &target_path, splits_scc, false, None)
+                    .ok()?;
+                Some(ProposedExtraction {
+                    symbol_name: record.name.clone(),
+                    symbol_id: symbol.clone(),
+                    target_header: target_path.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// The neutral symbol views handed to the language constraints trait.
+    fn symbol_records(&self, file_symbols: &[SymbolId]) -> Vec<SymbolRecord> {
+        file_symbols
+            .iter()
+            .filter_map(|id| self.model.symbols.get(id))
+            .filter_map(|record| {
+                let owning_file = record.defining_file?;
+                Some(ariadne_index::types::SymbolRecord {
+                    id: record.id.clone(),
+                    name: record.name.clone(),
+                    kind: record.kind,
+                    owning_file,
+                    declarations: record.declarations.clone(),
+                    definition: record.definition.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn frozen_symbol_set(&self, file_symbols: &[SymbolId]) -> HashSet<SymbolId> {
+        match self.constraints {
+            Some(constraints) => constraints.frozen_symbols(&self.symbol_records(file_symbols)),
+            None => HashSet::new(),
+        }
+    }
+
     fn assemble_plan(
         &self,
-        candidate: &HeaderCandidate,
+        candidate: &AggregationCandidate,
         proposed_extractions: Vec<ProposedExtraction>,
         plan_number: usize,
         frontier_analyzer: &FrontierAnalyzer,
         policies: &FilePolicyMaps,
-        header_consumers: &HashMap<FileId, Vec<FileId>>,
+        aggregation_consumers: &HashMap<FileId, Vec<FileId>>,
     ) -> OptimizationPlan {
         let optimization_frontier = frontier_analyzer.find_frontiers(
             candidate.file_id,
@@ -233,7 +327,7 @@ impl<'a> OptimizationPlanner<'a> {
             &policies.ownership_by_id,
         );
 
-        let validation_required_tus = header_consumers
+        let validation_required_tus = aggregation_consumers
             .get(&candidate.file_id)
             .map(|tus| {
                 tus.iter()
@@ -284,130 +378,34 @@ impl<'a> OptimizationPlanner<'a> {
     }
 }
 
-/// Turn a symbol name into a filesystem-safe header stem. Closure-merged
-/// models surface qualified/template names (`std::vector`, `Thing<T>`) that
-/// are invalid in file names on Windows.
-fn sanitize_header_stem(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    let mut pending_underscore = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            if pending_underscore {
-                out.push('_');
-                pending_underscore = false;
-            }
-            out.push(ch);
-        } else {
-            pending_underscore = true;
-        }
-    }
-    let stem = out.trim_matches('_').to_string();
-    if stem.is_empty() {
-        "symbol".to_string()
-    } else {
-        stem
-    }
-}
-
-#[cfg(test)]
-#[path = "planner_characterization_tests.rs"]
-mod planner_characterization;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ariadne_graph::reduced::{ReducedSemanticModel, ReducedSymbolRecord};
-    use ariadne_graph::IncludeGraph;
-    use ariadne_index::types::SymbolKind;
-    use ariadne_repo::{FileId, FileOwnership, FileRecord};
-    use std::collections::BTreeMap;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_planner_basic() {
-        let mut include_graph = IncludeGraph::new();
-        include_graph.register_file(FileId(1), PathBuf::from("start.h"));
-        include_graph.register_file(FileId(2), PathBuf::from("col.h"));
-
-        use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
-        include_graph.add_edge(IncludeEdge {
-            source: FileId(1),
-            destination: Some(FileId(2)),
-            context_name: "Default".into(),
-            source_location: SourceLocation::new(1, 1),
-            kind: IncludeKind::Local,
-            raw_path: "col.h".into(),
-            resolved_path: Some(PathBuf::from("col.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
-        });
-
-        let mut model = ReducedSemanticModel {
-            repo_root: PathBuf::from("/"),
-            symbols: BTreeMap::new(),
-            edges: vec![],
-            tu_usage: BTreeMap::new(),
-            file_symbols: BTreeMap::new(),
+/// Union-merge proposal batches whose symbol sets intersect a colocated
+/// group (plan M18.7): the first intersected batch stays in place as the
+/// merge anchor, later intersected batches are appended in encounter order
+/// (order-stable). Groups are applied sequentially, so a symbol shared by
+/// two groups transitively merges them.
+fn merge_colocated_batches(
+    batches: &mut Vec<Vec<SymbolId>>,
+    colocated_groups: &[Vec<SymbolId>],
+) {
+    for group in colocated_groups {
+        let group_symbols: HashSet<&SymbolId> = group.iter().collect();
+        let intersecting: Vec<usize> = batches
+            .iter()
+            .enumerate()
+            .filter(|(_, batch)| batch.iter().any(|symbol| group_symbols.contains(symbol)))
+            .map(|(index, _)| index)
+            .collect();
+        let Some((&anchor, rest)) = intersecting.split_first() else {
+            continue;
         };
-
-        let sym_a = SymbolId::new("A");
-        model.symbols.insert(
-            sym_a.clone(),
-            ReducedSymbolRecord {
-                id: sym_a.clone(),
-                name: "A".to_string(),
-                kind: SymbolKind::Class,
-                defining_file: Some(FileId(1)),
-                declarations: vec![],
-                definition: None,
-            },
-        );
-        model.file_symbols.insert(FileId(1), vec![sym_a.clone()]);
-
-        let sym_b = SymbolId::new("B");
-        model.symbols.insert(
-            sym_b.clone(),
-            ReducedSymbolRecord {
-                id: sym_b.clone(),
-                name: "B".to_string(),
-                kind: SymbolKind::Class,
-                defining_file: Some(FileId(2)),
-                declarations: vec![],
-                definition: None,
-            },
-        );
-        model.file_symbols.insert(FileId(2), vec![sym_b.clone()]);
-
-        let file_records = vec![
-            FileRecord {
-                id: FileId(1),
-                path: PathBuf::from("start.h"),
-                canonical_path: PathBuf::from("start.h"),
-                kind: ariadne_repo::FileKind::Header,
-                size: 0,
-                content_hash: String::new(),
-                ownership: FileOwnership::Repository,
-                optimization_policy: OptimizationPolicy::Optimizable,
-                language: ariadne_repo::SourceLanguage::Cpp,
-            },
-            FileRecord {
-                id: FileId(2),
-                path: PathBuf::from("col.h"),
-                canonical_path: PathBuf::from("col.h"),
-                kind: ariadne_repo::FileKind::Header,
-                size: 0,
-                content_hash: String::new(),
-                ownership: FileOwnership::ThirdParty,
-                optimization_policy: OptimizationPolicy::Frozen,
-                language: ariadne_repo::SourceLanguage::Cpp,
-            },
-        ];
-        let tu_file_ids = vec![];
-
-        let planner = OptimizationPlanner::new(&include_graph, &model, &file_records, &tu_file_ids);
-        let plans = planner.plan();
-
-        assert_eq!(plans.len(), 1, "Should generate exactly one plan");
-        assert_eq!(plans[0].id.0, "PLAN-001");
-        assert_eq!(plans[0].target_file_id, FileId(1));
+        for &merge_index in rest.iter().rev() {
+            let merged = batches.remove(merge_index);
+            let anchor_batch = &mut batches[anchor];
+            for symbol in merged {
+                if !anchor_batch.contains(&symbol) {
+                    anchor_batch.push(symbol);
+                }
+            }
+        }
     }
 }
