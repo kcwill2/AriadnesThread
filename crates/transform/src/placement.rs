@@ -1,8 +1,13 @@
 //! Placement: mapping generated headers onto consumer include migrations.
 
-use crate::GeneratedHeader;
+use crate::GeneratedUnit;
+use ariadne_lang::DependencyRewriter;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+
+fn path_strings(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|p| p.display().to_string()).collect()
+}
 
 /// Represents one consumer file's include migration.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -24,21 +29,18 @@ impl ConsumerRewrite {
     }
 
     /// Format as a unified-diff-style patch fragment for this consumer.
-    pub fn format_diff(&self) -> String {
+    ///
+    /// The directive-line text (and its exact spelling) belongs to the
+    /// language plugin's [`DependencyRewriter`]; this engine only owns the
+    /// neutral redirect logic and the consumer-file header line.
+    pub fn format_diff_with(&self, rewriter: &dyn DependencyRewriter) -> String {
         let mut out = String::new();
         out.push_str(&format!("{}\n", self.consumer_file.display()));
-        for old in &self.old_includes {
-            out.push_str(&format!("    - #include \"{}\"\n", old.display()));
-        }
-        for new in &self.new_includes {
-            out.push_str(&format!("    + #include \"{}\"\n", new.display()));
-        }
-        for preserved in &self.side_effect_preservations {
-            out.push_str(&format!(
-                "    ~ #include \"{}\" // side-effect preserved\n",
-                preserved.display()
-            ));
-        }
+        out.push_str(&rewriter.render_diff(
+            &path_strings(&self.old_includes),
+            &path_strings(&self.new_includes),
+            &path_strings(&self.side_effect_preservations),
+        ));
         out
     }
 }
@@ -51,11 +53,12 @@ pub struct MigrationPreview {
 }
 
 impl MigrationPreview {
-    /// Format the full preview as a human-readable diff.
-    pub fn format_diff(&self) -> String {
+    /// Format the full preview as a human-readable diff, rendering each
+    /// rewrite's directive lines through the plugin's rewriter.
+    pub fn format_diff_with(&self, rewriter: &dyn DependencyRewriter) -> String {
         let mut out = String::new();
         for rewrite in &self.rewrites {
-            out.push_str(&rewrite.format_diff());
+            out.push_str(&rewrite.format_diff_with(rewriter));
             out.push('\n');
         }
         out
@@ -71,18 +74,18 @@ impl MigrationPreview {
 pub struct IncludeRewriter {
     /// Maps symbol name -> the generated header filename that owns it
     symbol_name_to_header: BTreeMap<String, PathBuf>,
-    /// All generated headers, needed to resolve required_includes (predecessors)
-    generated_headers: Vec<GeneratedHeader>,
+    /// All generated units, needed to resolve required deps (predecessors)
+    generated_units: Vec<GeneratedUnit>,
 }
 
 impl IncludeRewriter {
     pub fn new(
         symbol_name_to_header: BTreeMap<String, PathBuf>,
-        generated_headers: Vec<GeneratedHeader>,
+        generated_units: Vec<GeneratedUnit>,
     ) -> Self {
         Self {
             symbol_name_to_header,
-            generated_headers,
+            generated_units,
         }
     }
 
@@ -116,13 +119,9 @@ impl IncludeRewriter {
         let mut all_new_includes: BTreeSet<PathBuf> = BTreeSet::new();
         for target in &target_headers {
             all_new_includes.insert(target.clone());
-            // Find the GeneratedHeader to get its required_includes
-            if let Some(gen_hdr) = self
-                .generated_headers
-                .iter()
-                .find(|h| &h.filename == target)
-            {
-                for prereq in &gen_hdr.required_includes {
+            // Find the GeneratedUnit to get its required deps
+            if let Some(gen_unit) = self.generated_units.iter().find(|u| &u.path == target) {
+                for prereq in &gen_unit.required_deps {
                     all_new_includes.insert(prereq.clone());
                 }
             }
@@ -176,6 +175,11 @@ impl IncludeRewriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_lang_cpp::CppDependencyRewriter;
+
+    fn cpp() -> CppDependencyRewriter {
+        CppDependencyRewriter
+    }
 
     #[test]
     fn test_consumer_rewrite_format_diff() {
@@ -185,7 +189,7 @@ mod tests {
             new_includes: vec![std::path::PathBuf::from("thing_types.h")],
             side_effect_preservations: vec![],
         };
-        let diff = rewrite.format_diff();
+        let diff = rewrite.format_diff_with(&cpp());
         assert!(diff.contains("- #include \"thing.h\""), "diff: {}", diff);
         assert!(
             diff.contains("+ #include \"thing_types.h\""),
@@ -193,6 +197,11 @@ mod tests {
             diff
         );
         assert!(diff.contains("src/foo.cpp"), "diff: {}", diff);
+        // Byte-exact capture of the pre-M18.8b `format_diff` output.
+        assert_eq!(
+            diff,
+            "src/foo.cpp\n    - #include \"thing.h\"\n    + #include \"thing_types.h\"\n"
+        );
     }
 
     #[test]
@@ -233,7 +242,7 @@ mod tests {
                 },
             ],
         };
-        let diff = preview.format_diff();
+        let diff = preview.format_diff_with(&cpp());
         assert!(diff.contains("src/foo.cpp"));
         assert!(diff.contains("src/bar.cpp"));
         assert!(diff.contains("thing_types.h"));
@@ -255,7 +264,7 @@ mod tests {
                 side_effect_preservations: vec![std::path::PathBuf::from("registry.h")],
             }],
         };
-        let diff = preview.format_diff();
+        let diff = preview.format_diff_with(&cpp());
         assert!(
             diff.contains("~ #include \"registry.h\" // side-effect preserved"),
             "diff: {}",
@@ -270,7 +279,7 @@ mod tests {
             plan_id: "PLAN-003".to_string(),
             rewrites: vec![],
         };
-        assert_eq!(preview.format_diff(), "");
+        assert_eq!(preview.format_diff_with(&cpp()), "");
         assert_eq!(preview.effective_rewrites(), 0);
     }
 
@@ -279,11 +288,10 @@ mod tests {
         let mut sym_map: BTreeMap<String, PathBuf> = BTreeMap::new();
         sym_map.insert("ThingConfig".to_string(), PathBuf::from("thing_types.h"));
 
-        let gen_headers = vec![GeneratedHeader {
-            filename: PathBuf::from("thing_types.h"),
-            pragma_once: true,
+        let gen_headers = vec![GeneratedUnit {
+            path: PathBuf::from("thing_types.h"),
             symbols: vec![],
-            required_includes: vec![],
+            required_deps: vec![],
         }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
@@ -311,17 +319,15 @@ mod tests {
         sym_map.insert("ThingBuilder".to_string(), PathBuf::from("thing_core.h"));
 
         let gen_headers = vec![
-            GeneratedHeader {
-                filename: PathBuf::from("thing_types.h"),
-                pragma_once: true,
+            GeneratedUnit {
+                path: PathBuf::from("thing_types.h"),
                 symbols: vec![],
-                required_includes: vec![],
+                required_deps: vec![],
             },
-            GeneratedHeader {
-                filename: PathBuf::from("thing_core.h"),
-                pragma_once: true,
+            GeneratedUnit {
+                path: PathBuf::from("thing_core.h"),
                 symbols: vec![],
-                required_includes: vec![PathBuf::from("thing_types.h")],
+                required_deps: vec![PathBuf::from("thing_types.h")],
             },
         ];
 
@@ -384,11 +390,10 @@ mod tests {
         let mut sym_map: BTreeMap<String, PathBuf> = BTreeMap::new();
         sym_map.insert("ThingBuilder".to_string(), PathBuf::from("thing_core.h"));
 
-        let gen_headers = vec![GeneratedHeader {
-            filename: PathBuf::from("thing_core.h"),
-            pragma_once: true,
+        let gen_headers = vec![GeneratedUnit {
+            path: PathBuf::from("thing_core.h"),
             symbols: vec![],
-            required_includes: vec![PathBuf::from("thing_types.h")],
+            required_deps: vec![PathBuf::from("thing_types.h")],
         }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
@@ -417,17 +422,15 @@ mod tests {
         sym_map.insert("ThingBuilder".to_string(), PathBuf::from("thing_core.h"));
 
         let gen_headers = vec![
-            GeneratedHeader {
-                filename: PathBuf::from("thing_types.h"),
-                pragma_once: true,
+            GeneratedUnit {
+                path: PathBuf::from("thing_types.h"),
                 symbols: vec![],
-                required_includes: vec![],
+                required_deps: vec![],
             },
-            GeneratedHeader {
-                filename: PathBuf::from("thing_core.h"),
-                pragma_once: true,
+            GeneratedUnit {
+                path: PathBuf::from("thing_core.h"),
                 symbols: vec![],
-                required_includes: vec![PathBuf::from("thing_types.h")],
+                required_deps: vec![PathBuf::from("thing_types.h")],
             },
         ];
 
@@ -450,7 +453,7 @@ mod tests {
         assert_eq!(preview.rewrites.len(), 2);
         assert_eq!(preview.effective_rewrites(), 2);
 
-        let diff = preview.format_diff();
+        let diff = preview.format_diff_with(&cpp());
         assert!(diff.contains("src/foo.cpp"));
         assert!(diff.contains("src/bar.cpp"));
         assert!(diff.contains("thing_types.h"));

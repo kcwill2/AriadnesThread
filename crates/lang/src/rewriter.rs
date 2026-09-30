@@ -2,12 +2,15 @@
 
 /// Specifies which dependency directives in a consumer file should be replaced.
 ///
-/// For C++ these are `#include` lines; for Scala they are `import` statements.
+/// The dependency lists carry **bare dependency identifiers** (paths for
+/// C/C++ includes, qualified names for Scala imports) — the concrete
+/// directive syntax (`#include "..."`, `import ...`) belongs to the
+/// language implementation, never to the pipeline that builds the spec.
 #[derive(Debug, Clone)]
 pub struct RewriteSpec {
-    /// The dependency strings to remove (e.g. `["#include \"models/all.h\""]`).
+    /// The dependency identifiers to remove (e.g. `["models/all.h"]`).
     pub old_deps: Vec<String>,
-    /// The replacement dependency strings (e.g. `["#include \"models/order.h\""]`).
+    /// The replacement dependency identifiers (e.g. `["models/order.h"]`).
     pub new_deps: Vec<String>,
 }
 
@@ -19,6 +22,31 @@ pub struct RewriteSpec {
 pub trait DependencyRewriter: Send + Sync {
     /// Apply `spec` to `source` and return the rewritten source text.
     fn rewrite(&self, source: &str, spec: &RewriteSpec) -> String;
+
+    /// Render a unified-diff-style fragment listing dependencies removed,
+    /// added, and preserved (side effects). The default is a language-neutral
+    /// marker rendering; language plugins reproduce their directive text.
+    fn render_diff(&self, removed: &[String], added: &[String], preserved: &[String]) -> String {
+        let mut out = String::new();
+        for dep in removed {
+            out.push_str(&format!(" - {dep}\n"));
+        }
+        for dep in added {
+            out.push_str(&format!(" + {dep}\n"));
+        }
+        for dep in preserved {
+            out.push_str(&format!(" ~ {dep}\n"));
+        }
+        out
+    }
+
+    /// Text emitted at the very top of a generated file, followed by one
+    /// directive line per `required_deps` (the language decides both). The
+    /// default emits nothing.
+    fn emit_file_preamble(&self, required_deps: &[String]) -> String {
+        let _ = required_deps;
+        String::new()
+    }
 }
 
 #[cfg(test)]

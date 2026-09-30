@@ -102,7 +102,7 @@ use ariadne_lang::CyclePolicy;
 use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
-use ariadne_transform::{ExtractionResult, GeneratedHeader, HeaderExtractor, IncludeRewriter};
+use ariadne_transform::{ExtractionResult, GeneratedUnit, IncludeRewriter, IsolationEngine};
 use ariadne_validate::{TierValidator, TransactionApplier, ValidationStatus};
 
 pub struct EndToEndOptimizer {
@@ -291,24 +291,24 @@ fn plan_safe_extractions(
 
 fn relocate_extraction_to_generated(
     extraction: &ExtractionResult,
-) -> (BTreeMap<String, PathBuf>, Vec<GeneratedHeader>) {
+) -> (BTreeMap<String, PathBuf>, Vec<GeneratedUnit>) {
     let mut symbol_name_to_header = BTreeMap::new();
-    let mut generated_headers = Vec::new();
-    for header in &extraction.headers {
-        let hpath = PathBuf::from("generated").join(&header.filename);
-        let mut new_header = header.clone();
-        new_header.filename = hpath.clone();
-        new_header.required_includes = header
-            .required_includes
+    let mut generated_units = Vec::new();
+    for unit in &extraction.headers {
+        let upath = PathBuf::from("generated").join(&unit.path);
+        let mut new_unit = unit.clone();
+        new_unit.path = upath.clone();
+        new_unit.required_deps = unit
+            .required_deps
             .iter()
             .map(|p| PathBuf::from("generated").join(p))
             .collect();
-        generated_headers.push(new_header);
-        for sym in &header.symbols {
-            symbol_name_to_header.insert(sym.name.clone(), hpath.clone());
+        generated_units.push(new_unit);
+        for sym in &unit.symbols {
+            symbol_name_to_header.insert(sym.name.clone(), upath.clone());
         }
     }
-    (symbol_name_to_header, generated_headers)
+    (symbol_name_to_header, generated_units)
 }
 
 fn find_including_translation_units(
@@ -352,7 +352,7 @@ fn apply_safe_plan(
     plan: &OptimizationPlan,
 ) -> Result<SafePlanOutcome> {
     // Header extraction
-    let extractor = HeaderExtractor::new(model);
+    let extractor = IsolationEngine::new(model);
     let extraction = extractor.extract(plan);
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
@@ -362,7 +362,15 @@ fn apply_safe_plan(
     let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
 
-    let (snapshot, new_paths) = TransactionApplier::apply(&repo.root, &extraction, &migration)?;
+    // M18.8b: directive text (guard block + include replacement) is owned by
+    // the registered plugin's rewriter; validate orchestrates the rest.
+    let plugin_registry = crate::registry::default_registry();
+    let text_rewriter = plugin_registry
+        .sole_plugin()
+        .map(|plugin| plugin.rewriter())
+        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let (snapshot, new_paths) =
+        TransactionApplier::apply_with(&repo.root, &extraction, &migration, text_rewriter)?;
 
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");

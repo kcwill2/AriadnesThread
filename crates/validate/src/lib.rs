@@ -1,6 +1,7 @@
 //! Validation harness and transactional verification.
 
 use anyhow::Result;
+use ariadne_lang::{DependencyRewriter, RewriteSpec};
 use ariadne_transform::{ExtractionResult, MigrationPreview};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -109,20 +110,50 @@ impl FileSnapshot {
     }
 }
 
+/// Transitional text-free rewriter (M18.8b): keeps the frozen 3-argument
+/// `TransactionApplier::apply` entry point compiling while all directive
+/// *text* lives behind the injected rewriter. It performs no directive
+/// mutation and emits no preamble; language-correct applications must go
+/// through [`TransactionApplier::apply_with`] with a registered plugin's
+/// rewriter (the CLI does). Removed when the frozen call sites move (M23).
+struct TransitionalDefaultRewriter;
+
+impl DependencyRewriter for TransitionalDefaultRewriter {
+    fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
+        source.to_string()
+    }
+}
+
 pub struct TransactionApplier;
 
 impl TransactionApplier {
+    /// Frozen-shape entry point: orchestration only, no directive text.
+    /// Production pipeline call sites (CLI) use
+    /// [`TransactionApplier::apply_with`] with a plugin rewriter.
+    #[deprecated = "use apply_with with a plugin rewriter (removed M23)"]
     pub fn apply(
         repo_root: &Path,
         extraction: &ExtractionResult,
         migration: &MigrationPreview,
     ) -> Result<(FileSnapshot, Vec<PathBuf>)> {
+        Self::apply_with(repo_root, extraction, migration, &TransitionalDefaultRewriter)
+    }
+
+    /// Transactional apply: snapshot the touched files, write generated
+    /// headers and consumer rewrites through `rewriter` (which owns every
+    /// directive spelling), and return the snapshot plus created paths.
+    pub fn apply_with(
+        repo_root: &Path,
+        extraction: &ExtractionResult,
+        migration: &MigrationPreview,
+        rewriter: &dyn DependencyRewriter,
+    ) -> Result<(FileSnapshot, Vec<PathBuf>)> {
         let mut paths_to_snapshot = Vec::new();
         let mut new_paths = Vec::new();
 
         let gen_dir = repo_root.join("generated");
-        for header in &extraction.headers {
-            paths_to_snapshot.push(gen_dir.join(&header.filename));
+        for unit in &extraction.headers {
+            paths_to_snapshot.push(gen_dir.join(&unit.path));
         }
 
         for rw in &migration.rewrites {
@@ -133,8 +164,8 @@ impl TransactionApplier {
 
         fs::create_dir_all(&gen_dir)?;
 
-        for header in &extraction.headers {
-            let path = gen_dir.join(&header.filename);
+        for unit in &extraction.headers {
+            let path = gen_dir.join(&unit.path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -142,17 +173,13 @@ impl TransactionApplier {
                 new_paths.push(path.clone());
             }
 
-            let mut content = String::new();
-            if header.pragma_once {
-                content.push_str("#pragma once\n\n");
-            }
-            for inc in &header.required_includes {
-                content.push_str(&format!("#include \"{}\"\n", inc.display()));
-            }
-            if !header.required_includes.is_empty() {
-                content.push('\n');
-            }
-            for sym in &header.symbols {
+            let deps: Vec<String> = unit
+                .required_deps
+                .iter()
+                .map(|dep| dep.display().to_string())
+                .collect();
+            let mut content = rewriter.emit_file_preamble(&deps);
+            for sym in &unit.symbols {
                 content.push_str(&sym.body);
                 content.push('\n');
             }
@@ -161,22 +188,20 @@ impl TransactionApplier {
 
         for rw in &migration.rewrites {
             let path = repo_root.join(&rw.consumer_file);
-            let mut content = fs::read_to_string(&path)?;
-
-            for old_inc in &rw.old_includes {
-                let s1 = format!("#include \"{}\"", old_inc.display());
-                let s2 = format!("#include <{}>", old_inc.display());
-
-                let mut new_lines = String::new();
-                for new_inc in &rw.new_includes {
-                    new_lines.push_str(&format!("#include \"{}\"\n", new_inc.display()));
-                }
-                let new_lines = new_lines.trim_end();
-
-                content = content.replace(&s1, new_lines);
-                content = content.replace(&s2, new_lines);
-            }
-
+            let source = fs::read_to_string(&path)?;
+            let spec = RewriteSpec {
+                old_deps: rw
+                    .old_includes
+                    .iter()
+                    .map(|dep| dep.display().to_string())
+                    .collect(),
+                new_deps: rw
+                    .new_includes
+                    .iter()
+                    .map(|dep| dep.display().to_string())
+                    .collect(),
+            };
+            let content = rewriter.rewrite(&source, &spec);
             fs::write(&path, content)?;
         }
 
@@ -239,8 +264,8 @@ impl TierValidator {
         extraction: &ExtractionResult,
         header_output_dir: &Path,
     ) -> TierResult {
-        for header in &extraction.headers {
-            for req in &header.required_includes {
+        for unit in &extraction.headers {
+            for req in &unit.required_deps {
                 let p1 = header_output_dir.join(req);
                 // Also check repo root, which is parent of generated dir in our scheme
                 let p2 = if let Some(parent) = header_output_dir.parent() {
@@ -298,7 +323,8 @@ impl TierValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_transform::{ConsumerRewrite, GeneratedHeader};
+    use ariadne_lang_cpp::CppDependencyRewriter;
+    use ariadne_transform::{ConsumerRewrite, GeneratedUnit};
 
     #[test]
     fn test_format_output() {
@@ -370,11 +396,68 @@ mod tests {
 
         let extraction = ExtractionResult {
             plan_id: "P1".into(),
-            headers: vec![GeneratedHeader {
-                filename: "new.h".into(),
-                pragma_once: true,
+            headers: vec![GeneratedUnit {
+                path: "new.h".into(),
                 symbols: vec![],
-                required_includes: vec![],
+                required_deps: vec![],
+            }],
+            errors: vec![],
+        };
+
+        let migration = MigrationPreview {
+            plan_id: "P1".into(),
+            rewrites: vec![ConsumerRewrite {
+                consumer_file: PathBuf::from("src/main.cpp"),
+                old_includes: vec![PathBuf::from("old.h")],
+                new_includes: vec![PathBuf::from("new.h")],
+                side_effect_preservations: vec![],
+            }],
+        };
+
+        let (snap, new_paths) =
+            TransactionApplier::apply_with(repo, &extraction, &migration, &CppDependencyRewriter)
+                .unwrap();
+
+        assert!(repo.join("generated/new.h").exists());
+        // Byte-parity with the pre-M18.8b apply emit (guard block + bodies).
+        assert_eq!(
+            fs::read_to_string(repo.join("generated/new.h")).unwrap(),
+            "#pragma once\n\n"
+        );
+        let consumer_content = fs::read_to_string(&consumer).unwrap();
+        assert!(consumer_content.contains("#include \"new.h\""));
+        assert!(!consumer_content.contains("#include \"old.h\""));
+        // Byte-parity with the pre-M18.8b replace loop.
+        assert_eq!(consumer_content, "#include \"new.h\"\nint main() {}");
+
+        assert!(TransactionApplier::verify_restored(&snap).is_err());
+
+        TransactionApplier::rollback(&snap, &new_paths).unwrap();
+        assert!(TransactionApplier::verify_restored(&snap).is_ok());
+        assert!(!repo.join("generated/new.h").exists());
+        let restored_content = fs::read_to_string(&consumer).unwrap();
+        assert!(restored_content.contains("#include \"old.h\""));
+    }
+
+    #[test]
+    #[allow(deprecated)] // pins the transitional 3-arg shim until M23 removal
+    fn transitional_apply_performs_orchestration_only() {
+        // The frozen 3-argument entry point still snapshots/creates/rolls
+        // back, but performs no directive text work (plugin-free default).
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+
+        let src_dir = repo.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let consumer = src_dir.join("main.cpp");
+        fs::write(&consumer, "#include \"old.h\"\nint main() {}").unwrap();
+
+        let extraction = ExtractionResult {
+            plan_id: "P1".into(),
+            headers: vec![GeneratedUnit {
+                path: "new.h".into(),
+                symbols: vec![],
+                required_deps: vec![],
             }],
             errors: vec![],
         };
@@ -391,17 +474,15 @@ mod tests {
 
         let (snap, new_paths) = TransactionApplier::apply(repo, &extraction, &migration).unwrap();
 
-        assert!(repo.join("generated/new.h").exists());
-        let consumer_content = fs::read_to_string(&consumer).unwrap();
-        assert!(consumer_content.contains("#include \"new.h\""));
-        assert!(!consumer_content.contains("#include \"old.h\""));
-
-        assert!(TransactionApplier::verify_restored(&snap).is_err());
+        // Created + rolled back, but text untouched and preamble-free.
+        assert_eq!(
+            fs::read_to_string(&consumer).unwrap(),
+            "#include \"old.h\"\nint main() {}"
+        );
+        assert_eq!(fs::read_to_string(repo.join("generated/new.h")).unwrap(), "");
 
         TransactionApplier::rollback(&snap, &new_paths).unwrap();
         assert!(TransactionApplier::verify_restored(&snap).is_ok());
         assert!(!repo.join("generated/new.h").exists());
-        let restored_content = fs::read_to_string(&consumer).unwrap();
-        assert!(restored_content.contains("#include \"old.h\""));
     }
 }

@@ -380,9 +380,10 @@ impl<'a> OptimizationPlanner<'a> {
 
 /// Union-merge proposal batches whose symbol sets intersect a colocated
 /// group (plan M18.7): the first intersected batch stays in place as the
-/// merge anchor, later intersected batches are appended in encounter order
-/// (order-stable). Groups are applied sequentially, so a symbol shared by
-/// two groups transitively merges them.
+/// merge anchor, later intersected batches are appended in reverse
+/// encounter order (last-intersected batch first; removing back-to-front
+/// keeps earlier batch indices valid). Groups are applied sequentially, so
+/// a symbol shared by two groups transitively merges them.
 fn merge_colocated_batches(
     batches: &mut Vec<Vec<SymbolId>>,
     colocated_groups: &[Vec<SymbolId>],

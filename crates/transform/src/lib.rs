@@ -1,9 +1,15 @@
-//! Refactoring and header extraction engine.
+//! Symbol isolation engine and consumer-rewrite machinery (plan §3.6).
+//!
+//! The engine is language-neutral: it groups planned extractions into
+//! [`GeneratedUnit`]s, computes inter-symbol dependency edges, checks the
+//! unit graph for cycles, and writes files through a plugin-provided
+//! [`SourceExtractor`](ariadne_lang::SourceExtractor) text hook. All
+//! language-specific new-file text lives in the language plugins.
 
-mod extractor;
+mod engine;
 mod placement;
 
-pub use extractor::HeaderExtractor;
+pub use engine::IsolationEngine;
 pub use placement::{ConsumerRewrite, IncludeRewriter, MigrationPreview};
 
 use ariadne_index::SymbolKind;
@@ -18,25 +24,28 @@ impl TransformEngine {
     }
 }
 
+/// One extracted symbol: its name, semantic kind, and body text.
 #[derive(Debug, Clone)]
 pub struct ExtractedSymbol {
     pub name: String,
     pub kind: SymbolKind,
-    pub forward_declarable: bool,
     pub body: String,
 }
 
+/// One generated file: where it lands and what it must depend on.
 #[derive(Debug, Clone)]
-pub struct GeneratedHeader {
-    pub filename: PathBuf,
-    pub pragma_once: bool,
+pub struct GeneratedUnit {
+    /// Relative path of the file the engine will write.
+    pub path: PathBuf,
+    /// Symbols extracted into this unit.
     pub symbols: Vec<ExtractedSymbol>,
-    pub required_includes: Vec<PathBuf>,
+    /// Other units this unit depends on (rendered by the plugin's extractor).
+    pub required_deps: Vec<PathBuf>,
 }
 
 pub struct ExtractionResult {
     pub plan_id: String,
-    pub headers: Vec<GeneratedHeader>,
+    pub headers: Vec<GeneratedUnit>,
     pub errors: Vec<String>,
 }
 

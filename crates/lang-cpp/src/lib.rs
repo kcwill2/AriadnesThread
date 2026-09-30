@@ -12,18 +12,22 @@
 //! components into `ariadne_lang::LanguagePlugin`.
 
 pub mod analyzer;
+pub mod dependency_rewriter;
 pub mod directive_parser;
 pub mod parser;
 pub mod planning;
 pub mod plugin;
 pub mod resolver;
+pub mod source_extractor;
 pub mod shaper;
 mod tokenizer;
 
 pub use analyzer::CppSemanticAnalyzer;
+pub use dependency_rewriter::CppDependencyRewriter;
 pub use directive_parser::{parse_include_directives, RawIncludeDirective};
 pub use planning::{cpp_aggregation_filter, cpp_target_path_for};
 pub use plugin::CppPlugin;
+pub use source_extractor::CppSourceExtractor;
 pub use resolver::{CppDependencyResolver, IncludeResolver};
 pub use shaper::CppUnitShaper;
 

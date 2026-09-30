@@ -13,4 +13,11 @@ ariadne-index = { path = "../index" }
 ariadne-graph = { path = "../graph" }
 ariadne-cluster = { path = "../cluster" }
 ariadne-repo = { path = "../repo" }
+# M18.8a: the isolation engine takes the neutral SourceExtractor text hook.
+ariadne-lang = { path = "../lang" }
 tempfile.workspace = true
+
+[dev-dependencies]
+# Byte-parity locks run the engine against the C++ plugin's byte emitter;
+# production code stays plugin-free.
+ariadne-lang-cpp = { path = "../lang-cpp" }

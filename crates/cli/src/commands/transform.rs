@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
-use ariadne_transform::{GeneratedHeader, IncludeRewriter};
+use ariadne_transform::{GeneratedUnit, IncludeRewriter};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -19,11 +19,19 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     };
 
     let model = artifacts.load_reduced_artifacts()?;
-    let extractor = ariadne_transform::HeaderExtractor::new(&model);
+    let extractor = ariadne_transform::IsolationEngine::new(&model);
     let result = extractor.extract(plan);
 
     let output_dir = artifacts.artifact_root.join("generated");
-    artifacts.save_extraction_artifacts(&result, &output_dir)?;
+    // M18.8a: new-file text comes from the registered plugin's extractor;
+    // the CLI never names a concrete plugin (registry.rs stays the only
+    // enumeration site).
+    let registry = crate::registry::default_registry();
+    let text_extractor = registry
+        .sole_plugin()
+        .map(|plugin| plugin.extractor())
+        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    artifacts.save_extraction_artifacts(&result, &output_dir, text_extractor)?;
 
     println!(
         "Extracted {} headers from plan {}",
@@ -35,7 +43,7 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let mut files = result
         .headers
         .iter()
-        .map(|h| h.filename.to_string_lossy().to_string())
+        .map(|h| h.path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
     files.sort();
 
@@ -77,7 +85,15 @@ pub fn build_migration_preview(repo_path: &PathBuf, plan_id: &str, preview: bool
                 plan.target_file.display()
             );
         } else {
-            println!("{}", preview_result.format_diff());
+            // M18.8b: directive diff text is rendered by the registered
+            // plugin's rewriter (registry.rs stays the only enumeration
+            // site — same route as the extractor in `extract_plan_headers`).
+            let registry = crate::registry::default_registry();
+            let rewriter = registry
+                .sole_plugin()
+                .map(|plugin| plugin.rewriter())
+                .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+            println!("{}", preview_result.format_diff_with(rewriter));
             println!("No files changed.");
         }
     }
@@ -101,7 +117,7 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     let model = artifacts.load_reduced_artifacts()?;
 
-    let extractor = ariadne_transform::HeaderExtractor::new(&model);
+    let extractor = ariadne_transform::IsolationEngine::new(&model);
     let extraction = extractor.extract(&plan);
 
     let (symbol_name_to_header, generated_headers) = plan_rewrite_targets(&plan);
@@ -114,8 +130,20 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     println!("Applying {}...\n", plan_id);
 
-    let (snapshot, new_paths) =
-        ariadne_validate::TransactionApplier::apply(&repository.root, &extraction, &migration)?;
+    // M18.8b: apply mutates directive text through the registered plugin's
+    // rewriter; validate only orchestrates snapshot/rollback/tiers.
+    let registry = crate::registry::default_registry();
+    let rewriter = registry
+        .sole_plugin()
+        .map(|plugin| plugin.rewriter())
+        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+
+    let (snapshot, new_paths) = ariadne_validate::TransactionApplier::apply_with(
+        &repository.root,
+        &extraction,
+        &migration,
+        rewriter,
+    )?;
 
     commit_or_rollback(
         &artifacts,
@@ -150,23 +178,22 @@ fn load_plan_for_action(
 
 fn plan_rewrite_targets(
     plan: &ariadne_cluster::plan::OptimizationPlan,
-) -> (BTreeMap<String, PathBuf>, Vec<GeneratedHeader>) {
+) -> (BTreeMap<String, PathBuf>, Vec<GeneratedUnit>) {
     // Build symbol_name_to_header map from plan's proposed_extractions
     let mut symbol_name_to_header: BTreeMap<String, PathBuf> = BTreeMap::new();
-    // Generated headers list (from proposed_extractions, conservative: no required_includes)
-    let mut header_map: BTreeMap<PathBuf, GeneratedHeader> = BTreeMap::new();
+    // Generated units list (from proposed_extractions, conservative: no required deps)
+    let mut unit_map: BTreeMap<PathBuf, GeneratedUnit> = BTreeMap::new();
     for ext in &plan.proposed_extractions {
         symbol_name_to_header.insert(ext.symbol_name.clone(), ext.target_header.clone());
-        header_map
+        unit_map
             .entry(ext.target_header.clone())
-            .or_insert_with(|| GeneratedHeader {
-                filename: ext.target_header.clone(),
-                pragma_once: true,
+            .or_insert_with(|| GeneratedUnit {
+                path: ext.target_header.clone(),
                 symbols: vec![],
-                required_includes: vec![],
+                required_deps: vec![],
             });
     }
-    (symbol_name_to_header, header_map.into_values().collect())
+    (symbol_name_to_header, unit_map.into_values().collect())
 }
 
 /// Consumer rewrite input: (TU source path, old includes, symbol names).

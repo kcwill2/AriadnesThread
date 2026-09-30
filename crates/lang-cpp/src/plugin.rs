@@ -8,11 +8,12 @@
 use crate::analyzer::CppSemanticAnalyzer;
 use crate::resolver::CppDependencyResolver;
 use crate::shaper::CppUnitShaper;
+use crate::source_extractor::CppSourceExtractor;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
-    GeneratedSourceFile, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, RewriteSpec, SemanticAnalyzer, SourceExtractor,
-    SourceFileKind, SymbolBody, SymbolId, SymbolPlacement, SymbolRecord, UnitKind, UnitShaper,
+    GuardKind, LanguageCapabilities, LanguageDetector, LanguageId, LanguageModeling, LanguagePlugin,
+    SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId, SymbolPlacement, SymbolRecord,
+    UnitKind, UnitShaper,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -53,31 +54,7 @@ impl ClusteringConstraints for CppClusteringConstraints {
     }
 }
 
-/// Placeholder until the byte-identical `CppSourceExtractor` lands in M18.8
-/// (plan §3.6). No pipeline code calls this before then; a call panics
-/// loudly instead of silently emitting wrong bytes.
-pub struct CppSourceExtractor;
-
-impl SourceExtractor for CppSourceExtractor {
-    fn extract(
-        &self,
-        _symbols: &[SymbolBody],
-        _namespace: &str,
-        _required_deps: &[String],
-    ) -> GeneratedSourceFile {
-        unimplemented!("CppSourceExtractor lands in M18.8 (plan §3.6)")
-    }
-}
-
-/// Placeholder until the byte-identical `CppDependencyRewriter` lands in
-/// M18.8 (plan §3.6). No pipeline code calls this before then.
-pub struct CppDependencyRewriter;
-
-impl ariadne_lang::DependencyRewriter for CppDependencyRewriter {
-    fn rewrite(&self, _source: &str, _spec: &RewriteSpec) -> String {
-        unimplemented!("CppDependencyRewriter lands in M18.8 (plan §3.6)")
-    }
-}
+pub use crate::dependency_rewriter::CppDependencyRewriter;
 
 /// Placeholder for real compiler invocation: `validate_compile` reports a
 /// failure (never a silent pass) until tier-3 wiring lands in M18.10/M23.

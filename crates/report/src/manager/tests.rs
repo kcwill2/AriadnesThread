@@ -311,14 +311,12 @@ fn test_save_extraction_artifacts() {
     let sym1 = ariadne_transform::ExtractedSymbol {
         name: "MyClass".to_string(),
         kind: ariadne_index::types::SymbolKind::Class,
-        forward_declarable: true,
         body: "// body1".to_string(),
     };
-    let header1 = ariadne_transform::GeneratedHeader {
-        filename: std::path::PathBuf::from("h1.h"),
-        pragma_once: true,
+    let header1 = ariadne_transform::GeneratedUnit {
+        path: std::path::PathBuf::from("h1.h"),
         symbols: vec![sym1],
-        required_includes: vec![],
+        required_deps: vec![],
     };
 
     let result = ariadne_transform::ExtractionResult {
@@ -328,7 +326,8 @@ fn test_save_extraction_artifacts() {
     };
 
     let output_dir = mgr.artifact_root.join("generated");
-    mgr.save_extraction_artifacts(&result, &output_dir).unwrap();
+    mgr.save_extraction_artifacts(&result, &output_dir, &ariadne_lang_cpp::CppSourceExtractor)
+        .unwrap();
 
     assert!(output_dir.join("manifest.json").exists());
     assert!(output_dir.join("headers").join("h1.h").exists());

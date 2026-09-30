@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use ariadne_cli;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
-use ariadne_transform::{ExtractionResult, GeneratedHeader};
+use ariadne_transform::{ExtractionResult, GeneratedUnit};
 use ariadne_validate::{
     ApplyOutcome, FileSnapshot, TierResult, TierValidator, TransactionApplier, ValidationStatus,
     ValidationTier,
@@ -97,7 +97,7 @@ fn test_m10_rollback_identity() {
     let artifacts = ArtifactManager::prepare_for_repo(&repo).unwrap();
 
     // Inject deliberately broken extraction
-    let mut extraction = ariadne_transform::HeaderExtractor::new(
+    let mut extraction = ariadne_transform::IsolationEngine::new(
         &ariadne_cli::get_or_build_reduced_model(&repo_path)
             .unwrap()
             .1,
