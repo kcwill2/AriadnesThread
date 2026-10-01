@@ -562,9 +562,9 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 > EXECUTION NOTES (M18.3/M18.5, recorded post-audit 2026-10-01): divergence fixes from the M18.2 review live in code — (i) External-drop closed by feeding the compilation context's include dirs into `ResolutionContext.search_paths` + `on_disk_include_fallback` (`scheduler/tu_store.rs` `edge_destinations`, mirrored by the `graph` BFS incl. catalog-ownership ThirdParty→External classification); (ii) worker dispatch plugin-only (`analyze_tu_full_with_plugin`; empty registry reports unhandled, never defaults to C++); (iii) `DirectiveStyle` + shared `first_ondisk_include_candidate` reproduce legacy candidate order. Post-completion audit (2026-10-01): C++-is-a-plugin intent confirmed, zero behavioral regressions; accepted file-placement drifts — `CppUnitShaper` lives in `lang-cpp/src/shaper.rs` and the analyzer family spans `analyzer.rs`/`parser.rs`/`tokenizer.rs` (symbols/crate placement unchanged); the shaper-less compile_commands path in `build` retains `cl.exe`/`x64`/`language: Cpp` residues per §4 with plugin injection logged as an M19+ item.
 
 **M19–M22 — Scala analysis slice**
-- [ ] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
-- [ ] M19.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
-- [ ] M19.3 Register in `cli/src/registry.rs`; add `tests/fixtures/scala-basic/**`; `m19_scala_discovery_test.rs`
+- [x] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
+- [x] M19.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
+- [x] M19.3 Register in `cli/src/registry.rs`; add `tests/fixtures/scala-basic/**`; `m19_scala_discovery_test.rs`
 - [ ] M20.1 `ScalaImportResolver` (`resolve_edges` + `resolve_target`) + unit tests
 - [ ] M20.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m20_scala_dependency_graph_test.rs`
 - [ ] M21.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
