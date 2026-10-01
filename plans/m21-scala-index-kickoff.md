@@ -1,6 +1,6 @@
 # M21 Kickoff — Scala Semantic Index (offline, deterministic)
 
-Status: **IN PROGRESS** · Prepared 2026-10-01 · Base: branch `multi-language-support` @ `77bd0a7` (M20 complete + all reviewer gates approved; workspace 767/0/3, hygiene exit 0, goldens zero drift)
+Status: **COMPLETE** (execution notes below) · Prepared 2026-10-01 · Base: branch `multi-language-support` @ `77bd0a7` (M20 complete + all reviewer gates approved; workspace 767/0/3, hygiene exit 0, goldens zero drift) · Executed `21b4c4d` (T-A) → `9fcc315` (T-B, +docs `94d3d7d`) → `37d7b5c` (T-C) → `acbb1a9` (T-D); final gate **842/0/3**, hygiene exit 0, zero golden drift
 
 Authoritative spec: `plans/multi-language-support-implementation_plan.md` — §5 "M21" table (lines 403–413) is the per-file change list and acceptance; §6.2 row `lang-scala::parser` the unit-test contract; §6.3 the suite name; §7 R2/R4 the review rules (R4: parser expected to split into submodules). This document adds only milestone state, decisions, and the orchestration protocol.
 
@@ -55,6 +55,12 @@ Touch-set: `crates/lang-scala/**` (T-A/T-B), `crates/pipeline/src/lib.rs` + pipe
 - UTF-8 hazard (recorded correction): never script-edit tracked files via `Set-Content`/`Out-File`/`>`; Read/Edit tools only, verify with `git diff --numstat`. Fixture/parsed sources stay ASCII-safe anyway.
 - Long cargo runs: command timeout 600000 ms; scoped commands only until T-D's final `--workspace`.
 
-## Execution notes
+## Execution notes (2026-10-01, orchestrator; all four reviewer gates APPROVED)
 
-(to be appended on completion)
+Commits: docs `d31a038` (this kickoff + T-A…T-D specs) · T-A `21b4c4d` (`scanner.rs` + `parser/{mod,declarations,directives,occurrences,corpus}.rs`; RED 59→GREEN 109) · docs `94d3d7d` (Gate-A addendum — 6 non-blocking reviewer notes folded into T-B, incl. the `x.package` dot-guard) · T-B `9fcc315` (`analyzer.rs`, plugin swap, fingerprint `"scala-1"`→`"scala-parser-1"`, `StubAnalyzer` deleted repo-wide; 115/0) · T-C `37d7b5c` (D15 landed in `indexed_build`, not `compute_inputs` — see deviation ruling; pipeline 15/15) · T-D `acbb1a9` (554-line acceptance suite, single-file scope; workspace **842/0/3** = 767 baseline + 75 M21 tests, m00 2/2 **zero golden drift**, m17 5/5, m18 22/22, m19 5/5, m20_scala 5/5, old-numbering m20_apply 6/6, hygiene exit 0).
+
+Gate history: **Gate-A APPROVED** zero-blocking; six self-declared parser rulings all ACCEPTED (notably: cross-file same-package refs invisible offline — the fixture `Order→User` deliberately yields no edge; plan:413 rides OrderService's grouped import; edge src/dst files = analyzed TU, mirroring lang-cpp). **Gate-B APPROVED** zero-blocking with a factual correction — D19's shorthand `C++ "v1"` is wrong: the C++ fingerprint is `"cpp-analyzer-1"` (`lang-cpp/src/plugin.rs`), `"v1"` is only the trait default; neither moved. **Gate-C APPROVED with deviation ACCEPTED:** the handoff's literal `compute_inputs` placement was verified impossible (builder sets the filter after construction) and *wrong* (filtered contexts would poison `fps.index` freshness); the landing seam re-discovers at the index stage with the `None` path byte-identical (`compute_inputs` absent from the diff) and was proven warm-safe (second/third filtered runs reuse: "5 TUs reused, 0 reanalyzed"). **Gate-D APPROVED:** plan:413 clause-mapped; whole-milestone diff = 18 files, zero forbidden tokens in added production lines, deferral ledger verified on disk.
+
+Orchestrator rulings executed: D15–D21 as written; Gate-A addendum authorized in the same worktree docs commit; Gate-D's counting-analyzer D21 witness (test-only bespoke registry wrapper delegating `analysis_fingerprint` — no src change) accepted over shard-byte-identity-only.
+
+Carried-forward (non-blocking, reviewer-ruled): **exact cold-count** (`calls > 0` today; `== 5` one line away if ever tightened); **CountingScalaPlugin must add a delegation per new `LanguagePlugin` override** or it silently takes the trait default; `copy_tree` lacks `artifacts`/`.ariadne` dot-dir exclusion (harmless while fixtures stay clean); pipeline neutrality (R2) is review-enforced, not test-enforced — widening the m17 guard to `crates/pipeline` is an M23 item; M20's catalog carries (`first_path_segment` `.`-trim, `by_module_path_suffix` index, backslash-query test) confirmed still open → M22/M23. Session note: two T-A dispatches died with empty summaries (protocol anticipated this); disk-state restart recovered with zero loss; a third retry completed RED→GREEN in one pass.
