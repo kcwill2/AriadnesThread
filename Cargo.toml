@@ -4,6 +4,7 @@ members = [
     "crates/lang",
     "crates/lang-api",
     "crates/lang-cpp",
+    "crates/lang-scala",
     "crates/repo",
     "crates/build",
     "crates/scheduler",

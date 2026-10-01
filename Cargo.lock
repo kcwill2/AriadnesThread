@@ -219,6 +219,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne-lang-scala"
+version = "0.1.0"
+dependencies = [
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-repo",
+ "tempfile",
+]
+
+[[package]]
 name = "ariadne-pipeline"
 version = "0.1.0"
 dependencies = [
