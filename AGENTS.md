@@ -34,6 +34,16 @@ This project enforces strict code hygiene:
 
 Violations will cause code review to fail. See `~/.config/devin/skills/idd-workflow/CODE_HYGIENE.md` for detailed guidelines.
 
+## File-Edit Discipline (UTF-8 hazard — read before touching any file)
+
+PowerShell 5.1 mangles UTF-8 in this repo: tracked files repeatedly accumulated double-encoded sequences of legitimate characters (`§`, `—`, `→` stored as their own mojibake). Hard rules:
+
+- NEVER write or rewrite file content through `Set-Content`, `Out-File`, `>`, `>>`, or `Get-Content | -replace` pipelines. Use the Read/Edit/Write tools instead (byte-safe), or byte-level writes (`open(path, "wb")`) in scripts.
+- When quoting git content, ALWAYS quote the whole revision:path argument: `git show "rev^:path"` — an unquoted `^` is misparsed by PowerShell and can silently compare the wrong blob.
+- NEVER pipe `git show`/`git cat-file` through PowerShell into a file; PowerShell console decoding fakes "missing" or corrupt lines. Read blobs with the Read tool on a checkout, or byte-level `git cat-file` inside Python.
+- All authored file contents are pure ASCII; test fixtures that need corruption signatures construct them via byte escapes (`b"\xc3\x82\xc2\xa7"`), never literals.
+- Enforcement: `python tools/encoding_guard.py --all` (also `--staged` for pre-commit) detects double-encoded UTF-8 mojibake and non-UTF-8 blobs in tracked content; CI runs it.
+
 ## Quick Mode
 
 For simple tasks (single-file changes, trivial fixes, configuration updates), the workflow will offer a "quick mode" option that bypasses full planning and review while still enforcing code hygiene.

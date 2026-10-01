@@ -34,8 +34,11 @@ jobs:
         # included in this run.
         run: cargo test --workspace
 
+      - name: Encoding gate (mojibake / non-UTF-8)
+        run: python3 tools/encoding_guard.py --all
+
       - name: Hygiene gate (R1/R2)
         run: python3 tools/hygiene_check.py
 
-      - name: Hygiene gate unit tests
-        run: python3 tools/hygiene_check_tests.py
+      - name: Tool unit tests
+        run: python3 -m unittest discover -s tools -p "*_tests.py"
