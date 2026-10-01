@@ -39,6 +39,12 @@ marker lists) with plan-line citations>
 ## Required tests
 <explicit per-behavior test list, exact expected values>
 
+## Hygiene (review-enforced)
+Functions < 100 lines, files < 1000 lines, no banned identifier names
+(tmp/res/foo/bar/test1) and no single-letter locals, intention-revealing
+identifiers, one responsibility per function.
+`python tools/hygiene_check.py` must stay exit 0.
+
 ## Frozen locks
 <list, or "none this task">; verify with
 `python tools/golden_guard.py --base <rev>` once it lands (until then:

@@ -61,12 +61,26 @@ This is a Rust workspace for C++ dependency analysis:
 
 ### Testing
 - Use `cargo test` to run tests
+- Canonical reporting: `python tools/testrun.py [scoped cargo test args]` prints one line `N passed / M failed / K ignored / S suites` (exit 2 = parse drift; use `--baseline` for milestone gates)
+- UI runtime smoke (one command): `python tools/ui_smoke.py` builds the tool, cold-boots the UI on an ephemeral port, asserts routes + `Cache-Control: no-store`
+- Tool unit suites: `python -m unittest discover -s tools -p "*_tests.py"` (what CI runs)
 - Tests are organized by crate in `crates/*/tests/` and `tests/`
 - Integration tests are in `tests/integration/`
 
 ### Build
 - Use `cargo build` to build the project
 - Use `cargo build --release` for release builds
+- Load-perf regression check (local gate): `python tools/bench_compare.py` (median-of-3 stage-5 tail vs per-machine baseline)
+
+### Process Tooling (deterministic rituals; reference, don't re-author)
+- `python tools/checkpoint_guard.py status` — ground truth at session start (incl. worktree census); `resume --spec tasks/<handoff>.md --scope … --cmd …` — fresh-session bootstrap after a dead implementer (skill `resume-checkpoint`)
+- `python tools/encoding_guard.py --staged` before committing; `--all` in CI (mojibake/non-UTF-8 gate)
+- `python tools/commit_scoped.py --scope <glob> … -m <msg>` — scoped commits in shared worktrees (never `git add .`)
+- `python tools/theme_token_check.py --check-added --base <rev>` — UI hex-literal drift guard
+- `python tools/hygiene_check.py` — R1/R2 blocking, R3 naming warn-only (flips via dated rows in `tasks/milestone_ledger.md`)
+- `python tools/testrun.py` — canonical test summary line (quote verbatim in reports)
+- Skills (`.kilo/skills/`): `handoff-spec` (author handoffs), `review-gate` (adjudicate handoffs; its commit-vs-touch-set check enforces scope), `milestone-lifecycle` (kickoff/closeout; ledger is source of truth), `resume-checkpoint`, `walkthrough-commit`
+- Milestone state: `tasks/milestone_ledger.md` is the source of truth; kilo-memory mirrors it in the same commit
 
 ### Documentation
 - Project intent is documented in `Intent.md`

@@ -122,3 +122,30 @@ F1 **`:0`-port claim false** — CLI takes fixed `--port`, no ephemeral handshak
 - T6 remains blocked on `multi-language-support` merging; until then frozen-locks enforcement is prose in handoffs (T8 carries that caveat).
 - Skills under `.kilo/skills/` require a session restart to enumerate; plan commits must not depend on same-session skill invocation.
 - `.css` files are invisible to the R2 size gate (hygiene_check.py:19) — recorded; expanding `R2_SCANNED_SUFFIXES` is a separate decision with a live 1422-line `styles.css` failing day one.
+
+## Execution results (2026-10-01)
+
+Status: EXECUTED on `main`, T1-T5 + T7-T14 landed; T6 deferred (D5, `tests/golden/**` exists only on `multi-language-support`; ledger row records the merge trigger). 13 Red/Green-style commit pairs + 3 docs/chore commits.
+
+| Task | Commit (feat) | Verification |
+|---|---|---|
+| T2 encoding_guard | `1e50fb8` | 11 tests; `--all` exit 0 on `main` incl. this plan file via allow-list (validation #2 met); `--staged` scope proven |
+| T1 checkpoint_guard + `resume-checkpoint` skill | `a5893ba` | 13 tests; real-repo census flags `troubled-concrete` DETACHED + surfaces the extension-worktree orphan; resume classification + skeleton proven in temp repos |
+| T5 commit_scoped | `fa387cb` | 10 tests incl. foreign-staged immunity and index.lock retry |
+| T7-T9, T12 skills + `tasks/milestone_ledger.md` | `4e1d851` | 5 project-local skills under `.kilo/skills/`; ledger carries D4 graduation rows incl. theming-redo mandate |
+| T4 testrun | `9cad1c9` | 20 tests; live smoke `-p ariadne-lang` -> `7 passed / 0 failed / 1 ignored / 2 suites` |
+| T10 hygiene R3 | `9b40f89` | R1/R2 behavior unchanged (all 48 pre-existing hygiene tests green); 6 new R3 tests; 150-location legacy allow-list committed, repo exit 0 with baseline |
+| T13 theme_token_check | `75833c5` | 10 tests; baseline: 132 literals / 8 asset files frozen; `--check-added --base HEAD` exit 0 |
+| T3 ui_smoke | `28cc57b` | 23 offline tests + LIVE cold AND warm smoke PASS on this box; cold guard proven (strips copy only) |
+| T14 run-script | `2ce8f08` | 2-line Agent Manager run script + asset-embed note |
+| T11 bench_compare | `592de60` | 21 tests; baseline generated from 3 live bench runs (`Windows-AMD64-AMD64_Family_26...` class); compare run exit 0 |
+
+Whole-plan gates at execution: `python -m unittest discover -s tools -p "*_tests.py"` = 153 OK (3x consecutive clean + 9x by T3 agent; one transient 9-fail run during concurrent process teardown never reproduced); `hygiene_check.py` exit 0; `encoding_guard.py --all` exit 0; CI consolidated per D3.
+
+Deviations from plan text (all recorded in ledger where actionable):
+1. **T2**: added vendored/binary skip policy (`node_modules`/`target`/NUL-byte) — `extensions/.../node_modules` is tracked and carries legitimate non-UTF-8 + cp1252 artifacts; without this the exit-0-on-main validation is unsatisfiable. Also found: `test_output.txt`/`test_results.txt`/`parse.py` are UTF-16 PowerShell debris (invisible to the guard via NUL) -> ledger deferred-findings row, delete at next hygiene pass.
+2. **T3**: assets DO send `Cache-Control: no-store` (server.rs:168) -> asserted, not warned; poll fast-fails on dead child; `--target-dir` flag added.
+3. **T10**: two pre-existing hygiene-test fixtures renamed (`f`/`x` -> `tally`/`total`) — single-letter fixture names legitimately triggered R3; R1/R2 assertions untouched.
+4. **T11**: phase labels pinned from LIVE bench rows (doc-comment table is stale: `hand-out`/`facts+closures`); debug profile per approved command; 3 phases at 0.0 baseline can fire +inf% WARN — ledger row.
+5. **T13**: baseline regex (3/4/6/8-hex) counts 132 vs E13's 104 (E13 tallied 6-hex in 5 files only).
+6. Test-count baseline drifted during execution (plan assumed 41 hygiene tests at authoring; actual pre-existing was 48+).
