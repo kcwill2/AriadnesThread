@@ -37,7 +37,9 @@ pub(crate) fn scan_directives(tokens: &[Token]) -> DirectiveScan {
     let mut index = 0usize;
     while index < tokens.len() {
         match tokens[index].ident() {
-            Some("package") => index = scan_package_clause(tokens, index, &mut scan),
+            Some("package") if !preceded_by_dot(tokens, index) => {
+                index = scan_package_clause(tokens, index, &mut scan);
+            }
             Some("import") | Some("export") if !preceded_by_dot(tokens, index) => {
                 index = scan_directive_statement(tokens, index, &mut scan);
             }
@@ -330,6 +332,20 @@ mod tests {
                 .iter()
                 .all(|(_, end)| *end <= 4),
             "the `package object` tokens must not be swallowed by the clause scan"
+        );
+    }
+
+    #[test]
+    fn dotted_package_accessor_is_not_a_package_clause() {
+        let scan_result = scan("package a\n\nval q = x.package\nval r = 1\n");
+        assert_eq!(
+            scan_result.namespace, "a",
+            "Gate-A note 6: `x.package` member access must not read `val` as a \
+             package qualifier; the same dot-guard import/export already have"
+        );
+        assert!(
+            scan_result.consumed_ranges.iter().all(|(_start, end)| *end <= 4),
+            "only the leading `package a` clause may be consumed"
         );
     }
 

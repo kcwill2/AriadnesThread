@@ -1,19 +1,19 @@
 //! [`ScalaPlugin`] - the registry entry point for Scala (plan M19.1).
 //!
 //! Wires the kickoff components (`ScalaDetector`, `ScalaUnitShaper`), the
-//! M20.1 resolver ([`crate::resolver::ScalaImportResolver`]), and the
-//! documented milestone stubs (M21/M23, see [`crate::stubs`]) into
+//! M20.1 resolver ([`crate::resolver::ScalaImportResolver`]), the M21
+//! analyzer ([`crate::analyzer::ScalaAnalyzer`] over the M21 parser), and
+//! the documented milestone stubs (M23, see [`crate::stubs`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
 //! gate that keeps the pipeline from reaching the stubs whose milestones
 //! have not landed.
 
+use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
 use crate::detector::ScalaDetector;
 use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
-use crate::stubs::{
-    StubAnalyzer, StubConstraints, StubExtractor, StubRewriter, StubValidator,
-};
+use crate::stubs::{StubConstraints, StubExtractor, StubRewriter, StubValidator};
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     DependencyRewriter, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
@@ -29,7 +29,7 @@ use ariadne_lang::{
 pub struct ScalaPlugin {
     detector: ScalaDetector,
     shaper: ScalaUnitShaper,
-    analyzer: StubAnalyzer,
+    analyzer: ScalaAnalyzer,
     resolver: ScalaImportResolver,
     constraints: StubConstraints,
     extractor: StubExtractor,
@@ -42,7 +42,7 @@ impl ScalaPlugin {
         Self {
             detector: ScalaDetector,
             shaper: ScalaUnitShaper,
-            analyzer: StubAnalyzer,
+            analyzer: ScalaAnalyzer::new(),
             resolver: ScalaImportResolver,
             constraints: StubConstraints,
             extractor: StubExtractor,
@@ -131,12 +131,12 @@ impl LanguagePlugin for ScalaPlugin {
         }
     }
 
-    /// M20.1 bump (kickoff fingerprint ruling): `ScalaImportResolver` is new
-    /// analysis behavior feeding the cache digest (plan Goal 4 / sec 3.5), so
-    /// the trait default "v1" is replaced — the M21 Scala parser will bump
-    /// this again. C++'s fingerprint stays "cpp-analyzer-1" (m18 parity).
+    /// M21 bump (D19): the M21 Scala parser replaced the stub analyzer, so
+    /// the cache digest input moves from M20.1's "scala-1" to
+    /// "scala-parser-1". C++'s fingerprint literal is a separate digest
+    /// input and stays where it is (m18 parity).
     fn analysis_fingerprint(&self) -> String {
-        "scala-1".to_string()
+        "scala-parser-1".to_string()
     }
 
     /// The Scala shaper owns the sbt-layout unit-shaping literals
@@ -157,10 +157,11 @@ mod tests {
         assert_eq!(plugin.id(), LanguageId::Scala);
         assert_eq!(
             plugin.analysis_fingerprint(),
-            "scala-1",
-            "M20.1 bump (kickoff fingerprint ruling): ScalaImportResolver is new \
-             analysis behavior feeding the cache digest; the trait default was \"v1\" \
-             and the M21 parser will bump this again"
+            "scala-parser-1",
+            "bumped with the M21 parser (D19): ScalaAnalyzer/ScalaSourceParser are new \
+             analysis behavior feeding the cache digest; M20.1 introduced this lock at \
+             \"scala-1\" over the trait default \"v1\"; C++ keeps its own \"v1\" input \
+             untouched"
         );
         assert_eq!(plugin.detector().name(), "scala");
         let shaper = plugin.shaper().expect("ScalaUnitShaper landed in M19.2");
@@ -247,12 +248,62 @@ mod tests {
     }
 
     #[test]
-    fn stub_analyzer_reports_empty_scala_analysis_through_the_plugin() {
+    fn analyzer_reports_real_scala_analysis_through_the_plugin() {
         let plugin = ScalaPlugin::new();
         let file_id = FileId::from_relative_path("src/main/scala/com/example/Main.scala");
-        let analysis = plugin.analyzer().analyze(file_id, "object Main {}", "root");
+        let analysis = plugin.analyzer().analyze(file_id, "package com.example\n\nobject Main {}", "root");
         assert_eq!(analysis.tu_file_id, file_id);
         assert_eq!(analysis.language, SourceLanguage::Scala);
-        assert!(analysis.symbols.is_empty());
+        assert_eq!(analysis.context_name, "root");
+        assert_eq!(
+            analysis
+                .symbols
+                .iter()
+                .map(|symbol| symbol.id.0.clone())
+                .collect::<Vec<String>>(),
+            vec!["com.example.Main"],
+            "M21 parser wired: the stub's empty analysis is retired"
+        );
+    }
+
+    #[test]
+    fn analyzer_yields_the_fixture_symbol_with_complete_import_edges() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/fixtures/scala-basic/src/main/scala/com/example/services/OrderService.scala",
+        );
+        let source = std::fs::read_to_string(&fixture)
+            .unwrap_or_else(|error| panic!("fixture {} readable: {error}", fixture.display()));
+        let analysis = ScalaPlugin::new().analyzer().analyze(
+            FileId::from_relative_path("src/main/scala/com/example/services/OrderService.scala"),
+            &source,
+            "scala-basic",
+        );
+        let symbol_ids: Vec<&str> = analysis
+            .symbols
+            .iter()
+            .map(|symbol| symbol.id.0.as_str())
+            .collect();
+        assert_eq!(symbol_ids, vec!["com.example.services.OrderService"]);
+        let complete: Vec<(String, String)> = analysis
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == ariadne_lang::DependencyKind::Complete)
+            .map(|edge| (edge.src_symbol.0.clone(), edge.dst_symbol.0.clone()))
+            .collect();
+        assert_eq!(
+            complete,
+            vec![
+                (
+                    "com.example.services.OrderService".to_string(),
+                    "com.example.models.User".to_string()
+                ),
+                (
+                    "com.example.services.OrderService".to_string(),
+                    "com.example.models.Order".to_string()
+                ),
+            ],
+            "plan:413 acceptance edges via the named import selector, in source order \
+             (`summarize(user: User, order: Order)` names User before Order)"
+        );
     }
 }

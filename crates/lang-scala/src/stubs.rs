@@ -4,35 +4,19 @@
 //! [`crate::plugin::ScalaPlugin::capabilities`] keep `planning`,
 //! `extraction`, `rewriting`, and `validation` switched off, so calling
 //! the extractor/rewriter/validator stubs before M23 is a capability-gated
-//! error before it could ever reach these bodies. The analyzer stub sits
-//! behind a capability that is already `true`: until the M21 parser lands,
-//! the pipeline legitimately receives an empty analysis from it, which is
-//! why the stub returns an honest empty value rather than failing loudly.
-//! M20.1 retired the resolver stub: [`crate::resolver::ScalaImportResolver`]
-//! is wired in [`crate::plugin`] instead.
+//! error before it could ever reach these bodies. M20.1 retired the
+//! resolver stub ([`crate::resolver::ScalaImportResolver`]) and M21 closed
+//! the analyzer gap ([`crate::analyzer::ScalaAnalyzer`] over the M21
+//! parser); both are wired in [`crate::plugin`] and their stubs deleted.
+//! What remains here is owned by M22 (constraints) and M23 (extraction,
+//! rewriting, validation).
 
 use ariadne_lang::{
     ClusteringConstraints, CompilerValidator, DependencyRewriter, GeneratedSourceFile,
-    RewriteSpec, SemanticAnalyzer, SourceExtractor, SymbolBody, SymbolId, SymbolRecord, TuAnalysis,
+    RewriteSpec, SourceExtractor, SymbolBody, SymbolId, SymbolRecord,
 };
-use ariadne_repo::{FileId, SourceLanguage};
 use std::collections::HashSet;
 use std::path::PathBuf;
-
-/// Reports an empty [`TuAnalysis`] until the M21 Scala parser replaces it;
-/// until M21 the semantic index legitimately holds zero Scala symbols, so
-/// this stays an empty result, never a parser error.
-pub struct StubAnalyzer;
-
-impl SemanticAnalyzer for StubAnalyzer {
-    fn analyze(&self, file_id: FileId, _source: &str, _context: &str) -> TuAnalysis {
-        TuAnalysis {
-            tu_file_id: file_id,
-            language: SourceLanguage::Scala,
-            ..TuAnalysis::default()
-        }
-    }
-}
 
 /// Scala has no atomic symbol groups and no language-level frozen symbols
 /// until its clustering milestone; the policy layer owns freezing (plan
@@ -92,17 +76,6 @@ impl CompilerValidator for StubValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stub_analyzer_reports_an_empty_scala_analysis() {
-        let file_id = FileId::from_relative_path("src/main/scala/com/example/Main.scala");
-        let analysis = StubAnalyzer.analyze(file_id, "object Main {}", "root");
-        assert_eq!(analysis.tu_file_id, file_id);
-        assert_eq!(analysis.language, SourceLanguage::Scala);
-        assert!(analysis.symbols.is_empty());
-        assert!(analysis.declarations.is_empty());
-        assert!(analysis.edges.is_empty());
-    }
 
     #[test]
     fn stub_rewriter_passes_source_through() {

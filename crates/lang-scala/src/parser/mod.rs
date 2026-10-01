@@ -396,10 +396,45 @@ mod tests {
     #[test]
     fn decl_text_inside_string_literals_is_invisible() {
         let analysis = parse_src(
-            "package p\n\nobject Doc {\n  val one = \"class Ghost {}\"\n  val two = \"\"\"object Phantom {}\"\"\"\n}",
+            "package p\n\nimport a.b.Widget\n\nobject Doc {\n  val one = \"class Ghost {}\"\n  val two = \"\"\"object Phantom {}\"\"\"\n  val three = \"\"\"Widget(1)\"\"\"\n}",
         );
         assert_eq!(symbol_ids(&analysis), ["p.Doc"]);
         assert!(analysis.references.is_empty());
+        assert!(
+            analysis.edges.is_empty() && analysis.call_sites.is_empty(),
+            "Gate-A note 3: a callable leak (`Widget(` of the named import) inside \
+             a triple-quoted literal must produce neither edges nor call-sites"
+        );
+    }
+
+    #[test]
+    fn nested_block_comment_wrapping_a_decl_yields_nothing() {
+        let analysis = parse_src("/* /* class Ghost */ */");
+        assert!(analysis.symbols.is_empty());
+        assert!(analysis.edges.is_empty());
+        assert!(analysis.references.is_empty());
+    }
+
+    #[test]
+    fn anonymous_given_yields_no_symbol() {
+        let analysis = parse_src("package p\n\ngiven Ordering[Int] with {}");
+        assert!(
+            analysis.symbols.is_empty(),
+            "Gate-A note 2: anonymous givens (non-lowercase name) are a documented \
+             no-symbol limitation"
+        );
+    }
+
+    #[test]
+    fn export_selector_feeds_complete_edge_like_import() {
+        let analysis = parse_src(
+            "package p\n\nexport a.b.Helper\n\nclass Use {\n  val h: Helper = null\n}",
+        );
+        assert_eq!(
+            edge_keys(&analysis),
+            vec![("p.Use".into(), "a.b.Helper".into(), DependencyKind::Complete)],
+            "Gate-A note 4: export participates in the edge map like import"
+        );
     }
 
     #[test]

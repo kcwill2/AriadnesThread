@@ -17,7 +17,10 @@
 //! - A quote character inside an interpolation splice (e.g. `s"${"q"}"`) ends
 //!   the string token early — the same run-to-run leak concession M20 made
 //!   for invalid input only.
-//! - Unterminated single-quoted strings and block comments run to EOF.
+//! - Unterminated block comments run to EOF. An unterminated char literal
+//!   is *not* a literal: `scan_char_literal` returns false, the quote lexes
+//!   as punctuation, and the tail continues as ordinary tokens (behavior;
+//!   an earlier doc line claimed run-to-EOF).
 //! - Numeric literals are consumed greedily over `[0-9A-Za-z._]` tails;
 //!   postfix-dot member access on a literal (`1.toString`) lexes as one
 //!   token. Never analyzed either way.

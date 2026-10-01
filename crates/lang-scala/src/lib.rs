@@ -8,6 +8,7 @@
 //! inward only (repo -> lang-api -> lang); the m17 architecture guard
 //! enforces this edge rule from the moment the crate exists.
 
+pub mod analyzer;
 pub mod boundary;
 pub mod detector;
 mod directive_parser;
@@ -18,6 +19,7 @@ pub mod resolver;
 pub mod shaper;
 mod stubs;
 
+pub use analyzer::ScalaAnalyzer;
 pub use boundary::EXTERNAL_PATH_MARKERS;
 pub use detector::ScalaDetector;
 pub use parser::ScalaSourceParser;
