@@ -495,3 +495,73 @@ fn test_collect_file_metrics_matches_path_reference_and_skips_unregistered() {
         "file metrics must equal the path round-trip reference, same order"
     );
 }
+
+// ── M21 T-C: filter-driven unit shaping (D15) ───────────────────────────────
+// The index stage must shape units through the language FILTER's plugin
+// shaper, not the registry's first-wins shaper, while an unfiltered run
+// keeps the construction-time shaping byte-identical.
+
+fn fixture_root(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures")
+        .join(name)
+}
+
+/// Throwaway copy of a fixture (m00's isolation contract: regenerable caches
+/// like `artifacts/` are never copied, so every pipeline run is cold).
+fn isolated_fixture_copy(fixture: &str, label: &str) -> TempDir {
+    let dir = TempDir::new().unwrap();
+    copy_fixture_tree(&fixture_root(fixture), &dir.path().join(label)).unwrap();
+    dir
+}
+
+fn copy_fixture_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str == "artifacts" || name_str == ".ariadne" || name_str.starts_with('.') {
+            continue;
+        }
+        let target = dst.join(name);
+        if entry.file_type()?.is_dir() {
+            copy_fixture_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn language_filtered_index_uses_the_filter_plugin_unit_shaper() {
+    let dir = isolated_fixture_copy("scala-basic", "repo");
+    let root = dir.path().join("repo");
+
+    let mut pipeline = Pipeline::with_registry(&root, None, default_registry())
+        .unwrap()
+        .language_filter(Some(SourceLanguage::Scala));
+    let index = pipeline.get_or_build_index().unwrap();
+    assert_eq!(
+        index.tu_analyses.len(),
+        5,
+        "one unit per main-root source under the filter's shaper (D15)"
+    );
+}
+
+#[test]
+fn unfiltered_index_keeps_the_registry_first_wins_shaping() {
+    let dir = isolated_fixture_copy("basic", "repo");
+    let root = dir.path().join("repo");
+
+    let mut pipeline = Pipeline::with_registry(&root, None, default_registry())
+        .unwrap()
+        .language_filter(None);
+    let index = pipeline.get_or_build_index().unwrap();
+    assert_eq!(
+        index.tu_analyses.len(),
+        2,
+        "the unfiltered run must index exactly the two construction-shaped units"
+    );
+}

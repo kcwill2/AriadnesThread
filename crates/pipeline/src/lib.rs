@@ -24,7 +24,7 @@ use ariadne_graph::{
 use ariadne_index::{
     IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
 };
-use ariadne_lang::{CyclePolicy, LanguagePlugin, LanguageRegistry};
+use ariadne_lang::{CyclePolicy, LanguagePlugin, LanguageRegistry, UnitShaper};
 use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
@@ -375,7 +375,7 @@ impl Pipeline {
             }
         }
 
-        let indexed_build = self.indexed_build();
+        let indexed_build = self.indexed_build()?;
         let (index_result, stats, production_stats) = match self.workers {
             Some(workers) => {
                 // M18.11: the production path always runs the registry-backed
@@ -421,14 +421,41 @@ impl Pipeline {
     /// The build result the index stage analyzes: full, or restricted to the
     /// `--lang` language (plan M18.3). Contexts are kept intact either way —
     /// closures resolve per TU context exactly as in a full run.
-    fn indexed_build(&self) -> BuildDiscoveryResult {
-        let mut build = self.build.clone();
+    ///
+    /// A filtered run re-shapes through the filter's plugin shaper (D15):
+    /// construction-time discovery ran the registry's first-wins shaper,
+    /// which may recognize none of the filtered language's build markers at
+    /// all (a repo shaped by another language's shaper yields zero units), so
+    /// retention alone could never surface units of the filtered language.
+    /// The unfiltered path returns the construction-time result unchanged —
+    /// `select_unit_shaper`'s `None` branch is that same first-wins call, so
+    /// `compute_inputs`' discovery and every derived fingerprint are exactly
+    /// what the unfiltered run has always analyzed.
+    fn indexed_build(&mut self) -> Result<BuildDiscoveryResult> {
+        let mut build = match self.language_filter {
+            None => self.build.clone(),
+            Some(_) => {
+                let reshaped = BuildDiscoverer::new(&self.repo.root)
+                    .with_repo_discovery(&self.discovery)
+                    .with_unit_shaper(select_unit_shaper(
+                        &self.registry,
+                        self.language_filter,
+                    ))
+                    .discover()?;
+                // The shard store context must see the contexts the shaping
+                // named, exactly as construction-time shaping provided them
+                // (context content is part of every TU cache fingerprint).
+                self.store_ctx =
+                    TuStoreContext::new(&self.discovery, reshaped.contexts.clone());
+                reshaped
+            }
+        };
         if let Some(language) = self.language_filter {
             build.translation_units.retain(|tu| {
                 self.registry.detect_language(&tu.source_path) == Some(language)
             });
         }
-        build
+        Ok(build)
     }
 
     fn rebuild_index_single_threaded(
@@ -692,6 +719,24 @@ impl Pipeline {
             .as_ref()
             .context("load stage cache must exist after ensure_load")?;
         Ok(Arc::unwrap_or_clone(Arc::clone(report)))
+    }
+}
+
+/// Unit shaper for the index stage's unit shaping (D15): with an explicit
+/// `--lang` filter the shaper comes from that language's plugin — a plugin
+/// that provides no shaper honestly stays `None`, leaving build discovery
+/// neutral instead of guessing another language's defaults; without a filter
+/// the registry's first-wins selection is untouched. Registry lookups only —
+/// no language-identity branching (R3).
+fn select_unit_shaper<'a>(
+    registry: &'a LanguageRegistry,
+    language_filter: Option<SourceLanguage>,
+) -> Option<&'a dyn UnitShaper> {
+    match language_filter {
+        Some(language) => registry
+            .plugin_for_id(language)
+            .and_then(|plugin| plugin.shaper()),
+        None => registry.unit_shaper_for(),
     }
 }
 
