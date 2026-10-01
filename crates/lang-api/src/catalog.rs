@@ -114,6 +114,33 @@ impl FileCatalog {
         self.by_module_path.get(stripped).copied()
     }
 
+    /// Deterministic (sorted-by-module-key) records whose module path ENDS
+    /// WITH the given dotted/slash module path (plan M20 D12):
+    /// `com.example.models.User` names `src/main/scala/com/example/models/User.scala`,
+    /// and `com.example/models` names every file under that package dir —
+    /// the suffix form exists because Scala packages omit the
+    /// `src/main/scala` prefix that [`Self::by_module_path`] exact-keys on.
+    /// Matching is component-boundary aware (`models.User` never matches
+    /// `xmodels.User`). Zero matches yield an empty `Vec`; an empty query
+    /// also yields an empty `Vec` instead of matching everything.
+    pub fn by_module_path_suffix(&self, module_path: &str) -> Vec<FileId> {
+        let suffix = unify_segments(module_path);
+        if suffix.is_empty() {
+            return Vec::new();
+        }
+        let mut hits: Vec<(String, FileId)> = self
+            .records
+            .values()
+            .filter_map(|record| {
+                let rel = normalize_path(&record.path.to_string_lossy());
+                let key = module_key(&rel);
+                ends_with_module_suffix(&key, &suffix).then_some((key, record.id))
+            })
+            .collect();
+        hits.sort();
+        hits.into_iter().map(|(_key, id)| id).collect()
+    }
+
     pub fn len(&self) -> usize {
         self.by_rel_path.len()
     }
@@ -185,6 +212,21 @@ fn module_key(rel_path: &str) -> String {
         Some(stripped) if !stripped.is_empty() => stripped.to_string(),
         _ => unified,
     }
+}
+
+/// `key` ends with `suffix` on a component boundary: exactly the suffix, or
+/// the suffix extended leftward by dotted segments (`prefix.suffix`).
+fn ends_on_module_boundary(key: &str, suffix: &str) -> bool {
+    key == suffix || key.ends_with(&format!(".{suffix}"))
+}
+
+/// Suffix test for [`FileCatalog::by_module_path_suffix`]: the full module
+/// key carries the suffix (file-level, `...models.User` ends with
+/// `models.User`), or its parent directory path does (package-dir level,
+/// `...models` ends with `models`, so every file under the package hits).
+fn ends_with_module_suffix(key: &str, suffix: &str) -> bool {
+    ends_on_module_boundary(key, suffix)
+        || strip_last_segment(key).is_some_and(|parent| ends_on_module_boundary(parent, suffix))
 }
 
 #[cfg(test)]
@@ -314,6 +356,90 @@ mod tests {
         // Canonical candidate (absolute include-dir form).
         assert_eq!(catalog.by_path(Path::new("/repo/abs/thing.h")), Some(id));
         assert_eq!(catalog.by_path(Path::new("include/missing.h")), None);
+    }
+
+    // ── by_module_path_suffix (plan M20 D12) ──
+
+    fn scala_tree_records() -> Vec<FileRecord> {
+        vec![
+            record("src/main/scala/com/example/models/Order.scala"),
+            record("src/main/scala/com/example/models/User.scala"),
+            record("src/main/scala/com/example/models/all.scala"),
+            record("src/main/scala/com/example/services/OrderService.scala"),
+        ]
+    }
+
+    fn scala_module_id(rel: &str) -> FileId {
+        FileId::from_relative_path(rel)
+    }
+
+    #[test]
+    fn suffix_lookup_hits_full_module_path_with_dot_or_slash() {
+        let catalog = FileCatalog::from_records(&scala_tree_records());
+        let order = scala_module_id("src/main/scala/com/example/models/Order.scala");
+        assert_eq!(
+            catalog.by_module_path_suffix("com.example.models.Order"),
+            vec![order]
+        );
+        assert_eq!(
+            catalog.by_module_path_suffix("com/example/models/Order"),
+            vec![order]
+        );
+        assert_eq!(
+            catalog.by_module_path_suffix("src/main/scala/com/example/models/Order"),
+            vec![order],
+            "a longer module key also ends with the given suffix"
+        );
+    }
+
+    #[test]
+    fn suffix_lookup_lists_every_file_under_a_package_dir() {
+        let catalog = FileCatalog::from_records(&scala_tree_records());
+        assert_eq!(
+            catalog.by_module_path_suffix("com/example/models"),
+            vec![
+                scala_module_id("src/main/scala/com/example/models/Order.scala"),
+                scala_module_id("src/main/scala/com/example/models/User.scala"),
+                scala_module_id("src/main/scala/com/example/models/all.scala"),
+            ],
+            "sorted by module key (Order < User < all); the services file is not under the package"
+        );
+    }
+
+    #[test]
+    fn suffix_lookup_respects_component_boundaries() {
+        let catalog = FileCatalog::from_records(&[record(
+            "src/main/scala/com/example/xmodels/Order.scala",
+        )]);
+        assert!(
+            catalog.by_module_path_suffix("com.example.models.Order").is_empty(),
+            "`xmodels` must not match the `models` component"
+        );
+    }
+
+    #[test]
+    fn suffix_lookup_is_empty_for_non_match_and_empty_query() {
+        let catalog = FileCatalog::from_records(&scala_tree_records());
+        assert!(catalog.by_module_path_suffix("com.example.nope").is_empty());
+        assert!(
+            catalog.by_module_path_suffix("").is_empty(),
+            "an empty query must not match every record"
+        );
+        assert!(FileCatalog::default()
+            .by_module_path_suffix("com.example.models")
+            .is_empty());
+    }
+
+    #[test]
+    fn suffix_lookup_order_is_deterministic_across_constructions() {
+        let ascending = FileCatalog::from_records(&scala_tree_records());
+        let mut reversed_records = scala_tree_records();
+        reversed_records.reverse();
+        let reversed = FileCatalog::from_records(&reversed_records);
+        assert_eq!(
+            ascending.by_module_path_suffix("com.example.models"),
+            reversed.by_module_path_suffix("com.example.models")
+        );
     }
 
     #[test]

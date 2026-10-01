@@ -4,20 +4,20 @@
 //! [`crate::plugin::ScalaPlugin::capabilities`] keep `planning`,
 //! `extraction`, `rewriting`, and `validation` switched off, so calling
 //! the extractor/rewriter/validator stubs before M23 is a capability-gated
-//! error before it could ever reach these bodies. The analyzer and resolver
-//! stubs sit behind capabilities that are already `true`: until their
-//! milestones land, the pipeline legitimately receives empty results from
-//! them, which is why each stub returns an honest empty value rather than
-//! failing loudly.
+//! error before it could ever reach these bodies. The analyzer stub sits
+//! behind a capability that is already `true`: until the M21 parser lands,
+//! the pipeline legitimately receives an empty analysis from it, which is
+//! why the stub returns an honest empty value rather than failing loudly.
+//! M20.1 retired the resolver stub: [`crate::resolver::ScalaImportResolver`]
+//! is wired in [`crate::plugin`] instead.
 
 use ariadne_lang::{
-    ClusteringConstraints, CompilerValidator, DependencyResolver, DependencyRewriter,
-    GeneratedSourceFile, RawDepEdge, ResolutionContext, RewriteSpec, SemanticAnalyzer,
-    SourceExtractor, SymbolBody, SymbolId, SymbolRecord, TuAnalysis,
+    ClusteringConstraints, CompilerValidator, DependencyRewriter, GeneratedSourceFile,
+    RewriteSpec, SemanticAnalyzer, SourceExtractor, SymbolBody, SymbolId, SymbolRecord, TuAnalysis,
 };
 use ariadne_repo::{FileId, SourceLanguage};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Reports an empty [`TuAnalysis`] until the M21 Scala parser replaces it;
 /// until M21 the semantic index legitimately holds zero Scala symbols, so
@@ -31,22 +31,6 @@ impl SemanticAnalyzer for StubAnalyzer {
             language: SourceLanguage::Scala,
             ..TuAnalysis::default()
         }
-    }
-}
-
-/// Reports no dependency edges until the M20 Scala resolver replaces it;
-/// the dependency graph legitimately holds no Scala edges until then.
-pub struct StubResolver;
-
-impl DependencyResolver for StubResolver {
-    fn resolve_edges(
-        &self,
-        _file_id: FileId,
-        _path: &Path,
-        _source: &str,
-        _context: &ResolutionContext<'_>,
-    ) -> Vec<RawDepEdge> {
-        vec![]
     }
 }
 

@@ -1,15 +1,18 @@
 //! [`ScalaPlugin`] - the registry entry point for Scala (plan M19.1).
 //!
-//! Wires the kickoff components (`ScalaDetector`, `ScalaUnitShaper`) and
-//! the documented milestone stubs (M20/M21/M23, see [`crate::stubs`]) into
+//! Wires the kickoff components (`ScalaDetector`, `ScalaUnitShaper`), the
+//! M20.1 resolver ([`crate::resolver::ScalaImportResolver`]), and the
+//! documented milestone stubs (M21/M23, see [`crate::stubs`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
 //! gate that keeps the pipeline from reaching the stubs whose milestones
 //! have not landed.
 
+use crate::boundary::EXTERNAL_PATH_MARKERS;
 use crate::detector::ScalaDetector;
+use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
 use crate::stubs::{
-    StubAnalyzer, StubConstraints, StubExtractor, StubResolver, StubRewriter, StubValidator,
+    StubAnalyzer, StubConstraints, StubExtractor, StubRewriter, StubValidator,
 };
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
@@ -27,7 +30,7 @@ pub struct ScalaPlugin {
     detector: ScalaDetector,
     shaper: ScalaUnitShaper,
     analyzer: StubAnalyzer,
-    resolver: StubResolver,
+    resolver: ScalaImportResolver,
     constraints: StubConstraints,
     extractor: StubExtractor,
     rewriter: StubRewriter,
@@ -40,7 +43,7 @@ impl ScalaPlugin {
             detector: ScalaDetector,
             shaper: ScalaUnitShaper,
             analyzer: StubAnalyzer,
-            resolver: StubResolver,
+            resolver: ScalaImportResolver,
             constraints: StubConstraints,
             extractor: StubExtractor,
             rewriter: StubRewriter,
@@ -91,9 +94,9 @@ impl LanguagePlugin for ScalaPlugin {
     /// Plan sec 3.4 Scala column: source-file units, package-object
     /// aggregation that re-exports nominally (no C++-style re-aggregation),
     /// no duplicate-definition guard, single-file symbol placement, cycles
-    /// tolerated within a package. External boundary markers are M20's
-    /// dependency-directory list; the plugin must supply it now (plan
-    /// sec 3.4 + M20 marker list).
+    /// tolerated within a package. External boundary markers are the
+    /// shared [`EXTERNAL_PATH_MARKERS`] list (M19 lock, M20 resolver) —
+    /// single-sourced so modeling and resolution cannot drift.
     fn modeling(&self) -> LanguageModeling {
         LanguageModeling {
             language: LanguageId::Scala,
@@ -103,12 +106,10 @@ impl LanguagePlugin for ScalaPlugin {
             symbol_placement: SymbolPlacement::SingleFile,
             aggregation_reexports: false,
             cycle_policy: CyclePolicy::TolerateWithinPackage,
-            external_path_markers: vec![
-                "lib".to_string(),
-                "target".to_string(),
-                ".ivy2".to_string(),
-                ".cache".to_string(),
-            ],
+            external_path_markers: EXTERNAL_PATH_MARKERS
+                .iter()
+                .map(|marker| marker.to_string())
+                .collect(),
         }
     }
 
@@ -130,9 +131,13 @@ impl LanguagePlugin for ScalaPlugin {
         }
     }
 
-    // `analysis_fingerprint()` intentionally keeps the trait default "v1":
-    // it is bumped together with the M21 Scala parser, the first plugin
-    // behavior that feeds a cache fingerprint (plan sec 3.5).
+    /// M20.1 bump (kickoff fingerprint ruling): `ScalaImportResolver` is new
+    /// analysis behavior feeding the cache digest (plan Goal 4 / sec 3.5), so
+    /// the trait default "v1" is replaced — the M21 Scala parser will bump
+    /// this again. C++'s fingerprint stays "cpp-analyzer-1" (m18 parity).
+    fn analysis_fingerprint(&self) -> String {
+        "scala-1".to_string()
+    }
 
     /// The Scala shaper owns the sbt-layout unit-shaping literals
     /// (plan M19.2).
@@ -152,8 +157,10 @@ mod tests {
         assert_eq!(plugin.id(), LanguageId::Scala);
         assert_eq!(
             plugin.analysis_fingerprint(),
-            "v1",
-            "trait default until the M21 parser bumps it"
+            "scala-1",
+            "M20.1 bump (kickoff fingerprint ruling): ScalaImportResolver is new \
+             analysis behavior feeding the cache digest; the trait default was \"v1\" \
+             and the M21 parser will bump this again"
         );
         assert_eq!(plugin.detector().name(), "scala");
         let shaper = plugin.shaper().expect("ScalaUnitShaper landed in M19.2");
@@ -161,6 +168,34 @@ mod tests {
             shaper.build_markers(),
             vec!["build.sbt", "build.sc", "pom.xml"]
         );
+    }
+
+    #[test]
+    fn plugin_resolver_reads_the_named_edges_from_real_fixture_source() {
+        use ariadne_lang::{DirectiveStyle, ResolutionContext};
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/fixtures/scala-basic/src/main/scala/com/example/services/OrderService.scala",
+        );
+        let source = std::fs::read_to_string(&fixture)
+            .unwrap_or_else(|error| panic!("fixture {} readable: {error}", fixture.display()));
+        let edges = ScalaPlugin::new().resolver().resolve_edges(
+            FileId::from_relative_path("src/main/scala/com/example/services/OrderService.scala"),
+            std::path::Path::new("src/main/scala/com/example/services/OrderService.scala"),
+            &source,
+            &ResolutionContext::default(),
+        );
+        let targets: Vec<&str> = edges.iter().map(|edge| edge.raw_target.as_str()).collect();
+        assert_eq!(
+            targets,
+            vec!["com.example.models.Order", "com.example.models.User"],
+            "the package clause emits no edge and the interpolated string emits none"
+        );
+        assert!(edges
+            .iter()
+            .all(|edge| edge.style == DirectiveStyle::Unspecified));
+        assert!(edges
+            .iter()
+            .all(|edge| (edge.line, edge.column) == (3, 1)));
     }
 
     #[test]
