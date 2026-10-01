@@ -187,15 +187,24 @@ mod tests {
         let targets: Vec<&str> = edges.iter().map(|edge| edge.raw_target.as_str()).collect();
         assert_eq!(
             targets,
-            vec!["com.example.models.Order", "com.example.models.User"],
-            "the package clause emits no edge and the interpolated string emits none"
+            vec![
+                "com.example.models.Order",
+                "com.example.models.User",
+                "scala.collection.mutable",
+            ],
+            "the package clause emits no edge and the interpolated string emits none; the \
+             third edge is the M20 T-D fixture's `import scala.collection.mutable._` (the \
+             wildcard edge carries the package, not the `._` spelling)"
         );
         assert!(edges
             .iter()
             .all(|edge| edge.style == DirectiveStyle::Unspecified));
-        assert!(edges
-            .iter()
-            .all(|edge| (edge.line, edge.column) == (3, 1)));
+        assert_eq!(
+            edges.iter().map(|edge| edge.line).collect::<Vec<u32>>(),
+            vec![3, 3, 4],
+            "the selector import sits on line 3, the wildcard import on line 4"
+        );
+        assert!(edges.iter().all(|edge| edge.column == 1));
     }
 
     #[test]
