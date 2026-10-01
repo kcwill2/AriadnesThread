@@ -127,6 +127,14 @@ def _advance_rust_code(line: str, position: int, state, events) -> int:
     if _rust_definition_name_at(line, position) is not None:
         events.append(("fn", position))
     char = line[position]
+    if char == "_" or char.isalpha():
+        raw = _raw_string_length(line, position)
+        if raw is None:
+            end = position
+            while end < len(line) and _is_word_character(line[end]):
+                end += 1
+            events.append(("ident", position))
+            return end
     following = line[position + 1] if position + 1 < len(line) else ""
     if char == "/" and following == "/":
         return len(line)
@@ -239,7 +247,7 @@ class _RustFunctionFinder:
             self._handle_fn(position, line, line_number)
         elif kind == "open":
             self._handle_open()
-        else:
+        elif kind == "close":
             self._handle_close(line_number)
 
     def _handle_fn(self, position: int, line: str, line_number: int):
@@ -440,6 +448,146 @@ def _pruned_directory(name: str) -> bool:
     return name.startswith(".") or name in PRUNED_DIR_NAMES
 
 
+# ---------------------------------------------------------------------------
+# R3 (warn-only): provably-banned identifier names + single-letter locals.
+# Flips to blocking ONLY via a dated row in tasks/milestone_ledger.md.
+# `data` is deliberately NOT banned (too common a legitimate identifier).
+# Strings, comments and raw text are out of scope: only code identifiers
+# produced by the Rust/Python scanners are judged.
+# ---------------------------------------------------------------------------
+
+R3_BANNED_IDENTIFIERS = frozenset({"tmp", "res", "foo", "bar", "test1"})
+R3_SCANNED_SUFFIXES = frozenset({".rs", ".py"})
+R3_ALLOW_LIST_FILE = "tools/hygiene_r3_allowlist.txt"
+PYTHON_ASSIGNMENT_TOKENS = frozenset(
+    {"=", "+=", "-=", "*=", "/=", "//=", "**=", "%=", "@=", "&=", "|=", "^="}
+)
+PYTHON_OPERATOR_CHARACTERS = frozenset("=+-*/%&|^@")
+
+
+def _identifier_run(line: str, position: int) -> str:
+    end = position
+    while end < len(line) and _is_word_character(line[end]):
+        end += 1
+    return line[position:end]
+
+
+def find_rust_identifiers(text: str):
+    """Per line: list of code identifier tokens (strings/comments excluded)."""
+    state = _RustScanState()
+    per_line = []
+    for index, line in enumerate(split_physical_lines(text), start=1):
+        names = [
+            _identifier_run(line, position)
+            for kind, position in _rust_line_events(line, state)
+            if kind == "ident"
+        ]
+        per_line.append((index, names))
+    return per_line
+
+
+def find_python_identifiers(text: str):
+    """Per line: list of code identifier tokens (strings/comments excluded)."""
+    state = _PythonScanState()
+    per_line = []
+    for index, line in enumerate(split_physical_lines(text), start=1):
+        per_line.append((index, _python_line_identifiers(line, state)))
+    return per_line
+
+
+def _python_line_identifiers(line: str, state) -> list:
+    names = []
+    position = 0
+    if state.triple_delimiter is not None:
+        closing = line.find(state.triple_delimiter)
+        if closing < 0:
+            return names
+        delimiter = state.triple_delimiter
+        state.triple_delimiter = None
+        position = closing + len(delimiter)
+    while position < len(line):
+        char = line[position]
+        if char == "#":
+            break
+        if char == "_" or char.isalpha():
+            run = _identifier_run(line, position)
+            names.append(run)
+            position += len(run)
+            continue
+        if char in "\"'":
+            position = _advance_python_string(line, position, state)
+            if state.triple_delimiter is not None:
+                break
+            continue
+        if char in PYTHON_OPERATOR_CHARACTERS:
+            end = position
+            while end < len(line) and line[end] in PYTHON_OPERATOR_CHARACTERS:
+                end += 1
+            names.append(line[position:end])
+            position = end
+            continue
+        position += 1
+    return names
+
+
+def _single_letter_finding(relative: str, suffix: str, line_number: int,
+                           names: list, index: int):
+    name = names[index]
+    if len(name) != 1 or not name.islower():
+        return None
+    previous = names[index - 1] if index > 0 else None
+    following = names[index + 1] if index + 1 < len(names) else None
+    two_back = names[index - 2] if index > 1 else None
+    rust_binding = suffix == ".rs" and (
+        previous == "let"
+        or (previous == "mut" and two_back == "let")
+        or (previous == "for" and following == "in")
+    )
+    python_binding = suffix == ".py" and (
+        (previous == "for" and following == "in")
+        or (names and names[0] == "def" and index >= 2)
+        or (index == 0 and following in PYTHON_ASSIGNMENT_TOKENS)
+    )
+    if rust_binding or python_binding:
+        return f"{relative}:{line_number}: R3 (warn) single-letter local `{name}`"
+    return None
+
+
+def _r3_entries(relative: str, suffix: str, text: str, allow_list: set):
+    finder = {
+        ".rs": find_rust_identifiers,
+        ".py": find_python_identifiers,
+    }[suffix]
+    identifier_lines = finder(text)
+    entries = []
+    for line_number, names in identifier_lines:
+        for index, name in enumerate(names):
+            location = f"{relative}:{line_number}"
+            if location in allow_list:
+                continue
+            if name in R3_BANNED_IDENTIFIERS:
+                entries.append(
+                    f"{location}: R3 (warn) banned identifier `{name}`"
+                )
+            single_letter = _single_letter_finding(
+                relative, suffix, line_number, names, index
+            )
+            if single_letter is not None:
+                entries.append(single_letter)
+    return entries
+
+
+def _load_r3_allow_list(root: Path) -> set:
+    path = root / R3_ALLOW_LIST_FILE
+    if not path.is_file():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+
 def _iter_source_files(root: Path):
     for directory, children, file_names in os.walk(root):
         children[:] = sorted(child for child in children if not _pruned_directory(child))
@@ -486,26 +634,74 @@ def _r1_entries(relative: str, suffix: str, text: str, errors):
 def scan_tree(root: Path):
     violations = []
     errors = []
+    warnings = []
+    allow_list = _load_r3_allow_list(root)
     for relative, path in _iter_source_files(root):
         text = _read_text(path)
         oversized = _r2_entry(relative, text)
         if oversized is not None:
             violations.append(oversized)
         violations.extend(_r1_entries(relative, path.suffix, text, errors))
-    return violations, errors
+        suffix = path.suffix.lower()
+        if suffix in R3_SCANNED_SUFFIXES:
+            warnings.extend(_r3_entries(relative, suffix, text, allow_list))
+    return violations, errors, warnings
+
+
+def _write_r3_baseline(warnings, output_path: Path) -> int:
+    lines = sorted({entry.rsplit(": R3 ", 1)[0] for entry in warnings})
+    header = ("# R3 warn allow-list (path:line), generated by"
+              " hygiene_check.py --r3-baseline\n")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(header + "".join(f"{line}\n" for line in lines),
+                           encoding="utf-8")
+    return len(lines)
+
+
+def _parse_main_arguments(arguments):
+    root = None
+    baseline_output = None
+    positionals = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--r3-baseline":
+            index += 1
+            if index >= len(arguments):
+                raise ValueError("--r3-baseline requires an output path")
+            baseline_output = Path(arguments[index])
+        else:
+            positionals.append(argument)
+        index += 1
+    if len(positionals) > 1:
+        raise ValueError("expected at most one root argument")
+    if positionals:
+        root = Path(positionals[0])
+    else:
+        root = Path(__file__).resolve().parents[1]
+    return root, baseline_output
 
 
 def main(argv=None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    root = Path(arguments[0]) if arguments else Path(__file__).resolve().parents[1]
+    try:
+        root, baseline_output = _parse_main_arguments(arguments)
+    except ValueError as usage_error:
+        print(f"ERROR {usage_error}")
+        return 2
     if not root.is_dir():
         print(f"ERROR {root} is not a directory")
         return 2
-    violations, errors = scan_tree(root)
+    violations, errors, warnings = scan_tree(root)
     for entry in sorted(violations):
         print(entry[3])
     for entry in sorted(errors):
         print(entry[3])
+    for warning in sorted(warnings):
+        print(warning)
+    if baseline_output is not None:
+        count = _write_r3_baseline(warnings, baseline_output)
+        print(f"R3 baseline: {count} entries written to {baseline_output}")
     if errors:
         return 2
     return 1 if violations else 0
