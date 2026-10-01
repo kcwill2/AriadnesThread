@@ -4,6 +4,7 @@
 //! the golden baseline and the M18 interim suites), so shard stores and
 //! artifacts never bleed between runs.
 
+pub mod external_boundary_parity;
 pub mod isolation_output_parity;
 pub mod provenance_lock;
 pub mod resolver_parity;
