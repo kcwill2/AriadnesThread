@@ -1,6 +1,6 @@
 # M19 Kickoff — Scala Plugin: Discovery + Build Context
 
-Status: READY TO EXECUTE · Prepared 2026-10-01 · Base: branch `multi-language-support` @ `e4ab68f` (workspace 679/0/3, hygiene gate green)
+Status: COMPLETE (execution notes below) · Prepared 2026-10-01 · Base: branch `multi-language-support` @ `e4ab68f` (workspace 679/0/3, hygiene gate green) · Executed `d0c6499` (T-A) → `e029e71` (T-B) → these notes; final gate 715/0/3
 
 Authoritative spec: `plans/multi-language-support-implementation_plan.md` — §5 "M19" table (lines 377–387) is the per-file change list and acceptance; §3.2/§3.4 the modeling/capability contracts; §9 lines 565–567 the task list; §7 R1–R4 the review rules. This document adds only what the plan cannot know: milestone state, decisions from the M18 audit, and the orchestration protocol.
 
@@ -36,3 +36,16 @@ R1 touch-set: `crates/lang-scala/**`, `crates/cli/src/registry.rs` (+ `crates/pi
 ## Known environment facts
 
 Fixtures are copied to temp dirs for runs (see `m18_cpp_plugin_parity/mod.rs::isolated_repo`); integration suites call `ariadne_cli` handlers directly (plan §6.3); `tests/integration/Cargo.toml` gains `ariadne-lang` + `ariadne-lang-scala` dev-deps; PowerShell 5.1, long cargo builds — timeouts 600000 ms.
+
+## Execution notes (2026-10-01, orchestrator; both reviewer gates APPROVED)
+
+Commits: handoff specs `9ac69e4` · T-A `d0c6499` (M19.1+M19.2, `crates/lang-scala`, 21/21) · T-B `e029e71` (M19.3+D9). Final gate: `cargo test --workspace` **715/0/3**, m17 5/5, m00 2/2 (no golden drift), m18 22/22 (byte-identical), m19 5/5, m10/m12/m14/m20/m1/m2 witnesses green, `tools/hygiene_check.py` exit 0. No Scala toolchain invoked (A3 honored — `scalac` appears only as a string literal). The `planning: true` blocker the protocol predicted occurred in the aborted T-A session's skeleton and was caught fix-side by the plan:381 full-struct test before commit.
+
+Orchestrator rulings executed (full text in `tasks/m19-ta-handoff.md` / `tasks/m19-tb-handoff.md`):
+
+1. **sole_plugin blast radius (not anticipated by this kickoff):** registering Scala made `sole_plugin()` → `None`, breaking `m10/m12/m14/m20` (their cli handlers route extractor/rewriter/validator/incremental through it). Fixed via `cli::registry::capability_backend` (stage = the plan:381 capability — Scala's `false` literals keep C++ the sole backend byte-identically) + `incremental_backend` (distinct `tu.language` set, unhandled-language error, never a C++ default; zero units → old sole-plugin fallback). Cli-handler edits are §3.1-justified exceptions (the M18.8b seam documented itself as "lands with M19", `lang/src/registry.rs:124–129`) and carry the justification in the T-B commit body. `sole_plugin()` is now fallback-only — retirement candidate when M21 lands the language-scoped cache.
+2. **D9 direction:** cli depends on pipeline (never reverse, cycle), so the shared builder lives in `pipeline::build_default_registry()` (Cpp-then-Scala order is a documented contract — `unit_shaper_for()`/`plugin_for()` first-wins keep C++ discovery byte-identical); `pipeline::default_registry()` and `cli::registry::default_registry()` both delegate; duplication locked twice (cli unit test + cross-crate m19 test).
+3. **plan:387's "crates/repo needs no functional change" was wrong:** `discovery.rs` filtered on `kind.is_source_or_header()`, which never records `ScalaSource` — `.scala` discovery was impossible. Generalized that one eligibility term to repo's own neutral `kind.is_analyzable()` (records `.scala`, excludes `.sc`/BuildDefinition — exactly plan:387's intent); `is_source_or_header` now has zero callers (kept as pub API, retirement candidate). C++ discovery byte-identical (m00/m1/m2/m18 witnesses).
+4. **Acceptance item 2 wording deviation (`lib/`+`target/` → ThirdParty/Generated via existing `policy.rs`):** shipped `policy.rs` has no `lib` rule and `discovery.rs` traversal SKIPS `target/` dirs, so that sentence cannot mean discovery classification. The m19 suite locks the real boundary instead: zero records under `target/`/`lib/`, `classify_ownership_and_policy(target-path) == (Generated, Frozen)`, and `"lib"`/`"target"` ∈ `modeling().external_path_markers` (the M20 resolver enforcement point). `policy.rs` deliberately untouched (R1/R2; the Scala lib/ boundary is plugin knowledge). All other acceptance items met verbatim.
+
+Protocol compliance: one implementer session died mid-T-A (empty compaction risk); restarted fresh from a disk-state inventory per protocol — the inventory found a compiling skeleton with strict tests but stubbed bodies (12/21 red), completed verify-before-fix to green. Reviewer gate A independently re-ran the crate suite; gate B independently re-ran m00/m10/m12/m17/m18/m19 + cli/pipeline/repo and byte-scanned the diff (0 non-ASCII added lines).
