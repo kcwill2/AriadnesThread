@@ -1,0 +1,55 @@
+# Milestone Ledger
+
+**Authority rule:** this ledger is the source of truth for milestone state.
+kilo-memory entries MIRROR it and must be updated in the same commit; on
+conflict, trust this ledger and fix the memory. Milestone rows and deferred
+findings predating 2026-10-01 were reconstructed from memory + git and should
+be backfilled at the next kickoff if found inaccurate.
+
+## Milestones
+
+| Milestone | Status | Where (commit/branch) | Frozen locks | Notes |
+|---|---|---|---|---|
+| M18 header-dependency migration + UI story | COMPLETE (audit 2026-10-01: intent confirmed, zero regressions, 8 findings dispositioned) | `main` (merged; audit vs spec at df57491) | `tests/golden/**` byte-locked, manifest hash `0xddc3...` resync via `UPDATE_GOLDENS=1` only | M18.11 session-death incident -> T1 checkpoint_guard |
+| M19 Scala plugin (`crates/lang-scala`) | COMPLETE on branch, NOT merged to `main` | `multi-language-support` @ `32ecf33` (worktree `.kilo/worktrees/linen-mice`) | same as M18 on that branch; `tests/golden/**` does NOT exist on `main` | 715 tests, cpp parity 22/22, walkthrough committed; handoffs `tasks/m19-t{a,b}-handoff.md` live on the branch |
+| M20 Scala resolver | STARTING (independent session + own worktree per 2026-10-01 handoff) | new branch off `multi-language-support` | TBD at kickoff | StubResolver replacement |
+| Process tooling codification (this ledger's birth) | IN PROGRESS on `main` | `.kilo/plans/1790831557705-process-tooling-codification.md` | n/a | T6 blocked on M19 merge |
+
+## Worktree census obligations (E16)
+
+Every participating worktree must end merged, or abandoned WITH a ledger row
+below. Closeout checks run `python tools/checkpoint_guard.py status` (census).
+
+| Worktree | State at 2026-10-01 | Disposition |
+|---|---|---|
+| `.kilo/worktrees/troubled-concrete` | DETACHED HEAD @ `1aa03b3`, own branch deleted; held verified-but-never-committed theming work (lost) | needs `git worktree remove` at next kickoff once operator confirms nothing to salvage |
+| `.kilo/worktrees/linen-mice` | M19 branch, complete | merge or abandon with row |
+| `.kilo/worktrees/jeweled-neon` | at `main` tip, no branch work | abandon with row |
+| `.kilo/worktrees/load-tail-phase-performance` | merged via `7a58e1f` | abandon with row |
+
+## Deferred findings (with target milestone)
+
+| Finding | Target | Source |
+|---|---|---|
+| Execute theming plan `1790656207440` (three themes, D1-D8) — implementation VERIFIED IN WORKTREE THEN LOST (E16); its own T8 parity + zero-hex Rust tests own theme-token Phase B | next UI capacity window; redo required | E16 / T13 |
+| lang-scala guard gaps | M23 | M19 kickoff (D9) |
+| `test_output.txt`, `test_results.txt`, `parse.py` are UTF-16 PowerShell-captured debris committed ~2026-09-25; invisible to encoding_guard's binary (NUL) skip | delete at next hygiene pass | found during T2 build 2026-10-01 |
+| `.css` invisible to R2 size gate (`styles.css` 1422 lines and growing; `R2_SCANNED_SUFFIXES` excludes `.css`) | separate decision (day-one failure risk) | plan residual risk |
+| T6 `tools/golden_guard.py` — specced, unimplemented: `tests/golden/**` exists only on `multi-language-support` | at/before M19 merge | D5 |
+
+## Graduation backlog (D4: warn-only -> blocking flips; owner = next kickoff runner)
+
+| Check | Current mode | Flip condition (propose dated target at kickoff) |
+|---|---|---|
+| `hygiene_check.py` R3 naming rule (`tmp`/`res`/`foo`/`bar`/`test1`, single-letter locals) | warn-only; per-file+line allow-list for legacy | flip after one full milestone with zero new R3 findings |
+| clippy `-D warnings` (125-warning baseline at `f7ace60`, ci.yml comment) | warn-only (plain clippy) | flip when baseline reaches 0 |
+| `tools/bench_compare.py` stage-5 25% median regression | local gate only; GitHub-runner timings incomparable | CI adoption needs a dedicated self-hosted runner class |
+| `tools/theme_token_check.py --check-added` hex drift | baseline-committed drift guard | Phase B token parity belongs to the theming plan's own Rust tests, NOT here |
+
+## Byte-locked sets (as of 2026-10-01)
+
+| Set | Branch | Regeneration protocol |
+|---|---|---|
+| `tests/golden/**` | `multi-language-support` only | `UPDATE_GOLDENS=1`, then manifest hash resync; no new files inside `tests/fixtures/basic` / `tests/fixtures/expensive` |
+| `tests/fixtures/**` | all branches | frozen; changes need explicit review approval |
+| `tools/theme_token_baseline.json` hex-location snapshot | `main` | regenerate only in a commit that justifies each new/removed literal |
