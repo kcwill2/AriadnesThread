@@ -1,6 +1,10 @@
 # M21 T-B Handoff — `ScalaAnalyzer` + plugin wiring + fingerprint bump
 
-Depends on: T-A merged (parser green). Decision refs: D18 (analyzer is a thin wrapper), D19 (fingerprint bump), D20. Kickoff: `plans/m21-scala-index-kickoff.md`.
+Depends on: T-A merged at `21b4c4d`, Gate-A **APPROVED** zero-blocking. Decision refs: D18 (analyzer is a thin wrapper), D19 (fingerprint bump), D20. Kickoff: `plans/m21-scala-index-kickoff.md`.
+
+## Gate-A addendum (pre-authorized test-only extension of the touch-set)
+
+Fold these reviewer non-blocking notes into your commit (test additions only — no parser semantics changes): (1) parser-level nested block comment negative `/* /* class Ghost */ */` ⇒ zero symbols/edges/refs; (2) anonymous `given Ordering[Int] with {}` ⇒ zero symbols assertion (currently doc-only); (3) strengthen `decl_text_inside_string_literals_is_invisible` by putting a *callable* leak (`X(` of a named-import `X`) inside `"""…"""` and assert edges/call-sites empty too; (4) parser-level `export` ⇒ Complete edge test; (5) scanner char-literal doc/behavior mismatch (reviewer note 5: doc claims run-to-EOF on unterminated `'\n`, `scan_char_literal` returns false and leaks tail) — align the doc to the behavior; (6) `x.package` dot-guard one-liner in `directives.rs` (reviewer note 6) IS a semantics change — implement it with a test (it was judged blocking-exotic; one guard + negative).
 
 ## Touch-set (nothing else)
 
