@@ -397,6 +397,8 @@ Acceptance (`tests/integration/tests/m19_scala_discovery_test.rs`): `ariadne dis
 
 Acceptance (`m20_scala_dependency_graph_test.rs`): `ariadne graph` emits `OrderService.scala → models/Order.scala` and `→ models/User.scala` with `kind:"Import"`; `import scala.collection.mutable._` becomes an `External` entry; the fixture's deliberate `models ↔ services` cycle does not fail the run (whereas C++ `m3` still asserts cycle reporting).
 
+> EXECUTION NOTES (M20, reviewer-APPROVED 2026-10-01 at `75abb8e`, final gate 767/0/3, goldens zero drift, see `plans/m20-scala-graph-kickoff.md`): (a) per user decision D3 the cycle *substrate* rework (SCC groups, iterative Tarjan) is NOT in M20 — it is standalone M23.5 post-merge (`.kilo/plans/1790821308681-cycle-substrate-scc-m23_5.md` on main); "planner honours CyclePolicy" was discharged on the **report side** (`generate_report_with_cycle_policies`, informational iff all members non-`Reject`, field skip-when-zero → byte-identical C++ `report.json`), `planner.rs` doc-only; (b) kind seam is a neutral trait default `DependencyResolver::directive_edge_kind() -> Option<IncludeKind>` (C++ None, Scala `Some(Import)`), `IncludeKind::Import` bincode index 3 pinned; `ResolveOutcome::External` got its own builder path (kind External, no on-disk probe; C++ never returns External — proven); (c) `plan:396`'s `modeling.rs` external markers were already shipped in M19 (`plugin.rs`); M20 added the *consumer* — single-sourced `EXTERNAL_PATH_MARKERS` in `lang-scala/boundary.rs` enforced by the resolver; (d) fixture cycle added content-only (`Order.scala` imports services + real use; `OrderService.scala` gains `scala.collection.mutable._` + `ArrayBuffer` use) — m19 6-record lock green unedited; (e) graph seeding stays C++-shaper-first; the Scala suite injects `ScalaUnitShaper` via new `build_dependency_graph_with_unit_shaper` (D14) — marker-based shaper auto-selection still deferred (M22 revisit).
+
 
 ### M21 — Scala semantic index (offline, deterministic)
 
@@ -565,8 +567,8 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [x] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
 - [x] M19.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
 - [x] M19.3 Register in `cli/src/registry.rs`; add `tests/fixtures/scala-basic/**`; `m19_scala_discovery_test.rs`
-- [ ] M20.1 `ScalaImportResolver` (`resolve_edges` + `resolve_target`) + unit tests
-- [ ] M20.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m20_scala_dependency_graph_test.rs`
+- [x] M20.1 `ScalaImportResolver` (`resolve_edges` + `resolve_target`) + unit tests
+- [x] M20.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m20_scala_dependency_graph_test.rs`
 - [ ] M21.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
 - [ ] M21.2 `ScalaAnalyzer` + `handle_index_with_registry` + `PluginWorkerBackend` language dispatch; language-scoped cache key; `m21_scala_semantic_index_test.rs`
 - [ ] M22.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
