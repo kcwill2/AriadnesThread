@@ -11,6 +11,8 @@
 pub mod boundary;
 pub mod detector;
 mod directive_parser;
+mod scanner;
+pub mod parser;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
@@ -18,6 +20,7 @@ mod stubs;
 
 pub use boundary::EXTERNAL_PATH_MARKERS;
 pub use detector::ScalaDetector;
+pub use parser::ScalaSourceParser;
 pub use plugin::ScalaPlugin;
 pub use resolver::ScalaImportResolver;
 pub use shaper::ScalaUnitShaper;
