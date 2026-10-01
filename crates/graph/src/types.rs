@@ -53,7 +53,20 @@ pub struct IncludeReport {
     pub external_headers_count: usize,
     pub unresolved_includes_count: usize,
     pub cycle_count: usize,
+    /// Cycles whose every member file tolerates cycles per its language's
+    /// `CyclePolicy` (M20 D11). Only ever non-zero through
+    /// `generate_report_with_cycle_policies`; skipped when 0 so every
+    /// pre-M20 artifact (all C++ paths) keeps a byte-identical `report.json`.
+    #[serde(default, skip_serializing_if = "informational_cycles_absent")]
+    pub informational_cycle_count: usize,
     pub top_headers_by_closure: Vec<(FileId, PathBuf, usize)>,
+}
+
+/// Serde skip predicate for `IncludeReport::informational_cycle_count`: the
+/// key is absent from serialized reports exactly when no cycle is
+/// informational (the shape every artifact had before M20).
+fn informational_cycles_absent(count: &usize) -> bool {
+    *count == 0
 }
 
 #[cfg(test)]

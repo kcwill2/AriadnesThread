@@ -24,7 +24,7 @@ use ariadne_graph::{
 use ariadne_index::{
     IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
 };
-use ariadne_lang::{LanguagePlugin, LanguageRegistry};
+use ariadne_lang::{CyclePolicy, LanguagePlugin, LanguageRegistry};
 use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
@@ -338,7 +338,12 @@ impl Pipeline {
 
         let graph = build_dependency_graph(&self.repo.root, &self.registry)?;
         let closures = graph.compute_closures();
-        let report = graph.generate_report();
+        let cycle_policies = cycle_policy_by_file(&self.registry, &self.discovery);
+        let report = graph.generate_report_with_cycle_policies(&|file_id| {
+            *cycle_policies
+                .get(&file_id)
+                .unwrap_or(&CyclePolicy::Reject)
+        });
         self.manager
             .save_include_artifacts(&graph, &closures, &report, &self.fps.include_graph)?;
         self.include_cache = Some((graph, closures));
@@ -688,6 +693,28 @@ impl Pipeline {
             .context("load stage cache must exist after ensure_load")?;
         Ok(Arc::unwrap_or_clone(Arc::clone(report)))
     }
+}
+
+/// Per-file cycle stance for the include-graph report (plan M20 D11, IV-5):
+/// each discovery record's `language` is resolved through the registry
+/// (`plugin_for_id` — R3-legal registry lookup, no `match LanguageId`), and
+/// files no registered plugin claims fall back to `Reject`, which keeps the
+/// C++ report byte-identical to the pre-M20 `generate_report()` output.
+fn cycle_policy_by_file(
+    registry: &LanguageRegistry,
+    discovery: &RepositoryDiscoveryResult,
+) -> HashMap<FileId, CyclePolicy> {
+    discovery
+        .files
+        .iter()
+        .map(|record| {
+            let policy = registry
+                .plugin_for_id(record.language)
+                .map(|plugin| plugin.modeling().cycle_policy)
+                .unwrap_or(CyclePolicy::Reject);
+            (record.id, policy)
+        })
+        .collect()
 }
 
 /// Plugin that owns `path`'s language (plan §3.3 fact 3): the registry

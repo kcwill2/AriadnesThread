@@ -1,6 +1,8 @@
 //! Physical file include graph structure, closure calculation, cycle detection, and visualization.
 
 use crate::types::{IncludeClosure, IncludeEdge, IncludeKind, IncludeReport};
+// M20 D11 (R2-legal): only the policy enum is named here — never a language.
+use ariadne_lang_api::modeling::CyclePolicy;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -271,8 +273,31 @@ impl IncludeGraph {
         current_path.pop();
     }
 
-    /// Generates an aggregated summary report of the include graph.
+    /// Generates an aggregated summary report of the include graph, treating
+    /// every file's cycle stance as `Reject` (IV-4): `informational_cycle_count`
+    /// is 0 and skipped by serde, so the artifact shape is unchanged for all
+    /// existing callers.
     pub fn generate_report(&self) -> IncludeReport {
+        self.generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Reject)
+    }
+
+    /// A cycle is informational iff **every** member file's policy is
+    /// non-`Reject` (M20 D11, IV-3); a mixed-member cycle is blocking.
+    fn cycle_is_informational(cycle: &[FileId], policy_of: &dyn Fn(FileId) -> CyclePolicy) -> bool {
+        cycle
+            .iter()
+            .all(|&file_id| !matches!(policy_of(file_id), CyclePolicy::Reject))
+    }
+
+    /// Generates the summary report classifying cycles against the injected
+    /// per-file cycle policies (M20 D11). `cycle_count` still counts every
+    /// detected cycle (IV-2, m3 lock); `informational_cycle_count` counts the
+    /// cycles where all members tolerate. No language is named here (R2) —
+    /// the stance arrives purely through `policy_of`.
+    pub fn generate_report_with_cycle_policies(
+        &self,
+        policy_of: &dyn Fn(FileId) -> CyclePolicy,
+    ) -> IncludeReport {
         let closures = self.compute_closures();
         let mut unique_headers = HashSet::new();
         let mut local_count = 0;
@@ -315,6 +340,12 @@ impl IncludeGraph {
         closure_sizes.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
         let top_headers = closure_sizes.into_iter().take(10).collect();
 
+        let detected_cycles = self.detect_cycles();
+        let informational_cycle_count = detected_cycles
+            .iter()
+            .filter(|cycle| Self::cycle_is_informational(cycle, policy_of))
+            .count();
+
         IncludeReport {
             total_edges: self.edges.len(),
             unique_headers: unique_headers.len(),
@@ -322,7 +353,8 @@ impl IncludeGraph {
             system_headers_count: system_count,
             external_headers_count: external_count,
             unresolved_includes_count: unresolved_count,
-            cycle_count: self.detect_cycles().len(),
+            cycle_count: detected_cycles.len(),
+            informational_cycle_count,
             top_headers_by_closure: top_headers,
         }
     }
@@ -552,6 +584,86 @@ mod tests {
         assert_eq!(report.external_headers_count, 1);
         assert_eq!(report.unresolved_includes_count, 0);
         assert_eq!(report.total_edges, 3);
+    }
+
+    fn mutual_cycle_graph() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        graph.register_file(FileId(1), PathBuf::from("a.h"));
+        graph.register_file(FileId(2), PathBuf::from("b.h"));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp));
+        graph.add_edge(edge(FileId(2), FileId(1), IncludeKind::Local, cpp));
+        graph
+    }
+
+    #[test]
+    fn cycle_with_all_members_tolerating_is_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::TolerateWithinPackage);
+        assert_eq!(report.cycle_count, 1, "IV-2: cycle_count keeps counting all cycles");
+        assert_eq!(report.informational_cycle_count, 1);
+    }
+
+    #[test]
+    fn cycle_with_one_rejecting_member_is_not_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph().generate_report_with_cycle_policies(&|file_id| {
+            if file_id == FileId(1) {
+                CyclePolicy::Reject
+            } else {
+                CyclePolicy::TolerateWithinPackage
+            }
+        });
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 0);
+    }
+
+    #[test]
+    fn plain_tolerate_also_counts_as_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Tolerate);
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 1);
+    }
+
+    #[test]
+    fn default_report_never_classifies_cycles_as_informational() {
+        let report = mutual_cycle_graph().generate_report();
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 0);
+    }
+
+    #[test]
+    fn informational_cycle_count_key_is_skipped_from_json_when_zero() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let default_json =
+            serde_json::to_string(&mutual_cycle_graph().generate_report()).unwrap();
+        assert!(
+            !default_json.contains("informational_cycle_count"),
+            "zero-informational report must serialize byte-identically to today's shape: {default_json}"
+        );
+        let tolerated = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Tolerate);
+        let tolerated_json = serde_json::to_string(&tolerated).unwrap();
+        assert!(
+            tolerated_json.contains("\"informational_cycle_count\":1"),
+            "non-zero informational count must surface: {tolerated_json}"
+        );
+    }
+
+    #[test]
+    fn all_reject_policy_json_is_byte_identical_to_default_report() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let default_json =
+            serde_json::to_string(&mutual_cycle_graph().generate_report()).unwrap();
+        let all_reject_json = serde_json::to_string(
+            &mutual_cycle_graph()
+                .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Reject),
+        )
+        .unwrap();
+        assert_eq!(default_json, all_reject_json);
     }
 
     #[test]

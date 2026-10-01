@@ -35,10 +35,15 @@ pub struct OptimizationPlanner<'a> {
     pub constraints: Option<&'a dyn ClusteringConstraints>,
     /// Cycle stance (plan M18.7): `Reject` rejects any proposal that would
     /// split an SCC via `ConstraintChecker`. `Tolerate` and
-    /// `TolerateWithinPackage` currently share that path — SCC members are
-    /// already co-proposed as one batch, so cycles are never split;
-    /// package-scoped informational cycle reporting lands in M20
-    /// (`graph.rs` cycle reporting), not here.
+    /// `TolerateWithinPackage` share that path here — SCC members are already
+    /// co-proposed as one batch, so cycles are never split, and the planner
+    /// keeps behaving identically under every policy (locked by
+    /// `tests/planner_injection.rs:315` `cycle_policy_variants_share_the_scc_coproposal_path_for_now`).
+    /// What shipped in M20 (D11): the stance is consumed on the *report* side
+    /// — `IncludeGraph::generate_report_with_cycle_policies` classifies a
+    /// cycle as informational when every member's policy is non-`Reject`.
+    /// Package-scoped cycle precision is superseded by the M23.5
+    /// group-condensation milestone, not by this field.
     pub cycle_policy: CyclePolicy,
 }
 
