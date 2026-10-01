@@ -454,19 +454,19 @@ class CodeReviewerRejectionTests(unittest.TestCase):
 class BodyLineBracketDepthTests(unittest.TestCase):
     def test_p7_body_line_bracket_with_column_zero_argument_flags_true_length(self):
         text = joined(
-            "def f():",
-            "    x = call(",
+            "def tally():",
+            "    total = call(",
             "column_zero_argument,",
             "    )",
             *["    step()"] * 97,
         )
-        self.assertEqual([(1, "f", 101)],
+        self.assertEqual([(1, "tally", 101)],
                          span_tuples(hygiene_check.find_python_functions(text)))
         with tempfile.TemporaryDirectory() as root:
             write_file(root, "p7.py", text)
             exit_code, stdout = run_checker(root)
         self.assertEqual(1, exit_code)
-        self.assertEqual(["p7.py:1: R1 def `f` is 101 lines (> 100)"],
+        self.assertEqual(["p7.py:1: R1 def `tally` is 101 lines (> 100)"],
                          stdout.splitlines())
 
     def test_p7_control_wrapped_signature_still_measures_without_double_count(self):
@@ -481,13 +481,13 @@ class BodyLineBracketDepthTests(unittest.TestCase):
 
     def test_p7_body_line_bracket_def_at_exactly_100_lines_stays_clean(self):
         text = joined(
-            "def f():",
-            "    x = call(",
+            "def tally():",
+            "    total = call(",
             "column_zero_argument,",
             "    )",
             *["    step()"] * 96,
         )
-        self.assertEqual([(1, "f", 100)],
+        self.assertEqual([(1, "tally", 100)],
                          span_tuples(hygiene_check.find_python_functions(text)))
         with tempfile.TemporaryDirectory() as root:
             write_file(root, "clean_p7.py", text)
@@ -531,6 +531,106 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(2, exit_code)
         self.assertIn("ERROR", stdout)
         self.assertIn("unclosed", stdout)
+
+
+class R3NamingTests(unittest.TestCase):
+    def test_banned_identifiers_are_warned_in_rust_and_python(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "src/short.rs",
+                       joined("fn main() {",
+                              "    let tmp = compute();",
+                              "    let res = fetch();", "}"))
+            write_file(root, "scripts/mover.py",
+                       joined("def shift(foo, bar):", "    return test1()"))
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(0, exit_code)
+        self.assertIn("src/short.rs:2: R3 (warn) banned identifier `tmp`",
+                      stdout.splitlines())
+        self.assertIn("src/short.rs:3: R3 (warn) banned identifier `res`",
+                      stdout.splitlines())
+        for relative, line, name in [("scripts/mover.py", 1, "foo"),
+                                     ("scripts/mover.py", 1, "bar"),
+                                     ("scripts/mover.py", 2, "test1")]:
+            self.assertIn(f"{relative}:{line}: R3 (warn) banned identifier `{name}`",
+                          stdout.splitlines())
+
+    def test_strings_and_comments_never_trigger_r3(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "quiet.rs", joined(
+                "// tmp res foo bar test1 in a comment",
+                "fn main() {",
+                '    let message = "tmp and res in a string";',
+                "}",
+            ))
+            write_file(root, "quiet.py", joined(
+                "# tmp res foo bar test1",
+                'NOTE = "tmp res foo"',
+            ))
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(0, exit_code)
+        self.assertEqual("", stdout)
+
+    def test_single_letter_locals_flagged_but_closure_parameters_tolerated(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "letters.rs", joined(
+                "fn main() {",
+                "    let x = 1;",
+                "    let mut q = 2;",
+                "    for i in 0..3 {}",
+                "    let handler = |y| y + 1;",
+                "}",
+            ))
+            write_file(root, "letters.py", joined(
+                "def update(offset, z):",
+                "    w = 0",
+                "    for n in offset:",
+                "        pass",
+            ))
+            exit_code, stdout = run_checker(root)
+        warned = stdout.splitlines()
+        self.assertEqual(0, exit_code)
+        self.assertIn("letters.rs:2: R3 (warn) single-letter local `x`", warned)
+        self.assertIn("letters.rs:3: R3 (warn) single-letter local `q`", warned)
+        self.assertIn("letters.rs:4: R3 (warn) single-letter local `i`", warned)
+        self.assertNotIn("|y|", stdout)
+        self.assertIn("letters.py:1: R3 (warn) single-letter local `z`", warned)
+        self.assertIn("letters.py:2: R3 (warn) single-letter local `w`", warned)
+        self.assertIn("letters.py:3: R3 (warn) single-letter local `n`", warned)
+
+    def test_allow_list_file_suppresses_warn_entries(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "src/short.rs", joined(
+                "fn main() {", "    let tmp = compute();", "}"))
+            write_file(root, "tools/hygiene_r3_allowlist.txt",
+                       "src/short.rs:2\n")
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(0, exit_code)
+        self.assertEqual("", stdout)
+
+    def test_r3_warnings_never_change_exit_code(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "src/only_r3.rs",
+                       joined("fn main() {", "    let tmp = 1;", "}"))
+            write_file(root, "src/big.rs", long_rust_function(101))
+            exit_code, stdout = run_checker(root)
+        self.assertEqual(1, exit_code)
+        self.assertIn("R3 (warn)", stdout)
+        self.assertIn("R1 fn", stdout)
+
+    def test_r3_baseline_writes_path_line_entries(self):
+        with tempfile.TemporaryDirectory() as root:
+            write_file(root, "src/short.rs", joined(
+                "fn main() {", "    let tmp = compute();", "}"))
+            baseline = Path(root) / "out" / "allow.txt"
+            finished = subprocess.run(
+                [sys.executable, CHECKER_PATH, str(root),
+                 "--r3-baseline", str(baseline)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(0, finished.returncode)
+            self.assertIn("entries written", finished.stdout)
+            written = baseline.read_text(encoding="utf-8").splitlines()
+        self.assertIn("src/short.rs:2", written)
 
 
 if __name__ == "__main__":
