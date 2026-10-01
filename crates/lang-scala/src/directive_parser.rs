@@ -7,7 +7,8 @@
 //!   comma form `import a.C, d.F` yields only its first path (selectors
 //!   after a top-level comma carry no keyword and are ignored as noise);
 //! * multi-line `{...}` selector groups are not supported;
-//! * triple-quoted (`"""`) strings are not recognized as strings;
+//! * triple-quoted (`"""`) literals are consumed run-to-run (content until
+//!   the next 3+-quote run) without interpreting `$`-splices or escapes;
 //! * selector forms that are not plain dotted identifiers (`given`,
 //!   `type C`, alias leftovers) are ignored as noise (IV-2);
 //! * a selector-less import is decided by Scala's naming convention (IV-2's
@@ -41,8 +42,12 @@ pub(crate) fn parse_import_directives(source: &str) -> Vec<ParsedImport> {
             Some('/') if cursor.peek_at(1) == Some('/') => skip_line_comment(&mut cursor),
             Some('/') if cursor.peek_at(1) == Some('*') => skip_block_comment(&mut cursor),
             Some('"') => {
-                let interpolated = string_is_interpolated(&cursor);
-                skip_string_literal(&mut cursor, interpolated);
+                if starts_triple_quote(&cursor) {
+                    skip_triple_quoted_literal(&mut cursor);
+                } else {
+                    let interpolated = string_is_interpolated(&cursor);
+                    skip_string_literal(&mut cursor, interpolated);
+                }
             }
             Some(c) if is_identifier_char(c) => {
                 let (line, column) = (cursor.line, cursor.column);
@@ -172,6 +177,35 @@ fn string_is_interpolated(cursor: &ScanCursor) -> bool {
         .get(cursor.index.saturating_sub(1))
         .copied()
         .is_some_and(|before| before != '"' && is_identifier_char(before))
+}
+
+/// True when a run of at least three quotes starts exactly at the cursor
+/// (the current char included — the run test must not fire one char early).
+fn starts_triple_quote(cursor: &ScanCursor) -> bool {
+    cursor.peek() == Some('"')
+        && cursor.peek_at(1) == Some('"')
+        && cursor.peek_at(2) == Some('"')
+}
+
+/// Consumes a `"""..."""` multi-line literal run-to-run: after the opening
+/// three quotes, everything up to and including the next run of at least
+/// three quotes is literal text (no directive, no escape, and — an
+/// accepted M20 limitation — no interpolation splices inside `s"""..."""`
+/// are interpreted). Content beginning with a quote can therefore merge
+/// with the closing run; full lexical fidelity is the M21 parser's job.
+fn skip_triple_quoted_literal(cursor: &mut ScanCursor) {
+    cursor.advance();
+    cursor.advance();
+    cursor.advance();
+    while !cursor.at_eof() {
+        if starts_triple_quote(cursor) {
+            cursor.advance();
+            cursor.advance();
+            cursor.advance();
+            return;
+        }
+        cursor.advance();
+    }
 }
 
 fn skip_string_literal(cursor: &mut ScanCursor, interpolated: bool) {
@@ -379,5 +413,32 @@ mod tests {
     #[test]
     fn keyword_like_identifiers_are_not_directives() {
         assert!(parse_import_directives("val importLike = 1\nval exported = export_thing\n").is_empty());
+    }
+
+    #[test]
+    fn triple_quoted_string_content_never_leaks_directives() {
+        assert!(
+            parse_import_directives(
+                "val doc = \"\"\"tip: write \"import com.example.snippet.Hidden\" first\"\"\""
+            )
+            .is_empty(),
+            "quoted text inside a triple-quoted literal is not code"
+        );
+        assert!(
+            parse_import_directives(
+                "val doc = s\"\"\"${name} note: \"import x.y\" done\"\"\"\n"
+            )
+            .is_empty(),
+            "an interpolated s\"\"\"...\"\"\" literal is consumed run-to-run"
+        );
+    }
+
+    #[test]
+    fn code_after_a_closing_triple_quote_is_scanned_normally() {
+        let parsed = parse_import_directives(
+            "val doc = \"\"\"note: \"import x.y\" still content\"\"\"\nimport com.example.models.Real\n",
+        );
+        assert_eq!(parsed.len(), 1, "only the code after the closing quote");
+        assert_eq!(parsed[0].raw_target, "com.example.models.Real");
     }
 }
