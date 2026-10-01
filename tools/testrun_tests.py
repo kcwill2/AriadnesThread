@@ -1,0 +1,294 @@
+"""Tests for tools/testrun.py (canonical cargo test reporting, T4).
+
+Run directly: python tools\\testrun_tests.py
+Or discovered: python -m unittest discover -s tools -p "*_tests.py"
+Everything here is OFFLINE: fixtures are canned cargo output written to temp
+files and fed through --replay or the pure parser. Real cargo is never run.
+"""
+
+import contextlib
+import io
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import testrun
+
+TESTRUN_PATH = str(Path(__file__).resolve().parent / "testrun.py")
+
+MULTI_SUITE_OUTPUT = """\
+    Finished test [unoptimized + debuginfo] target(s) in 1.20s
+     Running unittests src/lib.rs (target\\debug\\deps\\ariadne_lang-7c3d9a.exe)
+
+running 6 tests
+test graph::tests::empty_graph ... ok
+test lexer::tests::tokenizes_input ... ok
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/roundtrip.rs (target\\debug\\deps\\roundtrip-2f4e8b.exe)
+
+running 4 tests
+test parse_roundtrip ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests ariadne_lang
+
+running 2 tests
+test src/lib.rs - parse (line 8) ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+"""
+
+FAILED_GROUP_OUTPUT = """\
+    Finished test [unoptimized + debuginfo] target(s) in 0.40s
+     Running unittests src/lib.rs (target\\debug\\deps\\ariadne_graph-1b2c3d.exe)
+
+running 5 tests
+test cycles::tests::detects_self_loop ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/edges.rs (target\\debug\\deps\\edges-9d8e7f.exe)
+
+running 2 tests
+test edge_verdicts ... FAILED
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+"""
+
+GARBAGE_OUTPUT = """\
+error: no such command: `tset`
+
+\tDid you mean `test`?
+
+Usage: cargo <COMMAND>
+"""
+
+DRIFT_SHAPED_OUTPUT = """\
+     Running unittests src/lib.rs (target\\debug\\deps\\ariadne_x-0a1b.exe)
+test result: ok. 3 passed, 0 failed, 0 ignored
+"""
+
+HEADERS_ONLY_OUTPUT = """\
+     Running unittests src/lib.rs (target\\debug\\deps\\ariadne_x-0a1b.exe)
+running 0 tests
+   Doc-tests ariadne_x
+running 0 tests
+"""
+
+
+def write_text_file(holder, name, content):
+    target = Path(holder) / name
+    target.write_text(content, encoding="utf-8")
+    return str(target)
+
+
+def run_tool(*args):
+    finished = subprocess.run(
+        [sys.executable, TESTRUN_PATH, *args],
+        capture_output=True,
+        text=True,
+    )
+    return finished.returncode, finished.stdout, finished.stderr
+
+
+def last_stdout_line(standard_out):
+    return standard_out.rstrip("\r\n").splitlines()[-1]
+
+
+class ParserTests(unittest.TestCase):
+    def test_multi_binary_and_doctest_groups_are_summed(self):
+        counts = testrun.parse_cargo_output(MULTI_SUITE_OUTPUT)
+        self.assertEqual((12, 0, 1, 3), tuple(counts))
+
+    def test_failed_group_is_counted(self):
+        counts = testrun.parse_cargo_output(FAILED_GROUP_OUTPUT)
+        self.assertEqual((6, 1, 0, 2), tuple(counts))
+
+    def test_garbage_output_parses_to_none(self):
+        self.assertIsNone(testrun.parse_cargo_output(GARBAGE_OUTPUT))
+
+    def test_result_line_off_the_pinned_shape_parses_to_none(self):
+        self.assertIsNone(testrun.parse_cargo_output(DRIFT_SHAPED_OUTPUT))
+
+    def test_headers_without_result_lines_parse_to_none(self):
+        self.assertIsNone(testrun.parse_cargo_output(HEADERS_ONLY_OUTPUT))
+
+    def test_canonical_line_format(self):
+        counts = testrun.TestCounts(12, 0, 1, 3)
+        self.assertEqual(
+            "12 passed / 0 failed / 1 ignored / 3 suites",
+            testrun.canonical_line(counts),
+        )
+
+
+class ReplayCliTests(unittest.TestCase):
+    def test_multi_suite_replay_prints_canonical_line_last(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture
+            )
+        self.assertEqual(0, returncode, standard_err)
+        self.assertEqual(
+            "12 passed / 0 failed / 1 ignored / 3 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_failed_group_replay_exits_one(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "failed.txt", FAILED_GROUP_OUTPUT)
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture
+            )
+        self.assertEqual(1, returncode, standard_err)
+        self.assertEqual(
+            "6 passed / 1 failed / 0 ignored / 2 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_garbage_replay_reports_drift_and_exits_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "garbage.txt", GARBAGE_OUTPUT)
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture
+            )
+        self.assertEqual(2, returncode)
+        self.assertIn("parse format drift", standard_out + standard_err)
+
+
+class BaselineCliTests(unittest.TestCase):
+    def test_matching_baseline_exits_zero(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            baseline = write_text_file(holder, "base.txt", "12/0/1/3\n")
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture, "--baseline", baseline
+            )
+        self.assertEqual(0, returncode, standard_err)
+        self.assertEqual(
+            "12 passed / 0 failed / 1 ignored / 3 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_mismatching_baseline_prints_both_lines_and_exits_one(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            baseline = write_text_file(holder, "base.txt", "11/0/1/3")
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture, "--baseline", baseline
+            )
+        self.assertEqual(1, returncode, standard_err)
+        combined = standard_out + standard_err
+        self.assertIn("11 passed / 0 failed / 1 ignored / 3 suites", combined)
+        self.assertIn("12 passed / 0 failed / 1 ignored / 3 suites", combined)
+
+    def test_missing_baseline_file_exits_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            missing = str(Path(holder) / "no_such_baseline.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture, "--baseline", missing
+            )
+        self.assertEqual(2, returncode)
+        self.assertTrue(standard_out + standard_err.strip())
+
+
+class UsageErrorTests(unittest.TestCase):
+    def test_unknown_flag_exits_two(self):
+        returncode, standard_out, standard_err = run_tool("--bogus-flag")
+        self.assertEqual(2, returncode)
+        self.assertIn("unknown flag", standard_out + standard_err)
+
+    def test_missing_flag_value_exits_two(self):
+        returncode, standard_out, standard_err = run_tool("--timeout")
+        self.assertEqual(2, returncode)
+        self.assertTrue(standard_out + standard_err.strip())
+
+    def test_non_positive_timeout_exits_two(self):
+        returncode, standard_out, standard_err = run_tool("--timeout", "0")
+        self.assertEqual(2, returncode)
+        self.assertIn("timeout", standard_out + standard_err)
+
+    def test_missing_replay_file_exits_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            missing = str(Path(holder) / "absent.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", missing
+            )
+        self.assertEqual(2, returncode)
+        self.assertTrue(standard_out + standard_err.strip())
+
+
+class ScopedArgumentTests(unittest.TestCase):
+    def test_default_runs_workspace_and_scoped_args_are_forwarded(self):
+        recorded = []
+
+        def fake_run(cargo_args, timeout_seconds):
+            recorded.append((list(cargo_args), timeout_seconds))
+            return testrun.RunOutcome(text=MULTI_SUITE_OUTPUT, timed_out=False)
+
+        with mock.patch.object(testrun, "run_cargo_command", fake_run):
+            with contextlib.redirect_stdout(io.StringIO()):
+                default_code = testrun.main([])
+                scoped_code = testrun.main(["-p", "ariadne-lang"])
+        self.assertEqual((0, 0), (default_code, scoped_code))
+        self.assertEqual((["--workspace"], 600), recorded[0])
+        self.assertEqual((["-p", "ariadne-lang"], 600), recorded[1])
+
+
+class TimeoutTests(unittest.TestCase):
+    def _run_with_outcomes(self, argv, outcomes):
+        remaining = list(outcomes)
+
+        def fake_run(cargo_args, timeout_seconds):
+            return remaining.pop(0)
+
+        with mock.patch.object(testrun, "run_cargo_command", fake_run):
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                return_code = testrun.main(argv)
+        return return_code, captured.getvalue(), len(remaining)
+
+    def test_timeout_without_retry_exits_one(self):
+        outcomes = [testrun.RunOutcome(text="", timed_out=True)]
+        return_code, standard_out, unconsumed = self._run_with_outcomes(
+            ["--timeout", "3"], outcomes
+        )
+        self.assertEqual(1, return_code)
+        self.assertIn("TIMEOUT after 3s", standard_out)
+        self.assertEqual(0, unconsumed)
+
+    def test_timeout_with_retry_reruns_once_then_verdicts(self):
+        outcomes = [
+            testrun.RunOutcome(text="", timed_out=True),
+            testrun.RunOutcome(text=MULTI_SUITE_OUTPUT, timed_out=False),
+        ]
+        return_code, standard_out, unconsumed = self._run_with_outcomes(
+            ["--timeout", "5", "--retry-on-timeout"], outcomes
+        )
+        self.assertEqual(0, return_code)
+        self.assertEqual(0, unconsumed)
+        self.assertIn("TIMEOUT after 5s", standard_out)
+        self.assertEqual(
+            "12 passed / 0 failed / 1 ignored / 3 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_second_timeout_still_exits_one(self):
+        outcomes = [
+            testrun.RunOutcome(text="", timed_out=True),
+            testrun.RunOutcome(text="", timed_out=True),
+        ]
+        return_code, standard_out, unconsumed = self._run_with_outcomes(
+            ["--timeout", "4", "--retry-on-timeout"], outcomes
+        )
+        self.assertEqual(1, return_code)
+        self.assertEqual(0, unconsumed)
+        self.assertIn("TIMEOUT after 4s", standard_out)
+
+
+if __name__ == "__main__":
+    unittest.main()
