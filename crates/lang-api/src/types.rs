@@ -202,6 +202,10 @@ pub enum IncludeKind {
     System,
     /// External third-party library header.
     External,
+    /// Resolved module-system dependency directive (M20 D10). Appended LAST:
+    /// the bincode serialized indices of the variants above are frozen
+    /// (0/1/2) — see `include_kind_bincode_indices_are_pinned`.
+    Import,
 }
 
 /// Source location of an include directive.
@@ -265,5 +269,67 @@ mod include_dto_tests {
         let pre: IncludeEdge = serde_json::from_str(&json_no_lang).unwrap();
         assert_eq!(pre.language, SourceLanguage::Cpp);
         assert_eq!(pre.source, edge.source);
+    }
+
+    #[test]
+    fn include_kind_bincode_indices_are_pinned() {
+        // IV-2/IV-6 bincode index discipline: bincode 1.x writes a fieldless
+        // enum variant as its discriminant index (u32, little-endian). The
+        // pre-M20 variants are decoded from hand-written bytes representing
+        // the original three-variant understanding, proving the append of
+        // `Import` last did not shift any serialized index.
+        let index_bytes = |variant: IncludeKind| -> Vec<u8> {
+            bincode::serialize(&variant).unwrap()
+        };
+        assert_eq!(index_bytes(IncludeKind::Local), [0, 0, 0, 0]);
+        assert_eq!(index_bytes(IncludeKind::System), [1, 0, 0, 0]);
+        assert_eq!(index_bytes(IncludeKind::External), [2, 0, 0, 0]);
+
+        assert_eq!(
+            bincode::deserialize::<IncludeKind>(&[0, 0, 0, 0]).unwrap(),
+            IncludeKind::Local
+        );
+        assert_eq!(
+            bincode::deserialize::<IncludeKind>(&[1, 0, 0, 0]).unwrap(),
+            IncludeKind::System
+        );
+        assert_eq!(
+            bincode::deserialize::<IncludeKind>(&[2, 0, 0, 0]).unwrap(),
+            IncludeKind::External
+        );
+
+        // IV-2: `Import` is appended LAST, so it takes the next free index.
+        assert_eq!(IncludeKind::Import as u64, 3);
+        assert_eq!(index_bytes(IncludeKind::Import), [3, 0, 0, 0]);
+        assert_eq!(
+            bincode::deserialize::<IncludeKind>(&[3, 0, 0, 0]).unwrap(),
+            IncludeKind::Import
+        );
+    }
+
+    #[test]
+    fn import_edge_with_module_language_round_trips() {
+        // IV-6: the additive `Import` kind travels with the module-system
+        // language without disturbing any pre-existing serialized shape.
+        let edge = IncludeEdge {
+            source: FileId(11),
+            destination: Some(FileId(22)),
+            context_name: "Default".to_string(),
+            source_location: SourceLocation::new(2, 1),
+            kind: IncludeKind::Import,
+            raw_path: "com.example.models.Order".to_string(),
+            resolved_path: Some(PathBuf::from("src/main/pkg/models/Order.src")),
+            language: SourceLanguage::Scala,
+        };
+
+        let json = serde_json::to_string(&edge).unwrap();
+        let decoded: IncludeEdge = serde_json::from_str(&json).unwrap();
+        assert_eq!(edge, decoded);
+
+        let bin = bincode::serialize(&edge).unwrap();
+        let decoded_bin: IncludeEdge = bincode::deserialize(&bin).unwrap();
+        assert_eq!(decoded_bin.kind, IncludeKind::Import);
+        assert_eq!(decoded_bin.language, SourceLanguage::Scala);
+        assert_eq!(edge, decoded_bin);
     }
 }

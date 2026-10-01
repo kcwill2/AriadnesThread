@@ -291,6 +291,12 @@ impl IncludeGraph {
                 IncludeKind::Local => local_count += 1,
                 IncludeKind::System => system_count += 1,
                 IncludeKind::External => external_count += 1,
+                // IV-2 (plan M20 D10): the directive kind is tallied apart
+                // from the C++-facing counters above, never folded into one
+                // (their numbers stay byte-identical). Exposing a counter for
+                // this kind is an additive `IncludeReport` edit owned by the
+                // milestone task that touches that DTO.
+                IncludeKind::Import => {}
             }
         }
 
@@ -485,6 +491,82 @@ mod tests {
             !cycles.is_empty(),
             "Cycle must be detected between a.h and b.h"
         );
+    }
+
+    fn edge(
+        source: FileId,
+        destination: FileId,
+        kind: IncludeKind,
+        language: ariadne_repo::SourceLanguage,
+    ) -> IncludeEdge {
+        IncludeEdge {
+            source,
+            destination: Some(destination),
+            context_name: "Default".into(),
+            source_location: SourceLocation::new(1, 1),
+            kind,
+            raw_path: "target".into(),
+            resolved_path: None,
+            language,
+        }
+    }
+
+    fn one_edge_each_kind() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        for (idx, kind) in [
+            IncludeKind::Local,
+            IncludeKind::System,
+            IncludeKind::External,
+            IncludeKind::Import,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let source = FileId(idx as u64);
+            let destination = FileId(100 + idx as u64);
+            graph.register_file(source, PathBuf::from(format!("src/unit{idx}")));
+            graph.register_file(destination, PathBuf::from(format!("src/dep{idx}")));
+            graph.add_edge(edge(source, destination, kind, cpp));
+        }
+        graph
+    }
+
+    #[test]
+    fn report_counts_cpp_only_edge_set_currently() {
+        // Baseline lock: with only the pre-M20 kinds the report counters are
+        // exactly today's numbers (m00 proves the same end-to-end).
+        let mut graph = IncludeGraph::new();
+        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        graph.register_file(FileId(1), PathBuf::from("src/a"));
+        graph.register_file(FileId(2), PathBuf::from("src/b"));
+        graph.register_file(FileId(3), PathBuf::from("src/c"));
+        graph.register_file(FileId(4), PathBuf::from("src/d"));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp));
+        graph.add_edge(edge(FileId(1), FileId(3), IncludeKind::System, cpp));
+        graph.add_edge(edge(FileId(1), FileId(4), IncludeKind::External, cpp));
+
+        let report = graph.generate_report();
+        assert_eq!(report.local_headers_count, 1);
+        assert_eq!(report.system_headers_count, 1);
+        assert_eq!(report.external_headers_count, 1);
+        assert_eq!(report.unresolved_includes_count, 0);
+        assert_eq!(report.total_edges, 3);
+    }
+
+    #[test]
+    fn report_keeps_import_edges_out_of_cpp_facing_kind_counters() {
+        // IV-2: an Import-kind edge is tallied apart from the C++-facing
+        // Local/System/External counters — adding it moves none of them;
+        // the edge is still fully accounted as an edge with a destination.
+        let report = one_edge_each_kind().generate_report();
+        assert_eq!(report.local_headers_count, 1);
+        assert_eq!(report.system_headers_count, 1);
+        assert_eq!(report.external_headers_count, 1);
+        assert_eq!(report.unresolved_includes_count, 0,
+            "a resolved Import edge must not land in the unresolved tally");
+        assert_eq!(report.total_edges, 4);
+        assert_eq!(report.unique_headers, 4);
     }
 }
 

@@ -1,6 +1,7 @@
 //! Inter-file dependency resolution trait for language plugins.
 
 use ariadne_lang_api::catalog::{normalize_relative_path, FileCatalog, ResolveOutcome};
+use ariadne_lang_api::types::IncludeKind;
 use ariadne_repo::FileId;
 use std::path::{Path, PathBuf};
 
@@ -156,6 +157,16 @@ pub trait DependencyResolver: Send + Sync {
     ) -> ResolveOutcome {
         let _ = (edge, catalog, ctx);
         ResolveOutcome::Unresolved
+    }
+
+    /// Edge kind this plugin's resolved directives should carry (plan M20
+    /// D10). `None` (the default) keeps the graph layer's own destination
+    /// classification; a plugin whose directives are a fixed relation in its
+    /// language (an include-graph edge kind, not a discovered ownership
+    /// property) overrides with `Some(kind)`. Consulted for resolved and
+    /// wildcard outcomes only — the on-disk fallback stays spelling-derived.
+    fn directive_edge_kind(&self) -> Option<IncludeKind> {
+        None
     }
 }
 

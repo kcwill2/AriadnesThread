@@ -20,6 +20,7 @@ use crate::directive_parser::parse_import_directives;
 use ariadne_lang::{
     DependencyResolver, DirectiveStyle, FileCatalog, RawDepEdge, ResolutionContext, ResolveOutcome,
 };
+use ariadne_lang_api::types::IncludeKind;
 use ariadne_repo::FileId;
 use std::path::Path;
 
@@ -67,6 +68,13 @@ impl DependencyResolver for ScalaImportResolver {
             1 => resolve_single_match(catalog, matches[0]),
             _ => resolve_multiple_matches(catalog, &matches),
         }
+    }
+
+    /// IV-1 / D10: every directive this resolver emits names one dependency
+    /// relation, so its resolved edges are `Import` edges regardless of the
+    /// destination's catalog ownership.
+    fn directive_edge_kind(&self) -> Option<IncludeKind> {
+        Some(IncludeKind::Import)
     }
 }
 
