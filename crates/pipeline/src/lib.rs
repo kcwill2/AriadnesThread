@@ -39,16 +39,27 @@ pub const STAGE_REDUCED: &str = "reduced";
 pub const STAGE_CALLGRAPH: &str = "callgraph";
 pub const STAGE_LOAD: &str = "load";
 
-/// Default plugin set for library-level [`Pipeline::new`] entry points and
-/// [`Pipeline::rehash_inputs`]. The CLI enumerates plugins itself via
-/// `ariadne-cli::registry::default_registry`; this is the C++-only default
-/// that keeps the pipeline's pre-M18.11 byte-identical behavior without a
-/// registry-less (hardcoded-language) code path. Scala registers via
-/// `Pipeline::with_registry` from M19 onward.
+/// The single plugin enumeration site (D9 consolidation): C++ first, then Scala.
+/// Registration ORDER is a contract - it drives `unit_shaper_for()` and
+/// `plugin_for()` precedence so existing C++ discovery stays byte-identical.
+/// Scala discovery selects its shaper explicitly (M19.3) - automatic
+/// marker-based shaper selection is the deferred M18.5 gap.
+/// The CLI delegates here (`ariadne-cli::registry::default_registry`); cli
+/// depends on pipeline, never the reverse (D9 direction ruling).
+pub fn build_default_registry() -> LanguageRegistry {
+    LanguageRegistry::new()
+        .register(Box::new(ariadne_lang_cpp::CppPlugin::new()))
+        .register(Box::new(ariadne_lang_scala::ScalaPlugin::new()))
+}
+
+/// Shared registry for library-level [`Pipeline::new`] entry points and
+/// [`Pipeline::rehash_inputs`] - the [`build_default_registry`] plugin set.
+/// C++ behavior stays byte-identical because C++ registers first: the
+/// registry-selected shaper and detector precedence are unchanged, and the
+/// Scala plugin's `false` capability literals (plan:381) keep every
+/// extraction-side stage on the C++ backend (plan sec 3.1 handler note).
 pub fn default_registry() -> Arc<LanguageRegistry> {
-    Arc::new(
-        LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new())),
-    )
+    Arc::new(build_default_registry())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,12 +176,13 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Pipeline over the default plugin set. `ariadne-cli::registry::default_registry`
-    /// is the CLI's single enumeration site; this internal default keeps the
-    /// library-level entry point byte-identical to the pre-M18.11 C++-only
-    /// paths while the pipeline itself remains plugin-dispatched (M18.11
-    /// removed the hardcoded-C++ fallbacks — a pipeline without plugins cannot
-    /// shape, walk, or analyze units at all).
+    /// Pipeline over the shared default plugin set ([`build_default_registry`],
+    /// D9). The library-level entry point stays plugin-dispatched end to
+    /// end (M18.11 removed the hardcoded-C++ fallbacks - a pipeline without
+    /// plugins cannot shape, walk, or analyze units at all); the C++-first
+    /// registration order plus Scala's `false` capability literals keep C++
+    /// output byte-identical (locked by the m00 goldens and
+    /// `m18_cpp_plugin_parity_test`).
     pub fn new(repo_path: &Path, workers: Option<usize>) -> Result<Self> {
         Self::build(repo_path, workers, default_registry())
     }

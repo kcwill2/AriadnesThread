@@ -30,3 +30,5 @@ ariadne-lang-api = { path = "../../crates/lang-api" }
 ariadne-lang = { path = "../../crates/lang" }
 # M18.4: fingerprint helpers must inject the same C++ shaper the pipeline does.
 ariadne-lang-cpp = { path = "../../crates/lang-cpp" }
+# M19.3: the m19 discovery suite asserts the Scala plugin contract end to end.
+ariadne-lang-scala = { path = "../../crates/lang-scala" }

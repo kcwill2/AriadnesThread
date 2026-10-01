@@ -363,10 +363,10 @@ fn apply_safe_plan(
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
 
     // M18.8b: directive text (guard block + include replacement) is owned by
-    // the registered plugin's rewriter; validate orchestrates the rest.
+    // the capability-gated rewriting backend (M19.3: Scala's rewriting:false
+    // keeps C++ the sole claimant - plan:381); validate orchestrates the rest.
     let plugin_registry = crate::registry::default_registry();
-    let text_rewriter = plugin_registry
-        .sole_plugin()
+    let text_rewriter = crate::registry::capability_backend(&plugin_registry, |caps| caps.rewriting)
         .map(|plugin| plugin.rewriter())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
     let (snapshot, new_paths) =
@@ -376,7 +376,9 @@ fn apply_safe_plan(
     // toolchain status (probe lives in lang-cpp), and a Skipped tier counts
     // as NOT-failed — rollback/validation failure fires only on Fail
     // (rollback predicate `ValidationStatus::is_fail`).
-    let compiler_validator = plugin_registry.sole_plugin().map(|plugin| plugin.validator());
+    let compiler_validator =
+        crate::registry::capability_backend(&plugin_registry, |caps| caps.validation)
+            .map(|plugin| plugin.validator());
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");
     let t2 = TierValidator::validate_generated_headers(&extraction, &header_output_dir);

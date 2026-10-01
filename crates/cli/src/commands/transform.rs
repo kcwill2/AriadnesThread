@@ -23,12 +23,11 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let result = extractor.extract(plan);
 
     let output_dir = artifacts.artifact_root.join("generated");
-    // M18.8a: new-file text comes from the registered plugin's extractor;
-    // the CLI never names a concrete plugin (registry.rs stays the only
-    // enumeration site).
+    // M18.8a: new-file text comes from the capability-gated extraction
+    // backend (M19.3: Scala's extraction:false keeps C++ the sole claimant -
+    // plan:381); the CLI never names a concrete plugin.
     let registry = crate::registry::default_registry();
-    let text_extractor = registry
-        .sole_plugin()
+    let text_extractor = crate::registry::capability_backend(&registry, |caps| caps.extraction)
         .map(|plugin| plugin.extractor())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
     artifacts.save_extraction_artifacts(&result, &output_dir, text_extractor)?;
@@ -85,12 +84,11 @@ pub fn build_migration_preview(repo_path: &PathBuf, plan_id: &str, preview: bool
                 plan.target_file.display()
             );
         } else {
-            // M18.8b: directive diff text is rendered by the registered
-            // plugin's rewriter (registry.rs stays the only enumeration
-            // site — same route as the extractor in `extract_plan_headers`).
+            // M18.8b: directive diff text is rendered by the capability-gated
+            // rewriting backend (M19.3: Scala's rewriting:false keeps C++ the
+            // sole claimant - same route as the extractor above).
             let registry = crate::registry::default_registry();
-            let rewriter = registry
-                .sole_plugin()
+            let rewriter = crate::registry::capability_backend(&registry, |caps| caps.rewriting)
                 .map(|plugin| plugin.rewriter())
                 .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
             println!("{}", preview_result.format_diff_with(rewriter));
@@ -130,11 +128,11 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     println!("Applying {}...\n", plan_id);
 
-    // M18.8b: apply mutates directive text through the registered plugin's
-    // rewriter; validate only orchestrates snapshot/rollback/tiers.
+    // M18.8b: apply mutates directive text through the capability-gated
+    // rewriting backend (M19.3: Scala's rewriting:false keeps C++ the sole
+    // claimant); validate only orchestrates snapshot/rollback/tiers.
     let registry = crate::registry::default_registry();
-    let rewriter = registry
-        .sole_plugin()
+    let rewriter = crate::registry::capability_backend(&registry, |caps| caps.rewriting)
         .map(|plugin| plugin.rewriter())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
 
@@ -257,11 +255,13 @@ fn commit_or_rollback(
     // tier (e.g. no compiler toolchain) commits like a Pass. The tier-3
     // skip decision runs through the injected plugin validator's
     // `toolchain_status()`, never a probe inside `ariadne-validate`.
-    // Multi-language registries dispatch per-unit in M19; until then the
-    // sole plugin owns the tier-3 toolchain, and `None` keeps the
-    // pre-M18.10 pass-through behavior.
+    // Multi-language registries dispatch per-language only with M21; until
+    // then the capability-gated validation backend (Scala's validation:false
+    // keeps C++ the sole claimant, M19.3) owns the tier-3 toolchain, and
+    // `None` keeps the pre-M18.10 pass-through behavior.
     let registry = crate::registry::default_registry();
-    let compiler_validator = registry.sole_plugin().map(|plugin| plugin.validator());
+    let compiler_validator = crate::registry::capability_backend(&registry, |caps| caps.validation)
+        .map(|plugin| plugin.validator());
 
     let t1 = ariadne_validate::TierValidator::validate_structural(extraction);
     if !t1.status.is_fail() {

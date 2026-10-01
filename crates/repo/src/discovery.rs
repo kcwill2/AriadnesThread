@@ -50,7 +50,10 @@ pub fn discover_repository_files(root: &Path) -> Result<Vec<FileRecord>> {
                 stack.push(path);
             } else if path.is_file() {
                 let kind = FileKind::from_path(&path);
-                if kind.is_source_or_header() {
+                // M19.3 (ruling 3): neutral analyzability predicate - includes
+                // ScalaSource while excluding ScalaScript/BuildDefinition,
+                // exactly plan:387's ".scala files listed".
+                if kind.is_analyzable() {
                     let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
                     let rel_path = path.strip_prefix(root).unwrap_or(&path);
                     let norm_rel_str = rel_path.to_string_lossy().replace('\\', "/");
@@ -198,5 +201,33 @@ mod tests {
         assert_eq!(result.policy_summary[&OptimizationPolicy::Optimizable], 1);
         assert_eq!(result.policy_summary[&OptimizationPolicy::Frozen], 1);
         assert_eq!(result.policy_summary[&OptimizationPolicy::Contract], 0);
+    }
+
+    #[test]
+    fn test_analyzable_filter_records_scala_sources() {
+        // M19.3 (T-B ruling 3): the recording filter is the neutral
+        // is_analyzable - ScalaSource in, ScalaScript/BuildDefinition out.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.cpp"), b"int main() {}").unwrap();
+        fs::write(root.join("b.h"), b"void foo();").unwrap();
+        fs::write(root.join("c.scala"), b"object C {}").unwrap();
+        fs::write(root.join("d.sc"), b"println(1)").unwrap();
+        fs::write(root.join("build.sbt"), b"name := \"x\"").unwrap();
+
+        let files = discover_repository_files(root).unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|record| record.path.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, vec!["a.cpp", "b.h", "c.scala"]);
+
+        let scala = names
+            .iter()
+            .position(|name| name == "c.scala")
+            .map(|index| &files[index]);
+        let scala = scala.expect("c.scala is recorded as an analyzable ScalaSource");
+        assert_eq!(scala.kind, crate::types::FileKind::ScalaSource);
+        assert_eq!(scala.language, crate::types::SourceLanguage::Scala);
     }
 }

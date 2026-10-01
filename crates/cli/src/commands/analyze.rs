@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_graph::LoadAnalyzer;
 use ariadne_lang::LanguageRegistry;
@@ -14,11 +14,12 @@ pub fn run_incremental_analysis(
     run_incremental_analysis_filtered(repo_path, None)
 }
 
-/// Registry-wired incremental analysis (plan M18.3): the unit shaper and the
-/// `IncrementalAnalyzer`'s analyzer/resolver injection come from the single
-/// registered plugin (multi-plugin registries dispatch per unit only after
-/// the M19 per-language split); units no plugin claims are reported as
-/// "unhandled language" (§3.3 fact 3), and `--lang` restricts the unit set.
+/// Registry-wired incremental analysis (plan M18.3, M19.3): the unit shaper
+/// comes from the registry-selected shaper and the analyzer backend from
+/// `registry::incremental_backend` (distinct `tu.language` dispatch: one
+/// language -> its plugin, unclaimed language -> "unhandled language"
+/// (sec 3.3 fact 3), mixed -> the M21 language-scoped-cache error, zero
+/// units -> sole-plugin fallback); `--lang` restricts the unit set.
 pub fn run_incremental_analysis_filtered(
     repo_path: &PathBuf,
     language: Option<SourceLanguage>,
@@ -42,9 +43,8 @@ pub fn run_incremental_analysis_filtered(
         discovered_units,
     );
 
-    let plugin = registry
-        .sole_plugin()
-        .ok_or_else(|| anyhow!("incremental indexing needs exactly one registered language plugin (multi-language lands in M19)"))?;
+    let plugin = crate::registry::incremental_backend(&registry, &build_discovery)
+        .map_err(anyhow::Error::msg)?;
     let mut analyzer = ariadne_scheduler::IncrementalAnalyzer::new(
         &repo,
         &repo_discovery,
