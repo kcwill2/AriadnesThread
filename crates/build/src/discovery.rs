@@ -169,8 +169,9 @@ impl<'a> BuildDiscoverer<'a> {
                 output: entry.output,
             };
 
-            // The compilation-database format is the C/C++ ecosystem's;
-            // multi-language databases are noted for M18.5 in the plan.
+            // compile_commands.json is a C/C++-specific artifact; a non-C++
+            // unit arriving here indicates plugin wiring lost (audit M18,
+            // item 3) — shaper injection for this path is an M19+ item
             translation_units.push(TranslationUnit {
                 file_id,
                 source_path,

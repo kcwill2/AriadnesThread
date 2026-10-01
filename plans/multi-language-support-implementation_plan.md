@@ -70,8 +70,8 @@ Verified in the working tree (each row is a real call site, not a guess):
 **Success criteria (machine-checkable)**
 - `cargo test --workspace` green at the end of **every** milestone.
 - Byte-identical C++ artifacts: golden snapshot of `artifacts/**.json` for `tests/fixtures/basic` and `tests/fixtures/expensive` is unchanged across M17–M18 (except additive fields listed in §3.5).
-- "Minimal change rule" test `m17_plugin_seam_test.rs::new_language_touches_only_plugin_crate` (§6.4).
-- `Select-String -Path crates/{index,graph,cluster,transform,validate,report}/src/*.rs -Pattern 'clang|\.h"|include'` returns **0** production matches after M18.
+- "Minimal change rule" enforced by the M17 guard tests `m17_plugin_seam_test.rs::core_crates_do_not_name_languages` + `::plugin_crates_do_not_depend_on_core_pipeline` (§6.3).
+- Non-comment production code in `crates/{index,graph,cluster,transform,validate,report}/src` contains **0** matches for `clang` / `g++` / `#include` / `".h"` after M18 (locked by `core_crates_do_not_name_languages`; D5-frozen identifiers like `include_load` are exempt by design).
 
 ---
 
@@ -558,6 +558,8 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [x] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
 
 > EXECUTION NOTES (M18.11, reviewer-APPROVED 2026-09-30 at 3b06e54): (a) the permanent suite's body-only worker oracle shares `CppSemanticAnalyzer::analyze_source` with the subject, so it locks dispatch/shape only — analyzer-semantics locking lives in the m00 goldens; (b) `core_crates_do_not_name_languages` has two admitted gaps: core-crate *test* code imports plugin type names (`CppDependencyRewriter`/`CppSourceExtractor`) and `"c++20"` literals pass the 4-token FORBIDDEN list — widening tokens (`Cpp`/`lang_cpp`/`c++`) or moving byte-fixture tests out of core src is an M23 item; the `concat!` literal scrub is byte-identical in assertion semantics and judged acceptable; (c) `pipeline::default_registry()` duplicates the `cli::registry::default_registry()` enumeration — keep in sync at M19 or share one helper; (d) relocation edge is `lang-cpp → scheduler` (verified `cargo tree -e normal`: no scheduler→lang-cpp normal edge); validate's 3-arg `apply` shim intentionally survives until M23.
+
+> EXECUTION NOTES (M18.3/M18.5, recorded post-audit 2026-10-01): divergence fixes from the M18.2 review live in code — (i) External-drop closed by feeding the compilation context's include dirs into `ResolutionContext.search_paths` + `on_disk_include_fallback` (`scheduler/tu_store.rs` `edge_destinations`, mirrored by the `graph` BFS incl. catalog-ownership ThirdParty→External classification); (ii) worker dispatch plugin-only (`analyze_tu_full_with_plugin`; empty registry reports unhandled, never defaults to C++); (iii) `DirectiveStyle` + shared `first_ondisk_include_candidate` reproduce legacy candidate order. Post-completion audit (2026-10-01): C++-is-a-plugin intent confirmed, zero behavioral regressions; accepted file-placement drifts — `CppUnitShaper` lives in `lang-cpp/src/shaper.rs` and the analyzer family spans `analyzer.rs`/`parser.rs`/`tokenizer.rs` (symbols/crate placement unchanged); the shaper-less compile_commands path in `build` retains `cl.exe`/`x64`/`language: Cpp` residues per §4 with plugin injection logged as an M19+ item.
 
 **M19–M22 — Scala analysis slice**
 - [ ] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members

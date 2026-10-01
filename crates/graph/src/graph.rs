@@ -182,16 +182,6 @@ impl IncludeGraph {
         closures
     }
 
-    /// Maps each header file to the set of translation units (sources) that include it directly or transitively.
-    ///
-    /// Transitional header-named alias: the neutral home of this query is
-    /// [`Self::map_aggregation_consumers`] (plan M18.5). Kept delegating with
-    /// its old name for one milestone for existing callers; removed with the
-    /// M18.11 transitional shims.
-    pub fn map_header_consuming_tus(&self, tu_file_ids: &[FileId]) -> HashMap<FileId, Vec<FileId>> {
-        self.map_aggregation_consumers(tu_file_ids)
-    }
-
     /// Maps each aggregation unit (today's C++ header, plan §3.4) to the set
     /// of units that include it directly or transitively — the neutral
     /// aggregation-consumer query (plan M18.5) that package/module-based

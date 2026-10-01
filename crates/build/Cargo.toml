@@ -16,7 +16,7 @@ ariadne-lang = { path = "../lang" }
 [dev-dependencies]
 tempfile.workspace = true
 # M18.4: the discovery unit tests exercise the neutral shaper seam with the
-# real C++ shaper. Dev-only edge closes the lang-cpp -> build normal-dependency
-# cycle (cargo allows dev cycles, same pattern as lang-cpp's index/scheduler
-# dev edges).
+# real C++ shaper. This dev-dependencies edge exists only for those tests;
+# production code in this crate stays plugin-free (lang-cpp depends on
+# ariadne-build normally, so a build -> lang-cpp edge must stay dev-only).
 ariadne-lang-cpp = { path = "../lang-cpp" }
