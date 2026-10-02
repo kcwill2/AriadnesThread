@@ -17,10 +17,15 @@ use crate::shaper::ScalaUnitShaper;
 use crate::stubs::{StubExtractor, StubRewriter, StubValidator};
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
-    DependencyRewriter, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, SemanticAnalyzer, SourceExtractor, SymbolPlacement,
-    UnitKind, UnitShaper,
+    DependencyRewriter, DependencyVocabulary, GuardKind, LanguageCapabilities, LanguageDetector,
+    LanguageId, LanguageModeling, LanguagePlugin, SemanticAnalyzer, SourceExtractor,
+    SymbolPlacement, UnitKind, UnitShaper,
 };
+
+/// D26 (plan:509): the disclaimer the CLI prints for runs that analyzed
+/// Scala. Lives here as plugin data — core crates never hard-code it.
+const SCALA_ANALYSIS_CAVEAT: &str =
+    "offline heuristic parser — exact types require the Scala toolchain analyzer";
 
 /// The Scala language plugin (plan sec 3.4 modeling table, M19.1).
 ///
@@ -111,6 +116,14 @@ impl LanguagePlugin for ScalaPlugin {
                 .iter()
                 .map(|marker| marker.to_string())
                 .collect(),
+            // D26 (plan:425 + risk 509): import-flavored wording and the
+            // heuristic caveat the CLI prints to stdout (never manifests).
+            dependency_vocabulary: DependencyVocabulary {
+                directive_label: "Import".into(),
+                directive_passive_verb: "imported".into(),
+                aggregation_noun: "package aggregation".into(),
+            },
+            analysis_caveat: Some(SCALA_ANALYSIS_CAVEAT.into()),
         }
     }
 
@@ -227,6 +240,22 @@ mod tests {
                 ".ivy2".to_string(),
                 ".cache".to_string()
             ]
+        );
+        // D26 added dependency_vocabulary + analysis_caveat: Scala renders
+        // import-flavored wording and carries the heuristic caveat.
+        assert_eq!(modeling.dependency_vocabulary.directive_label, "Import");
+        assert_eq!(
+            modeling.dependency_vocabulary.directive_passive_verb,
+            "imported"
+        );
+        assert_eq!(
+            modeling.dependency_vocabulary.aggregation_noun,
+            "package aggregation"
+        );
+        assert_eq!(
+            modeling.analysis_caveat.as_deref(),
+            Some(SCALA_ANALYSIS_CAVEAT),
+            "plan:509 — Scala output is labelled heuristic"
         );
     }
 

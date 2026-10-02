@@ -46,6 +46,20 @@ pub enum CyclePolicy {
     Tolerate,
 }
 
+/// Wording one language contributes to the dependency-story output
+/// (plan M22, D26): the CLI/graph render paths consume these fields instead
+/// of language literals, so "Include"-flavored and "Import"-flavored runs
+/// share one code path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyVocabulary {
+    /// Label for one dependency directive ("Include" | "Import").
+    pub directive_label: String,
+    /// Passive voice of the directive ("included" | "imported").
+    pub directive_passive_verb: String,
+    /// Noun for the aggregation artifact ("header" | "package aggregation").
+    pub aggregation_noun: String,
+}
+
 /// The complete modeling contract one plugin declares about its language.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageModeling {
@@ -61,12 +75,22 @@ pub struct LanguageModeling {
     /// Path components that mark the external (frozen) boundary; replaces
     /// `is_third_party_path(".h")`.
     pub external_path_markers: Vec<String>,
+    /// D26 (plan:425): source of the CLI load/explain wording for this
+    /// language; the default rendering stays whatever the plugin declares
+    /// here, never a core-crate literal.
+    pub dependency_vocabulary: DependencyVocabulary,
+    /// D26 (plan:509): heuristic disclaimer the CLI prints to stdout for
+    /// runs that analyzed this language; `None` for exact-toolchain
+    /// languages. Deliberately NOT surfaced in manifests (D25 ruling).
+    pub analysis_caveat: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// D26 added the `dependency_vocabulary` + `analysis_caveat` fields;
+    /// these helpers carry them so the round-trip covers the D26 shape too.
     fn cpp_modeling() -> LanguageModeling {
         LanguageModeling {
             language: LanguageId::Cpp,
@@ -77,6 +101,8 @@ mod tests {
             aggregation_reexports: true,
             cycle_policy: CyclePolicy::Reject,
             external_path_markers: vec!["third_party".into(), "vendor".into()],
+            dependency_vocabulary: cpp_vocabulary(),
+            analysis_caveat: None,
         }
     }
 
@@ -90,6 +116,27 @@ mod tests {
             aggregation_reexports: false,
             cycle_policy: CyclePolicy::TolerateWithinPackage,
             external_path_markers: vec!["lib".into(), "target".into()],
+            dependency_vocabulary: scala_vocabulary(),
+            analysis_caveat: Some(
+                "offline heuristic parser — exact types require the Scala toolchain analyzer"
+                    .into(),
+            ),
+        }
+    }
+
+    fn cpp_vocabulary() -> DependencyVocabulary {
+        DependencyVocabulary {
+            directive_label: "Include".into(),
+            directive_passive_verb: "included".into(),
+            aggregation_noun: "header".into(),
+        }
+    }
+
+    fn scala_vocabulary() -> DependencyVocabulary {
+        DependencyVocabulary {
+            directive_label: "Import".into(),
+            directive_passive_verb: "imported".into(),
+            aggregation_noun: "package aggregation".into(),
         }
     }
 
@@ -112,6 +159,35 @@ mod tests {
             let back: SymbolPlacement = serde_json::from_str(&json).unwrap();
             assert_eq!(back, placement);
         }
+    }
+
+    #[test]
+    fn dependency_vocabulary_round_trips_through_serde() {
+        for vocabulary in [cpp_vocabulary(), scala_vocabulary()] {
+            let json = serde_json::to_string(&vocabulary).unwrap();
+            let back: DependencyVocabulary = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, vocabulary);
+        }
+    }
+
+    #[test]
+    fn analysis_caveat_is_none_for_cpp_and_some_for_scala() {
+        assert_eq!(cpp_modeling().analysis_caveat, None);
+        let scala_caveat = scala_modeling().analysis_caveat.expect("D26: Scala carries a caveat");
+        assert!(scala_caveat.contains("heuristic"), "caveat names the heuristic: {scala_caveat}");
+    }
+
+    #[test]
+    fn vocabulary_fields_survive_full_modeling_round_trip() {
+        let json = serde_json::to_string(&scala_modeling()).unwrap();
+        let back: LanguageModeling = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.dependency_vocabulary.directive_label, "Import");
+        assert_eq!(back.dependency_vocabulary.directive_passive_verb, "imported");
+        assert_eq!(
+            back.dependency_vocabulary.aggregation_noun,
+            "package aggregation"
+        );
+        assert!(back.analysis_caveat.is_some());
     }
 
     #[test]

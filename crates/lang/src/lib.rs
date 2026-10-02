@@ -22,7 +22,8 @@ pub use ariadne_lang_api::capability::{LanguageCapabilities, ToolchainStatus};
 pub use ariadne_lang_api::catalog::{normalize_relative_path, FileCatalog, ResolveOutcome};
 pub use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
 pub use ariadne_lang_api::modeling::{
-    AggregationKind, CyclePolicy, GuardKind, LanguageModeling, SymbolPlacement, UnitKind,
+    AggregationKind, CyclePolicy, DependencyVocabulary, GuardKind, LanguageModeling,
+    SymbolPlacement, UnitKind,
 };
 pub use ariadne_lang_api::types::{
     CallSite, DeclId, DependencyKind, FileLocation, SemanticEdge, SymbolDecl, SymbolId, SymbolKind,

@@ -11,9 +11,9 @@ use crate::shaper::CppUnitShaper;
 use crate::source_extractor::CppSourceExtractor;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
-    GuardKind, LanguageCapabilities, LanguageDetector, LanguageId, LanguageModeling, LanguagePlugin,
-    SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId, SymbolPlacement, SymbolRecord,
-    ToolchainStatus, UnitKind, UnitShaper,
+    DependencyVocabulary, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
+    LanguageModeling, LanguagePlugin, SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId,
+    SymbolPlacement, SymbolRecord, ToolchainStatus, UnitKind, UnitShaper,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -207,6 +207,15 @@ impl LanguagePlugin for CppPlugin {
             aggregation_reexports: true,
             cycle_policy: CyclePolicy::Reject,
             external_path_markers: vec!["third_party".into(), "vendor".into()],
+            // D26: today's exact CLI wording, now carried as data so the
+            // default C++ path emits byte-identical strings. No caveat:
+            // the built-in analyzer is not a heuristic.
+            dependency_vocabulary: DependencyVocabulary {
+                directive_label: "Include".into(),
+                directive_passive_verb: "included".into(),
+                aggregation_noun: "header".into(),
+            },
+            analysis_caveat: None,
         }
     }
 
@@ -310,6 +319,16 @@ mod tests {
             modeling.external_path_markers,
             vec!["third_party".to_string(), "vendor".to_string()]
         );
+        // D26 added dependency_vocabulary + analysis_caveat: the C++
+        // vocabulary must equal today's literal CLI wording (m6 locks the
+        // rendered bytes) and C++ must carry no heuristic caveat.
+        assert_eq!(modeling.dependency_vocabulary.directive_label, "Include");
+        assert_eq!(
+            modeling.dependency_vocabulary.directive_passive_verb,
+            "included"
+        );
+        assert_eq!(modeling.dependency_vocabulary.aggregation_noun, "header");
+        assert_eq!(modeling.analysis_caveat, None);
     }
 
     #[test]

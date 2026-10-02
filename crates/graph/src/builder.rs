@@ -496,6 +496,14 @@ mod builder_seam_tests {
                 aggregation_reexports: false,
                 cycle_policy: CyclePolicy::Reject,
                 external_path_markers: vec![],
+                // D26 fields: default-path wording, no caveat (the mock
+                // makes no wording assertions).
+                dependency_vocabulary: ariadne_lang::DependencyVocabulary {
+                    directive_label: "Include".into(),
+                    directive_passive_verb: "included".into(),
+                    aggregation_noun: "header".into(),
+                },
+                analysis_caveat: None,
             }
         }
         fn capabilities(&self) -> LanguageCapabilities {

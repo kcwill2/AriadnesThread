@@ -5,6 +5,7 @@
 //! locks these outputs byte-for-byte across the split.
 
 use super::*;
+use ariadne_lang_api::modeling::DependencyVocabulary;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoadExplanation {
@@ -18,28 +19,53 @@ pub struct LoadExplanation {
 
 impl LoadExplanation {
     pub fn format_explanation(&self) -> String {
-        let mut out = String::new();
-        let path_len = self.path.len();
-        for (i, node) in self.path.iter().enumerate() {
-            out.push_str(node);
-            out.push('\n');
-            if i < path_len - 1 {
-                out.push_str("  ↓\n");
-            }
-        }
-
-        out.push_str("\nReason:\n");
-        let indented_reason = self
-            .reason
-            .split('\n')
-            .map(|line| format!("  {}", line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        out.push_str(&indented_reason);
-        out.push('\n');
-
-        out
+        render_explanation(&self.path, &self.reason)
     }
+
+    /// D26 (plan:425): renders the reason line with the vocabulary's passive
+    /// verb ("… is imported by …") instead of the stored C++ default wording,
+    /// composed through `format!` so no double-space artifact can appear.
+    /// The reason components are exactly the ones the `explain_*` builders
+    /// template (collateral basename, second-to-last path node = parent
+    /// basename, target name), so the default vocab renders today's bytes.
+    pub fn format_explanation_with(&self, vocabulary: &DependencyVocabulary) -> String {
+        let parent = self
+            .path
+            .get(self.path.len().saturating_sub(2))
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        let reason = format!(
+            "{} is {} by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
+            self.collateral_source, vocabulary.directive_passive_verb, parent, self.target_name,
+            self.collateral_source
+        );
+        render_explanation(&self.path, &reason)
+    }
+}
+
+/// Shared output body of both formatters (moved verbatim): path tree with
+/// `↓` connectors plus the indented `Reason:` block.
+fn render_explanation(path: &[String], reason: &str) -> String {
+    let mut out = String::new();
+    let path_len = path.len();
+    for (i, node) in path.iter().enumerate() {
+        out.push_str(node);
+        out.push('\n');
+        if i < path_len - 1 {
+            out.push_str("  ↓\n");
+        }
+    }
+
+    out.push_str("\nReason:\n");
+    let indented_reason = reason
+        .split('\n')
+        .map(|line| format!("  {}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    out.push_str(&indented_reason);
+    out.push('\n');
+
+    out
 }
 
 impl<'a> LoadAnalyzer<'a> {
@@ -200,5 +226,61 @@ impl<'a> LoadAnalyzer<'a> {
             collateral_symbols_count: col_source.symbol_count,
             reason,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scala_vocabulary() -> DependencyVocabulary {
+        DependencyVocabulary {
+            directive_label: "Import".into(),
+            directive_passive_verb: "imported".into(),
+            aggregation_noun: "package aggregation".into(),
+        }
+    }
+
+    /// Mirrors what `explain_symbol_load` builds for the C++ `basic`
+    /// fixture's Thing/heavy.h collateral chain (m6's witness shape).
+    fn explanation() -> LoadExplanation {
+        LoadExplanation {
+            target_name: "Thing".into(),
+            target_file: PathBuf::from("include/thing.h"),
+            path: vec!["Thing".into(), "thing.h".into(), "heavy.h".into()],
+            collateral_source: "heavy.h".into(),
+            collateral_symbols_count: 2,
+            reason: "heavy.h is included by thing.h.\nNo semantic dependency from Thing \
+                     reaches symbols owned by heavy.h."
+                .into(),
+        }
+    }
+
+    #[test]
+    fn default_formatting_is_todays_exact_bytes() {
+        assert_eq!(
+            explanation().format_explanation(),
+            "Thing\n  ↓\nthing.h\n  ↓\nheavy.h\n\nReason:\n  \
+             heavy.h is included by thing.h.\n  \
+             No semantic dependency from Thing reaches symbols owned by heavy.h.\n"
+        );
+    }
+
+    #[test]
+    fn scala_vocabulary_renders_is_imported_by() {
+        let formatted = explanation().format_explanation_with(&scala_vocabulary());
+        assert!(
+            formatted.contains("heavy.h is imported by thing.h."),
+            "expected import-flavored reason, got: {formatted}"
+        );
+        assert!(formatted.contains("No semantic dependency from Thing reaches symbols owned by heavy.h."));
+        assert!(!formatted.contains("included"));
+    }
+
+    #[test]
+    fn scala_vocabulary_verb_composes_without_double_spaces() {
+        let formatted = explanation().format_explanation_with(&scala_vocabulary());
+        assert!(!formatted.contains("  by "), "verb substitution must not leave a double-space artifact: {formatted}");
+        assert!(!formatted.contains("imported  by"));
     }
 }

@@ -14,7 +14,8 @@
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyRewriter,
     GeneratedSourceFile, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, LanguageRegistry, RawDepEdge, ResolutionContext, RewriteSpec,
+    DependencyVocabulary, LanguageModeling, LanguagePlugin, LanguageRegistry, RawDepEdge,
+    ResolutionContext, RewriteSpec,
     SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolBody, SymbolPlacement, SymbolRecord,
     ToolchainStatus, UnitKind,
 };
@@ -206,6 +207,14 @@ impl LanguagePlugin for SeamPlugin {
             aggregation_reexports: false,
             cycle_policy: CyclePolicy::TolerateWithinPackage,
             external_path_markers: vec!["lib".into(), "target".into()],
+            // D26 fields: the seam mock mirrors Scala wording; the caveat
+            // stays None because this mock is not the heuristic parser.
+            dependency_vocabulary: DependencyVocabulary {
+                directive_label: "Import".into(),
+                directive_passive_verb: "imported".into(),
+                aggregation_noun: "package aggregation".into(),
+            },
+            analysis_caveat: None,
         }
     }
     fn capabilities(&self) -> LanguageCapabilities {

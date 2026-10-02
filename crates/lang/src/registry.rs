@@ -205,8 +205,8 @@ mod tests {
     use crate::resolver::{DependencyResolver, RawDepEdge, ResolutionContext};
     use crate::rewriter::{DependencyRewriter, RewriteSpec};
     use crate::{
-        AggregationKind, CyclePolicy, GuardKind, LanguageCapabilities, SymbolId, SymbolRecord,
-        SymbolPlacement, TuAnalysis, UnitKind,
+        AggregationKind, CyclePolicy, DependencyVocabulary, GuardKind, LanguageCapabilities,
+        SymbolId, SymbolRecord, SymbolPlacement, TuAnalysis, UnitKind,
     };
     use ariadne_repo::FileId;
     use std::collections::HashSet;
@@ -397,6 +397,14 @@ mod tests {
                 aggregation_reexports: false,
                 cycle_policy: CyclePolicy::Tolerate,
                 external_path_markers: vec![],
+                // D26 fields: default-path wording, no caveat (the mock
+                // makes no wording assertions).
+                dependency_vocabulary: DependencyVocabulary {
+                    directive_label: "Include".into(),
+                    directive_passive_verb: "included".into(),
+                    aggregation_noun: "header".into(),
+                },
+                analysis_caveat: None,
             }
         }
         fn capabilities(&self) -> LanguageCapabilities {

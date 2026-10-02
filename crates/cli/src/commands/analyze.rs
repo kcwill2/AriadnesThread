@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_graph::LoadAnalyzer;
-use ariadne_lang::LanguageRegistry;
+use ariadne_lang::{DependencyVocabulary, LanguageRegistry};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
@@ -171,6 +171,74 @@ pub fn run_production_scale_analysis_filtered(
     })
 }
 
+/// D26 (plan:425 + plan:509): pick the run's dependency vocabulary and
+/// heuristic caveats through registry lookups over the discovered record
+/// languages (rule R3 — no `match` on a language). Single non-default
+/// language whose plugin is registered -> that plugin's vocabulary;
+/// C++-only, mixed, or unclaimed runs keep today's default wording
+/// (`None` -> the m6-locked call path). Caveats collect from EVERY
+/// analyzed language carrying one — a mixed run still surfaces the
+/// heuristic label — naming the language by Debug-formatting the
+/// `LanguageId` value (data, not a literal). Pure so the selection rule is
+/// testable without a repository.
+fn run_vocabulary(
+    languages: &[SourceLanguage],
+    registry: &LanguageRegistry,
+) -> (Option<DependencyVocabulary>, Vec<String>) {
+    let mut distinct: Vec<SourceLanguage> = Vec::new();
+    for language in languages {
+        if !distinct.contains(language) {
+            distinct.push(*language);
+        }
+    }
+    let vocabulary = match distinct.as_slice() {
+        [language] if *language != SourceLanguage::default() => registry
+            .plugin_for_id(*language)
+            .map(|plugin| plugin.modeling().dependency_vocabulary),
+        _ => None,
+    };
+    let mut caveats: Vec<String> = Vec::new();
+    for language in &distinct {
+        let Some(plugin) = registry.plugin_for_id(*language) else {
+            continue;
+        };
+        if let Some(caveat) = plugin.modeling().analysis_caveat {
+            caveats.push(format!("Analysis caveat [{language:?}]: {caveat}"));
+        }
+    }
+    (vocabulary, caveats)
+}
+
+/// Discovery record languages of the run, deduplicated in first-seen order.
+fn discovered_languages(pipeline: &Pipeline) -> Vec<SourceLanguage> {
+    let mut languages: Vec<SourceLanguage> = Vec::new();
+    for record in &pipeline.discovery.files {
+        if !languages.contains(&record.language) {
+            languages.push(record.language);
+        }
+    }
+    languages
+}
+
+/// Emits the caveat lines (nothing at all when no analyzed language carries
+/// one — the C++ stdout bytes stay untouched).
+pub(crate) fn print_caveats(caveats: &[String]) {
+    if caveats.is_empty() {
+        return;
+    }
+    for caveat in caveats {
+        println!("{caveat}");
+    }
+    println!();
+}
+
+pub(crate) fn discovered_run_vocabulary(
+    pipeline: &Pipeline,
+) -> (Option<DependencyVocabulary>, Vec<String>) {
+    let registry = crate::registry::default_registry();
+    run_vocabulary(&discovered_languages(pipeline), &registry)
+}
+
 pub fn analyze_dependency_load(
     repo_path: &PathBuf,
     symbol: Option<&str>,
@@ -180,6 +248,7 @@ pub fn analyze_dependency_load(
     let (graph, closures) = pipeline.get_or_build_include_graph()?;
     let model = pipeline.get_or_build_reduced()?;
     let repository = pipeline.repo.clone();
+    let (vocabulary, caveats) = discovered_run_vocabulary(&pipeline);
 
     let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
     let mut load_report = LoadReport {
@@ -196,13 +265,22 @@ pub fn analyze_dependency_load(
 
     if let Some(sym_name) = symbol {
         let metric = analyzer.analyze_symbol_load(sym_name)?;
-        println!("{}", metric.format_summary());
+        print_caveats(&caveats);
+        match &vocabulary {
+            Some(vocabulary) => println!("{}", metric.format_summary_with(vocabulary)),
+            None => println!("{}", metric.format_summary()),
+        }
         load_report.symbol_metrics.push(metric);
     } else if let Some(file_path) = file {
         let metric = analyzer.analyze_file_load(file_path)?;
-        println!("{}", metric.format_summary());
+        print_caveats(&caveats);
+        match &vocabulary {
+            Some(vocabulary) => println!("{}", metric.format_summary_with(vocabulary)),
+            None => println!("{}", metric.format_summary()),
+        }
         load_report.file_metrics.push(metric);
     } else {
+        print_caveats(&caveats);
         println!("Analyzing all symbols in model...");
         for sym_record in model.symbols.values() {
             if let Ok(metric) = analyzer.analyze_symbol_load(&sym_record.name) {
@@ -242,15 +320,24 @@ pub fn explain_dependency_load(
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, closures) = pipeline.get_or_build_include_graph()?;
     let model = pipeline.get_or_build_reduced()?;
+    let (vocabulary, caveats) = discovered_run_vocabulary(&pipeline);
 
     let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
 
     if let Some(sym_name) = symbol {
         let explanation = analyzer.explain_symbol_load(sym_name, source)?;
-        println!("{}", explanation.format_explanation());
+        print_caveats(&caveats);
+        match &vocabulary {
+            Some(vocabulary) => println!("{}", explanation.format_explanation_with(vocabulary)),
+            None => println!("{}", explanation.format_explanation()),
+        }
     } else     if let Some(file_path) = file {
         let explanation = analyzer.explain_file_load(file_path, source)?;
-        println!("{}", explanation.format_explanation());
+        print_caveats(&caveats);
+        match &vocabulary {
+            Some(vocabulary) => println!("{}", explanation.format_explanation_with(vocabulary)),
+            None => println!("{}", explanation.format_explanation()),
+        }
     } else {
         bail!("--symbol or --file is required to explain load");
     }
@@ -281,5 +368,50 @@ mod tests {
         assert!(!artifacts_are_authoritative(
             None, 5, 8
         ));
+    }
+
+    #[test]
+    fn scala_only_run_selects_import_vocabulary_and_scala_caveat() {
+        let registry = crate::registry::default_registry();
+        let (vocabulary, caveats) = run_vocabulary(&[SourceLanguage::Scala], &registry);
+        let vocabulary =
+            vocabulary.expect("single non-default language selects its plugin vocabulary");
+        assert_eq!(vocabulary.directive_label, "Import");
+        assert_eq!(vocabulary.directive_passive_verb, "imported");
+        assert_eq!(vocabulary.aggregation_noun, "package aggregation");
+        assert_eq!(caveats.len(), 1, "the Scala caveat must be reported: {caveats:?}");
+        assert!(caveats[0].contains("Scala"), "caveat names the language by data");
+        assert!(caveats[0].contains("heuristic"), "caveat is the heuristic disclaimer");
+    }
+
+    #[test]
+    fn cpp_only_run_keeps_todays_default_and_no_caveat() {
+        let registry = crate::registry::default_registry();
+        let (vocabulary, caveats) =
+            run_vocabulary(&[SourceLanguage::Cpp, SourceLanguage::Cpp], &registry);
+        assert!(
+            vocabulary.is_none(),
+            "a C++-only run must keep today's default calls (m6 byte locks)"
+        );
+        assert!(caveats.is_empty());
+    }
+
+    #[test]
+    fn mixed_run_keeps_default_wording_but_reports_the_scala_caveat() {
+        let registry = crate::registry::default_registry();
+        let (vocabulary, caveats) =
+            run_vocabulary(&[SourceLanguage::Cpp, SourceLanguage::Scala], &registry);
+        assert!(vocabulary.is_none(), "mixed runs keep today's default wording");
+        assert_eq!(caveats.len(), 1);
+        assert!(caveats[0].contains("Scala"));
+    }
+
+    #[test]
+    fn empty_and_unclaimed_languages_use_the_default_with_no_caveats() {
+        let registry = crate::registry::default_registry();
+        assert!(run_vocabulary(&[], &registry).0.is_none());
+        let (vocabulary, caveats) = run_vocabulary(&[SourceLanguage::Other], &registry);
+        assert!(vocabulary.is_none(), "an unclaimed language has no vocabulary to select");
+        assert!(caveats.is_empty());
     }
 }

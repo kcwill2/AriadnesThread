@@ -1,6 +1,7 @@
 use crate::{IncludeClosure, IncludeGraph, ReducedSemanticModel};
 use anyhow::{anyhow, Result};
 use ariadne_index::types::SymbolId;
+use ariadne_lang_api::modeling::DependencyVocabulary;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -52,12 +53,23 @@ pub struct LoadMetric {
 
 impl LoadMetric {
     pub fn format_summary(&self) -> String {
+        self.render_summary("Include")
+    }
+
+    /// D26 (plan:425): identical rendering with the directive label supplied
+    /// by a plugin's `DependencyVocabulary` — the other labels have no
+    /// language vocabulary and stay byte-identical.
+    pub fn format_summary_with(&self, vocabulary: &DependencyVocabulary) -> String {
+        self.render_summary(&vocabulary.directive_label)
+    }
+
+    fn render_summary(&self, directive_label: &str) -> String {
         let mut out = String::new();
         out.push_str(&self.target_name);
         out.push_str("\n\nSemantic load:\n");
         out.push_str(&format!("    {} symbols\n\n", self.semantic_load));
 
-        out.push_str("Include load:\n");
+        out.push_str(&format!("{directive_label} load:\n"));
         out.push_str(&format!("    {} symbols\n\n", self.include_load));
 
         out.push_str("Collateral load:\n");
@@ -653,3 +665,9 @@ mod perf;
 #[cfg(test)]
 #[path = "load_memo_tests.rs"]
 mod memo_perf;
+
+/// D26 vocabulary suite: locks `format_summary_with` against the unchanged
+/// default summary rendering (plan M22, plan:425).
+#[cfg(test)]
+#[path = "load_vocabulary_tests.rs"]
+mod vocabulary;
