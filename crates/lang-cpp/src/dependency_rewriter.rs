@@ -154,4 +154,65 @@ mod tests {
             "#pragma once\n\n#include \"a.h\"\n#include \"b.h\"\n\n"
         );
     }
+
+    // D-M23-7 iii (T7): consumer discovery baselines captured from the CLI
+    // substring scans in `commands/transform.rs::find_plan_consumers` and
+    // `optimize.rs::find_including_translation_units` — `content.contains(
+    // "#include \"<target>\"") || content.contains("#include <<target>>")`.
+    // FIDELITY NOTE (for G3): the C++ hits reproduce that RAW substring
+    // predicate line-by-line, INCLUDING occurrences inside comments — unlike
+    // the lexical Scala scan, byte-identical consumer SETS (I1) outrank
+    // lexical purity here; the neutral trait default stays empty.
+
+    fn hits(source: &str, target: &str) -> Vec<ariadne_lang::DirectiveHit> {
+        CppDependencyRewriter.find_dependency_targets(source, target)
+    }
+
+    #[test]
+    fn find_dependency_targets_finds_quoted_and_angled_spellings_with_lines() {
+        let source = "#include <sys.h>\nint x;\n#include \"thing.h\"\n";
+        let found: Vec<(usize, usize, String)> = hits(source, "thing.h")
+            .into_iter()
+            .map(|h| (h.start_line, h.end_line, h.raw_directive))
+            .collect();
+        assert_eq!(
+            found,
+            vec![(3, 3, "#include \"thing.h\"".to_string())],
+            "quoted spelling hits with 1-based inclusive line and verbatim line"
+        );
+        let angled: Vec<usize> = hits("#include <thing.h>\n", "thing.h")
+            .into_iter()
+            .map(|h| h.start_line)
+            .collect();
+        assert_eq!(angled, vec![1], "angled spelling is a hit too");
+    }
+
+    #[test]
+    fn find_dependency_targets_requires_the_exact_substring_spelling() {
+        assert!(hits("#include \"sub/thing.h\"\n", "thing.h").is_empty());
+        assert!(hits("#include  \"thing.h\"\n", "thing.h").is_empty());
+        assert!(hits("thing.h\n", "thing.h").is_empty());
+        assert!(hits("#include \"other.h\"\n", "thing.h").is_empty());
+        assert!(
+            hits("// #include \"thing.h\"\n", "thing.h").len() == 1,
+            "LOCK (substring fidelity): the pre-T7 CLI scan matched this \
+             too — reproducing it byte-identically keeps consumer sets equal"
+        );
+    }
+
+    #[test]
+    fn find_dependency_targets_reports_every_matching_line_and_survives_crlf() {
+        let source = "#include \"thing.h\"\nbody\n#include <thing.h>\n";
+        assert_eq!(hits(source, "thing.h").len(), 2);
+        let crlf = "#include \"thing.h\"\r\nint y;\r\n";
+        let found = hits(crlf, "thing.h");
+        assert_eq!(found.len(), 1, "CRLF line endings still hit");
+        assert_eq!(found[0].raw_directive, "#include \"thing.h\"");
+    }
+
+    #[test]
+    fn find_dependency_targets_no_match_is_empty() {
+        assert!(hits("int main() {}\n", "thing.h").is_empty());
+        assert!(hits("", "thing.h").is_empty());
+    }
 }
