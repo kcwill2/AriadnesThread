@@ -1,8 +1,26 @@
 use ariadne_graph::LoadMetric;
-use ariadne_repo::{FileOwnership, OptimizationPolicy};
+use ariadne_repo::{FileOwnership, OptimizationPolicy, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Non-default stage languages (plan M22 D25): the payload shared by every
+/// additive manifest `languages` field — only values that differ from
+/// `SourceLanguage::default()` (a default-value comparison, never a language
+/// noun, rule R2), deduped and sorted. An all-default stage yields an empty
+/// Vec, which serde then skips, keeping every pre-M22 artifact byte-identical
+/// (D11 skip-when-zero precedent).
+pub(crate) fn collect_stage_languages(
+    languages: impl IntoIterator<Item = SourceLanguage>,
+) -> Vec<SourceLanguage> {
+    let mut collected: Vec<SourceLanguage> = languages
+        .into_iter()
+        .filter(|lang| *lang != SourceLanguage::default())
+        .collect();
+    collected.sort_unstable();
+    collected.dedup();
+    collected
+}
 
 /// Metadata manifest for repository discovery artifact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +33,10 @@ pub struct RepositoryManifest {
     pub input_fingerprint: String,
     #[serde(default)]
     pub analysis_version: String,
+    /// Plan §3.5 / M22 D25 additive field: skipped when empty, so artifacts
+    /// from default-language-only repositories keep their exact pre-M22 bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<SourceLanguage>,
 }
 
 /// Metadata manifest for compilation context artifact.
@@ -28,6 +50,10 @@ pub struct BuildContextManifest {
     pub input_fingerprint: String,
     #[serde(default)]
     pub analysis_version: String,
+    /// Plan §3.5 / M22 D25 additive field: skipped when empty, so artifacts
+    /// from default-language-only repositories keep their exact pre-M22 bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<SourceLanguage>,
 }
 
 /// Metadata manifest for include graph artifact.
@@ -45,6 +71,10 @@ pub struct IncludeManifest {
     pub input_fingerprint: String,
     #[serde(default)]
     pub analysis_version: String,
+    /// Plan §3.5 / M22 D25 additive field: skipped when empty, so artifacts
+    /// from default-language-only repositories keep their exact pre-M22 bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<SourceLanguage>,
 }
 
 /// Metadata manifest for semantic index artifact.
@@ -95,6 +125,12 @@ pub struct LoadManifest {
     pub input_fingerprint: String,
     #[serde(default)]
     pub analysis_version: String,
+    /// Plan §3.5 / M22 D25 additive field: skipped when empty, so artifacts
+    /// from default-language-only repositories keep their exact pre-M22 bytes.
+    /// Supplied by the load-stage call site; `save_load_artifacts` (the
+    /// pre-M22 signature) keeps emitting no key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<SourceLanguage>,
 }
 
 /// Metadata manifest for call graph artifact.

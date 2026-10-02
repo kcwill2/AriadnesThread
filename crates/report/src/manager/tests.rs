@@ -4,7 +4,7 @@ use ariadne_build::{BuildDiscoveryResult, CompilationContext, CompileCommand, Tr
 use ariadne_repo::FileId;
 use tempfile::tempdir;
 
-const FP: &str = "test-fingerprint";
+pub(super) const FP: &str = "test-fingerprint";
 
 #[test]
 fn test_artifact_manager_creation() {
@@ -651,7 +651,7 @@ fn fixture_contributing_source(
     }
 }
 
-fn fixture_load_report() -> LoadReport {
+pub(super) fn fixture_load_report() -> LoadReport {
     let alpha_source =
         fixture_contributing_source("include/alpha.h", "Alpha::", &["value", "helper", "state"]);
     let beta_source = fixture_contributing_source("include/beta.hpp", "Beta::", &["edge"]);
@@ -722,7 +722,7 @@ fn load_artifact_hashes(load_dir: &Path) -> (u64, u64, u64) {
     )
 }
 
-fn manager_in_fresh_tempdir(dir: &tempfile::TempDir) -> ArtifactManager {
+pub(super) fn manager_in_fresh_tempdir(dir: &tempfile::TempDir) -> ArtifactManager {
     let repo = Repository::locate(dir.path()).unwrap();
     ArtifactManager::prepare_for_repo(&repo).unwrap()
 }

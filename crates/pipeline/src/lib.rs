@@ -659,7 +659,16 @@ impl Pipeline {
             total: total_files,
         });
 
-        self.manager.save_load_artifacts(&report, &self.fps.load)?;
+        // M22 D25: the load report itself carries no language data, so the
+        // stage feeds the manifest from discovery records; an all-default
+        // repository still writes byte-identical pre-M22 manifest bytes.
+        let stage_languages: Vec<SourceLanguage> =
+            self.discovery.files.iter().map(|f| f.language).collect();
+        self.manager.save_load_artifacts_with_languages(
+            &report,
+            &self.fps.load,
+            &stage_languages,
+        )?;
         self.load_cache = Some(Arc::new(report));
         self.stats.record(STAGE_LOAD, StageReuse::Rebuilt);
         Ok(())

@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{write_atomic, write_json_atomic, ArtifactManager};
-use crate::manifests::{LoadManifest, LoadReport, PlanManifest};
+use crate::manifests::{collect_stage_languages, LoadManifest, LoadReport, PlanManifest};
 
 fn write_load_report_json(path: &Path, report: &LoadReport) -> Result<()> {
     write_json_atomic(path, report)
@@ -18,7 +18,15 @@ fn write_load_report_binary(path: &Path, report: &LoadReport) -> Result<()> {
     write_atomic(path, &report_bin)
 }
 
-fn build_load_manifest(report: &LoadReport, input_fingerprint: &str) -> LoadManifest {
+/// `LoadReport` carries no language data, so the load-stage call site supplies
+/// the stage's raw languages (plan M22 D25); this filters against
+/// `SourceLanguage::default()`, dedupes, and sorts. An empty/default input
+/// keeps the manifest byte-identical to the pre-M22 shape.
+fn build_load_manifest(
+    report: &LoadReport,
+    languages: &[ariadne_repo::SourceLanguage],
+    input_fingerprint: &str,
+) -> LoadManifest {
     let total_collateral_load: usize = report
         .symbol_metrics
         .iter()
@@ -37,14 +45,30 @@ fn build_load_manifest(report: &LoadReport, input_fingerprint: &str) -> LoadMani
         total_collateral_load,
         input_fingerprint: input_fingerprint.to_string(),
         analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+        languages: collect_stage_languages(languages.iter().copied()),
     }
 }
 
 impl ArtifactManager {
+    /// Pre-M22 entry point: emits a load manifest with no `languages` key
+    /// (the field is skipped when empty). Kept byte-identical for callers
+    /// that have no language payload to supply.
     pub fn save_load_artifacts(
         &self,
         report: &LoadReport,
         input_fingerprint: &str,
+    ) -> Result<PathBuf> {
+        self.save_load_artifacts_with_languages(report, input_fingerprint, &[])
+    }
+
+    /// `save_load_artifacts` plus the stage's raw languages (plan M22 D25):
+    /// only values beyond `SourceLanguage::default()` are recorded, so an
+    /// all-default stage writes exactly the pre-M22 manifest bytes.
+    pub fn save_load_artifacts_with_languages(
+        &self,
+        report: &LoadReport,
+        input_fingerprint: &str,
+        languages: &[ariadne_repo::SourceLanguage],
     ) -> Result<PathBuf> {
         let load_artifact_dir = self.artifact_root.join("load");
         fs::create_dir_all(&load_artifact_dir).with_context(|| {
@@ -66,7 +90,7 @@ impl ArtifactManager {
         json_write?;
         bin_write?;
 
-        let manifest = build_load_manifest(report, input_fingerprint);
+        let manifest = build_load_manifest(report, languages, input_fingerprint);
         write_json_atomic(&load_artifact_dir.join("manifest.json"), &manifest)?;
 
         Ok(load_artifact_dir)

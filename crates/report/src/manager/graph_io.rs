@@ -8,7 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::{write_atomic, write_json_atomic, ArtifactManager};
-use crate::manifests::{CallGraphManifest, IncludeManifest, ReducedManifest};
+use crate::manifests::{
+    collect_stage_languages, CallGraphManifest, IncludeManifest, ReducedManifest,
+};
 
 impl ArtifactManager {
     /// Saves edges.bin, closures.bin, report.json, and manifest.json into artifacts/includes/
@@ -57,6 +59,7 @@ impl ArtifactManager {
             cycle_count: report.cycle_count,
             input_fingerprint: input_fingerprint.to_string(),
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+            languages: collect_stage_languages(graph.edges.iter().map(|e| e.language)),
         };
         write_json_atomic(&includes_artifact_dir.join("manifest.json"), &manifest)?;
 
