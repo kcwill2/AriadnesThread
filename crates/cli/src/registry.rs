@@ -53,39 +53,13 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
     ))
 }
 
-/// Stage backend: the one registered plugin whose capabilities enable `capability`.
-/// `Some` only on exactly-one claim; ambiguous/none -> `None` (callers keep their
-/// existing error/passthrough semantics). Language-neutral: no `match LanguageId` (R3).
-/// RETIRED BY THE T7 FLIP (D-M23-7 ii): once Scala's stage capabilities are
-/// on, two plugins claim most stages and exactly-one-claim is ambiguous by
-/// construction; call sites route per language via
-/// [`capability_backend_for_language`] instead.
-pub fn capability_backend<'a>(
-    registry: &'a ariadne_lang::LanguageRegistry,
-    capability: fn(&ariadne_lang::LanguageCapabilities) -> bool,
-) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
-    let mut claim: Option<&'a dyn ariadne_lang::LanguagePlugin> = None;
-    for language in registry.languages() {
-        let Some(plugin) = registry.plugin_for_id(language) else {
-            continue;
-        };
-        if capability(&plugin.capabilities()) {
-            if claim.is_some() {
-                return None;
-            }
-            claim = Some(plugin);
-        }
-    }
-    claim
-}
-
 /// Language-scoped stage backend (plan M23, D-M23-7 ii, T7): the plugin
 /// **of `language`** when that plugin's own capabilities enable
 /// `capability`; `None` for an unregistered language or a false capability
 /// (callers keep their honest error, never a C++ default). Replaces the
-/// pre-flip exactly-one-claim [`capability_backend`], which the
-/// [`ScalaPlugin`](ariadne_lang_scala::ScalaPlugin) flip makes permanently
-/// ambiguous.
+/// pre-flip exactly-one-claim helper `capability_backend`, which the
+/// [`ScalaPlugin`](ariadne_lang_scala::ScalaPlugin) flip made ambiguous by
+/// construction (two plugins claim most stages).
 pub fn capability_backend_for_language<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
     language: SourceLanguage,
@@ -93,6 +67,31 @@ pub fn capability_backend_for_language<'a>(
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
     let plugin = registry.plugin_for_id(language)?;
     capability(&plugin.capabilities()).then_some(plugin)
+}
+
+/// Stage backend for ONE optimization plan (D-M23-7 ii): plans are cut from
+/// one aggregation file, so their units and consumers share the target
+/// file's language — resolved through the registry detector, never
+/// defaulted to C++. The error names the stage so a failure is honest about
+/// which backend was missing.
+pub fn plan_backend<'a>(
+    registry: &'a ariadne_lang::LanguageRegistry,
+    plan_target_file: &std::path::Path,
+    capability: fn(&ariadne_lang::LanguageCapabilities) -> bool,
+    stage: &str,
+) -> anyhow::Result<&'a dyn ariadne_lang::LanguagePlugin> {
+    let language = registry.detect_language(plan_target_file).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no language plugin claims the plan target {} — cannot route the {stage} backend",
+            plan_target_file.display()
+        )
+    })?;
+    capability_backend_for_language(registry, language, capability).ok_or_else(|| {
+        anyhow::anyhow!(
+            "the {language:?} plugin does not enable the {stage} capability for plan target {}",
+            plan_target_file.display()
+        )
+    })
 }
 
 /// The incremental-analysis backend for a build's discovered units: distinct
@@ -242,77 +241,53 @@ mod tests {
         }
     }
 
-    fn extraction_backends_resolve_to_cpp(capability: &str, claim: fn(&ariadne_lang::LanguageCapabilities) -> bool) {
+    // m19 capability-backend locks, EVOLVED at the T7 flip (D-M23-7 ii):
+    // the pre-flip form asserted C++ as the SOLE claimant (Scala's false
+    // plan:381 literals); the flip makes resolution language-scoped, so
+    // each stage resolves to the claiming language's OWN plugin — the
+    // m19 spirit (no ambiguity, no C++ default) survives, the sole-
+    // claimant wording does not.
+    fn backend_resolves_to_owning_language(
+        capability: &str,
+        claim: fn(&ariadne_lang::LanguageCapabilities) -> bool,
+        language: SourceLanguage,
+    ) {
         let registry = default_registry();
-        let backend = capability_backend(&registry, claim)
-            .unwrap_or_else(|| panic!("exactly one plugin must claim {capability}"));
+        let backend = capability_backend_for_language(&registry, language, claim)
+            .unwrap_or_else(|| panic!("the {language:?} plugin must own its {capability} stage"));
         assert_eq!(
             backend.id(),
-            SourceLanguage::Cpp,
-            "Scala's false literals (plan:381) keep C++ the sole {capability} backend"
+            language,
+            "D-M23-7 ii: language-scoped resolution routes {capability} to the \
+             {language:?} plugin itself — never shared, never defaulted"
         );
     }
 
     #[test]
     fn capability_backend_resolves_extraction_to_cpp() {
-        extraction_backends_resolve_to_cpp("extraction", |caps| caps.extraction);
+        backend_resolves_to_owning_language("extraction", |caps| caps.extraction, SourceLanguage::Cpp);
     }
 
     #[test]
     fn capability_backend_resolves_rewriting_to_cpp() {
-        extraction_backends_resolve_to_cpp("rewriting", |caps| caps.rewriting);
+        backend_resolves_to_owning_language("rewriting", |caps| caps.rewriting, SourceLanguage::Cpp);
     }
 
     #[test]
     fn capability_backend_resolves_validation_to_cpp() {
-        extraction_backends_resolve_to_cpp("validation", |caps| caps.validation);
+        backend_resolves_to_owning_language("validation", |caps| caps.validation, SourceLanguage::Cpp);
     }
 
     #[test]
-    fn capability_backend_without_plugins_is_none() {
-        let registry = ariadne_lang::LanguageRegistry::new();
-        assert!(capability_backend(&registry, |caps| caps.extraction).is_none());
-    }
-
-    fn language_backends_resolve(
-        capability: &str,
-        claim: fn(&ariadne_lang::LanguageCapabilities) -> bool,
-    ) {
-        let registry = default_registry();
-        for language in [SourceLanguage::Cpp, SourceLanguage::Scala] {
-            let backend = capability_backend_for_language(&registry, language, claim)
-                .unwrap_or_else(|| panic!("the {language:?} plugin must own its {capability} stage"));
-            assert_eq!(
-                backend.id(),
-                language,
-                "D-M23-7 ii: language-scoped resolution routes {capability} to the \
-                 {language:?} plugin itself — the flip makes exactly-one-claim ambiguous, \
-                 never shared"
-            );
+    fn capability_backend_resolves_all_gated_stages_to_scala() {
+        for (stage, claim) in [
+            ("extraction", (|caps: &ariadne_lang::LanguageCapabilities| caps.extraction) as fn(&_) -> bool),
+            ("rewriting", |caps| caps.rewriting),
+            ("validation", |caps| caps.validation),
+            ("planning", |caps| caps.planning),
+        ] {
+            backend_resolves_to_owning_language(stage, claim, SourceLanguage::Scala);
         }
-    }
-
-    #[test]
-    fn capability_backend_for_language_resolves_extraction_per_language() {
-        language_backends_resolve("extraction", |caps| caps.extraction);
-    }
-
-    #[test]
-    fn capability_backend_for_language_resolves_rewriting_per_language() {
-        language_backends_resolve("rewriting", |caps| caps.rewriting);
-    }
-
-    #[test]
-    fn capability_backend_for_language_resolves_validation_per_language() {
-        language_backends_resolve("validation", |caps| caps.validation);
-    }
-
-    #[test]
-    fn capability_backend_for_language_resolves_planning_scala_side() {
-        let registry = default_registry();
-        let backend = capability_backend_for_language(&registry, SourceLanguage::Scala, |caps| caps.planning)
-            .expect("D-M23-6 flip: Scala plans with its own plugin");
-        assert_eq!(backend.id(), SourceLanguage::Scala);
     }
 
     #[test]

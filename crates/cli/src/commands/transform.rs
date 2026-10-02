@@ -43,13 +43,13 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let source_reader = repository_source_reader(&repository)?;
 
     let output_dir = artifacts.artifact_root.join("generated");
-    // M18.8a: new-file text comes from the capability-gated extraction
-    // backend (M19.3: Scala's extraction:false keeps C++ the sole claimant -
-    // plan:381); the CLI never names a concrete plugin.
+    // M23 T7 (D-M23-7 ii): the extraction backend is routed by the PLAN's
+    // language (target-file detector) — the flip made the pre-T7
+    // exactly-one-claim selection ambiguous; C++ plans keep resolving to
+    // the C++ plugin, Scala plans now get their own.
     let registry = crate::registry::default_registry();
-    let text_extractor = crate::registry::capability_backend(&registry, |caps| caps.extraction)
-        .map(|plugin| plugin.extractor())
-        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let text_extractor = crate::registry::plan_backend(&registry, &plan.target_file, |caps| caps.extraction, "extraction")?
+        .extractor();
     let result = extractor.extract(plan, &source_reader, text_extractor);
     artifacts.save_extraction_artifacts(&result, &output_dir, text_extractor)?;
 
@@ -105,13 +105,11 @@ pub fn build_migration_preview(repo_path: &PathBuf, plan_id: &str, preview: bool
                 plan.target_file.display()
             );
         } else {
-            // M18.8b: directive diff text is rendered by the capability-gated
-            // rewriting backend (M19.3: Scala's rewriting:false keeps C++ the
-            // sole claimant - same route as the extractor above).
+            // M23 T7 (D-M23-7 ii): directive diff text is rendered by the
+            // plan-language rewriting backend.
             let registry = crate::registry::default_registry();
-            let rewriter = crate::registry::capability_backend(&registry, |caps| caps.rewriting)
-                .map(|plugin| plugin.rewriter())
-                .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+            let rewriter = crate::registry::plan_backend(&registry, &plan.target_file, |caps| caps.rewriting, "rewriting")?
+                .rewriter();
             println!("{}", preview_result.format_diff_with(rewriter));
             println!("No files changed.");
         }
@@ -137,14 +135,14 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let model = artifacts.load_reduced_artifacts()?;
 
     let extractor = ariadne_transform::IsolationEngine::new(&model);
-    // M23 T1 (D-M23-3): the engine reads each extraction's source file (via
-    // the catalog) and asks the capability-gated extraction backend to locate
-    // verbatim declaration bodies; unreadable files fall back to placeholders.
+    // M23 T1/T7 (D-M23-3, D-M23-7 ii): the engine reads each extraction's
+    // source file (via the catalog) and asks the PLAN-LANGUAGE extraction
+    // backend to locate verbatim declaration bodies; unreadable files fall
+    // back to placeholders (I4).
     let source_reader = repository_source_reader(&repository)?;
     let registry = crate::registry::default_registry();
-    let text_extractor = crate::registry::capability_backend(&registry, |caps| caps.extraction)
-        .map(|plugin| plugin.extractor())
-        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let text_extractor = crate::registry::plan_backend(&registry, &plan.target_file, |caps| caps.extraction, "extraction")?
+        .extractor();
     let extraction = extractor.extract(&plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = plan_rewrite_targets(&plan);
@@ -157,12 +155,11 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     println!("Applying {}...\n", plan_id);
 
-    // M18.8b: apply mutates directive text through the capability-gated
-    // rewriting backend (M19.3: Scala's rewriting:false keeps C++ the sole
-    // claimant); validate only orchestrates snapshot/rollback/tiers.
-    let rewriter = crate::registry::capability_backend(&registry, |caps| caps.rewriting)
-        .map(|plugin| plugin.rewriter())
-        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    // M23 T7 (D-M23-7 ii): apply mutates directive text through the plan-
+    // language rewriting backend; validate only orchestrates snapshot/
+    // rollback/tiers.
+    let rewriter = crate::registry::plan_backend(&registry, &plan.target_file, |caps| caps.rewriting, "rewriting")?
+        .rewriter();
 
     let (snapshot, new_paths) = ariadne_validate::TransactionApplier::apply_with(
         &repository.root,
@@ -180,6 +177,8 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
         &migration,
         &snapshot,
         &new_paths,
+        &registry,
+        &plan.target_file,
     )
 }
 
@@ -314,6 +313,8 @@ fn commit_or_rollback(
     migration: &ariadne_transform::MigrationPreview,
     snapshot: &ariadne_validate::FileSnapshot,
     new_paths: &[PathBuf],
+    registry: &ariadne_lang::LanguageRegistry,
+    plan_target_file: &std::path::Path,
 ) -> Result<()> {
     let mut tiers_passed = Vec::new();
 
@@ -321,13 +322,12 @@ fn commit_or_rollback(
     // tier (e.g. no compiler toolchain) commits like a Pass. The tier-3
     // skip decision runs through the injected plugin validator's
     // `toolchain_status()`, never a probe inside `ariadne-validate`.
-    // Multi-language registries dispatch per-language only with M21; until
-    // then the capability-gated validation backend (Scala's validation:false
-    // keeps C++ the sole claimant, M19.3) owns the tier-3 toolchain, and
-    // `None` keeps the pre-M18.10 pass-through behavior.
-    let registry = crate::registry::default_registry();
-    let compiler_validator = crate::registry::capability_backend(&registry, |caps| caps.validation)
-        .map(|plugin| plugin.validator());
+    // M23 T7 (D-M23-7 ii): the tier-3 toolchain belongs to the PLAN's
+    // language (C++ plans clang, Scala plans the probe-only
+    // ScalaToolchainValidator — offline Missing ⇒ Skipped, I7).
+    let compiler_validator =
+        crate::registry::plan_backend(registry, plan_target_file, |caps| caps.validation, "validation")?
+            .validator();
 
     let t1 = ariadne_validate::TierValidator::validate_structural(extraction);
     if !t1.status.is_fail() {
@@ -345,8 +345,11 @@ fn commit_or_rollback(
         return report_rollback(artifacts, plan_id, t2, tiers_passed, snapshot, new_paths);
     }
 
-    let t3 =
-        ariadne_validate::TierValidator::validate_affected_tus(migration, &header_output_dir, compiler_validator);
+    let t3 = ariadne_validate::TierValidator::validate_affected_tus(
+        migration,
+        &header_output_dir,
+        Some(compiler_validator),
+    );
     if !t3.status.is_fail() {
         tiers_passed.push(t3);
     } else {

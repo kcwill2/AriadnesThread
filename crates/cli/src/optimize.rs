@@ -350,16 +350,16 @@ fn apply_safe_plan(
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
 ) -> Result<SafePlanOutcome> {
-    // Header extraction (M23 T1, D-M23-3: source-file text from the catalog,
-    // verbatim bodies located by the capability-gated extraction backend;
-    // unreadable files keep the engine's placeholder fallback per I4).
+    // Header extraction (M23 T1/T7, D-M23-3 + D-M23-7 ii: source-file text
+    // from the catalog, verbatim bodies located by the PLAN-LANGUAGE
+    // extraction backend; unreadable files keep the engine's placeholder
+    // fallback per I4).
     let extractor = IsolationEngine::new(model);
     let source_reader = crate::commands::transform::repository_source_reader(repo)?;
     let plugin_registry = crate::registry::default_registry();
     let text_extractor =
-        crate::registry::capability_backend(&plugin_registry, |caps| caps.extraction)
-            .map(|plugin| plugin.extractor())
-            .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.extraction, "extraction")?
+            .extractor();
     let extraction = extractor.extract(plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
@@ -370,12 +370,12 @@ fn apply_safe_plan(
     let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
 
-    // M18.8b: directive text (guard block + include replacement) is owned by
-    // the capability-gated rewriting backend (M19.3: Scala's rewriting:false
-    // keeps C++ the sole claimant - plan:381); validate orchestrates the rest.
-    let text_rewriter = crate::registry::capability_backend(&plugin_registry, |caps| caps.rewriting)
-        .map(|plugin| plugin.rewriter())
-        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    // M23 T7 (D-M23-7 ii): directive text (guard block + include replacement)
+    // is owned by the plan-language rewriting backend; validate orchestrates
+    // the rest.
+    let text_rewriter =
+        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.rewriting, "rewriting")?
+            .rewriter();
     let (snapshot, new_paths) = TransactionApplier::apply_with(
         &repo.root,
         &extraction,
@@ -385,16 +385,15 @@ fn apply_safe_plan(
     )?;
 
     // M18.10: the tier-3 skip decision uses the injected plugin validator's
-    // toolchain status (probe lives in lang-cpp), and a Skipped tier counts
-    // as NOT-failed — rollback/validation failure fires only on Fail
-    // (rollback predicate `ValidationStatus::is_fail`).
+    // toolchain status; M23 T7 (D-M23-7 ii) routes it to the plan's language.
     let compiler_validator =
-        crate::registry::capability_backend(&plugin_registry, |caps| caps.validation)
-            .map(|plugin| plugin.validator());
+        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.validation, "validation")?
+            .validator();
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");
     let t2 = TierValidator::validate_generated_headers(&extraction, &header_output_dir);
-    let t3 = TierValidator::validate_affected_tus(&migration, &header_output_dir, compiler_validator);
+    let t3 =
+        TierValidator::validate_affected_tus(&migration, &header_output_dir, Some(compiler_validator));
 
     let validation_passed =
         !t1.status.is_fail() && !t2.status.is_fail() && !t3.status.is_fail();

@@ -126,6 +126,14 @@ mod tests {
 
     #[test]
     fn planning_gaps_flags_planning_unsupported_language_once() {
+        // SANCTIONED EXPECTATION EVOLUTION (plan M23, D-M23-6/D-M23-9): the
+        // pre-flip form of this lock used Scala as the planning=false
+        // witness (m22 D23). The T7 flip turns Scala's planning bit on, so
+        // no registered language is a gap any more — the gap→rejection
+        // MECHANISM stays locked cluster-side (planner.rs planning_gap_tests
+        // with a neutral `Other` gap); this CLI-side rule now locks that a
+        // fully planned registry yields NO gaps, and keeps its once-per-
+        // language aggregation intact for any future planning=false plugin.
         let registry = crate::registry::default_registry();
         let files = vec![
             record("a.cpp", FileKind::Source, SourceLanguage::Cpp),
@@ -135,16 +143,17 @@ mod tests {
 
         let gaps = planning_gaps(&files, &registry);
 
-        assert_eq!(
-            gaps.len(),
-            1,
-            "Scala (planning=false) is the only gap; C++ plans"
+        assert!(
+            gaps.is_empty(),
+            "post-flip every registered plugin plans: {gaps:?}"
         );
-        assert_eq!(gaps[0].language, SourceLanguage::Scala);
-        assert_eq!(
-            gaps[0].sample_path,
-            PathBuf::from("B.scala"),
-            "the gap carries a representative discovered path"
+        assert!(
+            registry
+                .plugin_for_id(SourceLanguage::Scala)
+                .expect("scala registered")
+                .capabilities()
+                .planning,
+            "the flip is what retired the Scala gap (D-M23-6)"
         );
     }
 
