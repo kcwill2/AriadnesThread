@@ -87,6 +87,14 @@ impl DependencyRewriter for ScalaDependencyRewriter {
             .collect()
     }
 
+    fn remove_top_level_symbols(
+        &self,
+        source: &str,
+        qualified_names: &[String],
+    ) -> Option<String> {
+        crate::locator::removal::removal_text(source, qualified_names)
+    }
+
     fn render_diff(&self, removed: &[String], added: &[String], preserved: &[String]) -> String {
         // The C++ diff grammar's shape (4-space indent + marker), Scala
         // spelling; preserved entries carry the side-effect comment.
@@ -413,6 +421,23 @@ mod tests {
     fn bare_import_hits_only_its_exact_module_path() {
         assert_eq!(hits("import a.b.util\n", "a.b.util").len(), 1);
         assert!(hits("import a.b.util\n", "a.b").is_empty());
+    }
+
+    #[test]
+    fn remove_top_level_symbols_delegates_to_the_locator_removal() {
+        let names = ["Drop".to_string()];
+        assert_eq!(
+            ScalaDependencyRewriter
+                .remove_top_level_symbols("class Keep\nclass Drop\n", &names)
+                .as_deref(),
+            Some("class Keep\n")
+        );
+        assert_eq!(
+            ScalaDependencyRewriter
+                .remove_top_level_symbols("class Keep\n", &names),
+            None,
+            "an unremovable name yields None: the caller falls back without removal"
+        );
     }
 
     #[test]

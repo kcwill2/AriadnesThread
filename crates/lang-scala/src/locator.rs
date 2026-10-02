@@ -18,6 +18,7 @@
 
 #[cfg(test)]
 mod corpus;
+pub(crate) mod removal;
 #[cfg(test)]
 mod tests;
 
@@ -80,7 +81,7 @@ impl SourceProgram {
 /// True when the wanted qualified name and the declaration's qualified id
 /// are equal, or one is a segment-suffix of the other (`.`-joined names,
 /// mirroring the C++ `qualified_suffix_matches` discipline).
-fn qualified_suffix_matches(wanted: &str, qualified: &str) -> bool {
+pub(crate) fn qualified_suffix_matches(wanted: &str, qualified: &str) -> bool {
     let wanted_segments: Vec<&str> = wanted.split('.').collect();
     let qualified_segments: Vec<&str> = qualified.split('.').collect();
     (qualified_segments.len() <= wanted_segments.len()
