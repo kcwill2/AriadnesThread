@@ -527,6 +527,24 @@ class DistillBaselineExitHonestyTests(unittest.TestCase):
         self.assertEqual(1, len(headers), standard_out)
         self.assertRegex(headers[0], r"^### cargo test \w+ \(exit 1\)")
 
+    def test_distill_missing_baseline_header_and_rc_agree_on_exit_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            missing = str(Path(holder) / "no_such_baseline.txt")
+            capture = str(Path(holder) / "cap.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--distill", "--replay", fixture, "--baseline", missing,
+                "--capture", capture,
+            )
+        self.assertEqual(2, returncode, standard_err)
+        headers = [
+            line for line in standard_out.splitlines()
+            if line.startswith("### cargo test")
+        ]
+        self.assertEqual(1, len(headers), standard_out)
+        self.assertRegex(headers[0], r"^### cargo test \w+ \(exit 2\)")
+        self.assertIn("usage error", standard_out + standard_err)
+
 
 if __name__ == "__main__":
     unittest.main()

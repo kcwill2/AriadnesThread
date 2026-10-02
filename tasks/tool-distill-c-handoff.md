@@ -1,5 +1,7 @@
 # Handoff C — Tool Output Distillation: deferred findings (O1 ANSI-strip entry, B-gate exit-pin test)
 
+Status: COMPLETE 2026-10-02 — C1 landed as `f3dc53b`; C2 test-only exit-pin landed green at base; see tasks/tool-distill-c-handoff-journal.md.
+
 Binding inputs (read in this order, targeted reads only):
 1. This file (complete contract). Base rev: HEAD at authoring (post-`bc8b89f`).
 2. `tasks/milestone_ledger.md` deferred rows: O1 row (source tool-distill A
