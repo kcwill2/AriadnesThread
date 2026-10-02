@@ -59,7 +59,9 @@ impl SourceExtractor for ScalaSourceExtractor {
     /// rendering it would fabricate a broken directive (D-M23-13, T7
     /// replace-passthrough ruling). Without a source file the passthrough
     /// survives: nothing can be proven referenced, and no-source renders
-    /// stay honest by echoing what the engine passed.
+    /// stay honest by echoing what the engine passed. Block-scoped imports
+    /// are lifted to file level by the scan (G2b advisory 6 — accepted,
+    /// cited for G3: a body slice that used a nested import still gets it).
     fn unit_imports(
         &self,
         primary_source_text: Option<&str>,
@@ -89,9 +91,11 @@ fn render_package_clause(namespace: &str) -> String {
 /// One `import <dep>\n` per required dependency, sorted and deduped, plus a
 /// blank separator — the Scala twin of the C++ include block. The renderer
 /// is dumb by contract (see `deps_are_sorted_deduped_and_rendered_verbatim`):
-/// referenced-only selection is the planner's job upstream, wildcard
-/// spellings are never dropped (undroppable without the source file), and
-/// source-file import lines are never fabricated.
+/// referenced-only selection is upstream (see [`SourceExtractor::unit_imports`]
+/// — the raw engine unit-path deps are file paths, meaningless as Scala
+/// import syntax, so producers must supply module-path strings, D-M23-13);
+/// wildcard spellings are never dropped (undroppable without the source
+/// file), and source-file import lines are never fabricated.
 fn render_imports(deps: &[String]) -> String {
     let mut ordered: Vec<&String> = deps.iter().collect();
     ordered.sort_unstable();
@@ -267,6 +271,31 @@ mod tests {
             "the seam emits each referenced directive once across the unit's \
              bodies (render would dedup again, but the producer owns one-\
              per-line honesty)"
+        );
+    }
+
+    #[test]
+    fn render_replaces_unit_paths_module_paths_only_never_file_paths() {
+        let source = "package legacy.shop\n\nimport util.Clock\nimport util.Unused\n";
+        let content = ariadne_lang::render_unit(
+            &ScalaSourceExtractor,
+            &[body("Gadget", "class Gadget { val c = new Clock() }")],
+            Some(source),
+            &[
+                "src/main/scala/legacy/Other.scala".to_string(),
+                "generated/legacy/Widget.scala".to_string(),
+            ],
+        );
+        assert_eq!(
+            content,
+            "package legacy.shop\n\nimport util.Clock\n\nclass Gadget { val c = new Clock() }\n",
+            "G2b advisory 1 LOCK (D-M23-13 replace-not-append): a unit with \
+             BOTH engine unit-path deps AND source imports renders ONLY the \
+             referenced module paths"
+        );
+        assert!(
+            !content.contains("import src/") && !content.contains("import generated/"),
+            "zero `import <file-path>` lines may survive the replace seam"
         );
     }
 
