@@ -284,7 +284,12 @@ impl<'a> OptimizationPlanner<'a> {
             .collect();
         let colocated_groups = self
             .constraints
-            .map(|constraints| constraints.colocated_groups(&self.symbol_records(&file_symbols)))
+            .map(|constraints| {
+                constraints.colocated_groups_with_edges(
+                    &self.symbol_records(&file_symbols),
+                    &self.file_extends_edges(&file_symbols),
+                )
+            })
             .unwrap_or_default();
         merge_colocated_batches(&mut batches, &colocated_groups);
         let frozen = self.frozen_symbol_set(&file_symbols);
@@ -344,12 +349,21 @@ impl<'a> OptimizationPlanner<'a> {
     }
 
     /// The neutral symbol views handed to the language constraints trait.
+    /// `model.sealed_symbols` re-attaches the `sealed` modifier the frozen
+    /// `symbols.bin` layout cannot carry (plan M23, D-M23-8); C++ models
+    /// fold no sealed symbols, so their records keep empty modifiers.
     fn symbol_records(&self, file_symbols: &[SymbolId]) -> Vec<SymbolRecord> {
+        let sealed: HashSet<&SymbolId> = self.model.sealed_symbols.iter().collect();
         file_symbols
             .iter()
             .filter_map(|id| self.model.symbols.get(id))
             .filter_map(|record| {
                 let owning_file = record.defining_file?;
+                let modifiers = if sealed.contains(&record.id) {
+                    vec!["sealed".to_string()]
+                } else {
+                    Vec::new()
+                };
                 Some(ariadne_index::types::SymbolRecord {
                     id: record.id.clone(),
                     name: record.name.clone(),
@@ -358,9 +372,25 @@ impl<'a> OptimizationPlanner<'a> {
                     declarations: record.declarations.clone(),
                     definition: record.definition.clone(),
 
-                    modifiers: Vec::new(),
+                    modifiers,
                 })
             })
+            .collect()
+    }
+
+    /// The candidate file's slice of the typed extends channel: pairs with
+    /// both endpoints among the file's symbols (plan M23, D-M23-8). C++
+    /// models fold no extends edges, so this returns empty there.
+    fn file_extends_edges(&self, file_symbols: &[SymbolId]) -> Vec<(SymbolId, SymbolId)> {
+        if self.model.extends_edges.is_empty() {
+            return Vec::new();
+        }
+        let in_file: HashSet<&SymbolId> = file_symbols.iter().collect();
+        self.model
+            .extends_edges
+            .iter()
+            .filter(|(child, parent)| in_file.contains(child) && in_file.contains(parent))
+            .cloned()
             .collect()
     }
 
