@@ -237,7 +237,7 @@ class GenericDigestTests(unittest.TestCase):
             (THREE_TRACEBACKS, 1),
             (NOISE, 3),
             ("", 0),
-            ("\n".join("row %d" % i for i in range(400)), 2),
+            ("\n".join("row %d" % row for row in range(400)), 2),
         ]
         with tempfile.TemporaryDirectory() as holder:
             capture = str(Path(holder) / "sub" / "cap.txt")
