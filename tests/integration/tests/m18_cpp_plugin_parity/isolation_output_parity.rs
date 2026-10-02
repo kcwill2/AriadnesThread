@@ -17,7 +17,9 @@
 //! Every captured string is stored through the golden convention's
 //! separator normalization ([`super::lockable`], `\\` → `/`), so Windows
 //! path rendering inside dependency strings does not platform-lock the
-//! suite; everything else is byte-exact. `production_write_path_reproduces_
+//! suite; generated-file bodies additionally pass through [`normalize_eol`]
+//! (Gate G1 F1) so CRLF and LF checkouts lock the same bytes; everything
+//! else is byte-exact. `production_write_path_reproduces_
 //! the_same_bytes` additionally cross-checks the engine+extractor bytes
 //! against the production transactional write (validator apply) on the same
 //! plan, so the lock cannot drift between the two emitters.
@@ -68,7 +70,7 @@ const BASIC_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
         ),
         (
             "include/Thing_extracted.h",
-            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n\nclass Thing {\r\npublic:\r\n    explicit Thing(ThingConfig config);\r\n    int get_id() const;\r\n\r\nprivate:\r\n    ThingConfig config_;\r\n};\n",
+            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n\nclass Thing {\npublic:\n    explicit Thing(ThingConfig config);\n    int get_id() const;\n\nprivate:\n    ThingConfig config_;\n};\n",
         ),
         (
             "include/Thing_get_id_extracted.h",
@@ -85,11 +87,11 @@ const EXPENSIVE_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
     generated: &[
         (
             "include/Thing_extracted.h",
-            "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\nclass Thing {\r\npublic:\r\n    void use_heavy() {\r\n        heavy_func();\r\n    }\r\n};\n",
+            "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\nclass Thing {\npublic:\n    void use_heavy() {\n        heavy_func();\n    }\n};\n",
         ),
         (
             "include/Thing_use_heavy_extracted.h",
-            "#pragma once\n\nvoid use_heavy() {\r\n        heavy_func();\r\n    }\n",
+            "#pragma once\n\nvoid use_heavy() {\n        heavy_func();\n    }\n",
         ),
         (
             "include/heavy_func_extracted.h",
@@ -103,6 +105,10 @@ const EXPENSIVE_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
 /// One plan's embedded capture (see the module docs for the capture run).
 pub struct PlanLock {
     pub plan_id: &'static str,
+    /// Generated header bodies are additionally EOL-normalized
+    /// ([`normalize_eol`], Gate G1 F1): fixtures are `i/lf w/crlf` with no
+    /// `.gitattributes`, so a CRLF working copy verbatim-slices `\r\n` into
+    /// declaration bodies while an LF checkout (ubuntu CI) yields `\n`.
     pub generated: &'static [(&'static str, &'static str)],
     pub preview_json: &'static str,
     pub diff_text: &'static str,
@@ -162,10 +168,12 @@ fn conservative_plans(harness: &FixtureHarness) -> Result<Vec<OptimizationPlan>>
 
 /// One plan's live isolation output, computed the same way the capture run
 /// produced the embedded locks. Every field is stored in its LOCKED form:
-/// paths normalized to forward slashes, and the per-run temp root replaced
+/// paths normalized to forward slashes, the per-run temp root replaced
 /// with the golden convention's `<ROOT>` placeholder (the production
 /// `MigrationPreview` carries the TU's absolute canonical path, which
-/// cannot be embedded verbatim into a permanent suite).
+/// cannot be embedded verbatim into a permanent suite), and generated-file
+/// bodies passed through [`normalize_eol`] so the capture is checkout-EOL
+/// neutral (Gate G1 F1).
 struct PlanCapture {
     plan_id: String,
     generated: BTreeMap<String, String>,
@@ -200,7 +208,7 @@ fn capture_plan(harness: &FixtureHarness, plan: &OptimizationPlan) -> Result<Pla
     extraction.write_to_disk(output_dir.path(), &CppSourceExtractor)?;
     let generated = read_text_tree(output_dir.path())?
         .into_iter()
-        .map(|(path, content)| (path, lockable(&content)))
+        .map(|(path, content)| (path, normalize_eol(&lockable(&content))))
         .collect();
 
     let (symbol_name_to_header, relocated) = relocate_to_generated(&extraction);
@@ -242,6 +250,21 @@ fn redact_run_root(text: &str, root: &Path) -> String {
     redacted
 }
 
+/// Gate G1 (F1): folds `\r\n` to `\n` at the capture/compare boundary of the
+/// generated-file locks only. Verbatim declaration bodies inherit the
+/// fixture checkout's EOL (`i/lf w/crlf` fixtures, no `.gitattributes`), so
+/// without this the vendored gen-file locks flip-flop between CRLF and LF
+/// per machine. Applied identically on the capture side (`capture_plan`) and
+/// the vendored-lock side (`assert_plan_capture_matches_lock`), every
+/// checkout compares the same LF bytes. `preview_json` (serde pretty JSON,
+/// always `\n`) and `diff_text` (plugin renderer output) never carry CRLF and
+/// are deliberately left on their existing byte-exact paths; production
+/// on-disk bytes stay locked against each other by
+/// `production_write_path_reproduces_the_same_bytes_basic`.
+fn normalize_eol(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 fn assert_plan_capture_matches_lock(fixture: &str, capture: &PlanCapture, lock: &PlanLock) {
     assert_eq!(
         capture.plan_id, lock.plan_id,
@@ -250,7 +273,7 @@ fn assert_plan_capture_matches_lock(fixture: &str, capture: &PlanCapture, lock: 
     let expected: BTreeMap<String, String> = lock
         .generated
         .iter()
-        .map(|(path, content)| (path.to_string(), content.to_string()))
+        .map(|(path, content)| (path.to_string(), normalize_eol(content)))
         .collect();
     assert_eq!(
         expected, capture.generated,
@@ -292,6 +315,29 @@ fn plan_lock_parity(fixture: &str, locks: &[PlanLock]) -> Result<()> {
         assert_plan_capture_matches_lock(fixture, &capture, lock);
     }
     Ok(())
+}
+
+#[test]
+fn eol_normalizer_makes_crlf_and_lf_captures_match_the_lf_lock() {
+    // Gate G1 (F1) CI-safety proof: a CRLF working-copy capture and an LF
+    // checkout capture must both land on the same vendored LF bytes.
+    let lf_lock = "#pragma once\n\nclass Thing {\npublic:\n    int id;\n};\n";
+    let crlf_capture = lf_lock.replace("\n", "\r\n");
+    assert_eq!(
+        normalize_eol(&crlf_capture),
+        lf_lock,
+        "a CRLF-captured body must equal the LF lock"
+    );
+    assert_eq!(
+        normalize_eol(lf_lock),
+        lf_lock,
+        "an LF-captured body must pass through unchanged"
+    );
+    assert_eq!(
+        normalize_eol(&crlf_capture),
+        normalize_eol(&lf_lock),
+        "capture and vendored-lock sides converge on the same bytes"
+    );
 }
 
 #[test]
