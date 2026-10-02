@@ -233,9 +233,25 @@ Validation required:
             r#"{"CycleCreation":"x"}"#
         );
         assert_eq!(
+            serde_json::to_string(&RejectionReason::FrozenFile(PathBuf::from("f.h"))).unwrap(),
+            r#"{"FrozenFile":"f.h"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::ContractViolation(PathBuf::from("c.h")))
+                .unwrap(),
+            r#"{"ContractViolation":"c.h"}"#
+        );
+        assert_eq!(
             serde_json::to_string(&RejectionReason::NonMovableDeclaration("y".to_string()))
                 .unwrap(),
             r#"{"NonMovableDeclaration":"y"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::UnresolvedSemanticDependency(
+                "sym_7".to_string()
+            ))
+            .unwrap(),
+            r#"{"UnresolvedSemanticDependency":"sym_7"}"#
         );
     }
 }
