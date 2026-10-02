@@ -40,10 +40,11 @@ pub const STAGE_CALLGRAPH: &str = "callgraph";
 pub const STAGE_LOAD: &str = "load";
 
 /// The single plugin enumeration site (D9 consolidation): C++ first, then Scala.
-/// Registration ORDER is a contract - it drives `unit_shaper_for()` and
-/// `plugin_for()` precedence so existing C++ discovery stays byte-identical.
-/// Scala discovery selects its shaper explicitly (M19.3) - automatic
-/// marker-based shaper selection is the deferred M18.5 gap.
+/// Registration ORDER is a contract - it drives `unit_shaper_for()`/
+/// `unit_shaper_for_repo()` fallback and `plugin_for()` precedence so existing
+/// C++ discovery stays byte-identical. Marker-based shaper auto-selection
+/// (the deferred M18.5 gap) landed with plan M22 D22: unfiltered discovery
+/// picks the first registered plugin whose build markers sit at the repo root.
 /// The CLI delegates here (`ariadne-cli::registry::default_registry`); cli
 /// depends on pipeline, never the reverse (D9 direction ruling).
 pub fn build_default_registry() -> LanguageRegistry {
@@ -54,10 +55,12 @@ pub fn build_default_registry() -> LanguageRegistry {
 
 /// Shared registry for library-level [`Pipeline::new`] entry points and
 /// [`Pipeline::rehash_inputs`] - the [`build_default_registry`] plugin set.
-/// C++ behavior stays byte-identical because C++ registers first: the
-/// registry-selected shaper and detector precedence are unchanged, and the
-/// Scala plugin's `false` capability literals (plan:381) keep every
-/// extraction-side stage on the C++ backend (plan sec 3.1 handler note).
+/// C++ behavior stays byte-identical: C++ registers first, and marker-based
+/// shaper selection (D22) only diverges from first-wins where a later
+/// plugin's markers are present while every earlier plugin's are absent -
+/// never true of an existing C++ repository. The Scala plugin's `false`
+/// capability literals (plan:381) keep every extraction-side stage on the
+/// C++ backend (plan sec 3.1 handler note).
 pub fn default_registry() -> Arc<LanguageRegistry> {
     Arc::new(build_default_registry())
 }
@@ -259,8 +262,9 @@ impl Pipeline {
 
     /// Fresh discovery + build discovery + stage fingerprint chain, computed
     /// identically by every path that derives fingerprints. The unit shaper
-    /// comes from the registry (plan M18.3: single registered plugin with a
-    /// shaper ⇒ that shaper).
+    /// comes from the registry's marker-based selection against the located
+    /// repository root (plan M22 D22; first-wins fallback preserved, so
+    /// every marker-free repository shapes exactly as before).
     fn compute_inputs(
         repo_path: &Path,
         registry: &LanguageRegistry,
@@ -274,7 +278,7 @@ impl Pipeline {
         let discovery = repo.discover()?;
         let build = BuildDiscoverer::new(&repo.root)
             .with_repo_discovery(&discovery)
-            .with_unit_shaper(registry.unit_shaper_for())
+            .with_unit_shaper(registry.unit_shaper_for_repo(&repo.root))
             .discover()?;
         let fps = StageFingerprints::from_inputs(
             &repo.root,
@@ -423,14 +427,15 @@ impl Pipeline {
     /// closures resolve per TU context exactly as in a full run.
     ///
     /// A filtered run re-shapes through the filter's plugin shaper (D15):
-    /// construction-time discovery ran the registry's first-wins shaper,
-    /// which may recognize none of the filtered language's build markers at
-    /// all (a repo shaped by another language's shaper yields zero units), so
-    /// retention alone could never surface units of the filtered language.
+    /// construction-time discovery ran the registry's marker-based selection
+    /// (D22), which may recognize none of the filtered language's build
+    /// markers at all (a repo shaped by another language's shaper yields
+    /// zero units), so retention alone could never surface units of the
+    /// filtered language.
     /// The unfiltered path returns the construction-time result unchanged —
-    /// `select_unit_shaper`'s `None` branch is that same first-wins call, so
-    /// `compute_inputs`' discovery and every derived fingerprint are exactly
-    /// what the unfiltered run has always analyzed.
+    /// `select_unit_shaper`'s `None` branch is that same marker-based call,
+    /// so `compute_inputs`' discovery and every derived fingerprint are
+    /// exactly what the unfiltered run analyzes.
     fn indexed_build(&mut self) -> Result<BuildDiscoveryResult> {
         let mut build = match self.language_filter {
             None => self.build.clone(),
@@ -440,6 +445,7 @@ impl Pipeline {
                     .with_unit_shaper(select_unit_shaper(
                         &self.registry,
                         self.language_filter,
+                        &self.repo.root,
                     ))
                     .discover()?;
                 // The shard store context must see the contexts the shaping
@@ -722,21 +728,24 @@ impl Pipeline {
     }
 }
 
-/// Unit shaper for the index stage's unit shaping (D15): with an explicit
-/// `--lang` filter the shaper comes from that language's plugin — a plugin
-/// that provides no shaper honestly stays `None`, leaving build discovery
-/// neutral instead of guessing another language's defaults; without a filter
-/// the registry's first-wins selection is untouched. Registry lookups only —
-/// no language-identity branching (R3).
+/// Unit shaper for the index stage's unit shaping (D15 + D22): with an
+/// explicit `--lang` filter the shaper comes from that language's plugin — a
+/// plugin that provides no shaper honestly stays `None`, leaving build
+/// discovery neutral instead of guessing another language's defaults;
+/// without a filter the registry's marker-based selection against the
+/// repository root applies (the same call `compute_inputs` made at
+/// construction). Registry lookups only — no language-identity branching
+/// (R3).
 fn select_unit_shaper<'a>(
     registry: &'a LanguageRegistry,
     language_filter: Option<SourceLanguage>,
+    repo_root: &Path,
 ) -> Option<&'a dyn UnitShaper> {
     match language_filter {
         Some(language) => registry
             .plugin_for_id(language)
             .and_then(|plugin| plugin.shaper()),
-        None => registry.unit_shaper_for(),
+        None => registry.unit_shaper_for_repo(repo_root),
     }
 }
 

@@ -9,3 +9,7 @@ ariadne-repo     = { path = "../repo" }
 ariadne-lang-api = { path = "../lang-api" }
 anyhow.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+# D22 marker-presence tests build throwaway repository roots.
+tempfile.workspace = true

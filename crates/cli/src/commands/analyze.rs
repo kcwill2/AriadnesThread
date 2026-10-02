@@ -31,9 +31,11 @@ pub fn run_incremental_analysis_filtered(
 
     let repo = Repository::locate(repo_path)?;
     let repo_discovery = repo.discover()?;
+    // D22: marker-based registry shaper selection against the repo root
+    // (first-wins fallback preserved).
     let mut build_discovery = BuildDiscoverer::new(&repo.root)
         .with_repo_discovery(&repo_discovery)
-        .with_unit_shaper(registry.unit_shaper_for())
+        .with_unit_shaper(registry.unit_shaper_for_repo(&repo.root))
         .discover()?;
     let discovered_units = build_discovery.translation_units.len();
     restrict_and_validate_units(&registry, language, &mut build_discovery)?;

@@ -20,19 +20,29 @@ use ariadne_repo::{FileId, FileOwnership, Repository, SourceLanguage};
 /// silently-C++-parsed one (§3.3 fact 3). C++ output is byte-identical to
 /// the pre-M18 BFS (locked by the vendored oracles in
 /// `m18_cpp_plugin_parity_test` and the `m00` include-graph goldens).
+///
+/// Since plan M22 D22 the seeding shaper is the registry's marker-based
+/// `unit_shaper_for_repo` selection against the located repository root
+/// (first-wins fallback preserved); a repo carrying another plugin's build
+/// markers now shapes through that plugin's shaper without injection.
 pub fn build_dependency_graph(
     repo_path: &Path,
     registry: &LanguageRegistry,
 ) -> Result<IncludeGraph> {
     let repository = Repository::locate(repo_path)?;
-    dependency_graph(&repository, registry, registry.unit_shaper_for())
+    dependency_graph(
+        &repository,
+        registry,
+        registry.unit_shaper_for_repo(&repository.root),
+    )
 }
 
 /// The registry-driven BFS with an explicitly injected [`UnitShaper`] seeding
 /// the scan (plan M20 D14): the hook for callers that hold a shaper the
-/// registry's first-wins `unit_shaper_for()` would not select — the shaper
-/// arrives as a neutral `&dyn UnitShaper`, never as a language name. With
-/// `registry.unit_shaper_for()` this is exactly [`build_dependency_graph`].
+/// registry's marker-based `unit_shaper_for_repo()` selection would not pick
+/// for this repository — the shaper arrives as a neutral `&dyn UnitShaper`,
+/// never as a language name. With the shaper marker selection yields, this is
+/// exactly [`build_dependency_graph`].
 pub fn build_dependency_graph_with_unit_shaper(
     repo_path: &Path,
     registry: &LanguageRegistry,

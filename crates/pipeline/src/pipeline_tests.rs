@@ -565,3 +565,29 @@ fn unfiltered_index_keeps_the_registry_first_wins_shaping() {
         "the unfiltered run must index exactly the two construction-shaped units"
     );
 }
+
+// ── M22 T-C: marker-based shaper auto-selection (D22) ───────────────────────
+// A plain Pipeline::new over an sbt repo must shape and walk Scala units on
+// its own — no `--lang` filter, no injected shaper. Before D22 the C++-first
+// first-wins selection recognized none of this repo's markers, so the
+// include-graph stage rebuilt an edgeless graph.
+
+#[test]
+fn unfiltered_pipeline_auto_shapes_the_sbt_repo_graph() {
+    let dir = isolated_fixture_copy("scala-basic", "repo");
+    let root = dir.path().join("repo");
+
+    let mut pipeline = Pipeline::new(&root, None).unwrap();
+    let (graph, _closures) = pipeline.get_or_build_include_graph().unwrap();
+    let scala_edges = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.language == SourceLanguage::Scala)
+        .count();
+    assert!(
+        scala_edges > 0,
+        "a plain Pipeline::new auto-selects the shaper whose markers sit at the \
+         repo root (D22): {} edges, none Scala-stamped",
+        graph.edges.len()
+    );
+}
