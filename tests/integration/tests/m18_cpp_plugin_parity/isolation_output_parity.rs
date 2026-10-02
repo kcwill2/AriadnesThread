@@ -49,6 +49,12 @@ use std::sync::Arc;
 /// content, both locked normalized), the `MigrationPreview` pretty JSON, and
 /// the plugin-rendered diff text. Captured at ceac55f from the pre-deletion
 /// code on the `basic` fixture (1 conservative plan).
+///
+/// M23 T1 sanctioned drift: generated-file bodies were refreshed from
+/// placeholders to verbatim plugin-located declaration text (recaptured via
+/// `zz_capture_isolation`); symbols defined outside the aggregation source
+/// (e.g. `ThingConfig` in `thing_types.h`) keep the placeholder fallback (I4).
+/// `preview_json`/`diff_text` remain byte-identical to the ceac55f capture (I1).
 const BASIC_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
     plan_id: "PLAN-001",
     generated: &[
@@ -58,15 +64,15 @@ const BASIC_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
         ),
         (
             "include/Thing_Thing_extracted.h",
-            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n#include \"include/Thing_extracted.h\"\n\n// Symbol: Thing::Thing (Function)\n",
+            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n#include \"include/Thing_extracted.h\"\n\nexplicit Thing(ThingConfig config);\n",
         ),
         (
             "include/Thing_extracted.h",
-            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n\n// Symbol: Thing (Class)\n",
+            "#pragma once\n\n#include \"include/ThingConfig_extracted.h\"\n\nclass Thing {\r\npublic:\r\n    explicit Thing(ThingConfig config);\r\n    int get_id() const;\r\n\r\nprivate:\r\n    ThingConfig config_;\r\n};\n",
         ),
         (
             "include/Thing_get_id_extracted.h",
-            "#pragma once\n\n// Symbol: Thing::get_id (Function)\n",
+            "#pragma once\n\nint get_id() const;\n",
         ),
     ],
     preview_json: "{\n  \"plan_id\": \"PLAN-001\",\n  \"rewrites\": [\n    {\n      \"consumer_file\": \"<ROOT>/src/thing.cpp\",\n      \"new_includes\": [\n        \"generated/include/ThingConfig_extracted.h\",\n        \"generated/include/Thing_Thing_extracted.h\",\n        \"generated/include/Thing_extracted.h\",\n        \"generated/include/Thing_get_id_extracted.h\"\n      ],\n      \"old_includes\": [\n        \"include/thing.h\"\n      ],\n      \"side_effect_preservations\": []\n    },\n    {\n      \"consumer_file\": \"<ROOT>/tests/consumer.cpp\",\n      \"new_includes\": [\n        \"generated/include/ThingConfig_extracted.h\",\n        \"generated/include/Thing_Thing_extracted.h\",\n        \"generated/include/Thing_extracted.h\",\n        \"generated/include/Thing_get_id_extracted.h\"\n      ],\n      \"old_includes\": [\n        \"include/thing.h\"\n      ],\n      \"side_effect_preservations\": []\n    }\n  ]\n}",
@@ -79,11 +85,11 @@ const EXPENSIVE_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
     generated: &[
         (
             "include/Thing_extracted.h",
-            "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\n// Symbol: Thing (Class)\n",
+            "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\nclass Thing {\r\npublic:\r\n    void use_heavy() {\r\n        heavy_func();\r\n    }\r\n};\n",
         ),
         (
             "include/Thing_use_heavy_extracted.h",
-            "#pragma once\n\n// Symbol: Thing::use_heavy (Function)\n",
+            "#pragma once\n\nvoid use_heavy() {\r\n        heavy_func();\r\n    }\n",
         ),
         (
             "include/heavy_func_extracted.h",

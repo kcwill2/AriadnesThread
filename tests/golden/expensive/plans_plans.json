@@ -9,16 +9,19 @@
     "problem": "2 symbols of collateral load",
     "proposed_extractions": [
       {
+        "source_file": 5780424644969596122,
         "symbol_id": "Thing",
         "symbol_name": "Thing",
         "target_header": "include/Thing_extracted.h"
       },
       {
+        "source_file": 5780424644969596122,
         "symbol_id": "Thing::use_heavy",
         "symbol_name": "Thing::use_heavy",
         "target_header": "include/Thing_use_heavy_extracted.h"
       },
       {
+        "source_file": 5780424644969596122,
         "symbol_id": "heavy_func",
         "symbol_name": "heavy_func",
         "target_header": "include/heavy_func_extracted.h"
