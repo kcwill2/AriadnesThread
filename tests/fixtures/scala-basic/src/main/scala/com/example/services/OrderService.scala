@@ -1,6 +1,6 @@
 package com.example.services
 
-import com.example.models.{Order, User}
+import com.example.models._
 import scala.collection.mutable._
 
 class OrderService {

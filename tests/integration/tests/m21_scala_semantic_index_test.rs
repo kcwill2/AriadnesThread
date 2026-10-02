@@ -53,7 +53,12 @@ const ORDER_ID: &str = "com.example.models.Order";
 const USER_ID: &str = "com.example.models.User";
 const MAIN_ID: &str = "com.example.Main";
 const PACKAGE_OBJECT_ID: &str = "com.example.models";
-const ARRAY_BUFFER_ID: &str = "scala.collection.mutable.ArrayBuffer";
+/// D27 fixture evolution (`import com.example.models._`): the FIRST active
+/// wildcard owns attribution (D16), so the `ArrayBuffer` use is now guessed
+/// qualified into `com.example.models` — the offline heuristic cannot see
+/// that the second wildcard (`scala.collection.mutable._`) is its real home,
+/// and it never fabricates a non-attributed edge.
+const ARRAY_BUFFER_ID: &str = "com.example.models.ArrayBuffer";
 
 /// Line holding the fixture's only `s"…${…}…"` interpolation (D18: splices
 /// contribute no references, edges, or call sites).
@@ -283,10 +288,14 @@ fn filtered_index_locks_symbols_and_complete_edges() -> Result<()> {
         .expect("plan:413: com.example.services.OrderService is in the index");
     assert_eq!(service.kind, SymbolKind::Class, "D17: class -> Class");
 
+    // D27 fixture evolution: the grouped import became
+    // `import com.example.models._`, so the two named-usage edges ride the
+    // active wildcard and carry D16's Incomplete kind (the plan:413
+    // "edges to Order and User" coverage is unchanged, the kind moved).
     for dest in [USER_ID, ORDER_ID] {
         assert!(
-            has_edge(&result, ORDER_SERVICE_ID, dest, DependencyKind::Complete),
-            "plan:413: Complete edge {ORDER_SERVICE_ID} -> {dest} exists in the index"
+            has_edge(&result, ORDER_SERVICE_ID, dest, DependencyKind::Incomplete),
+            "plan:413: wildcard edge {ORDER_SERVICE_ID} -> {dest} exists in the index"
         );
     }
 
@@ -403,8 +412,9 @@ fn order_edit_reanalyzes_exactly_its_import_dependents() -> Result<()> {
     let result = index_scala(&repo.root)?;
     assert_eq!(result.tu_analyses.len(), 5, "still five units after the edit");
     assert!(
-        has_edge(&result, ORDER_SERVICE_ID, ORDER_ID, DependencyKind::Complete),
-        "the reanalyzed index still carries the plan:413 Complete edge"
+        has_edge(&result, ORDER_SERVICE_ID, ORDER_ID, DependencyKind::Incomplete),
+        "the reanalyzed index still carries the plan:413 edge (Incomplete kind per the \
+         D27 fixture evolution — grouped import replaced by `import com.example.models._`)"
     );
 
     let after = read_shard_envelopes(&repo.root)?;
@@ -527,14 +537,18 @@ fn order_service_analysis_is_deterministic_offline() -> Result<()> {
         .iter()
         .map(|e| (e.src_symbol.0.clone(), e.dst_symbol.0.clone(), e.kind))
         .collect();
+    // D27 fixture evolution (`import com.example.models._` replaced the
+    // grouped import): all three usages ride the single active wildcard, so
+    // every edge is D16 Incomplete with its qualified guess — ArrayBuffer
+    // now guesses into the first wildcard's package (see ARRAY_BUFFER_ID).
     assert_eq!(
         edge_keys,
         vec![
             (ORDER_SERVICE_ID.into(), ARRAY_BUFFER_ID.into(), DependencyKind::Incomplete),
-            (ORDER_SERVICE_ID.into(), USER_ID.into(), DependencyKind::Complete),
-            (ORDER_SERVICE_ID.into(), ORDER_ID.into(), DependencyKind::Complete),
+            (ORDER_SERVICE_ID.into(), USER_ID.into(), DependencyKind::Incomplete),
+            (ORDER_SERVICE_ID.into(), ORDER_ID.into(), DependencyKind::Incomplete),
         ],
-        "exactly ONE Incomplete wildcard edge plus the two Complete import edges, source order"
+        "exactly the three wildcard-attributed Incomplete edges, source order"
     );
 
     assert_eq!(

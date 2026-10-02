@@ -108,30 +108,35 @@ fn order_service_scala_exact_symbols_edges_and_references() {
     );
     assert_eq!(analysis.declarations[0].location.line, 6);
     assert_eq!(analysis.declarations[0].location.column, 7);
+    // D27 fixture evolution (`import com.example.models._` replaced the
+    // grouped import): only the FIRST wildcard is attributable (D16), so all
+    // three usages are Incomplete edges guessed into `com.example.models` —
+    // the heuristic cannot see that ArrayBuffer's real home is the second
+    // wildcard's package, and never fabricates a non-attributed edge.
     assert_eq!(
         edge_keys(&analysis),
         vec![
             (
                 "com.example.services.OrderService".into(),
-                "scala.collection.mutable.ArrayBuffer".into(),
+                "com.example.models.ArrayBuffer".into(),
                 DependencyKind::Incomplete
             ),
             (
                 "com.example.services.OrderService".into(),
                 "com.example.models.User".into(),
-                DependencyKind::Complete
+                DependencyKind::Incomplete
             ),
             (
                 "com.example.services.OrderService".into(),
                 "com.example.models.Order".into(),
-                DependencyKind::Complete
+                DependencyKind::Incomplete
             ),
         ]
     );
     assert_eq!(
         ref_ids(&analysis),
         [
-            "scala.collection.mutable.ArrayBuffer",
+            "com.example.models.ArrayBuffer",
             "com.example.models.User",
             "com.example.models.Order"
         ]

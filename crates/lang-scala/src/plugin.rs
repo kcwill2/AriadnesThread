@@ -200,24 +200,22 @@ mod tests {
             &ResolutionContext::default(),
         );
         let targets: Vec<&str> = edges.iter().map(|edge| edge.raw_target.as_str()).collect();
+        // D27 fixture evolution: the selector import `com.example.models.{Order, User}`
+        // became `import com.example.models._`, so the directive edge carries the
+        // package (not the `._` spelling) instead of two named targets.
         assert_eq!(
             targets,
-            vec![
-                "com.example.models.Order",
-                "com.example.models.User",
-                "scala.collection.mutable",
-            ],
-            "the package clause emits no edge and the interpolated string emits none; the \
-             third edge is the M20 T-D fixture's `import scala.collection.mutable._` (the \
-             wildcard edge carries the package, not the `._` spelling)"
+            vec!["com.example.models", "scala.collection.mutable",],
+            "the package clause emits no edge and the interpolated string emits none; both \
+             imports are wildcard spelling and each carries its package, not the `._` suffix"
         );
         assert!(edges
             .iter()
             .all(|edge| edge.style == DirectiveStyle::Unspecified));
         assert_eq!(
             edges.iter().map(|edge| edge.line).collect::<Vec<u32>>(),
-            vec![3, 3, 4],
-            "the selector import sits on line 3, the wildcard import on line 4"
+            vec![3, 4],
+            "the models wildcard import sits on line 3, the mutable wildcard import on line 4"
         );
         assert!(edges.iter().all(|edge| edge.column == 1));
     }
@@ -331,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn analyzer_yields_the_fixture_symbol_with_complete_import_edges() {
+    fn analyzer_yields_the_fixture_symbol_with_wildcard_import_edges() {
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
             "../../tests/fixtures/scala-basic/src/main/scala/com/example/services/OrderService.scala",
         );
@@ -348,14 +346,23 @@ mod tests {
             .map(|symbol| symbol.id.0.as_str())
             .collect();
         assert_eq!(symbol_ids, vec!["com.example.services.OrderService"]);
-        let complete: Vec<(String, String)> = analysis
+        // D27 fixture evolution (`import com.example.models._`): the two
+        // plan:413 usage edges now ride the active wildcard and carry
+        // D16's Incomplete kind; the ArrayBuffer guess (also Incomplete,
+        // guessed into the first wildcard's package) is not part of this
+        // plan:413 witness.
+        let usage: Vec<(String, String)> = analysis
             .edges
             .iter()
-            .filter(|edge| edge.kind == ariadne_lang::DependencyKind::Complete)
+            .filter(|edge| edge.kind == ariadne_lang::DependencyKind::Incomplete)
+            .filter(|edge| {
+                edge.dst_symbol.0 == "com.example.models.User"
+                    || edge.dst_symbol.0 == "com.example.models.Order"
+            })
             .map(|edge| (edge.src_symbol.0.clone(), edge.dst_symbol.0.clone()))
             .collect();
         assert_eq!(
-            complete,
+            usage,
             vec![
                 (
                     "com.example.services.OrderService".to_string(),
@@ -366,7 +373,7 @@ mod tests {
                     "com.example.models.Order".to_string()
                 ),
             ],
-            "plan:413 acceptance edges via the named import selector, in source order \
+            "plan:413 acceptance edges via the active wildcard import, in source order \
              (`summarize(user: User, order: Order)` names User before Order)"
         );
     }
