@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod node_maps;
+
 pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
     pub reduced_model: ariadne_graph::ReducedSemanticModel,
@@ -237,14 +239,21 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
 
     let report = include_graph.generate_report();
     let cycles = include_graph.detect_cycles();
-    let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
+    let node_maps = node_maps::build(
+        &include_graph,
+        &pipeline.discovery.files,
+        &crate::registry::default_registry(),
+    );
+    let include_elements = ariadne_ui::build_include_elements(
+        &include_graph, &closures, &cycles, &node_maps.languages, &node_maps.unit_kinds,
+    );
 
     // C1: ONE memo for the whole generation, seeded with the stage closures
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
     // live route share it; rebuilds swap graph+model+memo as one unit.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
 
-    let path_to_id = build_path_to_id(&include_graph);
+    let path_to_id = node_maps::build_path_to_id(&include_graph);
     let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
     let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
@@ -269,7 +278,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
             .to_string_lossy()
             .into_owned(),
         include_graph: include_elements,
-        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
+        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model, &node_maps.paths),
         call_graph: ariadne_ui::build_call_elements(&call_graph),
         stats: ariadne_ui::SummaryStats {
             total_files: include_graph.file_paths.len(),
@@ -298,15 +307,6 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         status,
         fps: pipeline.fps.clone(),
     })
-}
-
-/// Shared path→numeric-FileId lookup used by every per-file payload builder.
-fn build_path_to_id(include_graph: &ariadne_graph::IncludeGraph) -> HashMap<PathBuf, u64> {
-    include_graph
-        .file_paths
-        .iter()
-        .map(|(id, path)| (path.clone(), id.0))
-        .collect()
 }
 
 /// Map each target file (by numeric FileId) to the symbol counts contributed

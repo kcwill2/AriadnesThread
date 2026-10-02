@@ -130,6 +130,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/app/file-view.js", get(asset_file_view_js))
         .route("/app/hotspots.js", get(asset_hotspots_js))
         .route("/app/preview.js", get(asset_preview_js))
+        .route("/app/provenance.js", get(asset_provenance_js))
         .route("/app/main.js", get(asset_main_js))
         .route("/api/status", get(api_status))
         .route("/api/graph/include", get(api_graph_include))
@@ -193,6 +194,10 @@ async fn asset_hotspots_js() -> axum::response::Response {
 
 async fn asset_preview_js() -> axum::response::Response {
     ui_asset(crate::PREVIEW_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_provenance_js() -> axum::response::Response {
+    ui_asset(crate::PROVENANCE_JS, "text/javascript; charset=utf-8")
 }
 
 async fn asset_main_js() -> axum::response::Response {

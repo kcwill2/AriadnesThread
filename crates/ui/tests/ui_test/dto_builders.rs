@@ -11,7 +11,7 @@ async fn test_dto_builders() {
     let closures = HashMap::new();
     let cycles = vec![];
 
-    let elements = build_include_elements(&include_graph, &closures, &cycles);
+    let elements = build_include_elements(&include_graph, &closures, &cycles, &HashMap::new(), &HashMap::new());
     assert!(elements.is_empty());
 
     let reduced_model = ReducedSemanticModel {
@@ -21,7 +21,7 @@ async fn test_dto_builders() {
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
     };
-    let sym_elements = build_symbol_elements(&reduced_model);
+    let sym_elements = build_symbol_elements(&reduced_model, &HashMap::new());
     assert!(sym_elements.is_empty());
 
     let call_graph = CallGraph::default();
@@ -137,7 +137,7 @@ fn test_build_symbol_elements_filters_unindexed() {
         file_symbols: std::collections::BTreeMap::new(),
     };
 
-    let elements = build_symbol_elements(&model);
+    let elements = build_symbol_elements(&model, &HashMap::new());
 
     // Nodes for A and B = 2 elements.
     // Edge A->B = 1 element.

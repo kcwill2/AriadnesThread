@@ -741,8 +741,8 @@ fn test_index_markup_has_no_inline_style_or_script_bodies() {
     assert_eq!(inline_script_count, 1, "exactly one inline script body");
     assert_eq!(
         html.matches("<script src=").count(),
-        6,
-        "exactly six classic asset scripts"
+        7,
+        "exactly seven classic asset scripts"
     );
 }
 
@@ -753,6 +753,7 @@ fn tag_start_is_asset(tag: &str) -> bool {
         "/app/file-view.js",
         "/app/hotspots.js",
         "/app/preview.js",
+        "/app/provenance.js",
         "/app/main.js",
     ]
     .iter()
@@ -770,6 +771,7 @@ fn test_script_tag_order_preserves_original_execution_order() {
         "/app/file-view.js",
         "/app/hotspots.js",
         "/app/preview.js",
+        "/app/provenance.js",
         "/app/main.js",
     ];
     let mut pos = 0usize;
@@ -789,7 +791,7 @@ fn test_script_tag_order_preserves_original_execution_order() {
 
 #[tokio::test]
 async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
-    let assets: [(&str, &str, &str); 7] = [
+    let assets: [(&str, &str, &str); 8] = [
         (
             "/styles.css",
             ariadne_ui::STYLES_CSS,
@@ -816,6 +818,11 @@ async fn test_ui_asset_routes_serve_bundled_content_with_no_store() {
             "text/javascript; charset=utf-8",
         ),
         ("/app/preview.js", ariadne_ui::PREVIEW_JS, "text/javascript; charset=utf-8"),
+        (
+            "/app/provenance.js",
+            ariadne_ui::PROVENANCE_JS,
+            "text/javascript; charset=utf-8",
+        ),
         (
             "/app/main.js",
             ariadne_ui::MAIN_JS,
@@ -973,6 +980,10 @@ fn test_standalone_export_inlines_all_split_assets() {
     assert!(
         content.contains("window.ariadnePreview"),
         "export must inline preview.js"
+    );
+    assert!(
+        content.contains("function renderNodeProvenance("),
+        "export must inline provenance.js"
     );
     assert!(
         content.contains("function triggerFirstVisitExperience"),

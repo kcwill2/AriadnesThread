@@ -68,6 +68,7 @@ pub fn page_content() -> String {
         ariadne_ui::FILE_VIEW_JS,
         ariadne_ui::HOTSPOTS_JS,
         ariadne_ui::MAIN_JS,
+        ariadne_ui::PROVENANCE_JS,
     ] {
         page.push_str(asset);
     }
@@ -105,7 +106,8 @@ pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
     graph.edges.push(edge(2, 3));
 
     let mut payload = empty_export_payload();
-    payload.include_graph = build_include_elements(&graph, &HashMap::new(), &[]);
+    payload.include_graph =
+        build_include_elements(&graph, &HashMap::new(), &[], &HashMap::new(), &HashMap::new());
     (graph, payload)
 }
 
