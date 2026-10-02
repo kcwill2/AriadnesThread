@@ -37,6 +37,10 @@ ariadne-ui = { path = "../ui" }
 # touches a concrete plugin. Enumeration stays here by design — the core
 # pipeline crates must stay plugin-free (plan §7 rule R2).
 ariadne-lang-cpp = { path = "../lang-cpp" }
+# M23 T7 (D-M23-7 i): plan dispatch routes Scala paths to lang-scala's
+# planning hooks (aggregation filter + target naming), same injection
+# stance as the lang-cpp hooks above.
+ariadne-lang-scala = { path = "../lang-scala" }
 # M18.3: registry.rs is the single plugin enumeration site.
 ariadne-lang = { path = "../lang" }
 open = "5.1.2"

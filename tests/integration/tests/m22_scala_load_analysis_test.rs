@@ -19,10 +19,11 @@
 use anyhow::Result;
 use ariadne_cli::registry::default_registry;
 use ariadne_cli::{analyze_dependency_load, plan_extractions};
-use ariadne_cluster::planner::{OptimizationPlanner, PlanningGap};
-use ariadne_cluster::plan::RejectionReason;
 use ariadne_graph::{build_dependency_graph, LoadAnalyzer};
-use ariadne_lang::{CyclePolicy, DependencyVocabulary, LanguageId};
+// M23 T7 evolution: the gap/rejection types this file used to hand-wire in
+// test 3 retired with the flip; the gap mechanism's locks live in
+// crates/cluster/src/planner.rs planning_gap_tests.
+use ariadne_lang::{CyclePolicy, DependencyVocabulary};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::SourceLanguage;
 use serde_json::Value;
@@ -227,18 +228,34 @@ fn explain_renders_import_chain() -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// 3. plan prints the capability-gated rejection and invents nothing
-//    (plan:428 acceptance #3, D23).
+// 3. plan EVOLVED (M23 T7, D-M23-9 sanctioned expectation evolution): the
+//    pre-flip m22 acceptance #3 locked `ariadne plan` REJECTING Scala with
+//    PlanningUnsupported (the planning capability was false, D23). The T7
+//    flip + language-routed wiring (D-M23-6/D-M23-7) retires that gap —
+//    scala-basic is now genuinely planned: its aggregation file
+//    (`models/all.scala`) is an EMPTY `package object models {}` (zero
+//    collateral, zero in-file symbols), so the wired planner proposes zero
+//    extractions and rejects NOTHING. A real Scala plan with
+//    Scala-shaped targets is the T8 witness on the `scala-isolation`
+//    fixture (D-M23-9: "sized so the Scala planner proposes ≥1
+//    extraction"); the dispatch itself (Scala paths routed to
+//    `scala_aggregation_filter`/`scala_target_path_for` by the CLI, not by
+//    test injection) is locked in `crates/cli/src/commands/plan.rs` unit
+//    tests.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn plan_prints_capability_rejection() -> Result<()> {
+fn plan_evolved_from_capability_rejection_to_planned_nothing() -> Result<()> {
     let repo = isolated_scala_repo("plan")?;
 
-    // The CLI lane: exit Ok, no plans, and the persisted stage is empty —
-    // no fake header is invented for Scala.
+    // The CLI lane plans — no fabricated entries, and crucially no
+    // PlanningUnsupported rejection any more.
     let plans = plan_extractions(&repo.root)?;
-    assert!(plans.is_empty(), "D4/D23: Scala never gets fabricated plans");
+    assert!(
+        plans.is_empty(),
+        "the empty package-object aggregation proposes zero extractions — \
+         and must no longer be capability-rejected (D-M23-6)"
+    );
     let plans_json = read_json(&repo.root.join("artifacts/plans/plans.json"))?;
     assert_eq!(
         plans_json,
@@ -252,72 +269,23 @@ fn plan_prints_capability_rejection() -> Result<()> {
         "the plan manifest counts zero plans: {manifest}"
     );
 
-    // The rejection stdout line is `Planning rejected: {explanation}` from
-    // this same planner lane (stdout is uncapturable in-process, so the
-    // wording is asserted at its source — the CLI adds only the prefix).
-    let mut pipeline = Pipeline::new(&repo.root, None)?;
-    let (graph, _closures) = pipeline.get_or_build_include_graph()?;
-    let model = pipeline.get_or_build_reduced()?;
-    let tu_file_ids: Vec<_> = pipeline
-        .build
-        .translation_units
-        .iter()
-        .map(|tu| tu.file_id)
-        .collect();
+    // The retired rejection, asserted at its source: the registry-driven
+    // gap rule sees every discovered language planning post-flip.
+    let pipeline = Pipeline::new(&repo.root, None)?;
     let registry = default_registry();
-    let mut gaps: Vec<PlanningGap> = Vec::new();
-    for record in &pipeline.discovery.files {
-        if gaps.iter().any(|gap| gap.language == record.language) {
-            continue;
-        }
-        let Some(plugin) = registry.plugin_for_id(record.language) else {
-            continue;
-        };
-        if plugin.capabilities().planning {
-            continue;
-        }
-        gaps.push(PlanningGap {
-            language: record.language,
-            sample_path: record.path.clone(),
-        });
-    }
-    let scala_gap = gaps
+    let any_planning_gap = pipeline
+        .discovery
+        .files
         .iter()
-        .find(|gap| gap.language == SourceLanguage::Scala)
-        .expect("the discovered Scala records form one planning gap");
+        .any(|record| match registry.plugin_for_id(record.language) {
+            Some(plugin) => !plugin.capabilities().planning,
+            None => false,
+        });
     assert!(
-        normalized_rel(&scala_gap.sample_path).ends_with(".scala"),
-        "the gap carries an honest discovered Scala path as its target_file sample: {:?}",
-        scala_gap.sample_path
-    );
-
-    let mut planner = OptimizationPlanner::new(
-        &graph,
-        &model,
-        &pipeline.discovery.files,
-        &tu_file_ids,
-        &ariadne_lang_cpp::cpp_aggregation_filter,
-        &ariadne_lang_cpp::cpp_target_path_for,
-        None,
-        ariadne_lang::CyclePolicy::Reject,
-    );
-    planner.with_planning_gaps(gaps);
-    let (planner_plans, rejections) = planner.plan_with_rejections();
-    assert!(planner_plans.is_empty());
-    assert_eq!(
-        rejections.len(),
-        1,
-        "exactly one explanatory rejection for the repository-present Scala"
-    );
-    assert_eq!(
-        rejections[0].reason,
-        RejectionReason::PlanningUnsupported(LanguageId::Scala),
-        "D23: the reason names the language by data"
-    );
-    assert!(
-        rejections[0].explanation.contains("Scala"),
-        "the printed explanation names Scala: {}",
-        rejections[0].explanation
+        !any_planning_gap,
+        "D-M23-6: the flip leaves no PlanningUnsupported gap for any \
+         discovered language (the gap->rejection mechanism itself stays \
+         locked cluster-side in planner.rs planning_gap_tests)"
     );
     Ok(())
 }
