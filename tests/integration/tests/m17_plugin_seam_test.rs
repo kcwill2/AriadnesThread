@@ -317,9 +317,20 @@ fn plugin_crates_do_not_depend_on_core_pipeline() {
 ///   stay outside the walk scope by design: the invariant is *analysis-core*
 ///   neutrality, and composition roots are named, not anonymous.
 ///
-/// CARVE-OUT ruling (D-M23-10): `"c++20"`-style language-STANDARD DATA
-/// literals (crates/build fixtures, index cache fixture) are language-standard
-/// values, not plugin names — intentionally not tokenized.
+/// CARVE-OUT rulings, one rationale each (D-M23-10 + orchestrator ruling on
+/// the T3 ask):
+/// * `"c++20"`-style language-STANDARD DATA literals (crates/build fixtures,
+///   index cache fixture) are language-standard values, not plugin names —
+///   intentionally not tokenized.
+/// * `SourceLanguage::Cpp` (stripped below, exact full-path string only) is
+///   spine language-TAXONOMY DATA owned by `crates/repo`, which is out of the
+///   walk scope BY DESIGN because the repository spine must name languages.
+///   The guard's invariant targets plugin identifiers and plugin crate names:
+///   `CppSourceExtractor`, `CppDependencyRewriter`, `CppPlugin`, `lang_cpp`,
+///   `ariadne-lang-cpp` stay fully banned (locked by
+///   `guard_neutral_vocab_stripping_cannot_mask_plugin_names`). Stripping is
+///   exact-string only; whitespace-obfuscated plugin names (`Cpp Plugin`) are
+///   out of scope for a substring guard.
 const GUARD_CORE_CRATES: [&str; 7] = [
     "crates/index",
     "crates/graph",
@@ -339,6 +350,7 @@ const GUARD_FORBIDDEN: [&str; 7] = [
     "ariadne-lang-cpp",
 ];
 const GUARD_ALLOWED_FILES: [&str; 1] = ["crates/pipeline/src/registry.rs"];
+const GUARD_NEUTRAL_VOCAB: [&str; 1] = ["SourceLanguage::Cpp"];
 
 fn is_allowlisted_line(trimmed: &str) -> bool {
     trimmed.starts_with("//") || trimmed.starts_with("*")
@@ -351,26 +363,60 @@ fn repo_relative(file: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// Tokens a single source line commits, after stripping exact spine-taxonomy
+/// data strings (see the two allowlist kinds + carve-out rulings above).
+fn line_guard_hits(line: &str) -> Vec<&'static str> {
+    if is_allowlisted_line(line.trim_start()) {
+        return Vec::new();
+    }
+    let mut scannable = line.to_string();
+    for neutral in GUARD_NEUTRAL_VOCAB {
+        scannable = scannable.replace(neutral, "");
+    }
+    GUARD_FORBIDDEN
+        .into_iter()
+        .filter(|pattern| scannable.contains(pattern))
+        .collect()
+}
+
 fn guard_line_violations(file: &Path, crate_dir: &str) -> Vec<String> {
     let text = fs::read_to_string(file).unwrap_or_default();
     let mut hits = Vec::new();
     for (idx, line) in text.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if is_allowlisted_line(trimmed) {
-            continue;
-        }
-        for pattern in GUARD_FORBIDDEN {
-            if line.contains(pattern) {
-                hits.push(format!(
-                    "{}:{}: contains {pattern:?} — {}",
-                    crate_dir,
-                    idx + 1,
-                    trimmed.trim_end()
-                ));
-            }
+        for pattern in line_guard_hits(line) {
+            hits.push(format!(
+                "{}:{}: contains {pattern:?} — {}",
+                crate_dir,
+                idx + 1,
+                line.trim_start().trim_end()
+            ));
         }
     }
     hits
+}
+
+/// Self-test for the GUARD_NEUTRAL_VOCAB machinery: stripping must be
+/// limited to the exact spine-taxonomy string, never masking a plugin
+/// identifier that merely shares a line with spine data (orchestrator
+/// condition on the D-M23-10 carve-out ruling).
+#[test]
+fn guard_neutral_vocab_stripping_cannot_mask_plugin_names() {
+    assert!(
+        line_guard_hits("language: ariadne_repo::SourceLanguage::Cpp,").is_empty(),
+        "exact spine-taxonomy data must not be a violation"
+    );
+    let planted = [
+        "use ariadne_lang_cpp::CppPlugin;",
+        "ariadne-lang-cpp = { path = \"../lang-cpp\" }",
+        "let _ = ariadne_repo::SourceLanguage::Cpp; register(CppSourceExtractor);",
+        ".register(Box::new(ariadne_lang_cpp::CppPlugin::new()))",
+    ];
+    for line in planted {
+        assert!(
+            !line_guard_hits(line).is_empty(),
+            "planted plugin-name fixture must stay RED through stripping: {line}"
+        );
+    }
 }
 
 #[test]
