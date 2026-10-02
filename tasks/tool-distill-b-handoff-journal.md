@@ -13,3 +13,7 @@
   `.kilo/skills/tool-runner/` does not exist in repo at base (git log empty);
   handoff-described file is the GLOBAL `~/.agents/skills/tool-runner/SKILL.md`
   = out of touch-set; not created/edited, needs owner decision.
+- M5: `docs/specs/tool-output-distillation.md` written (120 lines, ASCII);
+  entry-point table diffed byte-identical vs handoff (13/14 lines; timeout-row
+  em dash replaced by hyphen per pure-ASCII rule, declared); digest literals
+  and PROHIBITIONS verified against distilled.py/testrun.py/distill.py.
