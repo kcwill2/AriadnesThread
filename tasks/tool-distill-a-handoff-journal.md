@@ -13,8 +13,9 @@
 
 ## M3 distill.py + distill_tests.py
 - Red: `python tools/distill_tests.py` -> ModuleNotFoundError: No module named 'distill' (all 8 tests red at import; no stub). First green pass `FAILED (failures=1)`: build code emitted `error[0308]` (regex group dropped the `E` prefix); fixed BUILD_ERROR_CODE in distilled.py. Final: `Ran 8 tests in 0.275s OK`.
-- Commit: (this commit). Gates: `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 176 tests OK`; live `python tools/distill.py cargo check` -> `ok (exit 0, 0 warnings emitted) -> capture: target/distill-capture.txt`, exit 0; hygiene_check exit 0 (R3 `i` warn fixed in tests).
+- Commit: 776cba4. Gates: `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 176 tests OK`; live `python tools/distill.py cargo check` -> `ok (exit 0, 0 warnings emitted) -> capture: target/distill-capture.txt`, exit 0; hygiene_check exit 0 (R3 `i` warn fixed in tests).
 - Notes: no new deviations. `--kind auto` with `--input-file` resolves to generic (no child token to inspect); `--child-exit` alongside a live child is ignored in favor of the live exit code.
 
 ## Close
 - M3 commit hash: 776cba4. Plan execution-results addendum appended (section 8). Handoff A code scope complete; T4 governance deferred to handoff B.
+- Follow-ups: 98fef86 (plan addendum + journal close), 74da996 (style: single-letter rename in distilled_tests, hygiene R3 warn). Final tree green: discover `Ran 176 tests OK`, hygiene exit 0.

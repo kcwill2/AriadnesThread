@@ -262,4 +262,5 @@ this plan file (execution-results addendum only).
   optional trailing `capture_path=None` kwarg on the three digest functions
   (contract shapes require the path inside emitted lines); testrun
   `--capture PATH` override (needed by the tmp-capture test design).
+- Follow-up commits: 98fef86 (addendum + journal), 74da996 (style rename).
 - T4 (adoption/governance) remains open: handoff B scope.
