@@ -304,6 +304,7 @@ mod tests {
             path: PathBuf::from("thing_types.h"),
             symbols: vec![],
             required_deps: vec![],
+            primary_source_text: None,
         }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
@@ -335,11 +336,13 @@ mod tests {
                 path: PathBuf::from("thing_types.h"),
                 symbols: vec![],
                 required_deps: vec![],
+                primary_source_text: None,
             },
             GeneratedUnit {
                 path: PathBuf::from("thing_core.h"),
                 symbols: vec![],
                 required_deps: vec![PathBuf::from("thing_types.h")],
+                primary_source_text: None,
             },
         ];
 
@@ -406,6 +409,7 @@ mod tests {
             path: PathBuf::from("thing_core.h"),
             symbols: vec![],
             required_deps: vec![PathBuf::from("thing_types.h")],
+            primary_source_text: None,
         }];
 
         let rewriter = IncludeRewriter::new(sym_map, gen_headers);
@@ -438,11 +442,13 @@ mod tests {
                 path: PathBuf::from("thing_types.h"),
                 symbols: vec![],
                 required_deps: vec![],
+                primary_source_text: None,
             },
             GeneratedUnit {
                 path: PathBuf::from("thing_core.h"),
                 symbols: vec![],
                 required_deps: vec![PathBuf::from("thing_types.h")],
+                primary_source_text: None,
             },
         ];
 

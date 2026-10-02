@@ -351,9 +351,17 @@ fn apply_safe_plan(
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
 ) -> Result<SafePlanOutcome> {
-    // Header extraction
+    // Header extraction (M23 T1, D-M23-3: source-file text from the catalog,
+    // verbatim bodies located by the capability-gated extraction backend;
+    // unreadable files keep the engine's placeholder fallback per I4).
     let extractor = IsolationEngine::new(model);
-    let extraction = extractor.extract(plan);
+    let source_reader = crate::commands::transform::repository_source_reader(repo)?;
+    let plugin_registry = crate::registry::default_registry();
+    let text_extractor =
+        crate::registry::capability_backend(&plugin_registry, |caps| caps.extraction)
+            .map(|plugin| plugin.extractor())
+            .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let extraction = extractor.extract(plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
 
@@ -365,7 +373,6 @@ fn apply_safe_plan(
     // M18.8b: directive text (guard block + include replacement) is owned by
     // the capability-gated rewriting backend (M19.3: Scala's rewriting:false
     // keeps C++ the sole claimant - plan:381); validate orchestrates the rest.
-    let plugin_registry = crate::registry::default_registry();
     let text_rewriter = crate::registry::capability_backend(&plugin_registry, |caps| caps.rewriting)
         .map(|plugin| plugin.rewriter())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;

@@ -1,12 +1,32 @@
 use crate::commands::plan::plan_extractions;
 use anyhow::{bail, Result};
 use ariadne_build::BuildDiscoverer;
-use ariadne_repo::Repository;
+use ariadne_repo::{FileId, Repository};
 use ariadne_report::ArtifactManager;
 use ariadne_transform::{GeneratedUnit, IncludeRewriter};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+
+/// Content provider for the isolation engine (plan M23, D-M23-3): resolves a
+/// planned extraction's `source_file` FileId through the repository catalog
+/// and reads the file from disk. An unreadable file yields `None` — the
+/// engine then keeps its placeholder body (I4), never an error.
+pub fn repository_source_reader(
+    repository: &Repository,
+) -> Result<impl Fn(FileId) -> Option<String>> {
+    let discovery = repository.discover()?;
+    let path_by_id: BTreeMap<FileId, PathBuf> = discovery
+        .files
+        .iter()
+        .map(|record| (record.id, record.path.clone()))
+        .collect();
+    let repo_root = repository.root.clone();
+    Ok(move |file_id| {
+        let relative_path = path_by_id.get(&file_id)?;
+        fs::read_to_string(repo_root.join(relative_path)).ok()
+    })
+}
 
 pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
@@ -20,7 +40,7 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     let model = artifacts.load_reduced_artifacts()?;
     let extractor = ariadne_transform::IsolationEngine::new(&model);
-    let result = extractor.extract(plan);
+    let source_reader = repository_source_reader(&repository)?;
 
     let output_dir = artifacts.artifact_root.join("generated");
     // M18.8a: new-file text comes from the capability-gated extraction
@@ -30,6 +50,7 @@ pub fn extract_plan_headers(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let text_extractor = crate::registry::capability_backend(&registry, |caps| caps.extraction)
         .map(|plugin| plugin.extractor())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let result = extractor.extract(plan, &source_reader, text_extractor);
     artifacts.save_extraction_artifacts(&result, &output_dir, text_extractor)?;
 
     println!(
@@ -116,7 +137,15 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let model = artifacts.load_reduced_artifacts()?;
 
     let extractor = ariadne_transform::IsolationEngine::new(&model);
-    let extraction = extractor.extract(&plan);
+    // M23 T1 (D-M23-3): the engine reads each extraction's source file (via
+    // the catalog) and asks the capability-gated extraction backend to locate
+    // verbatim declaration bodies; unreadable files fall back to placeholders.
+    let source_reader = repository_source_reader(&repository)?;
+    let registry = crate::registry::default_registry();
+    let text_extractor = crate::registry::capability_backend(&registry, |caps| caps.extraction)
+        .map(|plugin| plugin.extractor())
+        .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
+    let extraction = extractor.extract(&plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = plan_rewrite_targets(&plan);
 
@@ -131,7 +160,6 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     // M18.8b: apply mutates directive text through the capability-gated
     // rewriting backend (M19.3: Scala's rewriting:false keeps C++ the sole
     // claimant); validate only orchestrates snapshot/rollback/tiers.
-    let registry = crate::registry::default_registry();
     let rewriter = crate::registry::capability_backend(&registry, |caps| caps.rewriting)
         .map(|plugin| plugin.rewriter())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
@@ -189,6 +217,7 @@ fn plan_rewrite_targets(
                 path: ext.target_header.clone(),
                 symbols: vec![],
                 required_deps: vec![],
+                primary_source_text: None,
             });
     }
     (symbol_name_to_header, unit_map.into_values().collect())

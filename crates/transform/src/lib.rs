@@ -41,6 +41,11 @@ pub struct GeneratedUnit {
     pub symbols: Vec<ExtractedSymbol>,
     /// Other units this unit depends on (rendered by the plugin's extractor).
     pub required_deps: Vec<PathBuf>,
+    /// Raw text of the unit's primary source file, when the engine could read
+    /// it at extract time (plan M23, D-M23-2/D-M23-3). Drives the
+    /// `SourceExtractor::unit_namespace` seam on write; `None` means no source
+    /// text was available (placeholder bodies, empty namespace).
+    pub primary_source_text: Option<String>,
 }
 
 pub struct ExtractionResult {

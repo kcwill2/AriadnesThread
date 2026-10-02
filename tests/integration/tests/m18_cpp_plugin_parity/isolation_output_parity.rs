@@ -167,10 +167,30 @@ struct PlanCapture {
     diff_text: String,
 }
 
+/// Content provider over the isolated fixture copy (M23 T1, D-M23-3): reads
+/// each extraction's `source_file` through the discovery catalog; unreadable
+/// files yield `None` and keep the engine's placeholder fallback (I4).
+fn harness_source_reader(
+    harness: &FixtureHarness,
+) -> impl Fn(ariadne_repo::FileId) -> Option<String> {
+    let path_by_id: BTreeMap<ariadne_repo::FileId, PathBuf> = harness
+        .discovery
+        .files
+        .iter()
+        .map(|record| (record.id, record.path.clone()))
+        .collect();
+    let repo_root = harness.repo.root.clone();
+    move |file_id| {
+        let relative_path = path_by_id.get(&file_id)?;
+        std::fs::read_to_string(repo_root.join(relative_path)).ok()
+    }
+}
+
 fn capture_plan(harness: &FixtureHarness, plan: &OptimizationPlan) -> Result<PlanCapture> {
-    let extraction = IsolationEngine::new(&harness.model).extract(plan);
+    let source_reader = harness_source_reader(harness);
+    let extraction =
+        IsolationEngine::new(&harness.model).extract(plan, &source_reader, &CppSourceExtractor);
     let output_dir = tempfile::tempdir()?;
-    ensure_unit_parents(output_dir.path(), &extraction);
     extraction.write_to_disk(output_dir.path(), &CppSourceExtractor)?;
     let generated = read_text_tree(output_dir.path())?
         .into_iter()
@@ -277,9 +297,10 @@ fn production_write_path_reproduces_the_same_bytes_basic() -> Result<()> {
     let plans = conservative_plans(&harness)?;
     assert!(!plans.is_empty(), "basic fixture must produce a plan");
     for plan in &plans {
-        let extraction = IsolationEngine::new(&harness.model).extract(plan);
+        let source_reader = harness_source_reader(&harness);
+        let extraction = IsolationEngine::new(&harness.model)
+            .extract(plan, &source_reader, &CppSourceExtractor);
         let output_dir = tempfile::tempdir()?;
-        ensure_unit_parents(output_dir.path(), &extraction);
         extraction.write_to_disk(output_dir.path(), &CppSourceExtractor)?;
 
         let (symbol_name_to_header, relocated) = relocate_to_generated(&extraction);
@@ -371,17 +392,8 @@ fn consumers_including_plan_target(
     consumers
 }
 
-/// `ExtractionResult::write_to_disk` creates only its root; the production
-/// transactional apply also creates each generated unit's parent directory
-/// (`include/` nesting). Mirror that here so the engine+extractor bytes are
-/// captured in the same layout production produces them.
-fn ensure_unit_parents(output_dir: &Path, extraction: &ExtractionResult) {
-    for unit in &extraction.headers {
-        if let Some(parent) = output_dir.join(&unit.path).parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-    }
-}
+// (M23 T1, D-M23-4) `write_to_disk` now creates each unit's parent chain
+// itself — the `ensure_unit_parents` mirror this file used before M23 is gone.
 
 fn read_text_tree(root: &Path) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::new();

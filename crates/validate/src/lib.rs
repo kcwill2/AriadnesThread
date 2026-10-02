@@ -441,6 +441,7 @@ mod tests {
                 path: "new.h".into(),
                 symbols: vec![],
                 required_deps: vec![],
+                primary_source_text: None,
             }],
             errors: vec![],
         };
@@ -499,6 +500,7 @@ mod tests {
                 path: "new.h".into(),
                 symbols: vec![],
                 required_deps: vec![],
+                primary_source_text: None,
             }],
             errors: vec![],
         };

@@ -359,6 +359,7 @@ fn test_save_extraction_artifacts() {
         path: std::path::PathBuf::from("h1.h"),
         symbols: vec![sym1],
         required_deps: vec![],
+        primary_source_text: None,
     };
 
     let result = ariadne_transform::ExtractionResult {
