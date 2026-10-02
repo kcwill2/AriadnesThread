@@ -23,6 +23,7 @@ pub mod plugin;
 pub mod resolver;
 pub mod source_extractor;
 pub mod shaper;
+mod symbol_locator;
 mod tokenizer;
 
 pub use analyzer::CppSemanticAnalyzer;

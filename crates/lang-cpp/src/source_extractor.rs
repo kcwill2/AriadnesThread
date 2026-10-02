@@ -36,6 +36,16 @@ impl SourceExtractor for CppSourceExtractor {
             content,
         }
     }
+
+    /// Verbatim C++ declaration blocks sliced from `source_text`
+    /// (plan M23, D-M23-1). See [`crate::symbol_locator`].
+    fn locate_symbol_bodies(
+        &self,
+        source_text: &str,
+        wanted: &[(String, ariadne_lang::SymbolKind)],
+    ) -> Vec<SymbolBody> {
+        crate::symbol_locator::locate(source_text, wanted)
+    }
 }
 
 #[cfg(test)]
@@ -109,5 +119,13 @@ mod tests {
             .extract(&[body("A", "// a")], "", &["dep.h".to_string()])
             .content;
         assert_eq!(content, "#pragma once\n\n#include \"dep.h\"\n\n// a\n");
+    }
+
+    #[test]
+    fn unit_namespace_stays_empty_for_cpp_so_existing_bytes_hold() {
+        // D-M23-2: the engine may pass a namespace into `extract` derived
+        // from this hook; C++ must keep the hook default (empty) so the
+        // generated-header bytes stay locked.
+        assert_eq!(CppSourceExtractor.unit_namespace("namespace gfx { }"), "");
     }
 }
