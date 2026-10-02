@@ -12,6 +12,7 @@ pub mod analyzer;
 pub mod boundary;
 pub mod constraints;
 pub mod detector;
+mod dependency_rewriter;
 mod directive_parser;
 pub mod extractor;
 mod imports;
@@ -27,6 +28,7 @@ pub mod validator;
 
 pub use analyzer::ScalaAnalyzer;
 pub use boundary::EXTERNAL_PATH_MARKERS;
+pub use dependency_rewriter::ScalaDependencyRewriter;
 pub use constraints::ScalaClusteringConstraints;
 pub use detector::ScalaDetector;
 pub use extractor::ScalaSourceExtractor;
