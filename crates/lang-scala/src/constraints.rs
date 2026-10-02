@@ -68,6 +68,42 @@ impl ClusteringConstraints for ScalaClusteringConstraints {
         companion_groups(symbols)
     }
 
+    /// D-M23-8: the records-only companion pairing plus sealed-trait ↔
+    /// direct-subtype groups from the candidate file's typed extends channel.
+    /// A sealed record groups with the children of its extends edges only
+    /// when at least one child is present; groups and members are id-sorted,
+    /// so output is batch-order independent.
+    fn colocated_groups_with_edges(
+        &self,
+        records: &[SymbolRecord],
+        edges: &[(SymbolId, SymbolId)],
+    ) -> Vec<Vec<SymbolId>> {
+        let mut groups: BTreeSet<Vec<String>> = companion_groups(records)
+            .into_iter()
+            .map(|group| group.into_iter().map(|id| id.0).collect())
+            .collect();
+        for record in records
+            .iter()
+            .filter(|record| record.modifiers.iter().any(|m| m == "sealed"))
+        {
+            let mut members: BTreeSet<&str> = BTreeSet::new();
+            members.insert(record.id.0.as_str());
+            members.extend(
+                edges
+                    .iter()
+                    .filter(|(_, parent)| *parent == record.id)
+                    .map(|(child, _)| child.0.as_str()),
+            );
+            if members.len() > 1 {
+                groups.insert(members.into_iter().map(str::to_string).collect());
+            }
+        }
+        groups
+            .into_iter()
+            .map(|group| group.into_iter().map(SymbolId::new).collect())
+            .collect()
+    }
+
     fn frozen_symbols(&self, _symbols: &[SymbolRecord]) -> HashSet<SymbolId> {
         HashSet::new()
     }
