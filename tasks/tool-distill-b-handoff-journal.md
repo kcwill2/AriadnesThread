@@ -21,3 +21,8 @@
   handoff-spec gates item 1 --distill + report item 3 distill evidence +
   bare-command blocker clause; resume-checkpoint --cmd + guard-suite
   examples in distilling forms. tool-runner item = blocker (see deviation 3).
+- M7: AGENTS.md Testing distill bullet + distill.py/contract-doc Process
+  Tooling rows (new lines ASCII); ledger milestone row (`B (same commit)`
+  literal kept per handoff, orchestrator finalizes hash at mirror time) +
+  deferred rows O1/O2; plan file append-only close line. Memory mirror is
+  orchestrator's job (pending).

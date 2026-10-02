@@ -264,3 +264,11 @@ this plan file (execution-results addendum only).
   `--capture PATH` override (needed by the tmp-capture test design).
 - Follow-up commits: 98fef86 (addendum + journal), 74da996 (style rename).
 - T4 (adoption/governance) remains open: handoff B scope.
+
+Execution results (handoff B, T4 adoption/governance, 2026-10-02): CLOSED.
+Standing contract `docs/specs/tool-output-distillation.md`; AGENTS.md agent
+guidance + tooling rows; skill policy rewrites (review-gate evidence check,
+handoff-spec distill gates, resume-checkpoint distill examples); ledger
+milestone row + deferred findings O1/O2; gate findings F1/F2 fixed
+red/green in `tools/`. Contract: `tasks/tool-distill-b-handoff.md` +
+`tasks/tool-distill-b-handoff-journal.md`.

@@ -62,6 +62,7 @@ This is a Rust workspace for C++ dependency analysis:
 ### Testing
 - Use `cargo test` to run tests
 - Canonical reporting: `python tools/testrun.py [scoped cargo test args]` prints one line `N passed / M failed / K ignored / S suites` (exit 2 = parse drift; use `--baseline` for milestone gates)
+- Agents run tests via `python tools/testrun.py --distill [scoped args]` (bounded digest + full capture at `target/testrun-capture.txt`, path printed in the digest); raw mode remains for humans
 - UI runtime smoke (one command): `python tools/ui_smoke.py` builds the tool, cold-boots the UI on an ephemeral port, asserts routes + `Cache-Control: no-store`
 - Tool unit suites: `python -m unittest discover -s tools -p "*_tests.py"` (what CI runs)
 - Tests are organized by crate in `crates/*/tests/` and `tests/`
@@ -79,6 +80,8 @@ This is a Rust workspace for C++ dependency analysis:
 - `python tools/theme_token_check.py --check-added --base <rev>` — UI hex-literal drift guard
 - `python tools/hygiene_check.py` — R1/R2 blocking, R3 naming warn-only (flips via dated rows in `tasks/milestone_ledger.md`)
 - `python tools/testrun.py` — canonical test summary line (quote verbatim in reports)
+- `python tools/distill.py -- <cmd>` - distilling wrapper for build/clippy/generic commands (digest + `target/distill-capture.txt`, never raw output in agent context)
+- Standing contract: `docs/specs/tool-output-distillation.md` - entry points, digest shapes, prohibitions, evidence rules
 - Skills (`.kilo/skills/`): `handoff-spec` (author handoffs), `review-gate` (adjudicate handoffs; its commit-vs-touch-set check enforces scope), `milestone-lifecycle` (kickoff/closeout; ledger is source of truth), `resume-checkpoint`, `walkthrough-commit`
 - Milestone state: `tasks/milestone_ledger.md` is the source of truth; kilo-memory mirrors it in the same commit
 
