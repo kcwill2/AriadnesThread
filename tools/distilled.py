@@ -28,7 +28,7 @@ FAILURE_BLOCK_END = re.compile(r"^(?:---- |failures:$|test result:)")
 PANIC_MARKER = "panicked at"
 
 BUILD_ERROR_OPEN = re.compile(r"^error(?:\[E\d+\])?: ")
-BUILD_ERROR_CODE = re.compile(r"^error\[E(\d+)\]: (.*)$")
+BUILD_ERROR_CODE = re.compile(r"^error\[(E\d+)\]: (.*)$")
 BUILD_ERROR_PLAIN = re.compile(r"^error: (.*)$")
 BUILD_LOCATION = re.compile(r"^\s*--> ")
 BUILD_NOTE = re.compile(r"^\s*= ")
