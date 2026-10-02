@@ -4,7 +4,7 @@
 //! package dirs, plan M23 D-M23-4).
 
 use crate::{ExtractionResult, GeneratedUnit};
-use ariadne_lang::{SourceExtractor, SymbolBody};
+use ariadne_lang::{render_unit, SourceExtractor, SymbolBody};
 use std::path::PathBuf;
 
 impl ExtractionResult {
@@ -43,16 +43,12 @@ fn write_unit(
         .map(|dep| dep.display().to_string())
         .collect();
 
-    let namespace = match unit.primary_source_text.as_deref() {
-        Some(source_text) => extractor.unit_namespace(source_text),
-        None => String::new(),
-    };
-    let generated = extractor.extract(&bodies, &namespace, &deps);
+    let content = render_unit(extractor, &bodies, unit.primary_source_text.as_deref(), &deps);
     let file_path = output_dir.join(&unit.path);
     if let Some(parent) = file_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&file_path, generated.content)?;
+    std::fs::write(&file_path, content)?;
     Ok(file_path)
 }
 

@@ -367,6 +367,7 @@ fn production_write_path_reproduces_the_same_bytes_basic() -> Result<()> {
             &extraction,
             &preview,
             &CppDependencyRewriter,
+            &CppSourceExtractor,
         )?;
         for unit in &extraction.headers {
             let produced = std::fs::read_to_string(

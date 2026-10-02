@@ -1,7 +1,10 @@
 //! Validation harness and transactional verification.
 
 use anyhow::Result;
-use ariadne_lang::{CompilerValidator, DependencyRewriter, RewriteSpec, ToolchainStatus};
+use ariadne_lang::{
+    render_unit, CompilerValidator, DependencyRewriter, RewriteSpec, SourceExtractor, SymbolBody,
+    ToolchainStatus,
+};
 use ariadne_transform::{ExtractionResult, MigrationPreview};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -123,43 +126,20 @@ impl FileSnapshot {
     }
 }
 
-/// Transitional text-free rewriter (M18.8b): keeps the frozen 3-argument
-/// `TransactionApplier::apply` entry point compiling while all directive
-/// *text* lives behind the injected rewriter. It performs no directive
-/// mutation and emits no preamble; language-correct applications must go
-/// through [`TransactionApplier::apply_with`] with a registered plugin's
-/// rewriter (the CLI does). Removed when the frozen call sites move (M23).
-struct TransitionalDefaultRewriter;
-
-impl DependencyRewriter for TransitionalDefaultRewriter {
-    fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
-        source.to_string()
-    }
-}
-
 pub struct TransactionApplier;
 
 impl TransactionApplier {
-    /// Frozen-shape entry point: orchestration only, no directive text.
-    /// Production pipeline call sites (CLI) use
-    /// [`TransactionApplier::apply_with`] with a plugin rewriter.
-    #[deprecated = "use apply_with with a plugin rewriter (removed M23)"]
-    pub fn apply(
-        repo_root: &Path,
-        extraction: &ExtractionResult,
-        migration: &MigrationPreview,
-    ) -> Result<(FileSnapshot, Vec<PathBuf>)> {
-        Self::apply_with(repo_root, extraction, migration, &TransitionalDefaultRewriter)
-    }
-
     /// Transactional apply: snapshot the touched files, write generated
-    /// headers and consumer rewrites through `rewriter` (which owns every
-    /// directive spelling), and return the snapshot plus created paths.
+    /// headers through `extractor` (the plugin owns every generated-file
+    /// byte, plan M23 I3) and consumer rewrites through `rewriter` (which
+    /// owns every directive spelling), and return the snapshot plus created
+    /// paths.
     pub fn apply_with(
         repo_root: &Path,
         extraction: &ExtractionResult,
         migration: &MigrationPreview,
         rewriter: &dyn DependencyRewriter,
+        extractor: &dyn SourceExtractor,
     ) -> Result<(FileSnapshot, Vec<PathBuf>)> {
         let mut paths_to_snapshot = Vec::new();
         let mut new_paths = Vec::new();
@@ -186,16 +166,20 @@ impl TransactionApplier {
                 new_paths.push(path.clone());
             }
 
+            let bodies: Vec<SymbolBody> = unit
+                .symbols
+                .iter()
+                .map(|sym| SymbolBody {
+                    name: sym.name.clone(),
+                    body: sym.body.clone(),
+                })
+                .collect();
             let deps: Vec<String> = unit
                 .required_deps
                 .iter()
                 .map(|dep| dep.display().to_string())
                 .collect();
-            let mut content = rewriter.emit_file_preamble(&deps);
-            for sym in &unit.symbols {
-                content.push_str(&sym.body);
-                content.push('\n');
-            }
+            let content = render_unit(extractor, &bodies, unit.primary_source_text.as_deref(), &deps);
             fs::write(&path, content)?;
         }
 
@@ -304,7 +288,11 @@ impl TierValidator {
     }
 
     /// Tier 3. Pre-M18.10 behavior was the include-existence walk only — this
-    /// tier never ran a compiler (the real compile wiring lands in M23).
+    /// tier never ran a compiler. Kickoff decision D-M23-12 (plan
+    /// `plans/m23-symbol-isolation-kickoff.md` §3) defers real compile
+    /// invocation out of M23 for BOTH languages: extracted headers are not
+    /// yet self-contained (extraction include-closure is its own workstream),
+    /// so the honest M23 tier-3 deliverable is the probe-backed skip below.
     /// M18.10 adds the honest skip: when the injected plugin validator's
     /// [`CompilerValidator::toolchain_status`] reports `Missing`, a would-be
     /// `Pass` becomes `Skipped`, so this tier can no longer claim a TU
@@ -352,9 +340,12 @@ impl TierValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_lang::{CompilerValidator, ToolchainStatus};
-    use ariadne_lang_cpp::CppDependencyRewriter;
-    use ariadne_transform::{ConsumerRewrite, GeneratedUnit};
+    use ariadne_lang::{
+        CompilerValidator, GeneratedSourceFile, SourceExtractor, SymbolBody, SymbolKind,
+        ToolchainStatus,
+    };
+    use ariadne_lang_cpp::{CppDependencyRewriter, CppSourceExtractor};
+    use ariadne_transform::{ConsumerRewrite, ExtractedSymbol, GeneratedUnit};
 
     // R2 keeps directive text out of this crate's sources, so the C++ shapes
     // asserted here are assembled from a non-contiguous marker (the plugin
@@ -456,12 +447,19 @@ mod tests {
             }],
         };
 
-        let (snap, new_paths) =
-            TransactionApplier::apply_with(repo, &extraction, &migration, &CppDependencyRewriter)
-                .unwrap();
+        let (snap, new_paths) = TransactionApplier::apply_with(
+            repo,
+            &extraction,
+            &migration,
+            &CppDependencyRewriter,
+            &CppSourceExtractor,
+        )
+        .unwrap();
 
         assert!(repo.join("generated/new.h").exists());
-        // Byte-parity with the pre-M18.8b apply emit (guard block + bodies).
+        // Byte-parity with the pre-M18.8b apply emit (guard block + bodies):
+        // the empty unit renders as the guard block alone, verbatim from the
+        // extractor (M23 T2 single emitter).
         assert_eq!(
             fs::read_to_string(repo.join("generated/new.h")).unwrap(),
             "#pragma once\n\n"
@@ -481,11 +479,160 @@ mod tests {
         assert!(restored_content.contains(&include_of("old.h")));
     }
 
+    /// Neutral no-op rewriter: the orchestration coverage must hold without
+    /// any plugin directive text (the M18 transitional shim is retired).
+    struct NoTextMutationRewriter;
+
+    impl DependencyRewriter for NoTextMutationRewriter {
+        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
+            source.to_string()
+        }
+    }
+
+    /// Fake extractor whose bytes deliberately differ from anything a
+    /// preamble+body concat could produce: whatever lands on disk proves
+    /// `apply_with` delegates the generated text (invariant I3). Records the
+    /// `unit_namespace` inputs to lock the namespace seam rule.
+    #[derive(Default)]
+    struct RecordingDelegatingExtractor {
+        namespace_inputs: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingDelegatingExtractor {
+        fn namespace_inputs(&self) -> Vec<String> {
+            self.namespace_inputs.lock().unwrap().clone()
+        }
+    }
+
+    impl SourceExtractor for RecordingDelegatingExtractor {
+        fn extract(
+            &self,
+            symbols: &[SymbolBody],
+            namespace: &str,
+            required_deps: &[String],
+        ) -> GeneratedSourceFile {
+            let mut content = format!("FAKE-UNIT ns={namespace}\n");
+            for dep in required_deps {
+                content.push_str(&format!("FAKE-DEP {dep}\n"));
+            }
+            for sym in symbols {
+                content.push_str("FAKE-BODY ");
+                content.push_str(&sym.body);
+                content.push('\n');
+            }
+            GeneratedSourceFile {
+                path: PathBuf::from("unused.fake"),
+                content,
+            }
+        }
+
+        fn unit_namespace(&self, source_text: &str) -> String {
+            self.namespace_inputs
+                .lock()
+                .unwrap()
+                .push(source_text.to_string());
+            "delegated_ns".to_string()
+        }
+    }
+
     #[test]
-    #[allow(deprecated)] // pins the transitional 3-arg shim until M23 removal
-    fn transitional_apply_performs_orchestration_only() {
-        // The frozen 3-argument entry point still snapshots/creates/rolls
-        // back, but performs no directive text work (plugin-free default).
+    fn apply_writes_generated_files_through_the_injected_extractor() {
+        // M23 T2 (I3): the extractor's bytes differ from any preamble+raw-body
+        // concat — `apply_with` must write exactly the extractor's rendering.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+
+        let extraction = ExtractionResult {
+            plan_id: "P1".into(),
+            headers: vec![GeneratedUnit {
+                path: "new.h".into(),
+                symbols: vec![ExtractedSymbol {
+                    name: "Widget".into(),
+                    kind: SymbolKind::Class,
+                    body: "class Widget {};".into(),
+                }],
+                required_deps: vec![PathBuf::from("dep.h")],
+                primary_source_text: Some("package demo\n".into()),
+            }],
+            errors: vec![],
+        };
+        let migration = MigrationPreview {
+            plan_id: "P1".into(),
+            rewrites: vec![],
+        };
+
+        let extractor = RecordingDelegatingExtractor::default();
+        let (_snap, _new_paths) = TransactionApplier::apply_with(
+            repo,
+            &extraction,
+            &migration,
+            &NoTextMutationRewriter,
+            &extractor,
+        )
+        .unwrap();
+
+        let written = fs::read_to_string(repo.join("generated/new.h")).unwrap();
+        assert_eq!(
+            written, "FAKE-UNIT ns=delegated_ns\nFAKE-DEP dep.h\nFAKE-BODY class Widget {};\n",
+            "generated bytes must be exactly the extractor's rendering"
+        );
+        assert_ne!(
+            written,
+            format!("{}\n", "class Widget {};"),
+            "the hand-rolled preamble+body concat must be gone"
+        );
+        assert_eq!(
+            extractor.namespace_inputs(),
+            vec!["package demo\n".to_string()],
+            "unit_namespace must be consulted with the unit's primary source text"
+        );
+    }
+
+    #[test]
+    fn apply_uses_empty_namespace_without_unit_source_text() {
+        // Mirrors the T1 engine rule on the applier side: `primary_source_text`
+        // `None` → no `unit_namespace` call, empty namespace (C++ bytes stay).
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+
+        let extraction = ExtractionResult {
+            plan_id: "P1".into(),
+            headers: vec![GeneratedUnit {
+                path: "bare.h".into(),
+                symbols: vec![],
+                required_deps: vec![],
+                primary_source_text: None,
+            }],
+            errors: vec![],
+        };
+        let migration = MigrationPreview {
+            plan_id: "P1".into(),
+            rewrites: vec![],
+        };
+
+        let extractor = RecordingDelegatingExtractor::default();
+        TransactionApplier::apply_with(
+            repo,
+            &extraction,
+            &migration,
+            &NoTextMutationRewriter,
+            &extractor,
+        )
+        .unwrap();
+
+        assert!(extractor.namespace_inputs().is_empty());
+        assert_eq!(
+            fs::read_to_string(repo.join("generated/bare.h")).unwrap(),
+            "FAKE-UNIT ns=\n"
+        );
+    }
+
+    #[test]
+    fn apply_with_orchestrates_snapshot_write_and_rollback_only() {
+        // Retarget of the retired 3-arg shim test (M23 T2): `apply_with`
+        // still only orchestrates — the neutral rewriter leaves consumer
+        // text untouched, the extractor owns the generated text, and
+        // rollback restores everything.
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
 
@@ -515,14 +662,25 @@ mod tests {
             }],
         };
 
-        let (snap, new_paths) = TransactionApplier::apply(repo, &extraction, &migration).unwrap();
+        let (snap, new_paths) = TransactionApplier::apply_with(
+            repo,
+            &extraction,
+            &migration,
+            &NoTextMutationRewriter,
+            &RecordingDelegatingExtractor::default(),
+        )
+        .unwrap();
 
-        // Created + rolled back, but text untouched and preamble-free.
+        // Created + rolled back, but consumer text untouched and the
+        // generated file is exactly the extractor's rendering.
         assert_eq!(
             fs::read_to_string(&consumer).unwrap(),
             consumer_source("old.h")
         );
-        assert_eq!(fs::read_to_string(repo.join("generated/new.h")).unwrap(), "");
+        assert_eq!(
+            fs::read_to_string(repo.join("generated/new.h")).unwrap(),
+            "FAKE-UNIT ns=\n"
+        );
 
         TransactionApplier::rollback(&snap, &new_paths).unwrap();
         assert!(TransactionApplier::verify_restored(&snap).is_ok());

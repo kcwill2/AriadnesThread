@@ -376,8 +376,13 @@ fn apply_safe_plan(
     let text_rewriter = crate::registry::capability_backend(&plugin_registry, |caps| caps.rewriting)
         .map(|plugin| plugin.rewriter())
         .ok_or_else(|| anyhow::anyhow!("no language plugin registered"))?;
-    let (snapshot, new_paths) =
-        TransactionApplier::apply_with(&repo.root, &extraction, &migration, text_rewriter)?;
+    let (snapshot, new_paths) = TransactionApplier::apply_with(
+        &repo.root,
+        &extraction,
+        &migration,
+        text_rewriter,
+        text_extractor,
+    )?;
 
     // M18.10: the tier-3 skip decision uses the injected plugin validator's
     // toolchain status (probe lives in lang-cpp), and a Skipped tier counts

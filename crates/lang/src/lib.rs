@@ -34,7 +34,7 @@ pub use ariadne_lang_api::unit::UnitDescriptor;
 pub use analyzer::SemanticAnalyzer;
 pub use constraints::ClusteringConstraints;
 pub use detector::{LanguageDetector, SourceFileKind};
-pub use extractor::{GeneratedSourceFile, SourceExtractor, SymbolBody};
+pub use extractor::{render_unit, GeneratedSourceFile, SourceExtractor, SymbolBody};
 pub use registry::{LanguagePlugin, LanguageRegistry};
 pub use resolver::{
     first_ondisk_include_candidate, DependencyResolver, DirectiveStyle, RawDepEdge,

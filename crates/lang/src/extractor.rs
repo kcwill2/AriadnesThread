@@ -61,3 +61,25 @@ pub trait SourceExtractor: Send + Sync {
         Vec::new()
     }
 }
+
+/// Render the complete text of one generated unit — **the single emitter**
+/// for generated-file bytes (plan M23, invariant I3 / D-M23-4). The
+/// isolation engine's disk write and the transactional applier both route
+/// through here, so the namespace-seam rule lives in exactly one place:
+/// [`SourceExtractor::unit_namespace`] is consulted only when
+/// `primary_source_text` is `Some` (D-M23-2); otherwise no hook call is
+/// made and the namespace stays empty (C++ bytes stay unchanged).
+pub fn render_unit(
+    extractor: &dyn SourceExtractor,
+    symbol_bodies: &[SymbolBody],
+    primary_source_text: Option<&str>,
+    required_deps: &[String],
+) -> String {
+    let namespace = match primary_source_text {
+        Some(source_text) => extractor.unit_namespace(source_text),
+        None => String::new(),
+    };
+    extractor
+        .extract(symbol_bodies, &namespace, required_deps)
+        .content
+}

@@ -169,6 +169,7 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
         &extraction,
         &migration,
         rewriter,
+        text_extractor,
     )?;
 
     commit_or_rollback(

@@ -114,8 +114,14 @@ fn test_m10_rollback_identity() {
     };
 
     let hash_before = hash_dir(&repo_path);
-    let (snapshot, new_paths) =
-        TransactionApplier::apply(&repo.root, &extraction, &migration).unwrap();
+    let (snapshot, new_paths) = TransactionApplier::apply_with(
+        &repo.root,
+        &extraction,
+        &migration,
+        &ariadne_lang_cpp::CppDependencyRewriter,
+        &ariadne_lang_cpp::CppSourceExtractor,
+    )
+    .unwrap();
     let t1 = TierValidator::validate_structural(&extraction);
 
     let outcome = ApplyOutcome::RolledBack {
