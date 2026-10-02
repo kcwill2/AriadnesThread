@@ -7,11 +7,9 @@
 //! the M23.5 extractor ([`crate::extractor::ScalaSourceExtractor`]), and
 //! the M23.6 rewriter ([`crate::dependency_rewriter::ScalaDependencyRewriter`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
-//! gate that keeps the pipeline out of stages whose milestone has not
-//! landed; every wired component behind a still-false capability (the
-//! validator and rewriter, pre-T7) is the M18 shape — reachable only by
-//! direct plugin use, never by the gated pipeline. The T7 flip turns the
-//! planning/extraction/rewriting/validation bits on.
+//! gate the pipeline consults per stage; the T7 flip (D-M23-6) turned the
+//! planning/extraction/rewriting/validation bits on now that every
+//! component behind them has landed and passed Gate G2b.
 
 use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
@@ -134,9 +132,10 @@ impl LanguagePlugin for ScalaPlugin {
         }
     }
 
-    /// Discovery through load metric work offline at kickoff; planning and
-    /// the extraction-side stages stay off until their milestones
-    /// (plan:381). `requires_toolchain: false` per plan assumption A3: the
+    /// All eight capabilities now land offline: discovery through load
+    /// metric from kickoff, and (plan M23, T7, D-M23-6) planning, extraction,
+    /// rewriting and validation with the wired M23.4/5/6 components.
+    /// `requires_toolchain` stays `false` per plan assumption A3: the
     /// pipeline never invokes a Scala compile; the M23.4 validator only
     /// spawns `--version` probes (D-M23-6/D-M23-12, I7 — offline these
     /// resolve `Missing` and tier 3 reports `Skipped`).
@@ -146,10 +145,10 @@ impl LanguagePlugin for ScalaPlugin {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         }
     }
@@ -335,8 +334,13 @@ mod tests {
         );
     }
 
+    /// Byte-exact capability literal lock (same discipline as the retired
+    /// `capabilities_match_the_plan_381_literal`): the M23 T7 flip
+    /// (D-M23-6) is the new authority — all four gated stages on,
+    /// `requires_toolchain` false forever until the toolchain analyzer
+    /// milestone (D-M23-11).
     #[test]
-    fn capabilities_match_the_plan_381_literal() {
+    fn capabilities_match_the_m23_flip_literal() {
         assert_eq!(
             ScalaPlugin::new().capabilities(),
             LanguageCapabilities {
@@ -344,10 +348,10 @@ mod tests {
                 dependency_graph: true,
                 semantic_index: true,
                 load_metric: true,
-                planning: false,
-                extraction: false,
-                rewriting: false,
-                validation: false,
+                planning: true,
+                extraction: true,
+                rewriting: true,
+                validation: true,
                 requires_toolchain: false,
             }
         );

@@ -56,6 +56,10 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
 /// Stage backend: the one registered plugin whose capabilities enable `capability`.
 /// `Some` only on exactly-one claim; ambiguous/none -> `None` (callers keep their
 /// existing error/passthrough semantics). Language-neutral: no `match LanguageId` (R3).
+/// RETIRED BY THE T7 FLIP (D-M23-7 ii): once Scala's stage capabilities are
+/// on, two plugins claim most stages and exactly-one-claim is ambiguous by
+/// construction; call sites route per language via
+/// [`capability_backend_for_language`] instead.
 pub fn capability_backend<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
     capability: fn(&ariadne_lang::LanguageCapabilities) -> bool,
@@ -73,6 +77,22 @@ pub fn capability_backend<'a>(
         }
     }
     claim
+}
+
+/// Language-scoped stage backend (plan M23, D-M23-7 ii, T7): the plugin
+/// **of `language`** when that plugin's own capabilities enable
+/// `capability`; `None` for an unregistered language or a false capability
+/// (callers keep their honest error, never a C++ default). Replaces the
+/// pre-flip exactly-one-claim [`capability_backend`], which the
+/// [`ScalaPlugin`](ariadne_lang_scala::ScalaPlugin) flip makes permanently
+/// ambiguous.
+pub fn capability_backend_for_language<'a>(
+    registry: &'a ariadne_lang::LanguageRegistry,
+    language: SourceLanguage,
+    capability: fn(&ariadne_lang::LanguageCapabilities) -> bool,
+) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
+    let plugin = registry.plugin_for_id(language)?;
+    capability(&plugin.capabilities()).then_some(plugin)
 }
 
 /// The incremental-analysis backend for a build's discovered units: distinct
@@ -252,6 +272,62 @@ mod tests {
     fn capability_backend_without_plugins_is_none() {
         let registry = ariadne_lang::LanguageRegistry::new();
         assert!(capability_backend(&registry, |caps| caps.extraction).is_none());
+    }
+
+    fn language_backends_resolve(
+        capability: &str,
+        claim: fn(&ariadne_lang::LanguageCapabilities) -> bool,
+    ) {
+        let registry = default_registry();
+        for language in [SourceLanguage::Cpp, SourceLanguage::Scala] {
+            let backend = capability_backend_for_language(&registry, language, claim)
+                .unwrap_or_else(|| panic!("the {language:?} plugin must own its {capability} stage"));
+            assert_eq!(
+                backend.id(),
+                language,
+                "D-M23-7 ii: language-scoped resolution routes {capability} to the \
+                 {language:?} plugin itself — the flip makes exactly-one-claim ambiguous, \
+                 never shared"
+            );
+        }
+    }
+
+    #[test]
+    fn capability_backend_for_language_resolves_extraction_per_language() {
+        language_backends_resolve("extraction", |caps| caps.extraction);
+    }
+
+    #[test]
+    fn capability_backend_for_language_resolves_rewriting_per_language() {
+        language_backends_resolve("rewriting", |caps| caps.rewriting);
+    }
+
+    #[test]
+    fn capability_backend_for_language_resolves_validation_per_language() {
+        language_backends_resolve("validation", |caps| caps.validation);
+    }
+
+    #[test]
+    fn capability_backend_for_language_resolves_planning_scala_side() {
+        let registry = default_registry();
+        let backend = capability_backend_for_language(&registry, SourceLanguage::Scala, |caps| caps.planning)
+            .expect("D-M23-6 flip: Scala plans with its own plugin");
+        assert_eq!(backend.id(), SourceLanguage::Scala);
+    }
+
+    #[test]
+    fn capability_backend_for_language_unregistered_language_is_none_never_cpp_default() {
+        let registry = default_registry();
+        assert!(
+            capability_backend_for_language(&registry, SourceLanguage::Other, |caps| caps.extraction)
+                .is_none(),
+            "an unclaimed language has NO backend — never a C++ fallback"
+        );
+        let empty = ariadne_lang::LanguageRegistry::new();
+        assert!(
+            capability_backend_for_language(&empty, SourceLanguage::Cpp, |caps| caps.extraction)
+                .is_none()
+        );
     }
 
     fn unit_with_language(
