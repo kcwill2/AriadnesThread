@@ -190,6 +190,7 @@ fn plan_complete_structure_locks_current_output() {
                 symbol_name: "A".to_string(),
                 symbol_id: SymbolId::new("A"),
                 target_header: PathBuf::from("A_extracted.h"),
+                source_file: Some(FileId(1)),
             }],
             optimization_frontier: vec![PathBuf::from("start.h")],
             risk: RiskLevel::Conservative,
@@ -198,6 +199,25 @@ fn plan_complete_structure_locks_current_output() {
                         Extracting independent symbols."
                 .to_string(),
         }]
+    );
+}
+
+#[test]
+fn every_proposal_stamps_the_candidate_source_file() {
+    // M23 (D-M23-3): each ProposedExtraction records the aggregation file
+    // id the batch member was found in, so the engine can fetch its text
+    // and ask the plugin to locate the verbatim body.
+    let plans = collateral_header().plan();
+    assert_eq!(plans.len(), 1);
+    let source_files: Vec<Option<FileId>> = plans[0]
+        .proposed_extractions
+        .iter()
+        .map(|extraction| extraction.source_file)
+        .collect();
+    assert_eq!(
+        source_files,
+        vec![Some(FileId(1))],
+        "the stamp is the candidate aggregation file id, not a target path"
     );
 }
 
@@ -272,6 +292,7 @@ fn plan_keeps_independent_symbols_alongside_a_cyclic_scc() {
             symbol_name: "C2".to_string(),
             symbol_id: SymbolId::new("C2"),
             target_header: PathBuf::from("C2_extracted.h"),
+            source_file: Some(FileId(1)),
         }]
     );
 }

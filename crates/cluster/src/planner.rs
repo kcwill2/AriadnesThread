@@ -333,6 +333,7 @@ impl<'a> OptimizationPlanner<'a> {
                     symbol_name: record.name.clone(),
                     symbol_id: symbol.clone(),
                     target_header: target_path.clone(),
+                    source_file: Some(candidate.file_id),
                 })
             })
             .collect()

@@ -36,6 +36,12 @@ pub struct ProposedExtraction {
     pub symbol_name: String,
     pub symbol_id: SymbolId,
     pub target_header: PathBuf,
+    /// Aggregation file the batch member was found in (plan M23, D-M23-3).
+    /// Additive provenance: the isolation engine reads this file's text and
+    /// asks the language plugin to locate the symbol's verbatim body.
+    /// `#[serde(default)]` keeps older plan artifacts loadable (I6).
+    #[serde(default)]
+    pub source_file: Option<FileId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -172,11 +178,13 @@ mod tests {
                     symbol_name: "ThingOptions".to_string(),
                     symbol_id: SymbolId::new("sym_10"),
                     target_header: PathBuf::from("thing_types.h"),
+                    source_file: None,
                 },
                 ProposedExtraction {
                     symbol_name: "ThingBuilder".to_string(),
                     symbol_id: SymbolId::new("sym_11"),
                     target_header: PathBuf::from("thing_builder.h"),
+                    source_file: None,
                 },
             ],
             optimization_frontier: vec![PathBuf::from("graphics.h")],
@@ -222,6 +230,14 @@ Validation required:
             serde_json::from_str::<RejectionReason>(&json).unwrap(),
             reason
         );
+    }
+
+    #[test]
+    fn source_file_field_is_additive_for_pre_m23_plan_json() {
+        // I6: pre-M23 plan artifacts (no `source_file` key) still load.
+        let legacy = r#"{"symbol_name":"A","symbol_id":"A","target_header":"a.h"}"#;
+        let parsed: ProposedExtraction = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.source_file, None);
     }
 
     #[test]

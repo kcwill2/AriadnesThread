@@ -827,6 +827,7 @@ mod builder_tests {
                 symbol_name: "Thing".to_string(),
                 symbol_id: SymbolId::new("sym_1"),
                 target_header: PathBuf::from("graph_types.h"),
+                source_file: Some(FileId(7)),
             }],
             optimization_frontier: vec![
                 PathBuf::from("inc/graphics.h"),
@@ -924,6 +925,7 @@ mod builder_tests {
                 symbol_name: format!("Sym{n:02}"),
                 symbol_id: SymbolId::new(format!("sym_{n:02}")),
                 target_header: PathBuf::from("graph_types.h"),
+                source_file: Some(FileId(7)),
             })
             .collect();
         let out = conservative_proposals(vec![p]);
