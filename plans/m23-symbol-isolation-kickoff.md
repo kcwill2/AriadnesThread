@@ -143,3 +143,18 @@ Gate G1 after T1, G2 after T2+T3, G3 (final) after T8. Reviewer = Code-reviewer 
 - Move-semantics removal must never corrupt neighbours — whole-file byte-equality tests except for removed region (T6) are the contract.
 - Capability flip widens ambiguity blast-radius (registry, transform CLI, optimize path) — T7 lands all routing in one commit set, Gate-G3 audits the full call graph.
 - `m10`/`m14` are rollback-integrity characterizations: their shim migration must not weaken the dir-hash identity assertions (only the call signature moves).
+
+## 8. Continuation addendum (orchestrator #4, 2026-10-02, base `6a443e1` CLEAN)
+
+Prior orchestrator died on the context wall after T7c returned. T7c itself is COMPLETE — its slice (planner feed, D-M23-8 final call site) is committed and locked by the two green `planner_sealed_edges.rs` tests. Its S5 sweep instead surfaced a pre-existing regression; the pending ASK ruling is resolved here as **Option B: dedicated fixer** (no re-work of the T7c slice).
+
+**Ledger — landed and green:** T1–T6; T7 S1–S3 (flip, routing, discovery hooks, `unit_imports` seam); T7-S4 producers + side files + fingerprint `scala-parser-2` (`061a490`, `a88753c`, `dc93bc5`, `7afcca6`); T7-S4 final planner feed (`6a443e1`); T8a fixture + plan witness (`3dc784a`, `57c6ca8`).
+
+**Open (in order):**
+1. **FIX-F (S5 blocker, bisect-proven pre-existing at `061a490`):** `m00_golden_baseline_test` 2F + `m18_persistence` 5F + `pipeline_test` 3F. Green @ `57c6ca8`, red @ `a88753c`+. Suspect: additive `TuAnalysis.extends_edges`/`SymbolRecord.modifiers` shifting the `tu_analyses.bin` bincode layout (JSON `skip_serializing_if` does not cover bincode) and the self-computed shard-manifest trust path at load — index warm-load semantics changed (manifest persists warm shard-stats where golden expects cold). Fix must restore goldens byte-exactly — **NO golden edits**; if truly impossible, ASK the orchestrator with evidence first. Plus hygiene: `crates/cli/src/commands/ui.rs` 1026L, `crates/cli/src/optimize.rs:515` 103-line fn.
+2. **T7b:** defining-file filter (a proposed isolation into the symbol's own containing file — e.g. `legacy.scala` → `legacy.scala` — must not be planned; provably C++-no-op via m00/planner characterization) + neutral self-target guard (shape-impossible for C++) + move-removal transaction wiring (apply calls `remove_top_level_symbols` for `SymbolPlacement::SingleFile` inside the snapshot/rollback path, I5).
+3. **S5 re-run:** `cargo check --workspace --all-targets` + `cargo test --workspace --no-fail-fast` = 0 failures (~1063+ pass); `git diff --stat tests/golden/` zero; `python tools/hygiene_check.py` exit 0; tree clean.
+4. **T8b:** `m23_symbol_isolation_test.rs` acceptance completion (preview, apply+move-removal transaction, rollback dir-hash identity, untouched-file byte preservation, tiers `[Pass, Pass, Skipped]`); retire the two `TODO(M23 S4-landing)` witness assertions (now assertable: `modifiers` carries `sealed` on `LegacyShape`; sealed pair lands in ONE batch); kickoff closeout notes appended here.
+5. **Gate-G3:** Code-reviewer full-milestone audit vs this kickoff + plan §3.6; D-M23-1/13 deviations explicitly closed.
+
+**Standing rules for every implementer here:** pathspec commits only (`git commit -m … -- <paths>`, never `git add -A`); never PowerShell `Get-Content|-replace|Set-Content` on tracked files (UTF-8 mangling — recorded correction); bounded reads + filtered command output; if context pressure appears, checkpoint-commit and append a CONTINUATION SECTION to the final report.
