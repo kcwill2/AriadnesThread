@@ -26,12 +26,18 @@
 //!   token. Never analyzed either way.
 
 /// One lexeme with its 1-based source position (start column of the token,
-/// matching the `lang-cpp` tokenizer convention).
+/// matching the `lang-cpp` tokenizer convention) and its char-offset span
+/// `[start, end)` in the source text (plan M23, T5 — the same offset capture
+/// `lang-cpp` added in T1 so declaration regions re-slice byte-exactly).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
     pub line: usize,
     pub column: usize,
+    /// Char index of the token's first character.
+    pub start: usize,
+    /// Char index just past the token's last character.
+    pub end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +163,7 @@ impl<'a> ScanCursor<'a> {
     fn scan_token(&mut self) -> Option<Token> {
         let start_line = self.line;
         let start_column = self.column;
+        let start_offset = self.index;
         let ch = self.peek(0)?;
         let kind = if ch == '"' {
             self.scan_string_literal()?;
@@ -183,6 +190,8 @@ impl<'a> ScanCursor<'a> {
             kind,
             line: start_line,
             column: start_column,
+            start: start_offset,
+            end: self.index,
         })
     }
 
@@ -378,5 +387,35 @@ mod tests {
         let tokens = tokenize("class\n  Widget");
         assert_eq!((tokens[0].line, tokens[0].column), (1, 1));
         assert_eq!((tokens[1].line, tokens[1].column), (2, 3));
+    }
+
+    #[test]
+    fn token_spans_re_slice_their_own_lexemes_verbatim() {
+        let source = "class A { val s = \"} {\" } `my-op`\n\"\"\"t\n t\"\"\"";
+        let chars: Vec<char> = source.chars().collect();
+        for token in tokenize(source) {
+            assert!(token.end > token.start, "span {token:?} must be non-empty");
+            let lexeme: String = chars[token.start..token.end].iter().collect();
+            match &token.kind {
+                TokenKind::Ident(name) if lexeme == *name => {}
+                TokenKind::Ident(name) => {
+                    assert!(lexeme.starts_with('`') && lexeme.ends_with('`'));
+                    assert!(lexeme.contains(name.as_str()), "backtick lexeme wraps {name}");
+                }
+                TokenKind::Punct(ch) => assert_eq!(lexeme, ch.to_string()),
+                TokenKind::Literal => assert!(!lexeme.is_empty()),
+            }
+        }
+    }
+
+    #[test]
+    fn spans_count_crlf_as_two_chars_without_disturbing_offsets() {
+        let source = "val\r\nx = 1";
+        let tokens = tokenize(source);
+        let chars: Vec<char> = source.chars().collect();
+        assert_eq!((tokens[1].line, tokens[1].column), (2, 1));
+        assert_eq!(chars[tokens[1].start], 'x');
+        let spanned: String = chars[tokens[0].start..tokens[1].end].iter().collect();
+        assert_eq!(spanned, "val\r\nx");
     }
 }

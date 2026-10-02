@@ -46,10 +46,37 @@ mod occurrences;
 
 use ariadne_lang_api::types::{DependencyKind, SemanticEdge, TuAnalysis};
 use ariadne_repo::{FileId, SourceLanguage};
+use crate::scanner::Token;
 use declarations::{collect_top_level_decls, resolve_decl_ids, symbol_payloads};
 use directives::scan_directives;
+pub(crate) use declarations::ResolvedDecl;
 use occurrences::scan_occurrences;
 use std::collections::BTreeSet;
+
+/// Tokenized source with its resolved top-level declarations and derived
+/// package namespace (plan M23, T5): the shared view `locate_symbol_bodies`
+/// and `unit_namespace` consume, so region slicing sees exactly the
+/// analysis-time qualification — no second parser.
+pub(crate) struct SourceProgram {
+    pub namespace: String,
+    pub tokens: Vec<Token>,
+    pub decls: Vec<ResolvedDecl>,
+}
+
+/// Runs scanner → directives → declarations over `source` without building
+/// an analysis (same passes [`ScalaSourceParser::parse`] uses, minus the
+/// occurrence walk).
+pub(crate) fn program_of(source: &str) -> SourceProgram {
+    let tokens = crate::scanner::tokenize(source);
+    let directives = scan_directives(&tokens);
+    let decl_pass = collect_top_level_decls(&tokens, &directives);
+    let decls = resolve_decl_ids(decl_pass.decls, &tokens, &directives);
+    SourceProgram {
+        namespace: directives.namespace,
+        tokens,
+        decls,
+    }
+}
 
 /// Stateless offline Scala source parser (plan:407 contract).
 pub struct ScalaSourceParser;
