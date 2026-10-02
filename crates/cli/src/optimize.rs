@@ -462,6 +462,7 @@ pub fn run_end_to_end_optimize(repo_path: &Path) -> Result<OptimizationReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_repo::FileId;
 
     #[test]
     fn test_format_m14_output() {
@@ -511,23 +512,9 @@ mod tests {
         assert!(formatted.contains("Residual collateral load:\n    8241 symbols"));
     }
 
-    #[test]
-    fn test_collateral_opportunities_skip_symbols_without_defining_file() {
-        // Regression lock for 161f028: analyze_symbol_load legitimately errors
-        // for symbols with defining_file: None; the scan must skip them and
-        // keep aggregating the rest instead of panicking on unwrap.
-        use ariadne_graph::{IncludeEdge, IncludeKind, ReducedSymbolRecord, SourceLocation};
-        use ariadne_index::types::{SymbolId, SymbolKind};
-        use ariadne_repo::{
-            FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
-            RepositoryDiscoveryResult,
-        };
-
-        let mut graph = IncludeGraph::new();
-        graph.register_file(FileId(1), PathBuf::from("Thing.h"));
-        graph.register_file(FileId(2), PathBuf::from("graphics.h"));
-        graph.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
-        let link = |source: FileId, destination: FileId, raw_path: &str| IncludeEdge {
+    fn test_include_edge(source: FileId, destination: FileId, raw_path: &str) -> ariadne_graph::IncludeEdge {
+        use ariadne_graph::{IncludeEdge, IncludeKind, SourceLocation};
+        IncludeEdge {
             source,
             destination: Some(destination),
             context_name: String::new(),
@@ -536,9 +523,39 @@ mod tests {
             raw_path: raw_path.to_string(),
             resolved_path: Some(PathBuf::from(raw_path)),
             language: ariadne_repo::SourceLanguage::Cpp,
-        };
-        graph.add_edge(link(FileId(1), FileId(2), "graphics.h"));
-        graph.add_edge(link(FileId(2), FileId(3), "HugeThirdParty.h"));
+        }
+    }
+
+    fn discovery_file_record(id: FileId, name: &str) -> ariadne_repo::FileRecord {
+        use ariadne_repo::{FileKind, FileOwnership, FileRecord, OptimizationPolicy};
+        FileRecord {
+            id,
+            path: PathBuf::from(name),
+            canonical_path: PathBuf::from(name),
+            kind: FileKind::Header,
+            size: 1,
+            content_hash: String::new(),
+            ownership: FileOwnership::Repository,
+            optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
+        }
+    }
+
+    #[test]
+    fn test_collateral_opportunities_skip_symbols_without_defining_file() {
+        // Regression lock for 161f028: analyze_symbol_load legitimately errors
+        // for symbols with defining_file: None; the scan must skip them and
+        // keep aggregating the rest instead of panicking on unwrap.
+        use ariadne_graph::ReducedSymbolRecord;
+        use ariadne_index::types::{SymbolId, SymbolKind};
+        use ariadne_repo::RepositoryDiscoveryResult;
+
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(1), PathBuf::from("Thing.h"));
+        graph.register_file(FileId(2), PathBuf::from("graphics.h"));
+        graph.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
+        graph.add_edge(test_include_edge(FileId(1), FileId(2), "graphics.h"));
+        graph.add_edge(test_include_edge(FileId(2), FileId(3), "HugeThirdParty.h"));
 
         let mut model = ReducedSemanticModel {
             repo_root: PathBuf::from("/"),
@@ -577,23 +594,12 @@ mod tests {
         add_symbol(&mut model, "HugeThing", SymbolKind::Class, Some(FileId(3)));
         add_symbol(&mut model, "Thing", SymbolKind::Class, Some(FileId(1)));
 
-        let file_record = |id: FileId, name: &str| FileRecord {
-            id,
-            path: PathBuf::from(name),
-            canonical_path: PathBuf::from(name),
-            kind: FileKind::Header,
-            size: 1,
-            content_hash: String::new(),
-            ownership: FileOwnership::Repository,
-            optimization_policy: OptimizationPolicy::Optimizable,
-            language: ariadne_repo::SourceLanguage::Cpp,
-        };
         let repo_discovery = RepositoryDiscoveryResult {
             root: PathBuf::from("/"),
             files: vec![
-                file_record(FileId(1), "Thing.h"),
-                file_record(FileId(2), "graphics.h"),
-                file_record(FileId(3), "HugeThirdParty.h"),
+                discovery_file_record(FileId(1), "Thing.h"),
+                discovery_file_record(FileId(2), "graphics.h"),
+                discovery_file_record(FileId(3), "HugeThirdParty.h"),
             ],
             ownership_summary: HashMap::new(),
             policy_summary: HashMap::new(),
