@@ -17,3 +17,7 @@
   entry-point table diffed byte-identical vs handoff (13/14 lines; timeout-row
   em dash replaced by hyphen per pure-ASCII rule, declared); digest literals
   and PROHIBITIONS verified against distilled.py/testrun.py/distill.py.
+- M6: review-gate step 8 report-evidence check (verdict renumbered 9);
+  handoff-spec gates item 1 --distill + report item 3 distill evidence +
+  bare-command blocker clause; resume-checkpoint --cmd + guard-suite
+  examples in distilling forms. tool-runner item = blocker (see deviation 3).

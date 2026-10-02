@@ -40,7 +40,14 @@ reported that you can measure yourself; re-run everything fresh.
    `python tools/encoding_guard.py --all` exit 0; frozen-lock byte-identity
    for the handoff's lock list (`python tools/golden_guard.py --base <rev>`
    once it lands; until then the prose byte-check named in the handoff).
-8. **Verdict.** Reply APPROVED or REJECTED:
+8. **Report-evidence check (tool-output distillation,
+   `docs/specs/tool-output-distillation.md`).** The implementer report must
+   be digest-shaped: verdict/digest lines + `Ran N ... OK` summaries + exit
+   codes + capture paths, zero raw output dumps; and its gate commands must
+   use the distilling entry points (`testrun.py --distill`,
+   `distill.py -- ...`). Missing digest/capture evidence or any raw paste
+   = numbered finding.
+9. **Verdict.** Reply APPROVED or REJECTED:
    - Numbered findings; each = file:line, what/why, severity (blocker/minor).
    - Each implementer-declared deviation gets its own numbered disposition:
      accepted / rejected-with-required-change.

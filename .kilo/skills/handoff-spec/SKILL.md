@@ -52,8 +52,9 @@ identifiers, one responsibility per function.
 manual byte-identical check of <paths> -- do NOT touch these paths).
 
 ## Gates (exact commands, timeout 600000 ms each; scoped only until final gate)
-1. `python tools/testrun.py -p <crate>` -- canonical summary line must appear
-   verbatim in the report; red first, then green.
+1. `python tools/testrun.py --distill -p <crate>` -- canonical summary line
+   and digest header must appear verbatim in the report; red first, then
+   green.
 2. <next scoped command>
 3. `python tools/hygiene_check.py` -- exit 0.
 4. `python tools/encoding_guard.py --staged` -- exit 0 before committing.
@@ -65,6 +66,10 @@ manual byte-identical check of <paths> -- do NOT touch these paths).
   only; pure-ASCII content (see AGENTS.md File-Edit Discipline).
 - Touch only the touch-set; on discovering out-of-scope breakage: report, do
   not fix.
+- Bare high-volume commands (raw `cargo test`/`build`/`clippy`, full
+  `unittest discover`, `ui_smoke`, `bench_compare`) in an implementer
+  session are a reviewer blocker; run them through the distilling entry
+  points (`docs/specs/tool-output-distillation.md`).
 - After EACH per-module Green gate, append a 1-3 line checkpoint to
   `tasks/<handoff-basename>-journal.md` (created alongside this handoff):
   module + commit hash, any deviation, any lock/contract finding. The journal
@@ -76,7 +81,8 @@ manual byte-identical check of <paths> -- do NOT touch these paths).
 
 ## Report back (final message)
 1. Commit hash + `git show --stat`. 2. Red evidence (first failing tests).
-3. Green evidence (canonical testrun.py summary line). 4. Any deviation +
+3. Green evidence (distill-mode digest header line + canonical line +
+   capture path). 4. Any deviation +
    reason. 5. Out-of-scope observations (report-only).
 Never paste raw tool output (cargo/git dumps) into the report: cite the
 command + the canonical summary line + exit code (2026-10-01). The reviewer

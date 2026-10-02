@@ -24,12 +24,16 @@ Follow this order exactly:
    The handoff markdown parse is best-effort only. If the guard reports the
    parse is ambiguous or the handoff is old, pass explicit args and do not
    let the guard guess:
-   `resume --spec tasks/<handoff>.md --scope "<crate/dir>/**" --cmd "<command line>"`
+   `resume --spec tasks/<handoff>.md --scope "<crate/dir>/**" --cmd "python tools/testrun.py --distill -p <crate>"`
+   Use distilling forms for `--cmd` (`testrun.py --distill ...`,
+   `distill.py -- ...`); never bare high-volume commands (see
+   `docs/specs/tool-output-distillation.md`).
    The guard is report-only: it runs the scoped commands and classifies edits
    in-scope vs stray; it never fixes anything.
 
 3. Run the guard suite before continuing mutations:
-   - `python tools/testrun.py <scoped gates from the handoff>`
+   - `python tools/testrun.py --distill <scoped gates from the handoff>`
+     (or `python tools/distill.py -- <command>` for non-test commands)
    - `python tools/encoding_guard.py --staged`
    - `python tools/hygiene_check.py`
    Do not proceed while any of these is red.
