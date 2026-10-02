@@ -7,9 +7,11 @@
 //!   depend on `graph`/`cluster`/`transform`/`validate`. The plugin crates
 //!   (`lang-cpp`, `lang-scala`) do not exist yet: the test skips an absent
 //!   `Cargo.toml` and starts asserting the moment they appear (M18/M19).
-//! * `core_crates_do_not_name_languages` — the R2 guard: the six core
-//!   pipeline crates contain no C++ literals in any source line; enabled
-//!   unconditionally since the M18.11 shim removal.
+//! * `core_crates_do_not_name_languages` — the R2 guard: the seven core
+//!   pipeline crates (incl. pipeline, minus its named composition-root
+//!   registry) contain no plugin or language names in any source line;
+//!   enabled unconditionally since the M18.11 shim removal and hardened by
+//!   D-M23-10 (M23 T3).
 
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyRewriter,
@@ -294,48 +296,95 @@ fn plugin_crates_do_not_depend_on_core_pipeline() {
     }
 }
 
-/// Production lines of the core pipeline crates must not name any concrete
-/// language, compiler binary, directive syntax, or header suffix.
+/// Production lines AND in-src test lines (`#[cfg(test)]` mods are walked;
+/// `crates/*/tests/` integration files are out of scope) of the core pipeline
+/// crates must not name any concrete plugin, language, compiler binary,
+/// directive syntax, or header suffix (plan §7 rule R2, I2).
 ///
 /// M18.11 un-ignored this test once the C++ code moved into
 /// `ariadne-lang-cpp` and the `#[deprecated]` re-export shims were removed.
+/// M23 T3 (D-M23-10) hardened it: the walk scope gained `crates/pipeline`,
+/// the token table gained the plugin vocabulary (`Cpp`, `lang_cpp`,
+/// `ariadne-lang-cpp`), and plugin-named in-src tests were relocated to
+/// `crates/*/tests/` files or neutral fakes.
+///
+/// Allowlist mechanism, exactly two kinds:
+/// * doc-comment / whole-line-comment lines (below), and
+/// * one NAMED composition-root file, `crates/pipeline/src/registry.rs`,
+///   whose single duty is enumerating the plugin set — the same privilege
+///   class as `cli/src/registry.rs`, which delegates here (D9 direction:
+///   cli depends on pipeline, never the reverse). cli, scheduler, and build
+///   stay outside the walk scope by design: the invariant is *analysis-core*
+///   neutrality, and composition roots are named, not anonymous.
+///
+/// CARVE-OUT ruling (D-M23-10): `"c++20"`-style language-STANDARD DATA
+/// literals (crates/build fixtures, index cache fixture) are language-standard
+/// values, not plugin names — intentionally not tokenized.
+const GUARD_CORE_CRATES: [&str; 7] = [
+    "crates/index",
+    "crates/graph",
+    "crates/cluster",
+    "crates/transform",
+    "crates/validate",
+    "crates/report",
+    "crates/pipeline",
+];
+const GUARD_FORBIDDEN: [&str; 7] = [
+    "clang",
+    "g++",
+    "#include",
+    "\".h\"",
+    "Cpp",
+    "lang_cpp",
+    "ariadne-lang-cpp",
+];
+const GUARD_ALLOWED_FILES: [&str; 1] = ["crates/pipeline/src/registry.rs"];
+
+fn is_allowlisted_line(trimmed: &str) -> bool {
+    trimmed.starts_with("//") || trimmed.starts_with("*")
+}
+
+fn repo_relative(file: &Path) -> String {
+    file.strip_prefix(repo_root())
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn guard_line_violations(file: &Path, crate_dir: &str) -> Vec<String> {
+    let text = fs::read_to_string(file).unwrap_or_default();
+    let mut hits = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if is_allowlisted_line(trimmed) {
+            continue;
+        }
+        for pattern in GUARD_FORBIDDEN {
+            if line.contains(pattern) {
+                hits.push(format!(
+                    "{}:{}: contains {pattern:?} — {}",
+                    crate_dir,
+                    idx + 1,
+                    trimmed.trim_end()
+                ));
+            }
+        }
+    }
+    hits
+}
+
 #[test]
 fn core_crates_do_not_name_languages() {
-    const CORE_CRATES: [&str; 6] = [
-        "crates/index",
-        "crates/graph",
-        "crates/cluster",
-        "crates/transform",
-        "crates/validate",
-        "crates/report",
-    ];
-    const FORBIDDEN: [&str; 4] = ["clang", "g++", "#include", "\".h\""];
-
     let mut violations: Vec<String> = Vec::new();
-    for crate_dir in CORE_CRATES {
+    for crate_dir in GUARD_CORE_CRATES {
         let src_dir = repo_root().join(crate_dir).join("src");
         let mut files = Vec::new();
         collect_rs_files(&src_dir, &mut files);
         for file in files {
-            let text = fs::read_to_string(&file).unwrap_or_default();
-            for (idx, line) in text.lines().enumerate() {
-                let trimmed = line.trim_start();
-                // Allowlist: doc comments and whole-line comments; the M18
-                // transitional shims add their own #[allow(deprecated)] files.
-                if trimmed.starts_with("//") || trimmed.starts_with("*") {
-                    continue;
-                }
-                for pattern in FORBIDDEN {
-                    if line.contains(pattern) {
-                        violations.push(format!(
-                            "{}:{}: contains {pattern:?} — {}",
-                            crate_dir,
-                            idx + 1,
-                            trimmed.trim_end()
-                        ));
-                    }
-                }
+            if GUARD_ALLOWED_FILES.contains(&repo_relative(&file).as_str()) {
+                continue; // named composition root (see doc comment above)
             }
+            violations.extend(guard_line_violations(&file, crate_dir));
         }
     }
     assert!(
