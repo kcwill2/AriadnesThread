@@ -93,6 +93,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
+ "ariadne-lang-scala",
  "ariadne-pipeline",
  "ariadne-repo",
  "ariadne-report",
