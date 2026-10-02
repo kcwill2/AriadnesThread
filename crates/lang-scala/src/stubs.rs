@@ -12,30 +12,12 @@
 //! [`crate::constraints::ScalaClusteringConstraints`]. M23.4 (T4) retired
 //! the validator stub for
 //! [`crate::validator::ScalaToolchainValidator`] (probe-backed, D-M23-6).
-//! What remains here is owned by M23 T5/T6 (extraction, rewriting).
+//! M23.5 (T5) retired the extractor stub for
+//! [`crate::extractor::ScalaSourceExtractor`] (verbatim regions + package
+//! clause + rendered imports, D-M23-1/2). What remains here is owned by
+//! M23 T6 (rewriting).
 
-use ariadne_lang::{
-    DependencyRewriter, GeneratedSourceFile, RewriteSpec, SourceExtractor, SymbolBody,
-};
-use std::path::PathBuf;
-
-/// Empty-source placeholder until the M23 Scala extractor replaces it;
-/// `extraction: false` gates the pipeline away from this body until then.
-pub struct StubExtractor;
-
-impl SourceExtractor for StubExtractor {
-    fn extract(
-        &self,
-        _bodies: &[SymbolBody],
-        _namespace: &str,
-        _dependencies: &[String],
-    ) -> GeneratedSourceFile {
-        GeneratedSourceFile {
-            path: PathBuf::from("out.scala"),
-            content: String::new(),
-        }
-    }
-}
+use ariadne_lang::{DependencyRewriter, RewriteSpec};
 
 /// Source passthrough until the M23 Scala rewriter replaces it;
 /// `rewriting: false` gates the pipeline away from this body until then.

@@ -4,7 +4,8 @@
 //! M20.1 resolver ([`crate::resolver::ScalaImportResolver`]), the M21
 //! analyzer ([`crate::analyzer::ScalaAnalyzer`] over the M21 parser), the
 //! M23.4 probe validator ([`crate::validator::ScalaToolchainValidator`]),
-//! and the remaining milestone stubs (M23 T5/T6, see [`crate::stubs`]) into
+//! the M23.5 extractor ([`crate::extractor::ScalaSourceExtractor`]), and
+//! the remaining M23 T6 rewriter stub (see [`crate::stubs`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
 //! gate that keeps the pipeline from reaching the stubs whose milestones
 //! have not landed; a wired component behind a still-false capability (the
@@ -15,9 +16,10 @@ use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
 use crate::constraints::ScalaClusteringConstraints;
 use crate::detector::ScalaDetector;
+use crate::extractor::ScalaSourceExtractor;
 use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
-use crate::stubs::{StubExtractor, StubRewriter};
+use crate::stubs::StubRewriter;
 use crate::validator::ScalaToolchainValidator;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
@@ -42,7 +44,7 @@ pub struct ScalaPlugin {
     analyzer: ScalaAnalyzer,
     resolver: ScalaImportResolver,
     constraints: ScalaClusteringConstraints,
-    extractor: StubExtractor,
+    extractor: ScalaSourceExtractor,
     rewriter: StubRewriter,
     validator: ScalaToolchainValidator,
 }
@@ -55,7 +57,7 @@ impl ScalaPlugin {
             analyzer: ScalaAnalyzer::new(),
             resolver: ScalaImportResolver,
             constraints: ScalaClusteringConstraints,
-            extractor: StubExtractor,
+            extractor: ScalaSourceExtractor,
             rewriter: StubRewriter,
             validator: ScalaToolchainValidator::new(),
         }

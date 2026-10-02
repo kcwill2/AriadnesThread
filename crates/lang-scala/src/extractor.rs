@@ -52,12 +52,37 @@ impl SourceExtractor for ScalaSourceExtractor {
     }
 }
 
-fn render_package_clause(_namespace: &str) -> String {
-    String::new()
+/// `package <ns>\n\n` — omitted entirely for an empty namespace (LOCK: an
+/// extraction cut from a package-less source stays package-less).
+fn render_package_clause(namespace: &str) -> String {
+    if namespace.is_empty() {
+        String::new()
+    } else {
+        format!("package {namespace}\n\n")
+    }
 }
 
-fn render_imports(_deps: &[String]) -> String {
-    String::new()
+/// One `import <dep>\n` per required dependency, sorted and deduped, plus a
+/// blank separator — the Scala twin of the C++ include block. The renderer
+/// is dumb by contract (see `deps_are_sorted_deduped_and_rendered_verbatim`):
+/// referenced-only selection is the planner's job upstream, wildcard
+/// spellings are never dropped (undroppable without the source file), and
+/// source-file import lines are never fabricated.
+fn render_imports(deps: &[String]) -> String {
+    let mut ordered: Vec<&String> = deps.iter().collect();
+    ordered.sort_unstable();
+    ordered.dedup();
+    if ordered.is_empty() {
+        return String::new();
+    }
+    let mut block = String::new();
+    for dep in ordered {
+        block.push_str("import ");
+        block.push_str(dep);
+        block.push('\n');
+    }
+    block.push('\n');
+    block
 }
 
 #[cfg(test)]
