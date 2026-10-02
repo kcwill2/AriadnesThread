@@ -247,3 +247,19 @@ this plan file (execution-results addendum only).
 - **Flipping testrun default to distill** — breaks human expectation and any
   existing raw-output consumers; opt-in flag + agent-guidance update is lower
   risk.
+
+## 8. Execution results (handoff A, code tasks T1-T3, 2026-10-02)
+
+- T1 `tools/distilled.py` + tests: commit 4227407 (10 tests).
+- T2 `testrun.py --distill` (+`--capture` override) + 5 replay-mode tests:
+  commit 2b0e8ef (suite `Ran 25 OK`).
+- T3 `tools/distill.py` CLI + tests: commit 776cba4 (8 tests).
+- Gates: tools discovery `Ran 176 tests OK`; live `testrun.py --distill
+  -p ariadne-lang` -> 3-line digest, canonical last, exit 0; live
+  `distill.py cargo check` -> one-line ok digest + capture path, exit 0;
+  `hygiene_check.py` exit 0; `encoding_guard.py --staged` exit 0 per commit.
+- Declared deviations (detail in `tasks/tool-distill-a-handoff-journal.md`):
+  optional trailing `capture_path=None` kwarg on the three digest functions
+  (contract shapes require the path inside emitted lines); testrun
+  `--capture PATH` override (needed by the tmp-capture test design).
+- T4 (adoption/governance) remains open: handoff B scope.
