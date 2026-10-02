@@ -92,6 +92,10 @@ pub trait SourceExtractor: Send + Sync {
 /// [`SourceExtractor::unit_namespace`] is consulted only when
 /// `primary_source_text` is `Some` (D-M23-2); otherwise no hook call is
 /// made and the namespace stays empty (C++ bytes stay unchanged).
+/// Dependency text follows the same single path: [`SourceExtractor::unit_imports`]
+/// transforms `required_deps` before `extract` sees them (D-M23-13, T7
+/// replace-passthrough ruling); the default hook is the identity, so C++
+/// bytes through this seam are unchanged.
 pub fn render_unit(
     extractor: &dyn SourceExtractor,
     symbol_bodies: &[SymbolBody],
@@ -102,9 +106,8 @@ pub fn render_unit(
         Some(source_text) => extractor.unit_namespace(source_text),
         None => String::new(),
     };
-    extractor
-        .extract(symbol_bodies, &namespace, required_deps)
-        .content
+    let deps = extractor.unit_imports(primary_source_text, symbol_bodies, required_deps);
+    extractor.extract(symbol_bodies, &namespace, &deps).content
 }
 
 #[cfg(test)]

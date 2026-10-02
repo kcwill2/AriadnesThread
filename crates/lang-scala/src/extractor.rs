@@ -50,6 +50,30 @@ impl SourceExtractor for ScalaSourceExtractor {
     ) -> Vec<SymbolBody> {
         crate::locator::locate_bodies(source_text, wanted)
     }
+
+    /// With a source file present, the unit's imports are the source-file
+    /// directives its bodies still reference ([`crate::imports::referenced_
+    /// imports`], D-M23-13b) — the engine's inter-unit file paths are
+    /// DROPPED, never merged: Scala isolation keeps FQNs (D-M23-5), so a
+    /// path like `src/main/scala/p/Legacy.scala` is not import syntax and
+    /// rendering it would fabricate a broken directive (D-M23-13, T7
+    /// replace-passthrough ruling). Without a source file the passthrough
+    /// survives: nothing can be proven referenced, and no-source renders
+    /// stay honest by echoing what the engine passed.
+    fn unit_imports(
+        &self,
+        primary_source_text: Option<&str>,
+        bodies: &[SymbolBody],
+        unit_paths: &[String],
+    ) -> Vec<String> {
+        match primary_source_text {
+            Some(source_text) => {
+                let body_texts: Vec<&str> = bodies.iter().map(|b| b.body.as_str()).collect();
+                crate::imports::referenced_imports(source_text, &body_texts)
+            }
+            None => unit_paths.to_vec(),
+        }
+    }
 }
 
 /// `package <ns>\n\n` — omitted entirely for an empty namespace (LOCK: an
