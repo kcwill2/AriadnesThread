@@ -66,6 +66,32 @@ impl DependencyRewriter for CppDependencyRewriter {
         )
         .content
     }
+
+    /// Reproduces the pre-T7 CLI consumer scan (`content.contains(
+    /// "#include \"<target>\"") || content.contains("#include <<target>>")`)
+    /// line-by-line, D-M23-7 iii. A pattern spanning no newline, so
+    /// per-line containment is set-equal to the old whole-content
+    /// containment; `raw_directive` is the matched line verbatim without
+    /// its line terminator. Deliberately NOT lexical: the old scan matched
+    /// comment-embedded directives too, and byte-identical consumer sets
+    /// (I1) outrank lexical purity for C++ (the lexical Scala scan opts
+    /// into comment/string invisibility instead).
+    fn find_dependency_targets(&self, source: &str, target: &str) -> Vec<ariadne_lang::DirectiveHit> {
+        let quoted = quoted_directive(target);
+        let angled = angled_directive(target);
+        source
+            .split('\n')
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let text = line.strip_suffix('\r').unwrap_or(line);
+                (text.contains(&quoted) || text.contains(&angled)).then(|| ariadne_lang::DirectiveHit {
+                    start_line: index + 1,
+                    end_line: index + 1,
+                    raw_directive: text.to_string(),
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

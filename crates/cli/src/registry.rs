@@ -120,6 +120,32 @@ fn distinct_unit_languages(
     distinct
 }
 
+/// Catalog lookup over the discovered files: `FileId` → its
+/// [`SourceLanguage`](ariadne_repo::SourceLanguage) (plan M23, D-M23-7).
+/// The CLI's language-routed dispatch resolves plugins through this map —
+/// consumer discovery (T7 S2) and the per-language plan/backend routing
+/// (T7 S3) share it; files absent from the catalog have no language and
+/// are never dispatched (no C++ default, per §3.3 fact 3's discipline).
+pub fn catalog_languages(
+    discovery: &ariadne_repo::RepositoryDiscoveryResult,
+) -> std::collections::BTreeMap<ariadne_repo::FileId, SourceLanguage> {
+    discovery
+        .files
+        .iter()
+        .map(|record| (record.id, record.language))
+        .collect()
+}
+
+/// The plugin registered for a file's catalog language, or `None` when the
+/// file is not in the catalog or its language has no plugin (D-M23-7).
+pub fn plugin_for_catalog_file<'a>(
+    registry: &'a LanguageRegistry,
+    catalog: &std::collections::BTreeMap<ariadne_repo::FileId, SourceLanguage>,
+    file_id: ariadne_repo::FileId,
+) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
+    registry.plugin_for_id(*catalog.get(&file_id)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +332,59 @@ mod tests {
         assert!(
             err.contains("exactly one registered language plugin"),
             "empty-repo fallback stays sole-plugin semantics, got: {err}"
+        );
+    }
+
+    fn discovery_of(rels: &[(&str, SourceLanguage)]) -> ariadne_repo::RepositoryDiscoveryResult {
+        ariadne_repo::RepositoryDiscoveryResult {
+            root: std::path::PathBuf::from("."),
+            files: rels
+                .iter()
+                .map(|(rel, language)| ariadne_repo::FileRecord {
+                    id: ariadne_repo::FileId::from_relative_path(rel),
+                    path: std::path::PathBuf::from(rel),
+                    canonical_path: std::path::PathBuf::from(rel),
+                    kind: ariadne_repo::FileKind::Source,
+                    size: 0,
+                    content_hash: String::new(),
+                    ownership: ariadne_repo::FileOwnership::Repository,
+                    optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                    language: *language,
+                })
+                .collect(),
+            ownership_summary: Default::default(),
+            policy_summary: Default::default(),
+        }
+    }
+
+    #[test]
+    fn catalog_helpers_route_plugin_per_file_language_never_cpp_default() {
+        let registry = default_registry();
+        let discovery = discovery_of(&[
+            ("a.cpp", SourceLanguage::Cpp),
+            ("B.scala", SourceLanguage::Scala),
+        ]);
+        let catalog = catalog_languages(&discovery);
+        assert_eq!(
+            plugin_for_catalog_file(&registry, &catalog, ariadne_repo::FileId::from_relative_path("a.cpp"))
+                .expect("cpp file dispatches to the cpp plugin")
+                .id(),
+            SourceLanguage::Cpp
+        );
+        assert_eq!(
+            plugin_for_catalog_file(&registry, &catalog, ariadne_repo::FileId::from_relative_path("B.scala"))
+                .expect("scala file dispatches to the scala plugin")
+                .id(),
+            SourceLanguage::Scala
+        );
+        assert!(
+            plugin_for_catalog_file(
+                &registry,
+                &catalog,
+                ariadne_repo::FileId::from_relative_path("ghost.cpp")
+            )
+            .is_none(),
+            "a file outside the catalog has NO plugin — never a C++ default (D-M23-7)"
         );
     }
 }

@@ -225,7 +225,50 @@ fn plan_rewrite_targets(
 }
 
 /// Consumer rewrite input: (TU source path, old includes, symbol names).
-type PlanConsumers = Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>;
+pub(crate) type PlanConsumers = Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>;
+
+/// Neutral consumer discovery (plan M23, D-M23-7 iii, T7 S2): for every TU,
+/// the plugin of that file's **catalog language** (never a C++ default)
+/// scans its own directive syntax for `target_include`; a hit ⇔ consumer,
+/// keeping today's conservative (path, old-include, all-symbols) payload.
+/// `lang-cpp` reproduces the pre-neutralization raw substring scan
+/// byte-for-byte, so C++ consumer sets are set-equal (I1 — locked by the
+/// untouched m10/m14/m19/m20 characterization suites); Scala consumers are
+/// located by import scan but stay rewrite-empty until the T7b move-removal
+/// transaction (orchestrator scope fence — hits are membership-only).
+pub(crate) fn plan_target_consumers(
+    registry: &ariadne_lang::LanguageRegistry,
+    catalog: &std::collections::BTreeMap<FileId, ariadne_repo::SourceLanguage>,
+    translation_units: &[ariadne_build::TranslationUnit],
+    repo_root: &std::path::Path,
+    target_include: &str,
+    target_file: &PathBuf,
+    all_symbol_names: &[String],
+) -> PlanConsumers {
+    let mut consumers: PlanConsumers = Vec::new();
+    for tu in translation_units {
+        let abs_path = repo_root.join(&tu.source_path);
+        let Ok(content) = fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let Some(plugin) = crate::registry::plugin_for_catalog_file(registry, catalog, tu.file_id)
+        else {
+            continue;
+        };
+        if !plugin
+            .rewriter()
+            .find_dependency_targets(&content, target_include)
+            .is_empty()
+        {
+            consumers.push((
+                tu.source_path.clone(),
+                vec![target_file.clone()],
+                all_symbol_names.to_vec(), // conservative: all symbols
+            ));
+        }
+    }
+    consumers
+}
 
 fn find_plan_consumers(
     repository: &Repository,
@@ -252,23 +295,15 @@ fn find_plan_consumers(
         .map(|e| e.symbol_name.clone())
         .collect();
 
-    let mut consumers: PlanConsumers = Vec::new();
-    for tu in &build_result.translation_units {
-        let abs_path = repository.root.join(&tu.source_path);
-        if let Ok(content) = fs::read_to_string(&abs_path) {
-            // Check if this TU includes the target header
-            if content.contains(&format!("#include \"{}\"", target_include))
-                || content.contains(&format!("#include <{}>", target_include))
-            {
-                consumers.push((
-                    tu.source_path.clone(),
-                    vec![plan.target_file.clone()],
-                    all_symbol_names.clone(), // conservative: all symbols
-                ));
-            }
-        }
-    }
-    Ok(consumers)
+    Ok(plan_target_consumers(
+        &registry,
+        &crate::registry::catalog_languages(&repo_discovery),
+        &build_result.translation_units,
+        &repository.root,
+        target_include,
+        &plan.target_file,
+        &all_symbol_names,
+    ))
 }
 
 fn commit_or_rollback(

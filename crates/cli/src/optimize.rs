@@ -159,7 +159,7 @@ impl EndToEndOptimizer {
         let mut build_passed = true;
 
         for plan in &safe_plans {
-            let outcome = apply_safe_plan(&repo, &model, &build_discovery, plan)?;
+            let outcome = apply_safe_plan(&repo, &repo_discovery, &model, &build_discovery, plan)?;
             affected_consumer_files_set.extend(outcome.affected_source_paths);
             validation_total_tus += outcome.consumer_tus;
             if outcome.validation_passed {
@@ -312,10 +312,15 @@ fn relocate_extraction_to_generated(
 }
 
 fn find_including_translation_units(
-    repo: &Repository,
+    registry: &ariadne_lang::LanguageRegistry,
+    repo_discovery: &RepositoryDiscoveryResult,
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
 ) -> Vec<(PathBuf, Vec<PathBuf>, Vec<String>)> {
+    // D-M23-7 iii (T7 S2): language-routed consumer discovery — the C++
+    // plugin reproduces this function's former raw substring scan exactly
+    // (set-equal consumers, I1); see commands/transform.rs
+    // `plan_target_consumers` for the shared rule.
     let target_include = plan
         .target_file
         .file_name()
@@ -327,26 +332,20 @@ fn find_including_translation_units(
         .map(|e| e.symbol_name.clone())
         .collect();
 
-    let mut consumers = Vec::new();
-    for tu in &build_discovery.translation_units {
-        let abs_path = repo.root.join(&tu.source_path);
-        if let Ok(content) = fs::read_to_string(&abs_path) {
-            if content.contains(&format!("#include \"{}\"", target_include))
-                || content.contains(&format!("#include <{}>", target_include))
-            {
-                consumers.push((
-                    tu.source_path.clone(),
-                    vec![plan.target_file.clone()],
-                    all_symbol_names.clone(),
-                ));
-            }
-        }
-    }
-    consumers
+    crate::commands::transform::plan_target_consumers(
+        registry,
+        &crate::registry::catalog_languages(repo_discovery),
+        &build_discovery.translation_units,
+        &repo_discovery.root,
+        target_include,
+        &plan.target_file,
+        &all_symbol_names,
+    )
 }
 
 fn apply_safe_plan(
     repo: &Repository,
+    repo_discovery: &RepositoryDiscoveryResult,
     model: &ReducedSemanticModel,
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
@@ -365,7 +364,8 @@ fn apply_safe_plan(
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
 
-    let consumers = find_including_translation_units(repo, build_discovery, plan);
+    let consumers =
+        find_including_translation_units(&plugin_registry, repo_discovery, build_discovery, plan);
 
     let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
