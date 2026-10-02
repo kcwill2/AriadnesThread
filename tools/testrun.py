@@ -80,13 +80,19 @@ ToolOptions = namedtuple(
 
 
 def parse_cargo_output(text):
-    """Pure parser: pinned cargo shape -> TestCounts, or None on drift."""
+    """Pure parser: pinned cargo shape -> TestCounts, or None on drift.
+
+    ANSI escapes are stripped per line at this single matching entry
+    (deferred O1): colorized cargo must not trip the drift sentinel.
+    Stripping happens only for matching; echo and capture stay raw, and
+    non-pinned result shapes still drift (stripping never hides drift).
+    """
     passed = 0
     failed = 0
     ignored = 0
     suites = 0
     result_groups = 0
-    for line in text.splitlines():
+    for line in distilled.plain_lines(text):
         if SUITE_HEADER_LINE.match(line):
             suites += 1
         if ANY_RESULT_MARKER not in line:

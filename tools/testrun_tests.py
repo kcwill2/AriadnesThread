@@ -79,6 +79,87 @@ running 0 tests
 """
 
 
+ANSI_BOLD = "\x1b[1m"
+ANSI_GREEN = "\x1b[32m"
+ANSI_RESET = "\x1b[0m"
+
+
+def wrap_ansi(line):
+    return ANSI_BOLD + ANSI_GREEN + line + ANSI_RESET
+
+
+ANSI_PASS_OUTPUT = "\n".join([
+    "     Finished test [unoptimized + debuginfo] target(s) in 1.20s",
+    wrap_ansi(
+        "     Running unittests src/lib.rs"
+        " (target/debug/deps/ariadne_lang-7c3d9a.exe)"
+    ),
+    "",
+    "running 6 tests",
+    "test graph::tests::empty_graph ... ok",
+    wrap_ansi(
+        "test result: ok. 6 passed; 0 failed; 1 ignored;"
+        " 0 measured; 0 filtered out; finished in 0.01s"
+    ),
+    "",
+    wrap_ansi(
+        "     Running tests/roundtrip.rs"
+        " (target/debug/deps/roundtrip-2f4e8b.exe)"
+    ),
+    "",
+    "running 4 tests",
+    "test parse_roundtrip ... ok",
+    wrap_ansi(
+        "test result: ok. 4 passed; 0 failed; 0 ignored;"
+        " 0 measured; 0 filtered out; finished in 0.02s"
+    ),
+    "",
+    wrap_ansi("   Doc-tests ariadne_lang"),
+    "",
+    "running 2 tests",
+    "test src/lib.rs - parse (line 8) ... ok",
+    wrap_ansi(
+        "test result: ok. 2 passed; 0 failed; 0 ignored;"
+        " 0 measured; 0 filtered out; finished in 0.30s"
+    ),
+]) + "\n"
+
+ANSI_FAILED_OUTPUT = "\n".join([
+    "     Finished test [unoptimized + debuginfo] target(s) in 0.40s",
+    wrap_ansi(
+        "     Running unittests src/lib.rs"
+        " (target/debug/deps/ariadne_graph-1b2c3d.exe)"
+    ),
+    "",
+    "running 5 tests",
+    "test cycles::tests::detects_self_loop ... ok",
+    wrap_ansi(
+        "test result: ok. 5 passed; 0 failed; 0 ignored;"
+        " 0 measured; 0 filtered out; finished in 0.01s"
+    ),
+    "",
+    wrap_ansi(
+        "     Running tests/edges.rs"
+        " (target/debug/deps/edges-9d8e7f.exe)"
+    ),
+    "",
+    "running 2 tests",
+    "test edge_verdicts ... FAILED",
+    wrap_ansi(
+        "test result: FAILED. 1 passed; 1 failed; 0 ignored;"
+        " 0 measured; 0 filtered out; finished in 0.05s"
+    ),
+]) + "\n"
+
+ANSI_DRIFT_SHAPED_OUTPUT = "\n".join([
+    wrap_ansi(
+        "     Running unittests src/lib.rs"
+        " (target/debug/deps/ariadne_x-0a1b.exe)"
+    ),
+    wrap_ansi("test result: ok. 3 passed, 0 failed, 0 ignored"),
+]) + "\n"
+
+
 def write_text_file(holder, name, content):
     target = Path(holder) / name
     target.write_text(content, encoding="utf-8")
@@ -116,6 +197,11 @@ class ParserTests(unittest.TestCase):
     def test_headers_without_result_lines_parse_to_none(self):
         self.assertIsNone(testrun.parse_cargo_output(HEADERS_ONLY_OUTPUT))
 
+    def test_colorized_pass_output_parses_counts_and_suites(self):
+        counts = testrun.parse_cargo_output(ANSI_PASS_OUTPUT)
+        self.assertIsNotNone(counts, "colorized output must not trip drift")
+        self.assertEqual((12, 0, 1, 3), tuple(counts))
+
     def test_canonical_line_format(self):
         counts = testrun.TestCounts(12, 0, 1, 3)
         self.assertEqual(
@@ -152,6 +238,37 @@ class ReplayCliTests(unittest.TestCase):
     def test_garbage_replay_reports_drift_and_exits_two(self):
         with tempfile.TemporaryDirectory() as holder:
             fixture = write_text_file(holder, "garbage.txt", GARBAGE_OUTPUT)
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture
+            )
+        self.assertEqual(2, returncode)
+        self.assertIn("parse format drift", standard_out + standard_err)
+
+    def test_colorized_failed_output_parses_and_exits_one_via_replay(self):
+        counts = testrun.parse_cargo_output(ANSI_FAILED_OUTPUT)
+        self.assertIsNotNone(counts, "colorized output must not trip drift")
+        self.assertEqual((6, 1, 0, 2), tuple(counts))
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(
+                holder, "ansi_failed.txt", ANSI_FAILED_OUTPUT
+            )
+            returncode, standard_out, standard_err = run_tool(
+                "--replay", fixture
+            )
+        self.assertEqual(1, returncode, standard_err)
+        self.assertEqual(
+            "6 passed / 1 failed / 0 ignored / 2 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_colorized_drift_shaped_output_still_exits_two_via_replay(self):
+        self.assertIsNone(
+            testrun.parse_cargo_output(ANSI_DRIFT_SHAPED_OUTPUT)
+        )
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(
+                holder, "ansi_drift.txt", ANSI_DRIFT_SHAPED_OUTPUT
+            )
             returncode, standard_out, standard_err = run_tool(
                 "--replay", fixture
             )
