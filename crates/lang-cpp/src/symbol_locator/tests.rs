@@ -234,6 +234,66 @@ fn same_suffix_with_different_qualification_does_not_match() {
 }
 
 #[test]
+fn duplicate_definitions_resolve_the_first_matchable_occurrence() {
+    // Gate G1 (F5): every locate path scans tokens in ascending order and
+    // returns the first candidate whose body scan succeeds, so two
+    // identically-matchable definitions of one name resolve to the first
+    // (forward declarations are candidates that fail the body scan, hence
+    // skipped — see `scan_record_body`).
+    let cases: Vec<(&str, &str, &str, SymbolKind, &str)> = vec![
+        (
+            "class duplicates keep the first",
+            "class Dup { int first; };\nclass Dup { int second; };\n",
+            "Dup",
+            SymbolKind::Class,
+            "class Dup { int first; };",
+        ),
+        (
+            "struct duplicates keep the first",
+            "struct Dup { int first; };\nstruct Dup { int second; };\n",
+            "Dup",
+            SymbolKind::Struct,
+            "struct Dup { int first; };",
+        ),
+        (
+            "enum duplicates keep the first",
+            "enum Dup { kFirst };\nenum Dup { kSecond };\n",
+            "Dup",
+            SymbolKind::Enum,
+            "enum Dup { kFirst };",
+        ),
+        (
+            "function duplicates keep the first",
+            "int dup() { return 1; }\nint dup() { return 2; }\n",
+            "dup",
+            SymbolKind::Function,
+            "int dup() { return 1; }",
+        ),
+        (
+            "using-alias duplicates keep the first",
+            "using Dup = int;\nusing Dup = long;\n",
+            "Dup",
+            SymbolKind::TypeAlias,
+            "using Dup = int;",
+        ),
+        (
+            "unmatchable first candidate is skipped",
+            "class Dup;\nclass Dup { int second; };\n",
+            "Dup",
+            SymbolKind::Class,
+            "class Dup { int second; };",
+        ),
+    ];
+    for (label, source, wanted, kind, expected) in cases {
+        assert_eq!(
+            bodies(source, &[(wanted, kind)]),
+            vec![(wanted.to_string(), expected.to_string())],
+            "{label}"
+        );
+    }
+}
+
+#[test]
 fn multiple_wanted_names_resolve_in_wanted_order() {
     let source = "class A { int a; };\nclass B { int b; };\n";
     let found = bodies(
