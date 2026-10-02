@@ -48,6 +48,8 @@ impl CppSemanticAnalyzer {
             references: vec![],
             call_sites: ctx.call_sites,
             language: SourceLanguage::Cpp,
+
+            extends_edges: Vec::new(),
         }
     }
 

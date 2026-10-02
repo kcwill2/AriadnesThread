@@ -264,6 +264,9 @@ fn test_collect_file_metrics_matches_path_reference_and_skips_unregistered() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     let add = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
         let id = SymbolId::new(name);

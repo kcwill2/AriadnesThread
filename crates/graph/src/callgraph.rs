@@ -319,6 +319,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_b.clone(),
@@ -327,6 +329,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_c.clone(),
@@ -335,6 +339,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -378,6 +384,8 @@ mod tests {
                     },
                 },
             ],
+
+            extends_edges: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -448,6 +456,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_callee.clone(),
@@ -456,6 +466,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -481,6 +493,8 @@ mod tests {
                     },
                 },
             ],
+
+            extends_edges: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -517,6 +531,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_suffix.clone(),
@@ -525,6 +541,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -539,6 +557,8 @@ mod tests {
                     column: 5,
                 },
             }],
+
+            extends_edges: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);

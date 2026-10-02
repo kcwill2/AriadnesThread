@@ -38,6 +38,9 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -303,6 +306,9 @@ fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -353,6 +359,9 @@ fn setup_tiebreak_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -508,6 +517,9 @@ fn setup_ei9_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {

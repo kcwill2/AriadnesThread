@@ -10,17 +10,13 @@
 
 use ariadne_cluster::plan::{OptimizationPlan, PlanId, ProposedExtraction, RiskLevel};
 use ariadne_cluster::planner::OptimizationPlanner;
-use ariadne_graph::reduced::{
-    ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord,
-};
+use ariadne_graph::reduced::{ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord};
 use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_lang::CyclePolicy;
 use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
-use ariadne_repo::{
-    FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
-};
+use ariadne_repo::{FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -149,6 +145,9 @@ impl PlannerFixture {
             edges: self.model_edges.clone(),
             tu_usage: BTreeMap::new(),
             file_symbols: self.file_symbols.clone(),
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         };
         OptimizationPlanner::new(
             &self.graph,

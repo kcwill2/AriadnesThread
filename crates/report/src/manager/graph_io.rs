@@ -194,6 +194,9 @@ impl ArtifactManager {
             edges,
             tu_usage,
             file_symbols,
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         })
     }
 

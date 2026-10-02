@@ -11,7 +11,13 @@ async fn test_dto_builders() {
     let closures = HashMap::new();
     let cycles = vec![];
 
-    let elements = build_include_elements(&include_graph, &closures, &cycles, &HashMap::new(), &HashMap::new());
+    let elements = build_include_elements(
+        &include_graph,
+        &closures,
+        &cycles,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(elements.is_empty());
 
     let reduced_model = ReducedSemanticModel {
@@ -20,6 +26,8 @@ async fn test_dto_builders() {
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     let sym_elements = build_symbol_elements(&reduced_model, &HashMap::new());
     assert!(sym_elements.is_empty());
@@ -135,6 +143,8 @@ fn test_build_symbol_elements_filters_unindexed() {
         edges,
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let elements = build_symbol_elements(&model, &HashMap::new());
@@ -267,7 +277,9 @@ fn test_standalone_export_embeds_extraction_proposals() {
     assert!(!empty_blob.contains("D2PLAN-42"));
 }
 
-fn impact_fixture_entry(impact: Option<ariadne_ui::ImpactSummary>) -> ariadne_ui::JustificationEntry {
+fn impact_fixture_entry(
+    impact: Option<ariadne_ui::ImpactSummary>,
+) -> ariadne_ui::JustificationEntry {
     ariadne_ui::JustificationEntry {
         justified_symbols: vec!["Parser".to_string()],
         collateral_symbols: vec![],

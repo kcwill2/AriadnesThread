@@ -6,9 +6,7 @@
 
 use ariadne_cluster::plan::OptimizationPlan;
 use ariadne_cluster::planner::OptimizationPlanner;
-use ariadne_graph::reduced::{
-    ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord,
-};
+use ariadne_graph::reduced::{ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord};
 use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
@@ -54,11 +52,21 @@ impl Fixture {
     }
 
     fn candidate(self, id: FileId, name: &str) -> Self {
-        self.file(id, name, FileOwnership::Repository, OptimizationPolicy::Optimizable)
+        self.file(
+            id,
+            name,
+            FileOwnership::Repository,
+            OptimizationPolicy::Optimizable,
+        )
     }
 
     fn frozen(self, id: FileId, name: &str) -> Self {
-        self.file(id, name, FileOwnership::ThirdParty, OptimizationPolicy::Frozen)
+        self.file(
+            id,
+            name,
+            FileOwnership::ThirdParty,
+            OptimizationPolicy::Frozen,
+        )
     }
 
     fn includes(mut self, source: FileId, dest: FileId) -> Self {
@@ -121,6 +129,9 @@ impl Fixture {
             edges: self.edges.clone(),
             tu_usage: BTreeMap::new(),
             file_symbols: self.file_symbols.clone(),
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         };
         OptimizationPlanner::new(
             &self.graph,
@@ -284,8 +295,12 @@ fn frozen_symbols_are_skipped_from_proposals() {
         frozen: [SymbolId::new("Delta")].into_iter().collect(),
     };
 
-    let plans =
-        fixture.plan_with(&accept_every, &unit_template, Some(&fake), CyclePolicy::Reject);
+    let plans = fixture.plan_with(
+        &accept_every,
+        &unit_template,
+        Some(&fake),
+        CyclePolicy::Reject,
+    );
 
     assert_eq!(plans.len(), 1);
     let names: Vec<String> = plans[0]
@@ -302,8 +317,12 @@ fn colocated_batch_with_a_frozen_member_is_skipped_entirely() {
     let mut fake = FakeConstraints::colocated(vec![vec!["Alpha", "Delta"]]);
     fake.frozen.insert(SymbolId::new("Delta"));
 
-    let plans =
-        fixture.plan_with(&accept_every, &unit_template, Some(&fake), CyclePolicy::Reject);
+    let plans = fixture.plan_with(
+        &accept_every,
+        &unit_template,
+        Some(&fake),
+        CyclePolicy::Reject,
+    );
 
     assert!(
         plans.is_empty(),
@@ -316,14 +335,15 @@ fn cycle_policy_variants_share_the_scc_coproposal_path_for_now() {
     // M18.7 documents Tolerate/TolerateWithinPackage as reusing the SCC
     // co-proposal path (multi-member batches stay rejected by the checker)
     // until M20 adds package-scoped informational reporting.
-    let fixture = collateral_pair("agg").depends("Alpha", "Delta").depends("Delta", "Alpha");
+    let fixture = collateral_pair("agg")
+        .depends("Alpha", "Delta")
+        .depends("Delta", "Alpha");
     for policy in [
         CyclePolicy::Reject,
         CyclePolicy::Tolerate,
         CyclePolicy::TolerateWithinPackage,
     ] {
-        let plans =
-            fixture.plan_with(&accept_every, &unit_template, None, policy);
+        let plans = fixture.plan_with(&accept_every, &unit_template, None, policy);
         assert!(
             plans.is_empty(),
             "cycle members stay co-proposed-and-rejected under {policy:?}"

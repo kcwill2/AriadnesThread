@@ -39,6 +39,9 @@ fn setup_chain_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -110,6 +113,9 @@ fn setup_seed_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -288,6 +294,9 @@ pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {

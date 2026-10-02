@@ -22,6 +22,8 @@ async fn test_server_traversal_routes() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {
@@ -109,6 +111,8 @@ fn given_mock_search_graphs() -> (IncludeGraph, CallGraph, ReducedSemanticModel)
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     (include_graph, call_graph, reduced_model)
@@ -139,8 +143,9 @@ async fn test_search_advanced_queries_and_dto_paths() {
     let call_elements = build_call_elements(&call_graph);
     // D27: symbol paths resolve through the injected id→path map. The old
     // `"path" == "1"` lock pinned the numeric-FileId defect (§3.6.1 fix).
-    let sym_paths: std::collections::HashMap<u64, String> =
-        [(1u64, "include/test1.h".to_string())].into_iter().collect();
+    let sym_paths: std::collections::HashMap<u64, String> = [(1u64, "include/test1.h".to_string())]
+        .into_iter()
+        .collect();
     let sym_elements = build_symbol_elements(&reduced_model, &sym_paths);
 
     // Check DTO `path` field
@@ -192,6 +197,8 @@ async fn test_server_collateral_endpoint() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {

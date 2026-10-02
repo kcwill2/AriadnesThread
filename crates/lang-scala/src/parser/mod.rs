@@ -44,13 +44,13 @@ mod declarations;
 mod directives;
 mod occurrences;
 
+use crate::scanner::Token;
 use ariadne_lang_api::types::{DependencyKind, SemanticEdge, TuAnalysis};
 use ariadne_repo::{FileId, SourceLanguage};
-use crate::scanner::Token;
+pub(crate) use declarations::ResolvedDecl;
 use declarations::{collect_top_level_decls, resolve_decl_ids, symbol_payloads};
 use directives::scan_directives;
-pub(crate) use declarations::ResolvedDecl;
-pub(crate) use directives::{read_dotted_chain, preceded_by_dot};
+pub(crate) use directives::{preceded_by_dot, read_dotted_chain};
 use occurrences::scan_occurrences;
 use std::collections::BTreeSet;
 
@@ -116,6 +116,8 @@ impl ScalaSourceParser {
             references: occurrences.references,
             call_sites: occurrences.call_sites,
             language: SourceLanguage::Scala,
+
+            extends_edges: Vec::new(),
         }
     }
 }
@@ -276,8 +278,16 @@ mod tests {
         assert_eq!(
             edge_keys(&analysis),
             vec![
-                ("com.p.Box$".into(), "com.p.Box".into(), DependencyKind::Complete),
-                ("com.p.Box$".into(), "com.p.Box$".into(), DependencyKind::Complete),
+                (
+                    "com.p.Box$".into(),
+                    "com.p.Box".into(),
+                    DependencyKind::Complete
+                ),
+                (
+                    "com.p.Box$".into(),
+                    "com.p.Box$".into(),
+                    DependencyKind::Complete
+                ),
             ]
         );
         assert_eq!(analysis.call_sites.len(), 1);
@@ -322,13 +332,16 @@ mod tests {
 
     #[test]
     fn new_expression_yields_reference_edge_and_call_site() {
-        let analysis = parse_src(
-            "package p\n\nclass Thing\nobject Factory {\n  val made = new Thing\n}",
-        );
+        let analysis =
+            parse_src("package p\n\nclass Thing\nobject Factory {\n  val made = new Thing\n}");
         assert_eq!(ref_ids(&analysis), ["p.Thing"]);
         assert_eq!(
             edge_keys(&analysis),
-            vec![("p.Factory".into(), "p.Thing".into(), DependencyKind::Complete)]
+            vec![(
+                "p.Factory".into(),
+                "p.Thing".into(),
+                DependencyKind::Complete
+            )]
         );
         assert_eq!(analysis.call_sites.len(), 1);
         assert_eq!(analysis.call_sites[0].callee_name, "Thing");
@@ -337,12 +350,15 @@ mod tests {
 
     #[test]
     fn named_import_feeds_complete_edge() {
-        let analysis = parse_src(
-            "package p\n\nimport a.b.Widget\n\nclass Use {\n  val w: Widget = null\n}",
-        );
+        let analysis =
+            parse_src("package p\n\nimport a.b.Widget\n\nclass Use {\n  val w: Widget = null\n}");
         assert_eq!(
             edge_keys(&analysis),
-            vec![("p.Use".into(), "a.b.Widget".into(), DependencyKind::Complete)]
+            vec![(
+                "p.Use".into(),
+                "a.b.Widget".into(),
+                DependencyKind::Complete
+            )]
         );
         assert_eq!(ref_ids(&analysis), ["a.b.Widget"]);
     }
@@ -455,12 +471,15 @@ mod tests {
 
     #[test]
     fn export_selector_feeds_complete_edge_like_import() {
-        let analysis = parse_src(
-            "package p\n\nexport a.b.Helper\n\nclass Use {\n  val h: Helper = null\n}",
-        );
+        let analysis =
+            parse_src("package p\n\nexport a.b.Helper\n\nclass Use {\n  val h: Helper = null\n}");
         assert_eq!(
             edge_keys(&analysis),
-            vec![("p.Use".into(), "a.b.Helper".into(), DependencyKind::Complete)],
+            vec![(
+                "p.Use".into(),
+                "a.b.Helper".into(),
+                DependencyKind::Complete
+            )],
             "Gate-A note 4: export participates in the edge map like import"
         );
     }
@@ -518,5 +537,108 @@ mod tests {
     fn language_is_always_scala_even_for_garbage() {
         let analysis = parse_src("package x {");
         assert_eq!(analysis.language, SourceLanguage::Scala);
+    }
+
+    #[test]
+    fn sealed_declarations_record_the_sealed_modifier() {
+        let analysis = parse_src("package p\n\nsealed trait Shape\nclass Circle extends Shape");
+        let shape = analysis
+            .symbols
+            .iter()
+            .find(|s| s.name == "Shape")
+            .expect("Shape symbol present");
+        assert_eq!(
+            shape.modifiers,
+            vec!["sealed".to_string()],
+            "D-M23-8: the parser records the sealed keyword as a modifier"
+        );
+        let circle = analysis
+            .symbols
+            .iter()
+            .find(|s| s.name == "Circle")
+            .expect("Circle symbol present");
+        assert!(
+            circle.modifiers.is_empty(),
+            "unsealed declarations carry no modifiers (C++ emits none either)"
+        );
+    }
+
+    #[test]
+    fn extends_and_with_supertypes_populate_the_typed_channel() {
+        let analysis =
+            parse_src("package p\n\nsealed trait Marked\nclass Animal\nclass Dog extends Animal with Marked");
+        let pairs: Vec<(String, String)> = analysis
+            .extends_edges
+            .iter()
+            .map(|(sub, sup)| (sub.0.clone(), sup.0.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("p.Dog".to_string(), "p.Animal".to_string()),
+                ("p.Dog".to_string(), "p.Marked".to_string()),
+            ],
+            "D-M23-8 Option A: parent positions land in the typed channel in source order"
+        );
+    }
+
+    #[test]
+    fn unresolvable_supertype_guess_enters_the_channel() {
+        let analysis = parse_src("package p\n\nclass Solo extends Base");
+        let pairs: Vec<(String, String)> = analysis
+            .extends_edges
+            .iter()
+            .map(|(sub, sup)| (sub.0.clone(), sup.0.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("p.Solo".to_string(), "p.Base".to_string())],
+            "the qualified guess stays in the channel; constraint joins are membership-based"
+        );
+    }
+
+    #[test]
+    fn occurrence_edges_never_enter_the_typed_channel() {
+        let analysis = parse_src("package p\n\nclass Animal\nclass Host {\n  val a: Animal = ???\n}");
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .any(|e| e.src_symbol.0 == "p.Host" && e.dst_symbol.0 == "p.Animal"),
+            "the occurrence edge exists on the untyped channel"
+        );
+        assert!(
+            analysis.extends_edges.is_empty(),
+            "ruling guard 5: the typed channel carries extends/with parent positions only"
+        );
+    }
+
+    #[test]
+    fn repeated_parent_pairs_are_deduplicated() {
+        let analysis = parse_src(
+            "package p\n\nclass Base\nsealed class L1 extends Base\nsealed class L2 extends Base",
+        );
+        let pairs: Vec<(String, String)> = analysis
+            .extends_edges
+            .iter()
+            .map(|(sub, sup)| (sub.0.clone(), sup.0.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("p.L1".to_string(), "p.Base".to_string()),
+                ("p.L2".to_string(), "p.Base".to_string()),
+            ],
+            "distinct subtype pairs survive; identical pairs fold (channel is a set of pairs)"
+        );
+        assert_eq!(
+            analysis
+                .symbols
+                .iter()
+                .filter(|s| s.modifiers.iter().any(|m| m == "sealed"))
+                .count(),
+            2,
+            "both sealed classes recorded"
+        );
     }
 }

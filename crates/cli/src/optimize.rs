@@ -121,8 +121,7 @@ impl EndToEndOptimizer {
         // registry (byte-identical for C++); the worker pool backend is
         // registry-dispatching.
         let registry = std::sync::Arc::new(crate::registry::default_registry());
-        let mut pipeline =
-            Pipeline::with_registry(&self.repo_path, Some(4), registry)?;
+        let mut pipeline = Pipeline::with_registry(&self.repo_path, Some(4), registry)?;
         let repo = pipeline.repo.clone();
         let repo_discovery = pipeline.discovery.clone();
         let build_discovery = pipeline.build.clone();
@@ -245,9 +244,7 @@ fn analyze_collateral_opportunities(
 
     let mut collateral_opportunities: Vec<CollateralOpportunity> = header_collateral_map
         .into_iter()
-        .filter(|(header_name, _)| {
-            cpp_aggregation_filter(std::path::Path::new(header_name))
-        })
+        .filter(|(header_name, _)| cpp_aggregation_filter(std::path::Path::new(header_name)))
         .map(|(header_name, collateral_symbols)| CollateralOpportunity {
             header_name,
             collateral_symbols,
@@ -357,9 +354,13 @@ fn apply_safe_plan(
     let extractor = IsolationEngine::new(model);
     let source_reader = crate::commands::transform::repository_source_reader(repo)?;
     let plugin_registry = crate::registry::default_registry();
-    let text_extractor =
-        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.extraction, "extraction")?
-            .extractor();
+    let text_extractor = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.extraction,
+        "extraction",
+    )?
+    .extractor();
     let extraction = extractor.extract(plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
@@ -373,9 +374,13 @@ fn apply_safe_plan(
     // M23 T7 (D-M23-7 ii): directive text (guard block + include replacement)
     // is owned by the plan-language rewriting backend; validate orchestrates
     // the rest.
-    let text_rewriter =
-        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.rewriting, "rewriting")?
-            .rewriter();
+    let text_rewriter = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.rewriting,
+        "rewriting",
+    )?
+    .rewriter();
     let (snapshot, new_paths) = TransactionApplier::apply_with(
         &repo.root,
         &extraction,
@@ -386,17 +391,23 @@ fn apply_safe_plan(
 
     // M18.10: the tier-3 skip decision uses the injected plugin validator's
     // toolchain status; M23 T7 (D-M23-7 ii) routes it to the plan's language.
-    let compiler_validator =
-        crate::registry::plan_backend(&plugin_registry, &plan.target_file, |caps| caps.validation, "validation")?
-            .validator();
+    let compiler_validator = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.validation,
+        "validation",
+    )?
+    .validator();
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");
     let t2 = TierValidator::validate_generated_headers(&extraction, &header_output_dir);
-    let t3 =
-        TierValidator::validate_affected_tus(&migration, &header_output_dir, Some(compiler_validator));
+    let t3 = TierValidator::validate_affected_tus(
+        &migration,
+        &header_output_dir,
+        Some(compiler_validator),
+    );
 
-    let validation_passed =
-        !t1.status.is_fail() && !t2.status.is_fail() && !t3.status.is_fail();
+    let validation_passed = !t1.status.is_fail() && !t2.status.is_fail() && !t3.status.is_fail();
 
     if !validation_passed {
         TransactionApplier::rollback(&snapshot, &new_paths)?;
@@ -535,6 +546,9 @@ mod tests {
             edges: vec![],
             tu_usage: BTreeMap::new(),
             file_symbols: BTreeMap::new(),
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         };
         let add_symbol = |model: &mut ReducedSemanticModel,
                           name: &str,

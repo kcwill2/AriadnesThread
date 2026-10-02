@@ -30,6 +30,9 @@ fn dummy_model() -> ReducedSemanticModel {
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 
@@ -337,7 +340,11 @@ impl SourceExtractor for RecordingFakeExtractor {
         self.reported_namespace.clone()
     }
 
-    fn locate_symbol_bodies(&self, source_text: &str, wanted: &[(String, SymbolKind)]) -> Vec<SymbolBody> {
+    fn locate_symbol_bodies(
+        &self,
+        source_text: &str,
+        wanted: &[(String, SymbolKind)],
+    ) -> Vec<SymbolBody> {
         wanted
             .iter()
             .filter_map(|(name, _)| {

@@ -96,6 +96,13 @@ pub struct SymbolRecord {
     pub owning_file: FileId,
     pub declarations: Vec<DeclId>,
     pub definition: Option<DeclId>,
+    /// Declaration-language modifier words the analysis deliberately keeps
+    /// (plan M23, D-M23-8). The Scala parser records `"sealed"` only; the
+    /// C++ parser emits none. `skip_serializing_if` ⇒ the key is absent for
+    /// C++ records, so the m00 JSON index goldens stay byte-identical, and
+    /// `default` keeps pre-M23 artifacts readable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<String>,
 }
 
 impl Default for SymbolRecord {
@@ -107,6 +114,7 @@ impl Default for SymbolRecord {
             owning_file: FileId(0),
             declarations: Vec::new(),
             definition: None,
+            modifiers: Vec::new(),
         }
     }
 }
@@ -170,6 +178,14 @@ pub struct TuAnalysis {
     /// `#[serde(default)]` ⇒ pre-existing artifacts read back as `Cpp`.
     #[serde(default)]
     pub language: SourceLanguage,
+    /// Typed supertype (`extends`/`with`) edges, `(subtype, supertype)`
+    /// (plan M23, D-M23-8 Option-A ruling): a parallel channel because
+    /// `SemanticEdge` carries no extends kind and the bincode blobs forbid
+    /// edge-layout change at the frozen epoch. The Scala parser fills this
+    /// from parent positions only (never occurrences); C++ emits none, and
+    /// `skip_serializing_if` keeps its JSON bytes unchanged (m00 goldens).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extends_edges: Vec<(SymbolId, SymbolId)>,
 }
 
 impl Default for TuAnalysis {
@@ -183,6 +199,7 @@ impl Default for TuAnalysis {
             references: Vec::new(),
             call_sites: Vec::new(),
             language: SourceLanguage::default(),
+            extends_edges: Vec::new(),
         }
     }
 }
@@ -278,9 +295,8 @@ mod include_dto_tests {
         // pre-M20 variants are decoded from hand-written bytes representing
         // the original three-variant understanding, proving the append of
         // `Import` last did not shift any serialized index.
-        let index_bytes = |variant: IncludeKind| -> Vec<u8> {
-            bincode::serialize(&variant).unwrap()
-        };
+        let index_bytes =
+            |variant: IncludeKind| -> Vec<u8> { bincode::serialize(&variant).unwrap() };
         assert_eq!(index_bytes(IncludeKind::Local), [0, 0, 0, 0]);
         assert_eq!(index_bytes(IncludeKind::System), [1, 0, 0, 0]);
         assert_eq!(index_bytes(IncludeKind::External), [2, 0, 0, 0]);

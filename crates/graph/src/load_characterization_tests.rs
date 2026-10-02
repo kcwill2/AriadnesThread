@@ -39,6 +39,9 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let sym_thing = SymbolId::new("Thing");
@@ -293,6 +296,9 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let sym_main = SymbolId::new("Main");
@@ -390,6 +396,9 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -470,6 +479,9 @@ fn test_explain_paths_without_file_name_render_full_path() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let host = SymbolId::new("Host");
@@ -538,6 +550,9 @@ fn test_missing_defining_file_yields_err_not_panic() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     let ghost = SymbolId::new("Ghost");
     model.symbols.insert(

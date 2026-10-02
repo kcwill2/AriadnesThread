@@ -80,13 +80,25 @@ pub struct FileSymbols {
     pub symbols: Vec<SymbolId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ReducedSemanticModel {
     pub repo_root: PathBuf,
     pub symbols: BTreeMap<SymbolId, ReducedSymbolRecord>,
     pub edges: Vec<ReducedSemanticEdge>,
     pub tu_usage: BTreeMap<SymbolId, Vec<FileId>>,
     pub file_symbols: BTreeMap<FileId, Vec<SymbolId>>,
+    /// Deduplicated sorted supertype channel folded from the per-TU typed
+    /// `TuAnalysis::extends_edges` (plan M23, D-M23-8): persisted separately
+    /// from the four frozen blobs (`extends-edges.bin`), so their bincode
+    /// layouts and the epoch stay untouched. C++ folds none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extends_edges: Vec<(SymbolId, SymbolId)>,
+    /// Symbols whose analysis records carried the `sealed` modifier
+    /// (plan M23, D-M23-8). A side channel for the same reason as
+    /// `extends_edges`: the `symbols.bin` layout is frozen, so
+    /// `ReducedSymbolRecord` cannot grow `modifiers`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sealed_symbols: Vec<SymbolId>,
 }
 
 impl ReducedSemanticModel {
@@ -104,13 +116,14 @@ impl ReducedSemanticModel {
             // collide across files once analyses are merged into one
             // TuAnalysis, so locations are keyed by (symbol, decl) and
             // multiple files per pair are kept for the ambiguous case.
-            let mut decl_locations: BTreeMap<(&SymbolId, &DeclId), Vec<FileId>> =
-                BTreeMap::new();
+            let mut decl_locations: BTreeMap<(&SymbolId, &DeclId), Vec<FileId>> = BTreeMap::new();
             for decl in &tu.declarations {
                 if decl.location.file_id.0 == 0 {
                     continue;
                 }
-                let files = decl_locations.entry((&decl.symbol_id, &decl.id)).or_default();
+                let files = decl_locations
+                    .entry((&decl.symbol_id, &decl.id))
+                    .or_default();
                 if !files.contains(&decl.location.file_id) {
                     files.push(decl.location.file_id);
                 }
@@ -165,6 +178,8 @@ impl ReducedSemanticModel {
             edges,
             tu_usage: tu_usage_vec,
             file_symbols: file_symbols_vec,
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         }
     }
 
@@ -291,7 +306,7 @@ impl ReducedSemanticModel {
 mod tests {
     use super::*;
     use ariadne_index::types::{
-        FileLocation, SemanticEdge, SymbolRecord, SymbolReference, SymbolDecl, TuAnalysis,
+        FileLocation, SemanticEdge, SymbolDecl, SymbolRecord, SymbolReference, TuAnalysis,
     };
 
     fn create_dummy_index() -> IndexResult {
@@ -318,6 +333,8 @@ mod tests {
                     owning_file: f3.clone(),
                     declarations: vec![decl_a1.clone()],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_c.clone(),
@@ -326,6 +343,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: Some(DeclId::new("decl_c")),
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -338,6 +357,8 @@ mod tests {
             }],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
@@ -351,6 +372,8 @@ mod tests {
                 owning_file: f3.clone(),
                 declarations: vec![decl_a2.clone()],
                 definition: Some(decl_a2.clone()),
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![],
             edges: vec![SemanticEdge {
@@ -371,6 +394,8 @@ mod tests {
                 is_write: false,
             }],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2])
@@ -473,11 +498,15 @@ mod tests {
                 owning_file: analyzed,
                 declarations: vec![decl_def.clone()],
                 definition: Some(decl_def.clone()),
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![symbol_decl("decl_7", "X", header, 3, true)],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -509,6 +538,8 @@ mod tests {
                     owning_file: analyzed,
                     declarations: vec![unknown_def.clone()],
                     definition: Some(unknown_def.clone()),
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: SymbolId::new("Sentinel"),
@@ -517,12 +548,16 @@ mod tests {
                     owning_file: analyzed,
                     declarations: vec![sentinel_def.clone()],
                     definition: Some(sentinel_def.clone()),
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![symbol_decl("decl_sentinel", "Sentinel", FileId(0), 0, true)],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -559,6 +594,8 @@ mod tests {
                 owning_file: analyzed,
                 declarations: vec![DeclId::new("decl_1")],
                 definition: Some(DeclId::new("decl_1")),
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![
                 symbol_decl("decl_1", "Dup", host_one, 1, true),
@@ -567,6 +604,8 @@ mod tests {
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -606,11 +645,15 @@ mod tests {
                 owning_file: impl_file,
                 declarations: vec![DeclId::new("decl_fn")],
                 definition: Some(DeclId::new("decl_fn")),
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![symbol_decl("decl_fn", "Thing", impl_file, 5, true)],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let tu_class = TuAnalysis {
@@ -624,17 +667,15 @@ mod tests {
                 owning_file: stale_file,
                 declarations: vec![DeclId::new("decl_class")],
                 definition: Some(DeclId::new("decl_class")),
+
+                modifiers: Vec::new(),
             }],
-            declarations: vec![symbol_decl(
-                "decl_class",
-                "Thing",
-                header,
-                2,
-                true,
-            )],
+            declarations: vec![symbol_decl("decl_class", "Thing", header, 2, true)],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu_fn, tu_class]);
@@ -666,11 +707,15 @@ mod tests {
                 owning_file: a,
                 declarations: vec![DeclId::new("decl_1")],
                 definition: None,
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![symbol_decl("decl_1", "S", a, 1, false)],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
@@ -684,6 +729,8 @@ mod tests {
                 owning_file: b,
                 declarations: vec![DeclId::new("decl_1"), DeclId::new("decl_2")],
                 definition: None,
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![
                 symbol_decl("decl_1", "S", b, 9, false),
@@ -692,6 +739,8 @@ mod tests {
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2]);

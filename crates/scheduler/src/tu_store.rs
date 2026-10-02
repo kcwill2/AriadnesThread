@@ -164,7 +164,10 @@ fn repo_relative_form(path: &Path, repo_root: &Path, canonical_root: &Path) -> O
 /// contract compares cold runs of repo copies in different roots (a raw
 /// temp-root inside the bincode-hashed context would make that impossible).
 /// Paths outside the root (system SDK includes) stay verbatim.
-fn fingerprint_scoped_context(context: &CompilationContext, repo_root: &Path) -> CompilationContext {
+fn fingerprint_scoped_context(
+    context: &CompilationContext,
+    repo_root: &Path,
+) -> CompilationContext {
     let canonical_root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
     let mut scoped = context.clone();
     for dirs in [
@@ -221,6 +224,8 @@ pub fn analyze_closure_with(
         references: combined_references,
         call_sites: combined_call_sites,
         language,
+
+        extends_edges: Vec::new(),
     }
 }
 
@@ -384,7 +389,8 @@ pub fn compute_tu_closure_plugin(
     let mut stack: Vec<RawDepEdge> =
         resolver.resolve_edges(tu.file_id, &tu.source_path, &files[0].2, &resolution);
     while let Some(edge) = stack.pop() {
-        let destinations = edge_destinations(&edge, resolver, &catalog, &resolution, ctx, repo_root);
+        let destinations =
+            edge_destinations(&edge, resolver, &catalog, &resolution, ctx, repo_root);
         for (dest_id, dest_path) in destinations {
             if !visited.insert(dest_id) {
                 continue;
@@ -498,6 +504,8 @@ mod tests {
             references: vec![],
             call_sites: vec![],
             language: ariadne_repo::SourceLanguage::Cpp,
+
+            extends_edges: Vec::new(),
         };
         fs::write(
             shard_file(path, old.tu_file_id),
@@ -513,6 +521,49 @@ mod tests {
         save_shard(path, &cp).unwrap();
         let loaded = load_shard(path, old.tu_file_id).unwrap();
         assert_eq!(loaded.fingerprint, "abc");
+    }
+
+    #[test]
+    fn m23_fingerprint_bump_blocks_pre_change_scala_blobs() {
+        // Drift guard (M23 ruling guard 4): a pre-M23 Scala blob is valid
+        // JSON that reads cleanly into the NEW layout (serde defaults) - the
+        // envelope fingerprint and the TuCacheFingerprint digest are what
+        // reject it, so the scala-parser-1 -> scala-parser-2 bump guarantees
+        // an old analysis can never be consumed as fresh after the parser
+        // started emitting the typed extends channel and modifiers.
+        let legacy = ShardCheckpoint {
+            fingerprint: "scala-parser-1".into(),
+            analysis: TuAnalysis::default(),
+        };
+        let json = serde_json::to_string(&legacy).unwrap();
+        assert!(
+            !json.contains("extends_edges") && !json.contains("modifiers"),
+            "skip_serializing_if keeps channel keys out of bytes - the m00 zero-diff mechanism"
+        );
+        let parsed: ShardCheckpoint = serde_json::from_str(&json).unwrap();
+        assert!(parsed.analysis.extends_edges.is_empty());
+        assert_ne!(
+            parsed.fingerprint, "scala-parser-2",
+            "every Scala shard envelope written before the bump mismatches the new fingerprint"
+        );
+
+        let digest = |fp: &str| {
+            TuCacheFingerprint::compute(
+                CURRENT_ANALYSIS_VERSION,
+                &CompilationContext::new("default", "fake-toolchain"),
+                &FileId::from_relative_path("src/a.scala"),
+                "source-hash",
+                &[],
+                None,
+                ariadne_repo::SourceLanguage::Scala,
+                fp,
+            )
+        };
+        assert_ne!(
+            digest("scala-parser-1").combined_hash,
+            digest("scala-parser-2").combined_hash,
+            "the cache digest moves with the fingerprint: stale Scala entries miss instead of poisoning"
+        );
     }
 
     #[test]

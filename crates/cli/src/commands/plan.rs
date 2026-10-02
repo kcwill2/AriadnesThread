@@ -53,7 +53,10 @@ struct PlanningHooks {
 fn language_of_path(
     files: &[ariadne_repo::FileRecord],
 ) -> BTreeMap<PathBuf, ariadne_repo::SourceLanguage> {
-    files.iter().map(|record| (record.path.clone(), record.language)).collect()
+    files
+        .iter()
+        .map(|record| (record.path.clone(), record.language))
+        .collect()
 }
 
 fn planning_hooks(
@@ -78,7 +81,10 @@ fn planning_hooks(
             _ => ariadne_lang_cpp::cpp_target_path_for(candidate, symbol_name),
         }
     });
-    PlanningHooks { aggregation, target }
+    PlanningHooks {
+        aggregation,
+        target,
+    }
 }
 
 /// The single [`ClusteringConstraints`](ariadne_lang::ClusteringConstraints)
@@ -259,6 +265,8 @@ mod tests {
             owning_file,
             declarations: vec![],
             definition: None,
+
+            modifiers: Vec::new(),
         }
     }
 
@@ -276,12 +284,22 @@ mod tests {
         };
         let companion = ariadne_lang::SymbolRecord {
             name: "Foo".to_string(),
-            ..symbol("p.Foo$", "Foo$", ariadne_lang::SymbolKind::Object, scala_file)
+            ..symbol(
+                "p.Foo$",
+                "Foo$",
+                ariadne_lang::SymbolKind::Object,
+                scala_file,
+            )
         };
         let records = vec![
             symbol("p.Foo", "Foo", ariadne_lang::SymbolKind::Class, scala_file),
             companion,
-            symbol("Widget", "Widget", ariadne_lang::SymbolKind::Class, cpp_file),
+            symbol(
+                "Widget",
+                "Widget",
+                ariadne_lang::SymbolKind::Class,
+                cpp_file,
+            ),
         ];
         let groups = dispatcher.colocated_groups(&records);
         let group_ids: Vec<Vec<String>> = groups
@@ -305,7 +323,10 @@ mod tests {
             record("B.scala", FileKind::ScalaSource, SourceLanguage::Scala),
         ];
         let map = language_of_path(&files);
-        assert_eq!(map.get(&PathBuf::from("B.scala")), Some(&SourceLanguage::Scala));
+        assert_eq!(
+            map.get(&PathBuf::from("B.scala")),
+            Some(&SourceLanguage::Scala)
+        );
         assert_eq!(map.get(&PathBuf::from("a.cpp")), Some(&SourceLanguage::Cpp));
         assert_eq!(map.get(&PathBuf::from("ghost.h")), None);
     }
@@ -317,8 +338,8 @@ mod tests {
         let mut languages: BTreeMap<PathBuf, SourceLanguage> = BTreeMap::new();
         languages.insert(scala_rel.clone(), SourceLanguage::Scala);
         languages.insert(cpp_rel.clone(), SourceLanguage::Cpp);
-        let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/scala-basic");
+        let fixture_root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/scala-basic");
         let hooks = super::planning_hooks(fixture_root, languages);
         assert!(
             (hooks.aggregation)(&scala_rel),
@@ -326,7 +347,9 @@ mod tests {
              the CLI dispatch (scala_aggregation_filter, not test injection)"
         );
         assert!(
-            !(hooks.aggregation)(&PathBuf::from("src/main/scala/com/example/models/User.scala")),
+            !(hooks.aggregation)(&PathBuf::from(
+                "src/main/scala/com/example/models/User.scala"
+            )),
             "a Scala file without a package-object clause is NOT an \
              aggregation unit - the C++ extension filter never claims it"
         );

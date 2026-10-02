@@ -78,6 +78,8 @@ mod tests {
             owning_file: file2.clone(),
             declarations: vec![decl_a.clone()],
             definition: Some(decl_a),
+
+            modifiers: Vec::new(),
         };
 
         let edge = SemanticEdge {
@@ -97,6 +99,8 @@ mod tests {
             references: vec![],
             call_sites: vec![],
             language: SourceLanguage::Cpp,
+
+            extends_edges: Vec::new(),
         };
 
         let result = IndexResult::new(PathBuf::from("/test"), vec![tu]);

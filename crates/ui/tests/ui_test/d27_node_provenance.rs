@@ -30,6 +30,8 @@ fn symbol_model(defining: Option<FileId>, declaring: Vec<FileId>) -> ReducedSema
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 

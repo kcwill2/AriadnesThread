@@ -39,6 +39,8 @@ fn model_with(symbols: Vec<ReducedSymbolRecord>, edges: Vec<(&str, &str)>) -> Re
             .collect(),
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 

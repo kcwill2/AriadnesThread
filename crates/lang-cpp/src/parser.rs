@@ -152,6 +152,8 @@ impl<'a> ParserCtx<'a> {
                     owning_file: self.tu_file_id.clone(),
                     declarations: vec![decl_id.clone()],
                     definition: if is_definition { Some(decl_id) } else { None },
+
+                    modifiers: Vec::new(),
                 });
             }
         }
@@ -345,6 +347,8 @@ impl<'a> ParserCtx<'a> {
                 owning_file: self.tu_file_id.clone(),
                 declarations: vec![decl_id.clone()],
                 definition: if is_definition { Some(decl_id) } else { None },
+
+                modifiers: Vec::new(),
             });
         }
     }

@@ -86,10 +86,7 @@ pub(crate) fn is_modifier_keyword(word: &str) -> bool {
     )
 }
 
-pub(crate) fn collect_top_level_decls(
-    tokens: &[Token],
-    directives: &DirectiveScan,
-) -> DeclPass {
+pub(crate) fn collect_top_level_decls(tokens: &[Token], directives: &DirectiveScan) -> DeclPass {
     let mut pass = DeclPass {
         decls: Vec::new(),
         name_tokens: Vec::new(),
@@ -136,7 +133,12 @@ fn recognize_declaration(tokens: &[Token], index: usize) -> Option<(TrackedDecl,
     }
     let keyword = tokens.get(cursor).and_then(Token::ident)?;
     let (keyword, keyword_index) = match keyword {
-        "case" if matches!(tokens.get(cursor + 1).and_then(Token::ident), Some("class") | Some("object")) => {
+        "case"
+            if matches!(
+                tokens.get(cursor + 1).and_then(Token::ident),
+                Some("class") | Some("object")
+            ) =>
+        {
             (tokens[cursor + 1].ident()?, cursor + 1)
         }
         "package" if tokens.get(cursor + 1).and_then(Token::ident) == Some("object") => {
@@ -298,7 +300,8 @@ pub(crate) fn resolve_decl_ids(
             let dollar_suffixed = decl.kind == SymbolKind::Object
                 && !decl.is_package_object
                 && classish_names.contains(decl.simple_name.as_str());
-            let qualified = qualified_name(&directives.namespace, &decl.simple_name, dollar_suffixed);
+            let qualified =
+                qualified_name(&directives.namespace, &decl.simple_name, dollar_suffixed);
             let name_token = &tokens[decl.name_token];
             let span_end_exclusive = decl
                 .span_end
@@ -331,7 +334,11 @@ pub(crate) fn qualified_name(namespace: &str, simple_name: &str, dollar_suffixed
 
 /// Sorted token indices where a braceless top-level span must stop: the
 /// next declaration start, the next consumed directive range start, or EOF.
-fn span_boundaries(decls: &[TrackedDecl], directives: &DirectiveScan, token_count: usize) -> Vec<usize> {
+fn span_boundaries(
+    decls: &[TrackedDecl],
+    directives: &DirectiveScan,
+    token_count: usize,
+) -> Vec<usize> {
     let mut boundaries: Vec<usize> = decls
         .iter()
         .map(|decl| decl.span_start)
@@ -367,6 +374,8 @@ pub(crate) fn symbol_payloads(
             owning_file: file_id.clone(),
             declarations: vec![decl.decl_id.clone()],
             definition: Some(decl.decl_id.clone()),
+
+            modifiers: Vec::new(),
         })
         .collect();
     let declarations = resolved

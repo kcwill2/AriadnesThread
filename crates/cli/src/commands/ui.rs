@@ -1,8 +1,8 @@
+use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
-use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -245,7 +245,11 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         &crate::registry::default_registry(),
     );
     let include_elements = ariadne_ui::build_include_elements(
-        &include_graph, &closures, &cycles, &node_maps.languages, &node_maps.unit_kinds,
+        &include_graph,
+        &closures,
+        &cycles,
+        &node_maps.languages,
+        &node_maps.unit_kinds,
     );
 
     // C1: ONE memo for the whole generation, seeded with the stage closures
@@ -353,9 +357,14 @@ fn build_extraction_proposals(
     tu_file_ids: &[ariadne_repo::FileId],
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
     let planner = ariadne_cluster::planner::OptimizationPlanner::new(
-        include_graph, reduced_model, discovery_files, tu_file_ids,
-        &ariadne_lang_cpp::cpp_aggregation_filter, &ariadne_lang_cpp::cpp_target_path_for,
-        None, ariadne_lang::CyclePolicy::Reject,
+        include_graph,
+        reduced_model,
+        discovery_files,
+        tu_file_ids,
+        &ariadne_lang_cpp::cpp_aggregation_filter,
+        &ariadne_lang_cpp::cpp_target_path_for,
+        None,
+        ariadne_lang::CyclePolicy::Reject,
     );
     conservative_proposals(planner.plan())
 }
@@ -745,13 +754,20 @@ mod progress_contract_tests {
 
     #[test]
     fn test_tu_index_events_stay_in_stage_two_span() {
-        assert_eq!(tu_index_percent(0, 0), 20, "empty TU set must sit at stage start");
+        assert_eq!(
+            tu_index_percent(0, 0),
+            20,
+            "empty TU set must sit at stage start"
+        );
         assert_eq!(tu_index_percent(0, 7), 20);
         assert_eq!(tu_index_percent(7, 7), 40);
         let mut previous = tu_index_percent(0, 9);
         for done in 1..=9 {
             let percent = tu_index_percent(done, 9);
-            assert!((20..=40).contains(&percent), "{done}/9 mapped to {percent}%");
+            assert!(
+                (20..=40).contains(&percent),
+                "{done}/9 mapped to {percent}%"
+            );
             assert!(percent >= previous, "percent regressed at {done}/9");
             previous = percent;
         }
@@ -769,7 +785,10 @@ mod progress_contract_tests {
         let mut previous = collateral_file_percent(0, 9);
         for done in 1..=9 {
             let percent = collateral_file_percent(done, 9);
-            assert!((80..=95).contains(&percent), "{done}/9 mapped to {percent}%");
+            assert!(
+                (80..=95).contains(&percent),
+                "{done}/9 mapped to {percent}%"
+            );
             assert!(percent >= previous, "percent regressed at {done}/9");
             previous = percent;
         }
@@ -944,7 +963,10 @@ mod builder_tests {
                 plan_with("PLAN-003", 500, 50, RiskLevel::Conservative),
             ]
         };
-        assert_eq!(conservative_proposals(plans()), conservative_proposals(plans()));
+        assert_eq!(
+            conservative_proposals(plans()),
+            conservative_proposals(plans())
+        );
     }
 
     #[test]
@@ -955,6 +977,9 @@ mod builder_tests {
             edges: vec![],
             tu_usage: BTreeMap::new(),
             file_symbols: BTreeMap::new(),
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         };
         let out = build_extraction_proposals(&IncludeGraph::new(), &model, &[], &[]);
         assert!(out.is_empty());
@@ -971,7 +996,8 @@ mod builder_tests {
         let ids: Vec<&str> = out.iter().map(|p| p.plan_id.as_str()).collect();
         assert_eq!(ids, vec!["PLAN-004", "PLAN-002"]);
         assert!(
-            out.iter().all(|p| p.collateral_load_before != p.collateral_load_after),
+            out.iter()
+                .all(|p| p.collateral_load_before != p.collateral_load_after),
             "Zero-collateral proposals (before == after) must be filtered out"
         );
     }

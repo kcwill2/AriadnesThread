@@ -149,7 +149,8 @@ impl<'a> OptimizationPlanner<'a> {
 
         let mut plans = Vec::new();
         for file_id in self.sorted_candidate_file_ids() {
-            let Some(candidate) = self.candidate_aggregation_file(file_id, &load_analyzer, &policies)
+            let Some(candidate) =
+                self.candidate_aggregation_file(file_id, &load_analyzer, &policies)
             else {
                 continue;
             };
@@ -277,7 +278,10 @@ impl<'a> OptimizationPlanner<'a> {
             .flat_map(|component| &component.symbols)
             .collect();
 
-        let mut batches: Vec<Vec<SymbolId>> = sccs.iter().map(|component| component.symbols.clone()).collect();
+        let mut batches: Vec<Vec<SymbolId>> = sccs
+            .iter()
+            .map(|component| component.symbols.clone())
+            .collect();
         let colocated_groups = self
             .constraints
             .map(|constraints| constraints.colocated_groups(&self.symbol_records(&file_symbols)))
@@ -353,6 +357,8 @@ impl<'a> OptimizationPlanner<'a> {
                     owning_file,
                     declarations: record.declarations.clone(),
                     definition: record.definition.clone(),
+
+                    modifiers: Vec::new(),
                 })
             })
             .collect()
@@ -439,10 +445,7 @@ impl<'a> OptimizationPlanner<'a> {
 /// encounter order (last-intersected batch first; removing back-to-front
 /// keeps earlier batch indices valid). Groups are applied sequentially, so
 /// a symbol shared by two groups transitively merges them.
-fn merge_colocated_batches(
-    batches: &mut Vec<Vec<SymbolId>>,
-    colocated_groups: &[Vec<SymbolId>],
-) {
+fn merge_colocated_batches(batches: &mut Vec<Vec<SymbolId>>, colocated_groups: &[Vec<SymbolId>]) {
     for group in colocated_groups {
         let group_symbols: HashSet<&SymbolId> = group.iter().collect();
         let intersecting: Vec<usize> = batches
@@ -496,6 +499,9 @@ mod planning_gap_tests {
                     edges: Vec::new(),
                     tu_usage: BTreeMap::new(),
                     file_symbols: BTreeMap::new(),
+
+                    extends_edges: Vec::new(),
+                    sealed_symbols: Vec::new(),
                 },
                 records: Vec::new(),
                 tu_file_ids: Vec::new(),

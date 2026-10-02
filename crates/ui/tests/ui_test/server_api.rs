@@ -19,6 +19,8 @@ async fn test_server_routes() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {
@@ -103,6 +105,8 @@ async fn test_async_ui_state_loading() {
                 edges: vec![],
                 tu_usage: std::collections::BTreeMap::new(),
                 file_symbols: std::collections::BTreeMap::new(),
+                extends_edges: Vec::new(),
+                sealed_symbols: Vec::new(),
             },
             Arc::new(ariadne_graph::LoadMemo::new()),
         );
@@ -141,6 +145,8 @@ async fn test_server_index_route() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {
@@ -415,6 +421,8 @@ fn justification_state() -> Arc<UiState> {
         edges,
         tu_usage: BTreeMap::new(),
         file_symbols,
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     Arc::new(UiState::new_loaded(
         std::path::PathBuf::from("."),

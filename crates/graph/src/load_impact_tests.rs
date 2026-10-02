@@ -97,6 +97,9 @@ pub(super) fn setup_impact_fixture(
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let fat_a = add_sym(&mut model, "FatA", FAT);

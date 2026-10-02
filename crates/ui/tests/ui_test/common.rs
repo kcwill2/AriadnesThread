@@ -16,6 +16,8 @@ pub fn empty_reduced_model() -> ReducedSemanticModel {
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 
@@ -106,8 +108,13 @@ pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
     graph.edges.push(edge(2, 3));
 
     let mut payload = empty_export_payload();
-    payload.include_graph =
-        build_include_elements(&graph, &HashMap::new(), &[], &HashMap::new(), &HashMap::new());
+    payload.include_graph = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     (graph, payload)
 }
 

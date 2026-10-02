@@ -758,3 +758,82 @@ fn load_artifact_bytes_independent_of_threading() {
     });
     assert_eq!(first, multi, "4-thread rayon pool must match direct call");
 }
+
+fn channel_model(root: &std::path::Path) -> ariadne_graph::ReducedSemanticModel {
+    use ariadne_index::types::SymbolId;
+    let mut model = ariadne_graph::ReducedSemanticModel::reduce(&ariadne_index::IndexResult::new(
+        root.to_path_buf(),
+        vec![],
+    ));
+    model.extends_edges = vec![(
+        SymbolId::new("p.Circle"),
+        SymbolId::new("p.Shape"),
+    )];
+    model.sealed_symbols = vec![SymbolId::new("p.Shape")];
+    model
+}
+
+#[test]
+fn reduced_extends_channel_round_trips_and_old_dirs_load_empty() {
+    let dir = tempdir().unwrap();
+    let mgr = manager_in_fresh_tempdir(&dir);
+    let model = channel_model(dir.path());
+    let reduced_dir = mgr.save_reduced_artifacts(&model, FP).unwrap();
+
+    let loaded = mgr.load_reduced_artifacts().unwrap();
+    assert_eq!(
+        loaded.extends_edges, model.extends_edges,
+        "D-M23-8: the typed extends channel round-trips through the new side file"
+    );
+    assert_eq!(
+        loaded.sealed_symbols, model.sealed_symbols,
+        "D-M23-8: the sealed side channel round-trips (symbols.bin layout stays frozen)"
+    );
+
+    // Drift guard (ruling guard 2): a pre-change artifact directory carries
+    // neither side file; loading it must yield EMPTY channels, never garbage.
+    for side in ["extends-edges.bin", "sealed-symbols.bin"] {
+        let path = reduced_dir.join(side);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let legacy = mgr.load_reduced_artifacts().unwrap();
+    assert!(
+        legacy.extends_edges.is_empty() && legacy.sealed_symbols.is_empty(),
+        "file-absent means empty channel: old four-blob dirs load unchanged"
+    );
+    assert_eq!(
+        legacy.symbols, loaded.symbols,
+        "the four frozen blobs deserialized identically with and without the side files"
+    );
+}
+
+#[test]
+fn reduced_four_blob_bytes_independent_of_extends_channel() {
+    // Drift guard (ruling guards 1+2): filling the channel must not move a
+    // single byte of symbols.bin / edges.bin / tu-usage.bin / file-symbols.bin.
+    let plain_dir = tempdir().unwrap();
+    let plain_mgr = manager_in_fresh_tempdir(&plain_dir);
+    let plain_model = ariadne_graph::ReducedSemanticModel::reduce(&ariadne_index::IndexResult::new(
+        plain_dir.path().to_path_buf(),
+        vec![],
+    ));
+    let plain_files = plain_mgr
+        .save_reduced_artifacts(&plain_model, FP)
+        .unwrap();
+
+    let channel_dir = tempdir().unwrap();
+    let channel_mgr = manager_in_fresh_tempdir(&channel_dir);
+    let channel_files = channel_mgr
+        .save_reduced_artifacts(&channel_model(channel_dir.path()), FP)
+        .unwrap();
+
+    for blob in ["symbols.bin", "edges.bin", "tu-usage.bin", "file-symbols.bin"] {
+        assert_eq!(
+            fs::read(plain_files.join(blob)).unwrap(),
+            fs::read(channel_files.join(blob)).unwrap(),
+            "{blob} bytes must not depend on the channel (epoch 2.0.0 stays honest)"
+        );
+    }
+}

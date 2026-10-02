@@ -7,18 +7,17 @@
 //!   id `<qualified-class-id>$`; the constraints group a `Class` record
 //!   `X` with an `Object` record `X$` when both are in the batch.
 //!
-//! NOT visible in that input, and therefore never claimed (locked by
-//! `sealed_pairing_scope_locked`):
-//! - **Sealed trait ↔ sub-type pairing**: `SymbolRecord` carries no
-//!   modifier flags (the parser consumes `sealed` as a plain modifier, see
-//!   `parser::declarations::is_modifier_keyword`) and no parent edges —
-//!   those live on `TuAnalysis::edges`, which the `ClusteringConstraints`
-//!   trait never receives. A `sealed trait` and its sub-types cannot be
-//!   recognized from records alone. Cross-file sealed members are doubly
-//!   invisible: the offline parser cannot see same-package siblings in
-//!   other files at all (D16 limitation), and a batch is only ever what
-//!   the planner puts in it. Revisit when M23 lands real bodies or when
-//!   the record slice grows modifiers/edges.
+//! - **Sealed trait ↔ sub-type pairing**: realized by
+//!   [`ClusteringConstraints::colocated_groups_with_edges`] (plan M23,
+//!   D-M23-8): the planner feeds the candidate file's typed extends channel
+//!   and the records carry the `sealed` modifier, so a sealed trait groups
+//!   with its direct sub-types (locked positively by
+//!   `sealed_trait_pairs_direct_subtypes_with_edges`). The records-only
+//!   [`ClusteringConstraints::colocated_groups`] path keeps the M22 gap
+//!   locked (`sealed_pairing_needs_both_modifier_and_edge`). Cross-file
+//!   sealed members stay invisible: the offline parser cannot see
+//!   same-package siblings in other files at all (D16 limitation), and a
+//!   batch is only ever what the planner puts in it.
 //! - `frozen_symbols` stays empty (plan §3.4: the policy layer owns
 //!   freezing, same stance as C++).
 
@@ -149,24 +148,107 @@ mod tests {
         );
     }
 
-    #[test]
-    fn sealed_pairing_scope_locked() {
-        let batch = vec![
-            record("com.example.models.Shape", SymbolKind::Trait),
+    fn sealed_batch() -> Vec<SymbolRecord> {
+        vec![
+            SymbolRecord {
+                modifiers: vec!["sealed".to_string()],
+                ..record("com.example.models.Shape", SymbolKind::Trait)
+            },
             record("com.example.models.Circle", SymbolKind::Class),
             record("com.example.models.Square", SymbolKind::Class),
-        ];
+            record("com.example.models.Base", SymbolKind::Trait),
+            record("com.example.models.Lone", SymbolKind::Class),
+        ]
+    }
+
+    fn sealed_edges() -> Vec<(SymbolId, SymbolId)> {
+        vec![
+            (
+                SymbolId::new("com.example.models.Circle"),
+                SymbolId::new("com.example.models.Shape"),
+            ),
+            (
+                SymbolId::new("com.example.models.Square"),
+                SymbolId::new("com.example.models.Shape"),
+            ),
+            (
+                SymbolId::new("com.example.models.Lone"),
+                SymbolId::new("com.example.models.Base"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn sealed_trait_pairs_direct_subtypes_with_edges() {
+        let groups =
+            ScalaClusteringConstraints.colocated_groups_with_edges(&sealed_batch(), &sealed_edges());
+        assert_eq!(
+            group_ids(&groups),
+            vec![vec![
+                "com.example.models.Circle".to_string(),
+                "com.example.models.Shape".to_string(),
+                "com.example.models.Square".to_string(),
+            ]],
+            "D-M23-8 positive lock: sealed trait and its extends-edge sub-types are atomic; \
+             the unsealed Base/Lone pair (edge exists, no modifier) stays out"
+        );
+    }
+
+    #[test]
+    fn sealed_pairing_needs_both_modifier_and_edge() {
+        // Records-only input (the M22 seam) keeps the gap locked.
         assert!(
-            ScalaClusteringConstraints.colocated_groups(&batch).is_empty(),
-            "locked limitation: a sealed trait and its sub-types produce no group because \
-             SymbolRecord carries neither the `sealed` modifier nor parent edges — see the \
-             module docs (cross-file sealed members are invisible to the offline parser anyway)"
+            ScalaClusteringConstraints.colocated_groups(&sealed_batch()).is_empty(),
+            "colocated_groups still cannot see modifiers+edges jointly"
+        );
+        // Sealed trait WITHOUT any extends edge groups nothing.
+        assert!(
+            ScalaClusteringConstraints
+                .colocated_groups_with_edges(&sealed_batch(), &[])
+                .is_empty(),
+            "the modifier alone is not a constraint; sub-typing must be evidenced by an edge"
         );
         assert!(
             ScalaClusteringConstraints
-                .frozen_symbols(&batch)
+                .frozen_symbols(&sealed_batch())
                 .is_empty(),
-            "IV3: frozen stays empty — the policy layer owns freezing (plan §3.4)"
+            "IV3: frozen stays empty - the policy layer owns freezing (plan 3.4)"
+        );
+    }
+
+    #[test]
+    fn companion_pairs_survive_the_with_edges_path() {
+        let companion = SymbolRecord {
+            name: "Foo".to_string(),
+            ..record("com.example.Foo$", SymbolKind::Object)
+        };
+        let mut batch = sealed_batch();
+        batch.push(record("com.example.Foo", SymbolKind::Class));
+        batch.push(companion);
+        let groups = ScalaClusteringConstraints.colocated_groups_with_edges(&batch, &sealed_edges());
+        let mut got = group_ids(&groups);
+        for g in got.iter_mut() {
+            g.sort();
+        }
+        got.sort();
+        let mut expected: Vec<Vec<String>> = vec![
+            vec![
+                "com.example.models.Circle",
+                "com.example.models.Shape",
+                "com.example.models.Square",
+            ],
+            vec!["com.example.Foo", "com.example.Foo$"],
+        ]
+        .into_iter()
+        .map(|g| g.iter().map(|s| s.to_string()).collect())
+        .collect();
+        for g in expected.iter_mut() {
+            g.sort();
+        }
+        expected.sort();
+        assert_eq!(
+            got, expected,
+            "D-M23-8: the with_edges path is a superset - companion logic is preserved"
         );
     }
 }
