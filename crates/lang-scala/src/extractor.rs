@@ -197,6 +197,56 @@ mod tests {
     }
 
     #[test]
+    fn unit_imports_replaces_unit_paths_with_referenced_imports() {
+        let source = "package legacy.shop\n\nimport util.Clock\nimport scala.collection.mutable._\nimport util.Unused\n";
+        let unit_paths = vec!["src/main/scala/legacy/Other.scala".to_string()];
+        let imports = ScalaSourceExtractor.unit_imports(
+            Some(source),
+            &[body("Gadget", "class Gadget { val c = new Clock() }")],
+            &unit_paths,
+        );
+        assert_eq!(
+            imports,
+            vec!["scala.collection.mutable._".to_string(), "util.Clock".to_string()],
+            "D-M23-13 (T7): with a source text the producer REPLACES the \
+             engine's file-path deps — paths are not Scala import syntax \
+             (isolation keeps FQNs, D-M23-5) — and keeps only what the \
+             bodies reference, wildcard always kept"
+        );
+    }
+
+    #[test]
+    fn unit_imports_keeps_passthrough_without_source_text() {
+        let unit_paths = vec!["gen/A.scala".to_string()];
+        assert_eq!(
+            ScalaSourceExtractor.unit_imports(None, &[body("A", "class A {}")], &unit_paths),
+            unit_paths,
+            "no source file: the producer cannot prove imports, so the \
+             passthrough keeps no-source renders honest"
+        );
+    }
+
+    #[test]
+    fn unit_imports_dedups_wildcard_referenced_by_two_bodies() {
+        let source = "package p\n\nimport a.b._\n";
+        let imports = ScalaSourceExtractor.unit_imports(
+            Some(source),
+            &[
+                body("A", "class A { val x: C = ??? }"),
+                body("B", "class B { val y: D = ??? }"),
+            ],
+            &[],
+        );
+        assert_eq!(
+            imports,
+            vec!["a.b._".to_string()],
+            "the seam emits each referenced directive once across the unit's \
+             bodies (render would dedup again, but the producer owns one-\
+             per-line honesty)"
+        );
+    }
+
+    #[test]
     fn plugin_extractor_emits_real_scala_bytes_not_the_stub() {
         use ariadne_lang::LanguagePlugin;
         let plugin = crate::plugin::ScalaPlugin::new();

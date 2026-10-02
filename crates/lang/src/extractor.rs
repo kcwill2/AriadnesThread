@@ -60,6 +60,29 @@ pub trait SourceExtractor: Send + Sync {
     ) -> Vec<SymbolBody> {
         Vec::new()
     }
+
+    /// The dependency list [`SourceExtractor::extract`] receives for one
+    /// generated unit (plan M23 T7, D-M23-13 as refined by the orchestrator's
+    /// replace-passthrough ruling).
+    ///
+    /// `unit_paths` are the engine's inter-unit file-path deps (today's
+    /// `required_deps`); the hook **replaces** them — it does not merge — so
+    /// a language whose import syntax is not file paths (Scala: FQNs,
+    /// D-M23-5) can emit what its compiler actually understands. The default
+    /// is the verbatim passthrough of `unit_paths` — exactly today's
+    /// behavior — so C++ keeps its byte locks unchanged.
+    ///
+    /// `primary_source_text` is `None` when the unit has no source file
+    /// (placeholder-only renders): honest producers keep the passthrough
+    /// then, because inventing directives without the file would fabricate.
+    fn unit_imports(
+        &self,
+        _primary_source_text: Option<&str>,
+        _bodies: &[SymbolBody],
+        unit_paths: &[String],
+    ) -> Vec<String> {
+        unit_paths.to_vec()
+    }
 }
 
 /// Render the complete text of one generated unit — **the single emitter**
@@ -82,4 +105,119 @@ pub fn render_unit(
     extractor
         .extract(symbol_bodies, &namespace, required_deps)
         .content
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bodies(names: &[&str]) -> Vec<SymbolBody> {
+        names
+            .iter()
+            .map(|name| SymbolBody {
+                name: name.to_string(),
+                body: format!("class {name} {{}}"),
+            })
+            .collect()
+    }
+
+    fn paths(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    struct PassthroughProbe;
+    impl SourceExtractor for PassthroughProbe {
+        fn extract(
+            &self,
+            _symbols: &[SymbolBody],
+            _namespace: &str,
+            required_deps: &[String],
+        ) -> GeneratedSourceFile {
+            GeneratedSourceFile {
+                path: PathBuf::new(),
+                content: required_deps.join("|"),
+            }
+        }
+    }
+
+    struct RoutingProducer;
+    impl SourceExtractor for RoutingProducer {
+        fn extract(
+            &self,
+            _symbols: &[SymbolBody],
+            _namespace: &str,
+            required_deps: &[String],
+        ) -> GeneratedSourceFile {
+            GeneratedSourceFile {
+                path: PathBuf::new(),
+                content: required_deps.join("|"),
+            }
+        }
+
+        fn unit_imports(
+            &self,
+            primary_source_text: Option<&str>,
+            _bodies: &[SymbolBody],
+            unit_paths: &[String],
+        ) -> Vec<String> {
+            match primary_source_text {
+                Some(_) => paths(&["a.b.C", "scala.collection.mutable._"]),
+                None => unit_paths.to_vec(),
+            }
+        }
+    }
+
+    #[test]
+    fn unit_imports_default_passes_unit_paths_through_verbatim() {
+        let probe = PassthroughProbe;
+        let unit_paths = paths(&["gen/a.h", "gen/b.h"]);
+        assert_eq!(
+            probe.unit_imports(Some("int x;"), &bodies(&["X"]), &unit_paths),
+            unit_paths,
+            "LOCK (D-M23-13 replace-passthrough): the default hands back the \
+             engine's unit paths byte-identical WITH a source text — the C++ \
+             extract deps are unchanged"
+        );
+        assert_eq!(
+            probe.unit_imports(None, &bodies(&["X"]), &unit_paths),
+            unit_paths,
+            "LOCK: same passthrough without a source text"
+        );
+        assert!(
+            probe
+                .unit_imports(Some("x"), &bodies(&["X"]), &[])
+                .is_empty(),
+            "empty unit paths stay empty"
+        );
+    }
+
+    #[test]
+    fn render_unit_default_route_keeps_required_deps_byte_identical() {
+        let unit_paths = paths(&["gen/a.h", "gen/b.h"]);
+        assert_eq!(
+            render_unit(&PassthroughProbe, &bodies(&["X"]), Some("src"), &unit_paths),
+            "gen/a.h|gen/b.h",
+            "LOCK (I1): with the default hook the bytes extract sees are \
+             exactly the required_deps the engine passed"
+        );
+        assert_eq!(
+            render_unit(&PassthroughProbe, &bodies(&["X"]), None, &unit_paths),
+            "gen/a.h|gen/b.h"
+        );
+    }
+
+    #[test]
+    fn render_unit_hands_unit_imports_output_to_extract() {
+        assert_eq!(
+            render_unit(&RoutingProducer, &bodies(&["X"]), Some("package p"), &paths(&["src/main/scala/p/Legacy.scala"])),
+            "a.b.C|scala.collection.mutable._",
+            "D-M23-13 (T7 ruling): extract must receive the hook's output, \
+             not the raw engine unit paths"
+        );
+        assert_eq!(
+            render_unit(&RoutingProducer, &bodies(&["X"]), None, &paths(&["gen/a.h"])),
+            "gen/a.h",
+            "no source text: the producer's own passthrough survives"
+        );
+    }
 }
