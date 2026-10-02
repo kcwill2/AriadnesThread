@@ -22,6 +22,7 @@ Binding inputs (read in this order, targeted reads only):
 4. <exact field names / literals sources>
 
 ## Touch-set (hard; any edit outside = blocker, report don't fix)
+- tasks/<handoff-basename>-journal.md (checkpoint journal; always in-set)
 - <glob or file> (<why>)
 ...
 You MUST NOT touch: <explicit list>. No `git stash`, no branch change.
@@ -64,6 +65,11 @@ manual byte-identical check of <paths> -- do NOT touch these paths).
   only; pure-ASCII content (see AGENTS.md File-Edit Discipline).
 - Touch only the touch-set; on discovering out-of-scope breakage: report, do
   not fix.
+- After EACH per-module Green gate, append a 1-3 line checkpoint to
+  `tasks/<handoff-basename>-journal.md` (created alongside this handoff):
+  module + commit hash, any deviation, any lock/contract finding. The journal
+  is the dead session's decision log; without it, recovery restores code (git)
+  but loses reasoning (context hygiene, 2026-10-01).
 - If context exhaustion looms: STOP, return a disk-state inventory; a dead
   session is NEVER resumed -- successor runs `python tools/checkpoint_guard.py
   resume --spec tasks/<this file> --scope … --cmd …`.
@@ -72,6 +78,9 @@ manual byte-identical check of <paths> -- do NOT touch these paths).
 1. Commit hash + `git show --stat`. 2. Red evidence (first failing tests).
 3. Green evidence (canonical testrun.py summary line). 4. Any deviation +
    reason. 5. Out-of-scope observations (report-only).
+Never paste raw tool output (cargo/git dumps) into the report: cite the
+command + the canonical summary line + exit code (2026-10-01). The reviewer
+re-runs gates against the commits; pasted output is context rot.
 ```
 
 Reviewer-gate reference: acceptance is adjudicated via the `review-gate`

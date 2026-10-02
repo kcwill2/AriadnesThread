@@ -6,6 +6,14 @@ conflict, trust this ledger and fix the memory. Milestone rows and deferred
 findings predating 2026-10-01 were reconstructed from memory + git and should
 be backfilled at the next kickoff if found inaccurate.
 
+## Archive rule (added 2026-10-01, context hygiene)
+
+The ledger carries only LIVE rows: kickoff reads it and kilo-memory mirrors it,
+so growth is paid twice. At the closeout AFTER a row lands -- a worktree census
+row whose disposition was carried out, or a deferred finding executed or
+dropped -- move that row verbatim to `tasks/ledger_archive.md`. Milestone rows
+stay (they are the audit trail); census and deferred rows do not.
+
 ## Milestones
 
 | Milestone | Status | Where (commit/branch) | Frozen locks | Notes |

@@ -34,7 +34,11 @@ Follow this order exactly:
    - `python tools/hygiene_check.py`
    Do not proceed while any of these is red.
 
-4. Treat the emitted `tasks/<handoff-basename>-resume.md` as the bootstrap
+4. If a `tasks/<handoff-basename>-journal.md` exists, read it next: it is the
+   dead session's decision log (per-module Green checkpoints, deviations,
+   lock findings). Authority split: disk/git for STATE, journal for RATIONALE.
+   A code/journal disagreement is a stop-and-ask, same as handoff-vs-disk.
+5. Treat the emitted `tasks/<handoff-basename>-resume.md` as the bootstrap
    checklist: verify its Disk state matches the `status` report, act on the
    Command verdicts (fix reds first), confirm the In-scope edits are yours,
    triage every Stray edit (out of scope) before touching unrelated files,

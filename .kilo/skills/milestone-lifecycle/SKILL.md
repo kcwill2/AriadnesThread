@@ -51,9 +51,17 @@ on conflict, trust the ledger and fix the memory.
 3. Update the ledger milestone row (status + HEAD commit) and any deferred /
    graduation rows; **update the mirroring kilo-memory entries in the same
    commit**.
-4. Commit plan addendum + ledger + walkthrough + final code together (per
+4. **Ledger archive + memory GC (context hygiene, 2026-10-01):** apply the
+   ledger's Archive rule (census rows with completed disposition and closed
+   deferred findings move to `tasks/ledger_archive.md`); then prune the
+   kilo-memory mirror -- `forget` superseded entries and any entry the ledger
+   now fully owns, so the injected startup context carries only live state
+   plus the pointer "state lives in `tasks/milestone_ledger.md`". A record
+   marked SUPERSEDED that still states the CURRENT contract is kept in exactly
+   one category (corrections preferred), never two.
+5. Commit plan addendum + ledger + walkthrough + final code together (per
    `repo.tracks_plan_files`), e.g. `git add .kilo/plans/<file> tasks/
    walkthroughs/ && git commit -m "docs(<milestone>): closeout"`. Use
    `python tools/commit_scoped.py` when a sibling session shares the worktree.
-5. Verify no byte-lock drift: handoff lock list unchanged, or an explicitly
+6. Verify no byte-lock drift: handoff lock list unchanged, or an explicitly
    reviewed `UPDATE_GOLDENS=1` commit (`tools/golden_guard.py` once landed).
