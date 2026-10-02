@@ -227,13 +227,18 @@ fn plugin_contract_in_default_registry() {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         },
-        "plan:381 capability-literal blocker check"
+        "EVOLVED at M23 T7 (D-M23-6 flip): the pre-flip form of this lock was \
+         the plan:381 capability-literal blocker (four false bits); the flip \
+         turned them on, requires_toolchain stays false (A3/I7). The \
+         per-language stage routing this enables is locked cli-side \
+         (registry.rs capability_backend_resolves_*). \
+         Same byte-exact literal discipline, new authority."
     );
 
     assert_eq!(
