@@ -155,4 +155,22 @@ mod tests {
 
         assert!(planning_gaps(&files, &registry).is_empty());
     }
+
+    #[test]
+    fn planning_gaps_skips_unclaimed_languages_without_a_plugin() {
+        // `Other` (e.g. a discovered `.md`/`.txt` path) has no registered
+        // plugin, so it is not a capability gap — the planner never hears of
+        // it. Only a REGISTERED plugin with planning=false is one.
+        let registry = crate::registry::default_registry();
+        let files = vec![
+            record("notes.md", FileKind::Other, SourceLanguage::Other),
+            record("data.txt", FileKind::Other, SourceLanguage::Other),
+            record("a.cpp", FileKind::Source, SourceLanguage::Cpp),
+        ];
+
+        assert!(
+            planning_gaps(&files, &registry).is_empty(),
+            "a language no plugin claims must not produce a planning rejection"
+        );
+    }
 }
