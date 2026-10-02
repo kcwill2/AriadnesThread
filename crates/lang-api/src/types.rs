@@ -5,8 +5,20 @@
 //! Module}` — the latter are never emitted by the C++ parser).
 
 use ariadne_repo::{FileId, SourceLanguage};
+use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// `skip_serializing_if` is symmetric only in self-describing formats: a
+/// positional writer (bincode: `is_human_readable() == false`) that omits a
+/// trailing field leaves the derived deserializer reading past the struct and
+/// the blob undecodable (`tu_analyses.bin` warm-load regression, plan M23
+/// FIX-F). Emit the field whenever the format is positional, regardless of
+/// emptiness; human-readable formats (JSON artifacts/shards) keep the
+/// omit-when-empty contract the m00 goldens byte-lock.
+fn field_conditional_on_format<S: Serializer>(serializer: &S, present: bool) -> bool {
+    !serializer.is_human_readable() || present
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SymbolId(pub String);
@@ -88,7 +100,7 @@ impl Default for SymbolDecl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SymbolRecord {
     pub id: SymbolId,
     pub name: String,
@@ -98,11 +110,28 @@ pub struct SymbolRecord {
     pub definition: Option<DeclId>,
     /// Declaration-language modifier words the analysis deliberately keeps
     /// (plan M23, D-M23-8). The Scala parser records `"sealed"` only; the
-    /// C++ parser emits none. `skip_serializing_if` ⇒ the key is absent for
-    /// C++ records, so the m00 JSON index goldens stay byte-identical, and
-    /// `default` keeps pre-M23 artifacts readable.
+    /// C++ parser emits none. JSON omits the key when empty (m00 goldens
+    /// byte-identical) and `default` keeps pre-M23 artifacts readable;
+    /// positional formats always carry it — see [`field_conditional_on_format`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modifiers: Vec<String>,
+}
+
+impl Serialize for SymbolRecord {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let emit_modifiers = field_conditional_on_format(&serializer, !self.modifiers.is_empty());
+        let mut state = serializer.serialize_struct("SymbolRecord", 6 + emit_modifiers as usize)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.serialize_field("owning_file", &self.owning_file)?;
+        state.serialize_field("declarations", &self.declarations)?;
+        state.serialize_field("definition", &self.definition)?;
+        if emit_modifiers {
+            state.serialize_field("modifiers", &self.modifiers)?;
+        }
+        state.end()
+    }
 }
 
 impl Default for SymbolRecord {
@@ -165,7 +194,7 @@ pub struct SymbolReference {
     pub is_write: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct TuAnalysis {
     pub tu_file_id: FileId,
     pub context_name: String,
@@ -183,9 +212,29 @@ pub struct TuAnalysis {
     /// `SemanticEdge` carries no extends kind and the bincode blobs forbid
     /// edge-layout change at the frozen epoch. The Scala parser fills this
     /// from parent positions only (never occurrences); C++ emits none, and
-    /// `skip_serializing_if` keeps its JSON bytes unchanged (m00 goldens).
+    /// the JSON key stays absent when empty (m00 goldens); positional
+    /// formats always carry it — see [`field_conditional_on_format`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extends_edges: Vec<(SymbolId, SymbolId)>,
+}
+
+impl Serialize for TuAnalysis {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let emit_extends = field_conditional_on_format(&serializer, !self.extends_edges.is_empty());
+        let mut state = serializer.serialize_struct("TuAnalysis", 8 + emit_extends as usize)?;
+        state.serialize_field("tu_file_id", &self.tu_file_id)?;
+        state.serialize_field("context_name", &self.context_name)?;
+        state.serialize_field("symbols", &self.symbols)?;
+        state.serialize_field("declarations", &self.declarations)?;
+        state.serialize_field("edges", &self.edges)?;
+        state.serialize_field("references", &self.references)?;
+        state.serialize_field("call_sites", &self.call_sites)?;
+        state.serialize_field("language", &self.language)?;
+        if emit_extends {
+            state.serialize_field("extends_edges", &self.extends_edges)?;
+        }
+        state.end()
+    }
 }
 
 impl Default for TuAnalysis {
