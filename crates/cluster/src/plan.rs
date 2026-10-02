@@ -1,4 +1,5 @@
 use ariadne_index::types::SymbolId;
+use ariadne_lang::LanguageId;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -139,6 +140,11 @@ pub enum RejectionReason {
     ContractViolation(PathBuf),
     NonMovableDeclaration(String),
     UnresolvedSemanticDependency(String),
+    /// The repository contains a language whose plugin reports
+    /// `capabilities().planning == false` (plan M22, D23): the language
+    /// arrives as neutral `LanguageId` data supplied by the caller, so the
+    /// engine stays language-neutral (rule R2).
+    PlanningUnsupported(LanguageId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -206,5 +212,30 @@ Validation required:
     23 translation units";
 
         assert_eq!(detail.trim(), expected.trim());
+    }
+
+    #[test]
+    fn planning_unsupported_reason_round_trips_as_language_data() {
+        let reason = RejectionReason::PlanningUnsupported(LanguageId::Other);
+        let json = serde_json::to_string(&reason).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RejectionReason>(&json).unwrap(),
+            reason
+        );
+    }
+
+    #[test]
+    fn pre_existing_rejection_reasons_serialize_unchanged() {
+        // The additive variant must not disturb the serialization of the
+        // pre-existing ones (variant names and field order).
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::CycleCreation("x".to_string())).unwrap(),
+            r#"{"CycleCreation":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::NonMovableDeclaration("y".to_string()))
+                .unwrap(),
+            r#"{"NonMovableDeclaration":"y"}"#
+        );
     }
 }

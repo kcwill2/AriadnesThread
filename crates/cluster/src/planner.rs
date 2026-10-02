@@ -1,12 +1,14 @@
 use crate::checker::ConstraintChecker;
 use crate::frontier::FrontierAnalyzer;
-use crate::plan::{OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, RiskLevel};
+use crate::plan::{
+    OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, RejectionReason, RiskLevel,
+};
 use crate::scc;
 use ariadne_graph::load::LoadAnalyzer;
 use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::SymbolId;
-use ariadne_lang::{ClusteringConstraints, CyclePolicy, SymbolRecord};
+use ariadne_lang::{ClusteringConstraints, CyclePolicy, LanguageId, SymbolRecord};
 use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -45,6 +47,23 @@ pub struct OptimizationPlanner<'a> {
     /// Package-scoped cycle precision is superseded by the M23.5
     /// group-condensation milestone, not by this field.
     pub cycle_policy: CyclePolicy,
+    /// Languages injected by the caller whose plugins report
+    /// `capabilities().planning == false` (plan M22, D23). Each gap yields one
+    /// explanatory rejection from `plan_with_rejections`, so planning output is
+    /// never silently empty. Empty (the default) keeps `plan()` and
+    /// `plan_with_rejections().0` byte-identical to today.
+    planning_gaps: Vec<PlanningGap>,
+}
+
+/// A language present in the repository whose plugin disables the planning
+/// stage (plan M22, D23). Computed by the caller from discovery records and
+/// the registry — the engine never consults a registry itself (rule R2): the
+/// language arrives as neutral `LanguageId` data with a representative
+/// discovered path so the resulting rejection has an honest `target_file`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanningGap {
+    pub language: LanguageId,
+    pub sample_path: PathBuf,
 }
 
 /// Optimization policy and ownership views built once per planning run.
@@ -85,7 +104,37 @@ impl<'a> OptimizationPlanner<'a> {
             target_path_for,
             constraints,
             cycle_policy,
+            planning_gaps: Vec::new(),
         }
+    }
+
+    /// Injects the caller-computed planning gaps (plan M22, D23) without
+    /// widening the constructor; returns `self` for builder-style use.
+    pub fn with_planning_gaps(&mut self, planning_gaps: Vec<PlanningGap>) -> &mut Self {
+        self.planning_gaps = planning_gaps;
+        self
+    }
+
+    /// Plans exactly as `plan()` and additionally returns one explanatory
+    /// rejection per injected planning gap (plan M22, D23), independent of the
+    /// candidate pass. With no gaps injected the rejection channel is empty
+    /// and the plans are byte-identical to `plan()`.
+    pub fn plan_with_rejections(&self) -> (Vec<OptimizationPlan>, Vec<PlanRejection>) {
+        let rejections = self
+            .planning_gaps
+            .iter()
+            .map(|gap| PlanRejection {
+                target_file: gap.sample_path.clone(),
+                reason: RejectionReason::PlanningUnsupported(gap.language),
+                explanation: format!(
+                    "Planning is not supported for {:?}: the registered plugin disables the planning stage, so no extraction plans are proposed for {:?} files such as {}.",
+                    gap.language,
+                    gap.language,
+                    gap.sample_path.display()
+                ),
+            })
+            .collect();
+        (self.plan(), rejections)
     }
 
     pub fn plan(&self) -> Vec<OptimizationPlan> {
@@ -413,5 +462,223 @@ fn merge_colocated_batches(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod planning_gap_tests {
+    use super::*;
+    use ariadne_graph::reduced::ReducedSymbolRecord;
+    use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
+    use ariadne_index::types::SymbolKind;
+    use ariadne_lang::LanguageId;
+    use ariadne_repo::{FileKind, SourceLanguage};
+    use std::collections::BTreeMap;
+
+    /// Snapshot the planner borrows: one optimizable aggregation candidate
+    /// with collateral load from a frozen source (neutral `.agg` fixture,
+    /// mirroring `tests/planner_injection.rs`).
+    struct GapFixture {
+        graph: IncludeGraph,
+        model: ReducedSemanticModel,
+        records: Vec<FileRecord>,
+        tu_file_ids: Vec<FileId>,
+    }
+
+    impl GapFixture {
+        fn empty() -> Self {
+            Self {
+                graph: IncludeGraph::default(),
+                model: ReducedSemanticModel {
+                    repo_root: PathBuf::from("/"),
+                    symbols: BTreeMap::new(),
+                    edges: Vec::new(),
+                    tu_usage: BTreeMap::new(),
+                    file_symbols: BTreeMap::new(),
+                },
+                records: Vec::new(),
+                tu_file_ids: Vec::new(),
+            }
+        }
+
+        fn record(
+            id: FileId,
+            name: &str,
+            ownership: FileOwnership,
+            policy: OptimizationPolicy,
+        ) -> FileRecord {
+            FileRecord {
+                id,
+                path: PathBuf::from(name),
+                canonical_path: PathBuf::from(name),
+                kind: FileKind::Other,
+                size: 0,
+                content_hash: String::new(),
+                ownership,
+                optimization_policy: policy,
+                language: SourceLanguage::Other,
+            }
+        }
+
+        fn symbol(&mut self, file: FileId, name: &str) {
+            let symbol_id = SymbolId::new(name);
+            self.model.symbols.insert(
+                symbol_id.clone(),
+                ReducedSymbolRecord {
+                    id: symbol_id.clone(),
+                    name: name.to_string(),
+                    kind: SymbolKind::Class,
+                    defining_file: Some(file),
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+            self.model
+                .file_symbols
+                .entry(file)
+                .or_default()
+                .push(symbol_id);
+        }
+
+        fn collateral_pair() -> Self {
+            let mut fixture = Self::empty();
+            fixture
+                .graph
+                .register_file(FileId(1), PathBuf::from("pkg.agg"));
+            fixture
+                .graph
+                .register_file(FileId(2), PathBuf::from("col.agg"));
+            fixture.graph.add_edge(IncludeEdge {
+                source: FileId(1),
+                destination: Some(FileId(2)),
+                context_name: "Default".into(),
+                source_location: SourceLocation::new(1, 1),
+                kind: IncludeKind::Local,
+                raw_path: "col.agg".to_string(),
+                resolved_path: Some(PathBuf::from("col.agg")),
+                language: SourceLanguage::Other,
+            });
+            fixture.records.push(Self::record(
+                FileId(1),
+                "pkg.agg",
+                FileOwnership::Repository,
+                OptimizationPolicy::Optimizable,
+            ));
+            fixture.records.push(Self::record(
+                FileId(2),
+                "col.agg",
+                FileOwnership::ThirdParty,
+                OptimizationPolicy::Frozen,
+            ));
+            fixture.symbol(FileId(1), "Alpha");
+            fixture.symbol(FileId(1), "Delta");
+            fixture.symbol(FileId(2), "Big");
+            fixture
+        }
+    }
+
+    fn accept_unit(path: &Path) -> bool {
+        path.file_name().is_some()
+    }
+
+    fn unit_template(path: &Path, symbol: &str) -> PathBuf {
+        path.with_file_name(format!("{symbol}_unit"))
+    }
+
+    fn planner_over(fixture: &GapFixture) -> OptimizationPlanner<'_> {
+        OptimizationPlanner::new(
+            &fixture.graph,
+            &fixture.model,
+            &fixture.records,
+            &fixture.tu_file_ids,
+            &accept_unit,
+            &unit_template,
+            None,
+            CyclePolicy::Reject,
+        )
+    }
+
+    fn neutral_gap(sample: &str) -> PlanningGap {
+        PlanningGap {
+            language: LanguageId::Other,
+            sample_path: PathBuf::from(sample),
+        }
+    }
+
+    #[test]
+    fn gaps_produce_rejections_per_language() {
+        let fixture = GapFixture::collateral_pair();
+        let mut planner = planner_over(&fixture);
+        planner.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
+
+        let (plans, rejections) = planner.plan_with_rejections();
+
+        assert_eq!(plans.len(), 1, "gaps do not disturb the candidate pass");
+        assert_eq!(
+            rejections.len(),
+            1,
+            "exactly one rejection per injected gap language"
+        );
+        let rejection = &rejections[0];
+        assert!(matches!(
+            rejection.reason,
+            RejectionReason::PlanningUnsupported(LanguageId::Other)
+        ));
+        assert_eq!(
+            rejection.target_file,
+            PathBuf::from("payload.unknown_ext"),
+            "the gap's representative path is the honest target_file"
+        );
+        assert!(
+            rejection.explanation.contains("Other"),
+            "explanation names the language by data (Debug of LanguageId): {}",
+            rejection.explanation
+        );
+
+        let empty_fixture = GapFixture::empty();
+        let mut bare = planner_over(&empty_fixture);
+        bare.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
+        let (bare_plans, bare_rejections) = bare.plan_with_rejections();
+        assert!(bare_plans.is_empty());
+        assert_eq!(
+            bare_rejections.len(),
+            1,
+            "rejections are independent of the candidate pass"
+        );
+    }
+
+    #[test]
+    fn no_gaps_rejections_empty() {
+        let fixture = GapFixture::collateral_pair();
+        let planner = planner_over(&fixture);
+
+        let (plans, rejections) = planner.plan_with_rejections();
+
+        assert!(rejections.is_empty(), "no gaps, no rejections");
+        assert_eq!(
+            plans,
+            planner.plan(),
+            "delegation equality: gap-free plans are identical"
+        );
+    }
+
+    #[test]
+    fn plan_delegates_unchanged() {
+        let fixture = GapFixture::collateral_pair();
+        let mut with_gaps = planner_over(&fixture);
+        with_gaps.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
+        let without_gaps = planner_over(&fixture);
+
+        assert_eq!(
+            with_gaps.plan(),
+            without_gaps.plan(),
+            "plan() drops the rejection channel: gap-free plans are identical"
+        );
+        assert_eq!(
+            with_gaps.plan(),
+            with_gaps.plan_with_rejections().0,
+            "plan() equals the plans channel of plan_with_rejections()"
+        );
     }
 }
