@@ -258,20 +258,27 @@ def _echo(text):
         sys.stdout.write("\n")
 
 
-def _emit_distilled_output(cargo_text, options, counts):
-    """Distill mode: bounded digest on stdout, full text in the capture (I5)."""
+def _final_exit_code(counts, baseline_counts, baseline_error) -> int:
+    """Exit code main() will return, known BEFORE any output is emitted (F2)."""
+    if counts is None or baseline_error is not None:
+        return EXIT_USAGE_OR_DRIFT
+    if baseline_counts is not None and baseline_counts != counts:
+        return EXIT_VERDICT_FAILED
+    return EXIT_CLEAN if counts.failed == 0 else EXIT_VERDICT_FAILED
+
+
+def _emit_distilled_output(cargo_text, options, counts, final_exit):
+    """Distill mode: bounded digest on stdout, full text in the capture (I5).
+
+    The header shows final_exit, the code main() actually returns, so a
+    baseline mismatch cannot print `(exit 0)` over an exiting-1 process (F2).
+    """
     capture_path = options.capture_path or str(
         REPO_ROOT / distilled.DEFAULT_CAPTURE_DIR / "testrun-capture.txt"
     )
     distilled.write_capture(cargo_text, capture_path)
-    if counts is None:
-        exit_for_digest = EXIT_USAGE_OR_DRIFT
-    elif counts.failed == 0:
-        exit_for_digest = EXIT_CLEAN
-    else:
-        exit_for_digest = EXIT_VERDICT_FAILED
     for line in distilled.digest_cargo_test(
-        cargo_text, counts, exit_for_digest, capture_path=capture_path
+        cargo_text, counts, final_exit, capture_path=capture_path
     ):
         print(line)
 
@@ -294,26 +301,32 @@ def main(argv=None) -> int:
             return EXIT_USAGE_OR_DRIFT
         cargo_text = outcome.text
     counts = parse_cargo_output(cargo_text)
+    baseline_counts, baseline_error = (None, None)
+    if counts is not None and options.baseline_path is not None:
+        baseline_counts, baseline_error = load_baseline(options.baseline_path)
+    final_exit = _final_exit_code(counts, baseline_counts, baseline_error)
     if options.distill:
-        _emit_distilled_output(cargo_text, options, counts)
+        _emit_distilled_output(cargo_text, options, counts, final_exit)
     else:
         _echo(cargo_text)
     if counts is None:
         print(DRIFT_MESSAGE)
         return EXIT_USAGE_OR_DRIFT
+    if baseline_error is not None:
+        print(f"usage error: {baseline_error}", file=sys.stderr)
+        return EXIT_USAGE_OR_DRIFT
     summary = canonical_line(counts)
-    if options.baseline_path is not None:
-        baseline_counts, baseline_error = load_baseline(options.baseline_path)
-        if baseline_counts is None:
-            print(f"usage error: {baseline_error}", file=sys.stderr)
-            return EXIT_USAGE_OR_DRIFT
-        if baseline_counts != counts:
-            print("baseline mismatch")
-            print(f"baseline {canonical_line(baseline_counts)}")
-            print(f"actual {summary}")
-            return EXIT_VERDICT_FAILED
+    if (
+        options.baseline_path is not None
+        and baseline_counts is not None
+        and baseline_counts != counts
+    ):
+        print("baseline mismatch")
+        print(f"baseline {canonical_line(baseline_counts)}")
+        print(f"actual {summary}")
+        return EXIT_VERDICT_FAILED
     print(summary)
-    return EXIT_CLEAN if counts.failed == 0 else EXIT_VERDICT_FAILED
+    return final_exit
 
 
 if __name__ == "__main__":

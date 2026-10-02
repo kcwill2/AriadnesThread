@@ -392,5 +392,24 @@ class DistillReplayCliTests(unittest.TestCase):
         )
 
 
+class DistillBaselineExitHonestyTests(unittest.TestCase):
+    def test_distill_baseline_mismatch_header_agrees_with_process_exit(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            baseline = write_text_file(holder, "base.txt", "11/0/1/3")
+            capture = str(Path(holder) / "cap.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--distill", "--replay", fixture, "--baseline", baseline,
+                "--capture", capture,
+            )
+        self.assertEqual(1, returncode, standard_err)
+        headers = [
+            line for line in standard_out.splitlines()
+            if line.startswith("### cargo test")
+        ]
+        self.assertEqual(1, len(headers), standard_out)
+        self.assertRegex(headers[0], r"^### cargo test \w+ \(exit 1\)")
+
+
 if __name__ == "__main__":
     unittest.main()

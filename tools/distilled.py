@@ -19,8 +19,6 @@ import re
 from collections import namedtuple
 from pathlib import Path
 
-import testrun
-
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 FAILURE_BLOCK_START = re.compile(r"^---- (.+) stdout ----\s*$")
@@ -110,6 +108,8 @@ def digest_cargo_test(text, counts, exit_code,
 
     counts None means pinned-parse drift: verdict DRIFT, never PASS (I3).
     """
+    import testrun  # lazy: breaks the distilled<->testrun import cycle (F1)
+
     body = plain_lines(text)
     tag = _capture_tag(capture_path, len(body))
     if counts is None:

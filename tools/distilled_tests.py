@@ -7,6 +7,7 @@ ANSI fixtures are constructed via byte escapes, never literals (UTF-8 rule).
 """
 
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -247,6 +248,38 @@ class GenericDigestTests(unittest.TestCase):
                 )
                 self.assertLessEqual(len(digest.lines), 50)
                 self.assertRegex(digest.lines[-1], CAPTURE_LINE)
+
+
+def run_isolated_python(statement):
+    """Fresh interpreter with cwd=tools (import-seam tests, gate F1)."""
+    finished = subprocess.run(
+        [sys.executable, "-c", statement],
+        cwd=str(Path(__file__).resolve().parent),
+        capture_output=True,
+        text=True,
+    )
+    return finished.returncode, finished.stdout, finished.stderr
+
+
+class ImportIsolationTests(unittest.TestCase):
+    def test_import_distilled_alone_exits_zero(self):
+        returncode, standard_out, standard_err = run_isolated_python(
+            "import distilled"
+        )
+        self.assertEqual(0, returncode, standard_err)
+
+    def test_import_testrun_alone_exits_zero(self):
+        returncode, standard_out, standard_err = run_isolated_python(
+            "import testrun"
+        )
+        self.assertEqual(0, returncode, standard_err)
+
+    def test_import_distilled_alone_does_not_require_testrun(self):
+        returncode, standard_out, standard_err = run_isolated_python(
+            "import distilled, sys; "
+            "sys.exit(1 if 'testrun' in sys.modules else 0)"
+        )
+        self.assertEqual(0, returncode, standard_err)
 
 
 class WriteCaptureTests(unittest.TestCase):
