@@ -302,7 +302,17 @@ pub fn analyze_dependency_load(
 
     if !targeted {
         let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
-        artifacts.save_load_artifacts(&load_report, &pipeline.fps.load)?;
+        // M22 T-D: the same discovery-record languages `Pipeline::ensure_load`
+        // feeds (`pipeline/src/lib.rs` load stage) — a Scala run's load
+        // manifest carries `languages`, an all-C++ run stays empty-skipped
+        // and byte-identical (D25, m00 witness).
+        let stage_languages: Vec<SourceLanguage> =
+            pipeline.discovery.files.iter().map(|f| f.language).collect();
+        artifacts.save_load_artifacts_with_languages(
+            &load_report,
+            &pipeline.fps.load,
+            &stage_languages,
+        )?;
     }
 
     println!();
