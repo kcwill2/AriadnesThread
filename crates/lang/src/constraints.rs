@@ -69,8 +69,7 @@ mod tests {
         assert_eq!(
             OnlyNameGroups.colocated_groups_with_edges(&records, &edges),
             OnlyNameGroups.colocated_groups(&records),
-            "D-M23-8: the default is byte-identity with colocated_groups — C++ \
-             and every non-opting language keep today's behavior"
+            "D-M23-8: the default is byte-identity with colocated_groups"
         );
     }
 }
