@@ -573,9 +573,9 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [x] M20.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m20_scala_dependency_graph_test.rs`
 - [x] M21.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
 - [x] M21.2 `ScalaAnalyzer` + `handle_index_with_registry` + `PluginWorkerBackend` language dispatch; language-scoped cache key; `m21_scala_semantic_index_test.rs`
-- [ ] M22.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
-- [ ] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
-- [ ] M22.3 `m22_scala_load_analysis_test.rs`; golden re-check; workspace green
+- [x] M22.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
+- [x] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
+- [x] M22.3 `m22_scala_load_analysis_test.rs`; golden re-check; workspace green
 
 **Docs**
 - [ ] D.1 Append M17–M22 to `Plan.md` using its Proves / Does-not-prove format
