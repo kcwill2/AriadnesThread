@@ -8,30 +8,15 @@
 //! resolver stub ([`crate::resolver::ScalaImportResolver`]) and M21 closed
 //! the analyzer gap ([`crate::analyzer::ScalaAnalyzer`] over the M21
 //! parser); both are wired in [`crate::plugin`] and their stubs deleted.
-//! What remains here is owned by M22 (constraints) and M23 (extraction,
-//! rewriting, validation).
+//! M22.1a retired the constraints stub for
+//! [`crate::constraints::ScalaClusteringConstraints`]. What remains here
+//! is owned by M23 (extraction, rewriting, validation).
 
 use ariadne_lang::{
-    ClusteringConstraints, CompilerValidator, DependencyRewriter, GeneratedSourceFile,
-    RewriteSpec, SourceExtractor, SymbolBody, SymbolId, SymbolRecord,
+    CompilerValidator, DependencyRewriter, GeneratedSourceFile, RewriteSpec, SourceExtractor,
+    SymbolBody,
 };
-use std::collections::HashSet;
 use std::path::PathBuf;
-
-/// Scala has no atomic symbol groups and no language-level frozen symbols
-/// until its clustering milestone; the policy layer owns freezing (plan
-/// sec 3.4, same stance as C++).
-pub struct StubConstraints;
-
-impl ClusteringConstraints for StubConstraints {
-    fn colocated_groups(&self, _symbols: &[SymbolRecord]) -> Vec<Vec<SymbolId>> {
-        Vec::new()
-    }
-
-    fn frozen_symbols(&self, _symbols: &[SymbolRecord]) -> HashSet<SymbolId> {
-        HashSet::new()
-    }
-}
 
 /// Empty-source placeholder until the M23 Scala extractor replaces it;
 /// `extraction: false` gates the pipeline away from this body until then.

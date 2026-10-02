@@ -10,10 +10,12 @@
 
 pub mod analyzer;
 pub mod boundary;
+pub mod constraints;
 pub mod detector;
 mod directive_parser;
 mod scanner;
 pub mod parser;
+pub mod planning;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
@@ -21,8 +23,10 @@ mod stubs;
 
 pub use analyzer::ScalaAnalyzer;
 pub use boundary::EXTERNAL_PATH_MARKERS;
+pub use constraints::ScalaClusteringConstraints;
 pub use detector::ScalaDetector;
 pub use parser::ScalaSourceParser;
+pub use planning::{scala_aggregation_filter, scala_declares_package_object, scala_target_path_for};
 pub use plugin::ScalaPlugin;
 pub use resolver::ScalaImportResolver;
 pub use shaper::ScalaUnitShaper;

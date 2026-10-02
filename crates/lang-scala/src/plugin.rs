@@ -10,10 +10,11 @@
 
 use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
+use crate::constraints::ScalaClusteringConstraints;
 use crate::detector::ScalaDetector;
 use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
-use crate::stubs::{StubConstraints, StubExtractor, StubRewriter, StubValidator};
+use crate::stubs::{StubExtractor, StubRewriter, StubValidator};
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     DependencyRewriter, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
@@ -31,7 +32,7 @@ pub struct ScalaPlugin {
     shaper: ScalaUnitShaper,
     analyzer: ScalaAnalyzer,
     resolver: ScalaImportResolver,
-    constraints: StubConstraints,
+    constraints: ScalaClusteringConstraints,
     extractor: StubExtractor,
     rewriter: StubRewriter,
     validator: StubValidator,
@@ -44,7 +45,7 @@ impl ScalaPlugin {
             shaper: ScalaUnitShaper,
             analyzer: ScalaAnalyzer::new(),
             resolver: ScalaImportResolver,
-            constraints: StubConstraints,
+            constraints: ScalaClusteringConstraints,
             extractor: StubExtractor,
             rewriter: StubRewriter,
             validator: StubValidator,
@@ -226,6 +227,40 @@ mod tests {
                 ".ivy2".to_string(),
                 ".cache".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn plugin_constraints_are_the_scala_clustering_constraints() {
+        use ariadne_lang::{SymbolId, SymbolKind, SymbolRecord};
+        let batch = vec![
+            SymbolRecord {
+                id: SymbolId::new("com.example.Counter"),
+                name: "Counter".to_string(),
+                kind: SymbolKind::Class,
+                ..SymbolRecord::default()
+            },
+            SymbolRecord {
+                id: SymbolId::new("com.example.Counter$"),
+                name: "Counter".to_string(),
+                kind: SymbolKind::Object,
+                ..SymbolRecord::default()
+            },
+        ];
+        let plugin = ScalaPlugin::new();
+        let groups = plugin.constraints().colocated_groups(&batch);
+        assert_eq!(
+            groups,
+            vec![vec![
+                SymbolId::new("com.example.Counter"),
+                SymbolId::new("com.example.Counter$")
+            ]],
+            "D24: the plugin serves ScalaClusteringConstraints, not the retired stub \
+             (which always returned an empty Vec)"
+        );
+        assert!(
+            plugin.constraints().frozen_symbols(&batch).is_empty(),
+            "IV3: frozen stays empty — the policy layer owns freezing"
         );
     }
 
