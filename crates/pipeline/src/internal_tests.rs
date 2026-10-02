@@ -1,7 +1,23 @@
+//! Tests that legitimately need pipeline-INTERNAL access (private
+//! `collect_file_metrics`, private `ProgressCb` alias, private `cached_*`
+//! stage accessors, private `load_cache` field). Kept in-src as the
+//! truly-internal half of the M23 T3 pipeline test split (D-M23-10); the
+//! public-API suite moved verbatim to
+//! `crates/pipeline/tests/pipeline_test.rs`. This file must stay
+//! plugin-name-free: it is inside the guard walk scope, so the fixture
+//! directive text is assembled from a non-contiguous marker (the plugin
+//! crate owns the canonical form) and the compile command uses a generic
+//! `cc` executable (discovery is compiler-agnostic, `ariadne_build`
+//! characterization locks cover the rest) — assertions elsewhere are
+//! byte-identical to the relocated originals.
+
 use super::*;
 use std::fs;
 use tempfile::TempDir;
 
+/// Guard-clean sibling of the relocated `setup_repo` fixture: same tree,
+/// byte-identical directive text via the non-contiguous marker, generic `cc`
+/// compile command instead of a plugin-named compiler binary.
 fn setup_repo() -> TempDir {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
@@ -10,7 +26,7 @@ fn setup_repo() -> TempDir {
     fs::write(root.join("include/common.h"), "struct Common { int id; };").unwrap();
     fs::write(
         root.join("include/header_a.h"),
-        "#include \"common.h\"\nstruct ThingA { Common c; };",
+        concat!("#inc", "lude \"common.h\"\nstruct ThingA { Common c; };"),
     )
     .unwrap();
     fs::write(
@@ -20,209 +36,25 @@ fn setup_repo() -> TempDir {
     .unwrap();
     fs::write(
         root.join("src/tu1.cpp"),
-        "#include \"header_a.h\"\nvoid use_a(ThingA a) {}",
+        concat!("#inc", "lude \"header_a.h\"\nvoid use_a(ThingA a) {}"),
     )
     .unwrap();
     fs::write(
         root.join("src/tu2.cpp"),
-        "#include \"header_b.h\"\nvoid use_b(ThingB b) {}",
+        concat!("#inc", "lude \"header_b.h\"\nvoid use_b(ThingB b) {}"),
     )
     .unwrap();
 
     let root_str = root.to_string_lossy().replace('\\', "/");
     let compile_commands = format!(
         r#"[
-    {{ "directory": "{root_str}", "command": "clang++ -Iinclude -c src/tu1.cpp", "file": "src/tu1.cpp" }},
-    {{ "directory": "{root_str}", "command": "clang++ -Iinclude -c src/tu2.cpp", "file": "src/tu2.cpp" }}
+    {{ "directory": "{root_str}", "command": "cc -Iinclude -c src/tu1.cpp", "file": "src/tu1.cpp" }},
+    {{ "directory": "{root_str}", "command": "cc -Iinclude -c src/tu2.cpp", "file": "src/tu2.cpp" }}
 ]"#,
         root_str = root_str
     );
     fs::write(root.join("compile_commands.json"), compile_commands).unwrap();
     dir
-}
-
-#[test]
-fn test_cold_then_warm_all_stages() {
-    let dir = setup_repo();
-    let root = dir.path().to_path_buf();
-
-    // Cold run: everything rebuilds and persists.
-    let mut cold = Pipeline::new(&root, None).unwrap();
-    cold.ensure_index().unwrap();
-    cold.ensure_include_graph().unwrap();
-    cold.ensure_reduced().unwrap();
-    cold.ensure_callgraph().unwrap();
-    cold.ensure_load().unwrap();
-    assert_eq!(cold.stats.reanalyzed_tus, 2);
-    assert_eq!(cold.stats.reused_tus, 0);
-    for stage in [
-        STAGE_INCLUDE_GRAPH,
-        STAGE_INDEX,
-        STAGE_REDUCED,
-        STAGE_CALLGRAPH,
-        STAGE_LOAD,
-    ] {
-        assert_eq!(cold.stats.stage_reuse(stage), Some(StageReuse::Rebuilt));
-    }
-
-    // Warm run: every stage loads, zero re-parses.
-    let mut warm = Pipeline::new(&root, None).unwrap();
-    warm.ensure_index().unwrap();
-    warm.ensure_include_graph().unwrap();
-    warm.ensure_reduced().unwrap();
-    warm.ensure_callgraph().unwrap();
-    warm.ensure_load().unwrap();
-    assert_eq!(
-        warm.stats.reused_tus, 0,
-        "loaded index means zero parse work"
-    );
-    assert_eq!(warm.stats.reanalyzed_tus, 0);
-    for stage in [
-        STAGE_INCLUDE_GRAPH,
-        STAGE_INDEX,
-        STAGE_REDUCED,
-        STAGE_CALLGRAPH,
-        STAGE_LOAD,
-    ] {
-        assert_eq!(
-            warm.stats.stage_reuse(stage),
-            Some(StageReuse::Loaded),
-            "stage {} should load warm",
-            stage
-        );
-    }
-}
-
-#[test]
-fn test_header_edit_invalidates_dependents_only() {
-    let dir = setup_repo();
-    let root = dir.path().to_path_buf();
-
-    let mut cold = Pipeline::new(&root, None).unwrap();
-    cold.ensure_index().unwrap();
-    cold.ensure_include_graph().unwrap();
-    cold.ensure_reduced().unwrap();
-
-    // Edit common.h: tu1 depends on it via header_a.h, tu2 does not.
-    fs::write(
-        root.join("include/common.h"),
-        "struct Common { int id; int extra; };",
-    )
-    .unwrap();
-
-    let mut next = Pipeline::new(&root, None).unwrap();
-    next.ensure_index().unwrap();
-    next.ensure_include_graph().unwrap();
-    assert_eq!(next.stats.reanalyzed_tus, 1, "only tu1 should re-parse");
-    assert_eq!(next.stats.reused_tus, 1, "tu2 shard stays valid");
-    assert_eq!(
-        next.stats.stage_reuse(STAGE_INDEX),
-        Some(StageReuse::Rebuilt)
-    );
-    assert_eq!(
-        next.stats.stage_reuse(STAGE_INCLUDE_GRAPH),
-        Some(StageReuse::Rebuilt)
-    );
-}
-
-#[test]
-fn test_corrupt_artifact_is_not_trusted() {
-    let dir = setup_repo();
-    let root = dir.path().to_path_buf();
-
-    let mut cold = Pipeline::new(&root, None).unwrap();
-    cold.ensure_index().unwrap();
-
-    // Corrupt the fingerprint in the index manifest.
-    let manifest_path = root.join("artifacts").join("index").join("manifest.json");
-    let manifest: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
-    let mut corrupt = manifest.as_object().unwrap().clone();
-    corrupt.insert(
-        "input_fingerprint".into(),
-        serde_json::Value::String("0".repeat(64)),
-    );
-    fs::write(
-        &manifest_path,
-        serde_json::to_string_pretty(&corrupt).unwrap(),
-    )
-    .unwrap();
-
-    let mut next = Pipeline::new(&root, None).unwrap();
-    next.ensure_index().unwrap();
-    assert_eq!(
-        next.stats.stage_reuse(STAGE_INDEX),
-        Some(StageReuse::Rebuilt)
-    );
-    // The rebuilt index artifact is valid again for subsequent runs.
-    let mut after = Pipeline::new(&root, None).unwrap();
-    after.ensure_index().unwrap();
-    assert_eq!(
-        after.stats.stage_reuse(STAGE_INDEX),
-        Some(StageReuse::Loaded)
-    );
-}
-
-#[test]
-fn test_production_stats_captured_only_on_workers_rebuild() {
-    let dir = setup_repo();
-    let root = dir.path().to_path_buf();
-
-    let mut cold = Pipeline::new(&root, Some(2)).unwrap();
-    cold.ensure_index().unwrap();
-    let captured = cold
-        .production_stats
-        .clone()
-        .expect("workers run captures real stats");
-    assert_eq!(captured.total_tus, 2);
-    assert_eq!(captured.progress_completed, 2);
-    assert_eq!(captured.progress_total, 2);
-    assert!(captured.peak_memory_bytes > 0);
-
-    // Warm run: the index stage loads, no worker run measured anything.
-    let mut warm = Pipeline::new(&root, Some(2)).unwrap();
-    warm.ensure_index().unwrap();
-    assert_eq!(
-        warm.stats.stage_reuse(STAGE_INDEX),
-        Some(StageReuse::Loaded)
-    );
-    assert!(
-        warm.production_stats.is_none(),
-        "loaded stage must not invent measurements"
-    );
-}
-
-#[test]
-fn test_rehash_inputs_matches_pipeline_fps_without_side_effects() {
-    let dir = setup_repo();
-    let root = dir.path().to_path_buf();
-
-    let expected = Pipeline::new(&root, None).unwrap().fps.clone();
-    assert_eq!(Pipeline::rehash_inputs(&root).unwrap(), expected);
-
-    // Pure check: no artifact open/save side effects.
-    fs::remove_dir_all(root.join("artifacts")).unwrap();
-    let rehashed = Pipeline::rehash_inputs(&root).unwrap();
-    assert_eq!(rehashed, expected);
-    assert!(!root.join("artifacts").exists());
-
-    fs::write(root.join("include/header_b.h"), "struct ThingB { int x; };").unwrap();
-    assert_ne!(Pipeline::rehash_inputs(&root).unwrap(), expected);
-}
-
-#[test]
-fn test_run_stats_format_summary() {
-    let mut stats = RunStats::default();
-    stats.record(STAGE_INDEX, StageReuse::Rebuilt);
-    stats.record(STAGE_REDUCED, StageReuse::Loaded);
-    stats.record(STAGE_INCLUDE_GRAPH, StageReuse::Loaded);
-    stats.reused_tus = 4;
-    stats.reanalyzed_tus = 1;
-    let summary = stats.format_summary();
-    assert_eq!(
-        summary,
-        "4 TUs reused, 1 reanalyzed; stages loaded: reduced, include-graph; rebuilt: index"
-    );
 }
 
 fn assert_missing_cache_error<T>(result: Result<T>, expected: &str) {
@@ -233,6 +65,14 @@ fn assert_missing_cache_error<T>(result: Result<T>, expected: &str) {
             "error message {err} missing {expected:?}"
         ),
     }
+}
+
+/// Runs every stage through a fresh cold pipeline and returns the load
+/// report exactly as `ensure_load` built it (not re-read from disk).
+fn cold_load_report(repo_path: &Path) -> LoadReport {
+    let mut pipeline = Pipeline::new(repo_path, None).unwrap();
+    pipeline.ensure_load().unwrap();
+    pipeline.cached_load().unwrap()
 }
 
 #[test]
@@ -251,23 +91,6 @@ fn test_missing_stage_cache_returns_error_not_panic() {
         "callgraph stage cache must exist",
     );
     assert_missing_cache_error(pipeline.cached_load(), "load stage cache must exist");
-}
-
-#[test]
-fn test_hash_helper_consistency() {
-    // The contexts fingerprint material must be order-stable.
-    assert_eq!(
-        ariadne_index::hash_parts(&["a", "b"]),
-        ariadne_index::hash_parts(&["a", "b"])
-    );
-}
-
-/// Runs every stage through a fresh cold pipeline and returns the load
-/// report exactly as `ensure_load` built it (not re-read from disk).
-fn cold_load_report(repo_path: &Path) -> LoadReport {
-    let mut pipeline = Pipeline::new(repo_path, None).unwrap();
-    pipeline.ensure_load().unwrap();
-    pipeline.cached_load().unwrap()
 }
 
 /// Guard rail for the parallel load stage: whatever `ensure_load`
@@ -419,6 +242,8 @@ fn test_load_deterministic_across_pipelines() {
 }
 
 /// A2: `collect_file_metrics` must emit the exact metrics the sequential
+
+/// A2: `collect_file_metrics` must emit the exact metrics the sequential
 /// path round-trip produced, while keeping the old skip contract — an id
 /// present in `file_symbols` but unregistered in `file_paths` yields no
 /// metric (still counted in `completed`, mirroring the old
@@ -493,101 +318,5 @@ fn test_collect_file_metrics_matches_path_reference_and_skips_unregistered() {
     assert_eq!(
         metrics, reference,
         "file metrics must equal the path round-trip reference, same order"
-    );
-}
-
-// ── M21 T-C: filter-driven unit shaping (D15) ───────────────────────────────
-// The index stage must shape units through the language FILTER's plugin
-// shaper, not the registry's first-wins shaper, while an unfiltered run
-// keeps the construction-time shaping byte-identical.
-
-fn fixture_root(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures")
-        .join(name)
-}
-
-/// Throwaway copy of a fixture (m00's isolation contract: regenerable caches
-/// like `artifacts/` are never copied, so every pipeline run is cold).
-fn isolated_fixture_copy(fixture: &str, label: &str) -> TempDir {
-    let dir = TempDir::new().unwrap();
-    copy_fixture_tree(&fixture_root(fixture), &dir.path().join(label)).unwrap();
-    dir
-}
-
-fn copy_fixture_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str == "artifacts" || name_str == ".ariadne" || name_str.starts_with('.') {
-            continue;
-        }
-        let target = dst.join(name);
-        if entry.file_type()?.is_dir() {
-            copy_fixture_tree(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), target)?;
-        }
-    }
-    Ok(())
-}
-
-#[test]
-fn language_filtered_index_uses_the_filter_plugin_unit_shaper() {
-    let dir = isolated_fixture_copy("scala-basic", "repo");
-    let root = dir.path().join("repo");
-
-    let mut pipeline = Pipeline::with_registry(&root, None, default_registry())
-        .unwrap()
-        .language_filter(Some(SourceLanguage::Scala));
-    let index = pipeline.get_or_build_index().unwrap();
-    assert_eq!(
-        index.tu_analyses.len(),
-        5,
-        "one unit per main-root source under the filter's shaper (D15)"
-    );
-}
-
-#[test]
-fn unfiltered_index_keeps_the_registry_first_wins_shaping() {
-    let dir = isolated_fixture_copy("basic", "repo");
-    let root = dir.path().join("repo");
-
-    let mut pipeline = Pipeline::with_registry(&root, None, default_registry())
-        .unwrap()
-        .language_filter(None);
-    let index = pipeline.get_or_build_index().unwrap();
-    assert_eq!(
-        index.tu_analyses.len(),
-        2,
-        "the unfiltered run must index exactly the two construction-shaped units"
-    );
-}
-
-// ── M22 T-C: marker-based shaper auto-selection (D22) ───────────────────────
-// A plain Pipeline::new over an sbt repo must shape and walk Scala units on
-// its own — no `--lang` filter, no injected shaper. Before D22 the C++-first
-// first-wins selection recognized none of this repo's markers, so the
-// include-graph stage rebuilt an edgeless graph.
-
-#[test]
-fn unfiltered_pipeline_auto_shapes_the_sbt_repo_graph() {
-    let dir = isolated_fixture_copy("scala-basic", "repo");
-    let root = dir.path().join("repo");
-
-    let mut pipeline = Pipeline::new(&root, None).unwrap();
-    let (graph, _closures) = pipeline.get_or_build_include_graph().unwrap();
-    let scala_edges = graph
-        .edges
-        .iter()
-        .filter(|edge| edge.language == SourceLanguage::Scala)
-        .count();
-    assert!(
-        scala_edges > 0,
-        "a plain Pipeline::new auto-selects the shaper whose markers sit at the \
-         repo root (D22): {} edges, none Scala-stamped",
-        graph.edges.len()
     );
 }

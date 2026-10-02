@@ -39,31 +39,13 @@ pub const STAGE_REDUCED: &str = "reduced";
 pub const STAGE_CALLGRAPH: &str = "callgraph";
 pub const STAGE_LOAD: &str = "load";
 
-/// The single plugin enumeration site (D9 consolidation): C++ first, then Scala.
-/// Registration ORDER is a contract - it drives `unit_shaper_for()`/
-/// `unit_shaper_for_repo()` fallback and `plugin_for()` precedence so existing
-/// C++ discovery stays byte-identical. Marker-based shaper auto-selection
-/// (the deferred M18.5 gap) landed with plan M22 D22: unfiltered discovery
-/// picks the first registered plugin whose build markers sit at the repo root.
-/// The CLI delegates here (`ariadne-cli::registry::default_registry`); cli
-/// depends on pipeline, never the reverse (D9 direction ruling).
-pub fn build_default_registry() -> LanguageRegistry {
-    LanguageRegistry::new()
-        .register(Box::new(ariadne_lang_cpp::CppPlugin::new()))
-        .register(Box::new(ariadne_lang_scala::ScalaPlugin::new()))
-}
-
-/// Shared registry for library-level [`Pipeline::new`] entry points and
-/// [`Pipeline::rehash_inputs`] - the [`build_default_registry`] plugin set.
-/// C++ behavior stays byte-identical: C++ registers first, and marker-based
-/// shaper selection (D22) only diverges from first-wins where a later
-/// plugin's markers are present while every earlier plugin's are absent -
-/// never true of an existing C++ repository. The Scala plugin's `false`
-/// capability literals (plan:381) keep every extraction-side stage on the
-/// C++ backend (plan sec 3.1 handler note).
-pub fn default_registry() -> Arc<LanguageRegistry> {
-    Arc::new(build_default_registry())
-}
+// The plugin enumeration moved to `registry.rs` (M23 T3, D-M23-10): the R2
+// architecture guard walks this crate's `src`, and `registry.rs` is the one
+// NAMED composition-root file it allowlists for plugin naming. Re-exports
+// keep `pipeline::default_registry` / `pipeline::build_default_registry`
+// callers unchanged (cli delegation contract, D9).
+mod registry;
+pub use registry::{build_default_registry, default_registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -912,6 +894,9 @@ fn collect_file_metrics(
         .collect()
 }
 
+// The full cold/warm pipeline suite moved to `crates/pipeline/tests/
+// pipeline_test.rs` (M23 T3, D-M23-10): its fixtures embed C++ compile-command
+// and directive text, so they live outside the guard walk scope. Tests that
+// need the private collection internals stay in `internal_tests.rs`.
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
-mod pipeline_tests;
+mod internal_tests;
