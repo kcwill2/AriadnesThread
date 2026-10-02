@@ -417,3 +417,56 @@ fn extract_falls_back_to_placeholder_when_source_text_is_missing() {
     assert_eq!(result.headers[0].symbols[0].body, "// Symbol: A (Other)");
     assert_eq!(result.headers[0].primary_source_text, None);
 }
+
+/// F4 carry-forward (M23 T3): `locate_bodies_for_unit` iterates
+/// `wanted_per_source` (a `BTreeMap<FileId, _>`), so with several readable
+/// source files the unit's `primary_source_text` must be the LOWEST FileId,
+/// independent of plan enumeration order, and the first readable one when a
+/// lower FileId is unreadable. This matters because the namespace seam
+/// (D-M23-2/D-M23-4) feeds `primary_source_text` to
+/// `SourceExtractor::unit_namespace` on write: a non-deterministic choice
+/// would make Scala's `unit_namespace` (T5/T7) — and thus the generated
+/// package clause — depend on extraction ordering.
+#[test]
+fn primary_source_text_is_the_lowest_readable_file_id_not_the_first_listed() {
+    use ariadne_cluster::plan::ProposedExtraction;
+    use ariadne_index::types::SymbolId;
+    use ariadne_repo::FileId;
+
+    let low_text = "// lowest file id\n";
+    let high_text = "// higher file id\n";
+    let extraction = |name: &str, source: FileId| ProposedExtraction {
+        symbol_name: name.to_string(),
+        symbol_id: SymbolId::new(name),
+        target_header: std::path::PathBuf::from("shared.h"),
+        source_file: Some(source),
+    };
+    // Deliberately enumerate the higher FileId first: BTreeMap order must win.
+    let plan = plan_of(vec![
+        extraction("Beta", FileId(2)),
+        extraction("Alpha", FileId(1)),
+    ]);
+    let reader = |file_id: FileId| match file_id {
+        FileId(1) => Some(low_text.to_string()),
+        FileId(2) => Some(high_text.to_string()),
+        _ => None,
+    };
+
+    let model = dummy_model();
+    let engine = IsolationEngine::new(&model);
+    let result = engine.extract(&plan, &reader, &RecordingFakeExtractor::default());
+    assert_eq!(
+        result.headers[0].primary_source_text.as_deref(),
+        Some(low_text),
+        "lowest FileId must win when several sources are readable"
+    );
+
+    // Unreadable lowest id: the FIRST READABLE id becomes primary.
+    let skip_low = |file_id: FileId| (file_id == FileId(2)).then(|| high_text.to_string());
+    let result = engine.extract(&plan, &skip_low, &RecordingFakeExtractor::default());
+    assert_eq!(
+        result.headers[0].primary_source_text.as_deref(),
+        Some(high_text),
+        "first readable id wins when the lowest is unreadable"
+    );
+}
