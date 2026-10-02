@@ -15,6 +15,18 @@ pub struct LoadExplanation {
     pub collateral_source: String,
     pub collateral_symbols_count: usize,
     pub reason: String,
+    /// M22 T-E: the true parent FILE basename chosen from the BFS `path_ids`
+    /// at the two `explain_*` sites (identical input to the stored reason's
+    /// composition). `format_explanation_with` renders with this instead of
+    /// recomposing from the display path, which for `explain_symbol_load`
+    /// prepends the target NAME — a len==1 display path would otherwise put
+    /// the symbol name in the parent slot ("X is imported by X").
+    /// Asymmetry recorded deliberately: the stored `reason` template carries
+    /// the same len==1 degeneracy (path_ids[0] == the collateral file makes
+    /// it its own parent) and is m6-locked byte-for-byte; the *_with lane
+    /// mirrors that true parent rather than re-deriving from `path`.
+    #[serde(skip, default)]
+    parent: String,
 }
 
 impl LoadExplanation {
@@ -29,11 +41,18 @@ impl LoadExplanation {
     /// template (collateral basename, second-to-last path node = parent
     /// basename, target name), so the default vocab renders today's bytes.
     pub fn format_explanation_with(&self, vocabulary: &DependencyVocabulary) -> String {
-        let parent = self
-            .path
-            .get(self.path.len().saturating_sub(2))
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
+        // M22 T-E: render with the true `path_ids` parent carried from the
+        // explain site. The display-path composition below only runs for
+        // values built elsewhere (no site ran), where it matches the
+        // file-only display shape.
+        let parent = if self.parent.is_empty() {
+            self.path
+                .get(self.path.len().saturating_sub(2))
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            self.parent.clone()
+        };
         let reason = format!(
             "{} is {} by {}.\nNo semantic dependency from {} reaches symbols owned by {}.",
             self.collateral_source, vocabulary.directive_passive_verb, parent, self.target_name,
@@ -167,6 +186,7 @@ impl<'a> LoadAnalyzer<'a> {
             collateral_source: col_name,
             collateral_symbols_count: col_source.symbol_count,
             reason,
+            parent: parent_name,
         })
     }
 
@@ -225,6 +245,7 @@ impl<'a> LoadAnalyzer<'a> {
             collateral_source: col_name,
             collateral_symbols_count: col_source.symbol_count,
             reason,
+            parent: parent_name,
         })
     }
 }
@@ -253,6 +274,7 @@ mod tests {
             reason: "heavy.h is included by thing.h.\nNo semantic dependency from Thing \
                      reaches symbols owned by heavy.h."
                 .into(),
+            parent: "thing.h".into(),
         }
     }
 
@@ -275,6 +297,40 @@ mod tests {
         );
         assert!(formatted.contains("No semantic dependency from Thing reaches symbols owned by heavy.h."));
         assert!(!formatted.contains("included"));
+    }
+
+    /// M22 T-E len==1 shape: `explain_symbol_load` when the collateral file
+    /// IS the symbol's defining file — `path_ids` is a single node, the true
+    /// parent the stored template uses is that file itself, and the display
+    /// path is `[target_name, file]`. The vocabulary lane must render the
+    /// true file parent (mirroring the stored reason's verb swap), never the
+    /// target SYMBOL NAME as parent ("X is imported by X" with X = symbol).
+    #[test]
+    fn len1_symbol_path_renders_true_parent_not_target_name() {
+        let explanation = LoadExplanation {
+            target_name: "com.example.services.OrderService".into(),
+            target_file: PathBuf::from("src/main/scala/com/example/services/OrderService.scala"),
+            path: vec![
+                "com.example.services.OrderService".into(),
+                "OrderService.scala".into(),
+            ],
+            collateral_source: "OrderService.scala".into(),
+            collateral_symbols_count: 1,
+            reason: "OrderService.scala is included by OrderService.scala.\nNo semantic \
+                     dependency from com.example.services.OrderService reaches symbols \
+                     owned by OrderService.scala."
+                .into(),
+            parent: "OrderService.scala".into(),
+        };
+        let formatted = explanation.format_explanation_with(&scala_vocabulary());
+        assert!(
+            formatted.contains("OrderService.scala is imported by OrderService.scala."),
+            "the len==1 lane mirrors the stored reason's true file parent: {formatted}"
+        );
+        assert!(
+            !formatted.contains("OrderService is imported by"),
+            "the target symbol name must never be rendered as the parent: {formatted}"
+        );
     }
 
     #[test]
