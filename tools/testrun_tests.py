@@ -290,5 +290,107 @@ class TimeoutTests(unittest.TestCase):
         self.assertIn("TIMEOUT after 4s", standard_out)
 
 
+FAILING_DETAIL_OUTPUT = """\
+     Running unittests src/lib.rs (target\\debug\\deps\\ariadne_graph-1b2c3d.exe)
+
+running 3 tests
+test cycles::tests::detects_self_loop ... ok
+test cycles::tests::ignores_dag ... FAILED
+
+failures:
+
+---- cycles::tests::ignores_dag stdout ----
+thread 'cycles::tests::ignores_dag' panicked at src/cycles.rs:88:5:
+assertion failed: !has_cycle
+
+failures:
+    cycles::tests::ignores_dag
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+"""
+
+
+class DistillReplayCliTests(unittest.TestCase):
+    def test_distill_pass_replay_omits_raw_lines_keeps_canonical_last(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            capture = str(Path(holder) / "cap.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--distill", "--replay", fixture, "--capture", capture
+            )
+        self.assertEqual(0, returncode, standard_err)
+        self.assertNotIn(
+            "test graph::tests::empty_graph ... ok", standard_out
+        )
+        self.assertIn("### cargo test PASS (exit 0)", standard_out)
+        self.assertIn("[capture: %s," % capture, standard_out)
+        self.assertEqual(
+            "12 passed / 0 failed / 1 ignored / 3 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_distill_fail_replay_excerpts_and_captures_full_text(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(
+                holder, "failed_detail.txt", FAILING_DETAIL_OUTPUT
+            )
+            capture = str(Path(holder) / "cap.txt")
+            returncode, standard_out, standard_err = run_tool(
+                "--distill", "--replay", fixture, "--capture", capture
+            )
+            captured_text = Path(capture).read_text(encoding="utf-8")
+        self.assertEqual(1, returncode, standard_err)
+        self.assertIn("cycles::tests::ignores_dag", standard_out)
+        self.assertIn("panicked at src/cycles.rs:88:5:", standard_out)
+        self.assertEqual(FAILING_DETAIL_OUTPUT, captured_text)
+        self.assertEqual(
+            "1 passed / 1 failed / 0 ignored / 1 suites",
+            last_stdout_line(standard_out),
+        )
+
+    def test_distill_drift_replay_reports_drift_and_exits_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(
+                holder, "drift.txt", DRIFT_SHAPED_OUTPUT
+            )
+            returncode, standard_out, standard_err = run_tool(
+                "--distill", "--replay", fixture,
+                "--capture", str(Path(holder) / "cap.txt"),
+            )
+        self.assertEqual(2, returncode)
+        self.assertIn("parse format drift", standard_out + standard_err)
+        self.assertNotIn("PASS", standard_out)
+
+    def test_distill_timeout_path_exits_one_unchanged(self):
+        def fake_run(cargo_args, timeout_seconds):
+            return testrun.RunOutcome(text="", timed_out=True)
+
+        with tempfile.TemporaryDirectory() as holder:
+            capture = Path(holder) / "cap.txt"
+            with mock.patch.object(testrun, "run_cargo_command", fake_run):
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured):
+                    return_code = testrun.main(
+                        ["--distill", "--timeout", "3",
+                         "--capture", str(capture)]
+                    )
+            self.assertEqual(1, return_code)
+            self.assertIn("TIMEOUT after 3s", captured.getvalue())
+            self.assertFalse(capture.exists())
+
+    def test_default_mode_stdout_stays_byte_identical_regression_lock(self):
+        with tempfile.TemporaryDirectory() as holder:
+            fixture = write_text_file(holder, "multi.txt", MULTI_SUITE_OUTPUT)
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                return_code = testrun.main(["--replay", fixture])
+        self.assertEqual(0, return_code)
+        self.assertEqual(
+            MULTI_SUITE_OUTPUT
+            + "12 passed / 0 failed / 1 ignored / 3 suites\n",
+            captured.getvalue(),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

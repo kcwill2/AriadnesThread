@@ -22,6 +22,12 @@ exits 1 (intentional deltas are accepted by editing the baseline in the same
 commit). --replay reads captured cargo output from a file instead of running
 cargo; this is the documented test-support hook.
 
+--distill replaces the raw cargo echo with the bounded digest from
+tools/distilled.py and preserves the full output in a capture file
+(default target/testrun-capture.txt, override with --capture PATH). The
+canonical line stays the last stdout line either way (I1); exit codes and
+drift behavior are identical in both modes.
+
 Exit codes: 0 clean, 1 failed tests / baseline mismatch / timeout,
 2 parse format drift or usage error.
 """
@@ -31,6 +37,8 @@ import subprocess
 import sys
 from collections import namedtuple
 from pathlib import Path
+
+import distilled
 
 DEFAULT_TIMEOUT_SECONDS = 600
 EXIT_CLEAN = 0
@@ -47,8 +55,10 @@ ANY_RESULT_MARKER = "test result:"
 SUITE_HEADER_LINE = re.compile(r"^\s*(?:Running|Doc-tests)\s")
 BASELINE_SHAPE = re.compile(r"^(\d+)/(\d+)/(\d+)/(\d+)$")
 
-OWN_SWITCH_FLAGS = frozenset({"--retry-on-timeout"})
-OWN_VALUE_FLAGS = frozenset({"--timeout", "--baseline", "--replay"})
+OWN_SWITCH_FLAGS = frozenset({"--retry-on-timeout", "--distill"})
+OWN_VALUE_FLAGS = frozenset(
+    {"--timeout", "--baseline", "--replay", "--capture"}
+)
 CARGO_VALUE_FLAGS = frozenset({
     "-j", "--exclude", "--features", "--jobs", "--manifest-path", "-p",
     "--package", "--target", "--test",
@@ -63,7 +73,9 @@ TestCounts = namedtuple("TestCounts", "passed failed ignored suites")
 RunOutcome = namedtuple("RunOutcome", "text timed_out")
 ToolOptions = namedtuple(
     "ToolOptions",
-    "cargo_args timeout_seconds baseline_path replay_path retry_on_timeout",
+    "cargo_args timeout_seconds baseline_path replay_path retry_on_timeout"
+    " distill capture_path",
+    defaults=(False, None),
 )
 
 
@@ -161,6 +173,8 @@ def parse_arguments(argv):
     baseline_path = None
     replay_path = None
     retry_on_timeout = False
+    distill = False
+    capture_path = None
     index = 0
     while index < len(argv):
         arg = argv[index]
@@ -170,7 +184,10 @@ def parse_arguments(argv):
             break
         option, inline_value = _split_option(arg)
         if option in OWN_SWITCH_FLAGS:
-            retry_on_timeout = True
+            if option == "--distill":
+                distill = True
+            else:
+                retry_on_timeout = True
         elif option in OWN_VALUE_FLAGS:
             value, index = _take_value(argv, index, inline_value)
             if value is None:
@@ -182,6 +199,8 @@ def parse_arguments(argv):
                 timeout_seconds = parsed_timeout
             elif option == "--baseline":
                 baseline_path = value
+            elif option == "--capture":
+                capture_path = value
             else:
                 replay_path = value
         elif option in CARGO_VALUE_FLAGS:
@@ -205,6 +224,8 @@ def parse_arguments(argv):
         baseline_path=baseline_path,
         replay_path=replay_path,
         retry_on_timeout=retry_on_timeout,
+        distill=distill,
+        capture_path=capture_path,
     )
 
 
@@ -237,6 +258,24 @@ def _echo(text):
         sys.stdout.write("\n")
 
 
+def _emit_distilled_output(cargo_text, options, counts):
+    """Distill mode: bounded digest on stdout, full text in the capture (I5)."""
+    capture_path = options.capture_path or str(
+        REPO_ROOT / distilled.DEFAULT_CAPTURE_DIR / "testrun-capture.txt"
+    )
+    distilled.write_capture(cargo_text, capture_path)
+    if counts is None:
+        exit_for_digest = EXIT_USAGE_OR_DRIFT
+    elif counts.failed == 0:
+        exit_for_digest = EXIT_CLEAN
+    else:
+        exit_for_digest = EXIT_VERDICT_FAILED
+    for line in distilled.digest_cargo_test(
+        cargo_text, counts, exit_for_digest, capture_path=capture_path
+    ):
+        print(line)
+
+
 def main(argv=None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     options = parse_arguments(arguments)
@@ -254,8 +293,11 @@ def main(argv=None) -> int:
         if outcome.text is None:
             return EXIT_USAGE_OR_DRIFT
         cargo_text = outcome.text
-    _echo(cargo_text)
     counts = parse_cargo_output(cargo_text)
+    if options.distill:
+        _emit_distilled_output(cargo_text, options, counts)
+    else:
+        _echo(cargo_text)
     if counts is None:
         print(DRIFT_MESSAGE)
         return EXIT_USAGE_OR_DRIFT
