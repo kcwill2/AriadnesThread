@@ -312,6 +312,18 @@ impl<'a> OptimizationPlanner<'a> {
     /// symbol record). A batch holding a frozen symbol is skipped whole:
     /// colocated members must move together, and one immovable member makes
     /// that impossible.
+    ///
+    /// T7b defining-file filter (kickoff §8 item 2; the self-target guard is
+    /// this same filter — one mechanism, not two): when the computed target
+    /// path equals the candidate's own path the batch is dropped — an
+    /// "extraction" into the very file that defines the symbol is a no-op
+    /// move, and planning it would only generate churn (witnessed on the
+    /// scala-isolation fixture, where `{Symbol}.scala` naming resolves the
+    /// package object `legacy` back to `legacy.scala`). The filter is pure
+    /// path equality, never a language test (I2); for C++ targets are
+    /// `{name}_extracted.h`, never equal to the candidate — provably a
+    /// no-op there, locked by the byte-identical m00 goldens and the
+    /// untouched planner characterization suites.
     fn propose_batch(
         &self,
         batch: &[SymbolId],
@@ -331,6 +343,9 @@ impl<'a> OptimizationPlanner<'a> {
             return Vec::new();
         };
         let target_path = (self.target_path_for)(&candidate.path, &anchor.name);
+        if target_path == candidate.path {
+            return Vec::new();
+        }
         members
             .into_iter()
             .filter_map(|(symbol, record)| {

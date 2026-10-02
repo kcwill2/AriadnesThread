@@ -7,7 +7,7 @@ use ariadne_lang::{
 };
 use ariadne_transform::{ExtractionResult, MigrationPreview};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -134,6 +134,15 @@ impl TransactionApplier {
     /// byte, plan M23 I3) and consumer rewrites through `rewriter` (which
     /// owns every directive spelling), and return the snapshot plus created
     /// paths.
+    ///
+    /// T7b move-removal (D-M23-5, I5): when a rewrite points at moved
+    /// symbols generated into new files, the symbols' existing source files
+    /// are also snapshotted, and `rewriter.remove_top_level_symbols` decides
+    /// the strip inside the same transaction — `Some` writes the stripped
+    /// text back (rollback restores the original), `None` (the C++ default)
+    /// leaves the file byte-identical, preserving copy-only semantics. The
+    /// decision lives entirely in the hook result; validate names no
+    /// language (I2).
     pub fn apply_with(
         repo_root: &Path,
         extraction: &ExtractionResult,
@@ -151,6 +160,11 @@ impl TransactionApplier {
 
         for rw in &migration.rewrites {
             paths_to_snapshot.push(repo_root.join(&rw.consumer_file));
+        }
+
+        let move_removals = collect_move_removals(repo_root, migration, extraction);
+        for source in move_removals.keys() {
+            paths_to_snapshot.push(repo_root.join(source));
         }
 
         let snapshot = FileSnapshot::capture(&paths_to_snapshot)?;
@@ -202,6 +216,8 @@ impl TransactionApplier {
             fs::write(&path, content)?;
         }
 
+        strip_moved_symbols(repo_root, &move_removals, rewriter)?;
+
         Ok((snapshot, new_paths))
     }
 
@@ -240,6 +256,72 @@ impl TransactionApplier {
             Err("State mismatch".into())
         }
     }
+}
+
+/// The existing source files whose moved symbols `apply_with` must offer to
+/// `remove_top_level_symbols`, keyed by repo-relative path, valued with the
+/// moved symbol names (sorted). Derivation is fully neutral (I2): a rewrite's
+/// `old_includes` entries that exist on disk, are not the consumer itself,
+/// and are not a generated target (the T7b self-target mirror — stripping a
+/// unit's own output would corrupt it); the names come from the generated
+/// units the rewrite's `new_includes` point at.
+fn collect_move_removals(
+    repo_root: &Path,
+    migration: &MigrationPreview,
+    extraction: &ExtractionResult,
+) -> BTreeMap<PathBuf, Vec<String>> {
+    let mut names_by_source: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
+    for rewrite in &migration.rewrites {
+        let moved: BTreeSet<String> = extraction
+            .headers
+            .iter()
+            .filter(|unit| rewrite.new_includes.contains(&unit.path))
+            .flat_map(|unit| unit.symbols.iter().map(|sym| sym.name.clone()))
+            .collect();
+        if moved.is_empty() {
+            continue;
+        }
+        for old_dep in &rewrite.old_includes {
+            if old_dep == &rewrite.consumer_file || is_generated_target(old_dep, extraction) {
+                continue;
+            }
+            if repo_root.join(old_dep).is_file() {
+                names_by_source
+                    .entry(old_dep.clone())
+                    .or_default()
+                    .extend(moved.iter().cloned());
+            }
+        }
+    }
+    names_by_source
+        .into_iter()
+        .map(|(source, names)| (source, names.into_iter().collect()))
+        .collect()
+}
+
+/// A rewrite's old dependency path that is itself one of this plan's
+/// generated unit targets (shape-impossible for C++: targets are
+/// `{name}_extracted.h` under `generated/`).
+fn is_generated_target(path: &Path, extraction: &ExtractionResult) -> bool {
+    extraction.headers.iter().any(|unit| unit.path == path)
+}
+
+/// Offer each moved source file to the plugin's removal hook; a `Some`
+/// result is written back inside the caller's snapshot (I5 move), a `None`
+/// result (C++ default) leaves the file byte-identical (copy-only, I5).
+fn strip_moved_symbols(
+    repo_root: &Path,
+    removals: &BTreeMap<PathBuf, Vec<String>>,
+    rewriter: &dyn DependencyRewriter,
+) -> Result<()> {
+    for (relative, names) in removals {
+        let path = repo_root.join(relative);
+        let content = fs::read_to_string(&path)?;
+        if let Some(stripped) = rewriter.remove_top_level_symbols(&content, names) {
+            fs::write(&path, stripped)?;
+        }
+    }
+    Ok(())
 }
 
 pub struct TierValidator;

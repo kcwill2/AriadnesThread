@@ -97,6 +97,24 @@ fn read_json(path: &Path) -> Result<Value> {
     Ok(parsed)
 }
 
+/// T7b defining-file filter lock: no proposed extraction may target the
+/// file that defines its symbol (a self-move is a no-op the planner must
+/// never plan).
+fn assert_no_self_targeted_proposals(
+    extractions: &[ariadne_cluster::plan::ProposedExtraction],
+    defining_rel: &str,
+) {
+    let self_targeted: Vec<String> = extractions
+        .iter()
+        .filter(|ext| normalized_rel(&ext.target_header) == defining_rel)
+        .map(|ext| ext.symbol_id.0.clone())
+        .collect();
+    assert!(
+        self_targeted.is_empty(),
+        "T7b: no proposal may target the file that defines its symbol (self-targeted: {self_targeted:?})"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 1. Fixture discovery + shaping (D-M23-9 sbt shape).
 // ---------------------------------------------------------------------------
@@ -363,6 +381,12 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
         );
     }
 
+    // T7b defining-file filter: `{Symbol}.scala` naming resolves the package
+    // object `com.example.legacy.legacy` back to `legacy.scala` — extracting
+    // a symbol into its own defining file is a no-op move and must never be
+    // planned.
+    assert_no_self_targeted_proposals(&plan.proposed_extractions, SHARED_REL);
+
     // The flip retired the gap at its source: no discovered language lacks
     // planning, so plan_with_rejections has no PlanningUnsupported(Scala) —
     // asserted from the registry rule the CLI applies (m22 pattern).
@@ -381,21 +405,26 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
         "D-M23-6: no PlanningUnsupported(Scala) rejection can exist post-flip"
     );
 
-    let persisted = read_json(&repo.root.join("artifacts/plans/plans.json"))?;
-    assert_eq!(
-        persisted.as_array().map(Vec::len),
-        Some(plans.len()),
-        "the persisted plan stage mirrors the returned plans"
-    );
-    let manifest = read_json(&repo.root.join("artifacts/plans/manifest.json"))?;
-    assert_eq!(
-        manifest["total_plans"].as_u64(),
-        Some(plans.len() as u64),
-        "the plan manifest counts the proposed plans: {manifest}"
-    );
+    assert_persisted_plan_stage(&repo.root, plans.len())?;
     // TODO(M23 S4-landing): assert the sealed pair (LegacyShape+LegacyCircle)
     // lands in ONE batch/target once the typed extends channel feeds
     // colocated_groups_with_edges; today (HEAD b3a9958) they are separate
     // singleton batches, which the assertions above deliberately do not lock.
+    Ok(())
+}
+
+fn assert_persisted_plan_stage(root: &Path, plan_count: usize) -> Result<()> {
+    let persisted = read_json(&root.join("artifacts/plans/plans.json"))?;
+    assert_eq!(
+        persisted.as_array().map(Vec::len),
+        Some(plan_count),
+        "the persisted plan stage mirrors the returned plans"
+    );
+    let manifest = read_json(&root.join("artifacts/plans/manifest.json"))?;
+    assert_eq!(
+        manifest["total_plans"].as_u64(),
+        Some(plan_count as u64),
+        "the plan manifest counts the proposed plans: {manifest}"
+    );
     Ok(())
 }

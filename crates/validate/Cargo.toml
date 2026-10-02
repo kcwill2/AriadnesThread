@@ -20,3 +20,6 @@ ariadne-lang = { path = "../lang" }
 # Byte-parity locks run apply_with against the C++ plugin's directive text;
 # production code stays plugin-free (same pattern as ariadne-transform).
 ariadne-lang-cpp = { path = "../lang-cpp" }
+# T7b move-removal locks build ExtractedSymbol values (SymbolKind) in a
+# neutral fake-rewriter transaction test.
+ariadne-index = { path = "../index" }

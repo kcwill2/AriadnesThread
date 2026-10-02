@@ -347,6 +347,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-cluster",
+ "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
  "ariadne-transform",
