@@ -2,19 +2,20 @@
 //!
 //! Capability gating lives in the pipeline, not here: the literals of
 //! [`crate::plugin::ScalaPlugin::capabilities`] keep `planning`,
-//! `extraction`, `rewriting`, and `validation` switched off, so calling
-//! the extractor/rewriter/validator stubs before M23 is a capability-gated
+//! `extraction`, and `rewriting` switched off, so calling the
+//! extractor/rewriter stubs before their milestones is a capability-gated
 //! error before it could ever reach these bodies. M20.1 retired the
 //! resolver stub ([`crate::resolver::ScalaImportResolver`]) and M21 closed
 //! the analyzer gap ([`crate::analyzer::ScalaAnalyzer`] over the M21
 //! parser); both are wired in [`crate::plugin`] and their stubs deleted.
 //! M22.1a retired the constraints stub for
-//! [`crate::constraints::ScalaClusteringConstraints`]. What remains here
-//! is owned by M23 (extraction, rewriting, validation).
+//! [`crate::constraints::ScalaClusteringConstraints`]. M23.4 (T4) retired
+//! the validator stub for
+//! [`crate::validator::ScalaToolchainValidator`] (probe-backed, D-M23-6).
+//! What remains here is owned by M23 T5/T6 (extraction, rewriting).
 
 use ariadne_lang::{
-    CompilerValidator, DependencyRewriter, GeneratedSourceFile, RewriteSpec, SourceExtractor,
-    SymbolBody,
+    DependencyRewriter, GeneratedSourceFile, RewriteSpec, SourceExtractor, SymbolBody,
 };
 use std::path::PathBuf;
 
@@ -46,18 +47,6 @@ impl DependencyRewriter for StubRewriter {
     }
 }
 
-/// Reports success without compiling until the M23 Scala validator
-/// replaces it; `validation: false` gates the pipeline away from this body
-/// until then. The trait-default `toolchain_status()` (`Unknown`) is kept:
-/// no Scala toolchain probe exists before M23.
-pub struct StubValidator;
-
-impl CompilerValidator for StubValidator {
-    fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,12 +59,5 @@ mod tests {
             new_deps: vec!["com.example.orders.model".to_string()],
         };
         assert_eq!(StubRewriter.rewrite(source, &spec), source);
-    }
-
-    #[test]
-    fn stub_validator_reports_ok_until_m23() {
-        assert!(StubValidator
-            .validate_compile(&[], &[])
-            .is_ok());
     }
 }

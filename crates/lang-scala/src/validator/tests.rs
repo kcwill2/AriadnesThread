@@ -310,11 +310,10 @@ fn validate_compile_maps_a_vanished_compiler_to_err() {
 
 #[test]
 fn real_runner_reports_none_for_unspawnable_binary() {
-    assert_eq!(
+    assert!(
         ProcessCommandRunner
             .run("ariadne-definitely-not-on-path-xyz", &["--version"])
             .is_none(),
-        true,
         "the production runner maps spawn failure to None — the Missing half of the probe"
     );
 }

@@ -96,10 +96,18 @@ impl ScalaToolchainValidator {
         Self { runner }
     }
 
-    /// First usable candidate and its version banner line. T4 red skeleton:
-    /// behavior lands in the green step.
+    /// First usable candidate and its version banner line. A candidate is
+    /// usable when the probe process could be spawned **and** exited
+    /// successfully; unresolvable or failing candidates fall through to the
+    /// next entry of [`TOOLCHAIN_PROBE_ORDER`].
     fn first_usable_toolchain(&self) -> Option<(&'static str, String)> {
-        let _ = &self.runner;
+        for candidate in TOOLCHAIN_PROBE_ORDER {
+            if let Some(outcome) = self.runner.run(candidate, VERSION_PROBE_ARGS) {
+                if outcome.success {
+                    return Some((candidate, version_banner(&outcome.stdout, candidate)));
+                }
+            }
+        }
         None
     }
 }
@@ -111,24 +119,72 @@ impl Default for ScalaToolchainValidator {
 }
 
 impl CompilerValidator for ScalaToolchainValidator {
-    /// D-M23-12: without a usable toolchain this must be an honest `Err`
-    /// naming the decision with no compile spawn; with one it invokes
-    /// `<binary> <compiler_args…> <source_files…>` and maps failure to
-    /// `Err` carrying the compiler output. T4 red skeleton: always defers.
+    /// D-M23-12: without a usable toolchain this is an honest `Err` naming
+    /// the decision, with only the `--version` probe walk spawned; with one
+    /// it invokes `<binary> <compiler_args…> <source_files…>` (the scalac
+    /// options-before-sources convention) and maps failure to `Err` carrying
+    /// the compiler output.
     fn validate_compile(
         &self,
-        _source_files: &[PathBuf],
-        _compiler_args: &[String],
+        source_files: &[PathBuf],
+        compiler_args: &[String],
     ) -> Result<(), String> {
-        Err(COMPILE_DEFERRAL.to_string())
+        let Some((binary, _)) = self.first_usable_toolchain() else {
+            return Err(COMPILE_DEFERRAL.to_string());
+        };
+        let arguments = compile_arguments(compiler_args, source_files);
+        let args: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        match self.runner.run(binary, &args) {
+            Some(outcome) if outcome.success => Ok(()),
+            Some(outcome) => Err(failure_text(binary, &outcome)),
+            None => Err(format!(
+                "{binary} became unrunnable between probe and compile"
+            )),
+        }
     }
 
     /// Probes `scalac`, `scala-cli`, `sbt` in order (D-M23-6); `Missing`
     /// when none is usable — the offline contract on this machine and CI
-    /// (I7). T4 red skeleton: trait-default `Unknown` still in place.
+    /// (I7), feeding the existing neutral `Missing ⇒ Skipped` tier-3 mapping.
     fn toolchain_status(&self) -> ToolchainStatus {
-        ToolchainStatus::Unknown
+        match self.first_usable_toolchain() {
+            Some((_, version)) => ToolchainStatus::Available(version),
+            None => ToolchainStatus::Missing,
+        }
     }
+}
+
+/// The first non-empty line of the version output, falling back to the
+/// probed binary name — the `probe_compiler_status` banner shape.
+fn version_banner(stdout: &str, binary: &str) -> String {
+    stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(binary)
+        .to_string()
+}
+
+/// The documented invocation shape: `[compiler_args…, source_files…]`.
+fn compile_arguments(compiler_args: &[String], source_files: &[PathBuf]) -> Vec<String> {
+    let mut arguments: Vec<String> = compiler_args.to_vec();
+    arguments.extend(source_files.iter().map(|file| file.display().to_string()));
+    arguments
+}
+
+/// A failed compile maps to `Err` carrying the binary and the compiler's
+/// own output (stderr first, then stdout).
+fn failure_text(binary: &str, outcome: &CommandOutcome) -> String {
+    let stderr = outcome.stderr.trim();
+    let stdout = outcome.stdout.trim();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no compiler output"
+    };
+    format!("{binary} exited unsuccessfully: {detail}")
 }
 
 #[cfg(test)]

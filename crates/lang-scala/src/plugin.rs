@@ -2,11 +2,14 @@
 //!
 //! Wires the kickoff components (`ScalaDetector`, `ScalaUnitShaper`), the
 //! M20.1 resolver ([`crate::resolver::ScalaImportResolver`]), the M21
-//! analyzer ([`crate::analyzer::ScalaAnalyzer`] over the M21 parser), and
-//! the documented milestone stubs (M23, see [`crate::stubs`]) into
+//! analyzer ([`crate::analyzer::ScalaAnalyzer`] over the M21 parser), the
+//! M23.4 probe validator ([`crate::validator::ScalaToolchainValidator`]),
+//! and the remaining milestone stubs (M23 T5/T6, see [`crate::stubs`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
 //! gate that keeps the pipeline from reaching the stubs whose milestones
-//! have not landed.
+//! have not landed; a wired component behind a still-false capability (the
+//! validator, pre-T7) is the M18 shape — reachable only by direct plugin
+//! use, never by the gated pipeline.
 
 use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
@@ -14,7 +17,8 @@ use crate::constraints::ScalaClusteringConstraints;
 use crate::detector::ScalaDetector;
 use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
-use crate::stubs::{StubExtractor, StubRewriter, StubValidator};
+use crate::stubs::{StubExtractor, StubRewriter};
+use crate::validator::ScalaToolchainValidator;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     DependencyRewriter, DependencyVocabulary, GuardKind, LanguageCapabilities, LanguageDetector,
@@ -40,7 +44,7 @@ pub struct ScalaPlugin {
     constraints: ScalaClusteringConstraints,
     extractor: StubExtractor,
     rewriter: StubRewriter,
-    validator: StubValidator,
+    validator: ScalaToolchainValidator,
 }
 
 impl ScalaPlugin {
@@ -53,7 +57,7 @@ impl ScalaPlugin {
             constraints: ScalaClusteringConstraints,
             extractor: StubExtractor,
             rewriter: StubRewriter,
-            validator: StubValidator,
+            validator: ScalaToolchainValidator::new(),
         }
     }
 }
@@ -129,8 +133,10 @@ impl LanguagePlugin for ScalaPlugin {
 
     /// Discovery through load metric work offline at kickoff; planning and
     /// the extraction-side stages stay off until their milestones
-    /// (plan:381). `requires_toolchain: false` per plan assumption A3:
-    /// kickoff never invokes scalac/sbt.
+    /// (plan:381). `requires_toolchain: false` per plan assumption A3: the
+    /// pipeline never invokes a Scala compile; the M23.4 validator only
+    /// spawns `--version` probes (D-M23-6/D-M23-12, I7 — offline these
+    /// resolve `Missing` and tier 3 reports `Skipped`).
     fn capabilities(&self) -> LanguageCapabilities {
         LanguageCapabilities {
             discovery: true,
