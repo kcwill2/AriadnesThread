@@ -25,7 +25,24 @@
 use crate::imports::{
     char_to_byte_map, scan_imports, ImportPass, ImportStatement, ParsedSelector, SelectorForm,
 };
-use ariadne_lang::{DependencyRewriter, RewriteSpec};
+use ariadne_lang::{DependencyRewriter, DirectiveHit, RewriteSpec};
+
+/// Statement-level target relation (D-M23-7 iii consumer discovery): a named
+/// or grouped selector whose module path EQUALS the target, or a wildcard
+/// whose base is the target itself or the target's package prefix — LOCKED:
+/// `import a.b._` is target-affected for `a.b`, for `a.b.C`, and for
+/// `a.b.deep.D` (qualified access through the wildcard), never for a sibling
+/// package sharing only a character prefix (`ab.C` is not under `a`).
+fn statement_mentions(form: &SelectorForm, target: &str) -> bool {
+    match form {
+        SelectorForm::Plain { .. } | SelectorForm::Grouped { .. } => {
+            form.module_path().as_deref() == Some(target)
+        }
+        SelectorForm::Wildcard { base } => {
+            target == base || target.starts_with(&format!("{base}."))
+        }
+    }
+}
 
 /// Rewrites Scala import directives in consumer sources.
 pub struct ScalaDependencyRewriter;
@@ -50,6 +67,24 @@ impl DependencyRewriter for ScalaDependencyRewriter {
             content = rewrite_for_dep(&content, old_dep, &spec.new_deps);
         }
         content
+    }
+
+    fn find_dependency_targets(&self, source: &str, target: &str) -> Vec<DirectiveHit> {
+        let pass = scan_imports(source);
+        pass.statements
+            .iter()
+            .filter(|statement| {
+                statement
+                    .selectors
+                    .iter()
+                    .any(|selector| statement_mentions(&selector.form, target))
+            })
+            .map(|statement| DirectiveHit {
+                start_line: pass.tokens[statement.start_tok].line,
+                end_line: pass.tokens[statement.end_tok - 1].line,
+                raw_directive: pass.statement_text(source, statement),
+            })
+            .collect()
     }
 
     fn render_diff(&self, removed: &[String], added: &[String], preserved: &[String]) -> String {
@@ -322,6 +357,62 @@ mod tests {
              import com.example.models.{User}\nimport scala.collection.mutable._\n\n\
              object Svc {\n  def f(u: User): Unit = ???\n}\n"
         );
+    }
+
+    fn hits(source: &str, target: &str) -> Vec<DirectiveHit> {
+        ScalaDependencyRewriter.find_dependency_targets(source, target)
+    }
+
+    #[test]
+    fn named_grouped_and_wildcard_statements_are_found_for_their_targets() {
+        let source = "package p\n\nimport a.b.C\nimport d.e.{F, G}\nimport h._\n";
+        let named: Vec<(usize, usize, String)> = hits(source, "a.b.C")
+            .into_iter()
+            .map(|h| (h.start_line, h.end_line, h.raw_directive))
+            .collect();
+        assert_eq!(named, vec![(3, 3, "import a.b.C".to_string())]);
+        assert_eq!(hits(source, "d.e.G").len(), 1, "a grouped member hits its statement");
+        assert_eq!(hits(source, "h").len(), 1, "the aggregate itself is target-affected");
+        assert_eq!(hits(source, "h.K").len(), 1, "a direct member is under the wildcard");
+        assert_eq!(hits(source, "h.m.N").len(), 1, "qualified access through the wildcard");
+        assert!(hits(source, "h2.K").is_empty());
+    }
+
+    #[test]
+    fn wildcard_prefix_rule_never_matches_a_sibling_package() {
+        let source = "import a._\nimport ab.C\n";
+        assert_eq!(hits(source, "ab.C")[0].raw_directive, "import ab.C");
+        assert_eq!(hits(source, "a.K")[0].raw_directive, "import a._");
+        assert!(hits(source, "z.z.C").is_empty());
+    }
+
+    #[test]
+    fn commented_and_quoted_occurrences_are_never_hits() {
+        assert!(hits("// import a.b.C\nval doc = \"import a.b.C\"\n", "a.b.C").is_empty());
+    }
+
+    #[test]
+    fn multiline_grouped_hit_reports_full_line_range_and_verbatim_text() {
+        let source = "import a.b.{\n  Old,\n  Keep\n}\nclass Use\n";
+        let hits = hits(source, "a.b.Old");
+        assert_eq!(hits.len(), 1);
+        assert_eq!((hits[0].start_line, hits[0].end_line), (1, 4));
+        assert_eq!(hits[0].raw_directive, "import a.b.{\n  Old,\n  Keep\n}");
+    }
+
+    #[test]
+    fn multiple_occurrences_yield_multiple_hits_in_source_order() {
+        let hits = hits("import a.b.C\nimport other.T\nimport a.b.C\n", "a.b.C");
+        assert_eq!(
+            hits.iter().map(|h| h.start_line).collect::<Vec<usize>>(),
+            vec![1, 3]
+        );
+    }
+
+    #[test]
+    fn bare_import_hits_only_its_exact_module_path() {
+        assert_eq!(hits("import a.b.util\n", "a.b.util").len(), 1);
+        assert!(hits("import a.b.util\n", "a.b").is_empty());
     }
 
     #[test]
