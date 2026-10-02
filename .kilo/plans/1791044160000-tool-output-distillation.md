@@ -1,8 +1,11 @@
 # Tool Output Distillation (spec)
 
-Status: PROPOSED (awaiting mode + go decision). Successor to the discarded
-untracked prototype `tools/distill_tool_output.py` (deleted 2026-10-02, never
-committed — lessons below, do not resurrect its failure modes).
+Status: ACCEPTED 2026-10-02 (full workflow). Scope generalized per user
+direction: the digest+capture pattern applies to EVERY non-trivial tool
+output, and enforcement lives at the tool-output layer, not in agent
+delegation prose (I8). Successor to the discarded untracked prototype
+`tools/distill_tool_output.py` (deleted 2026-10-02, never committed — lessons
+below, do not resurrect its failure modes).
 
 ## 1. Intent Statement
 
@@ -42,6 +45,21 @@ workflow pays.
   rewrites.
 - **I7 — Hygiene.** Functions < 100 lines, files < 1000 lines, descriptive
   names, no ambiguous abbrevs; `tools/hygiene_check.py` R1/R2 clean.
+- **I8 — Output-layer enforcement.** Empirical finding (2026-10-02):
+  implementer subagents do NOT observably delegate to tool-runner; raw output
+  lands in implementer context and implementers sometimes overflow (M18.11
+  lineage). Context protection therefore lives in the TOOLS, not in skill
+  prose: every non-trivial output reaching an agent comes from a distilling
+  entry point — a pinned distiller or `tools/distill.py` generic mode. Bare
+  runs of known high-volume commands inside an implementer session are a
+  reviewer blocker; reports must show digest-shaped evidence (verdict line +
+  capture path), never raw pastes. tool-runner delegation is optional
+  architecture, never the load-bearing protection.
+- **I9 — Action-completeness.** A digest is valid only if the implementer can
+  act from it without opening the capture in the common case: failing test
+  name + `panicked at file:line:col` + assertion text (tests); error code +
+  message + `-->` location (builds); exception type + message (generic).
+  Truncation must self-declare (`... and K more`), never silent.
 
 ## 3. Architecture & Contract
 
@@ -60,6 +78,7 @@ Digest = namedtuple("Digest", "verdict lines capture_path")
 def digest_cargo_test(text, counts, exit_code,
                       max_blocks=5, max_block_lines=8) -> list[str]
 def digest_cargo_build(text, exit_code, max_blocks=10) -> Digest
+def digest_generic(text, exit_code, max_lines=50) -> Digest  # fallback
 def write_capture(text: str, capture_path) -> Path   # binary-mode write
 ```
 
@@ -75,6 +94,21 @@ Pinned cargo-test failure grammar (fixtures must cover all):
 Clean-pass digest is <= 4 lines: counts line, `no failures`, capture path,
 canonical line (testrun mode only).
 
+### `digest_generic` — deterministic fallback for commands without a pinned parser
+
+Verdict := child exit code only (I2/I8); text NEVER flips the verdict. Excerpt
+selection in strict priority order, hard cap 50 digest lines total:
+
+1. Python unittest `^(FAIL|ERROR): <name>` lines (max 5).
+2. Traceback blocks: `^Traceback (most recent call last):` through the final
+   non-indented line (max 2 blocks, max 10 lines each).
+3. Exception/error summary lines matching `^[A-Za-z_.]*(Error|Exception)[: ]`
+   or `^error:` or `^ERROR` (max 5).
+4. Nothing matched: first 3 + last 12 lines (anchored head/tail — never a
+   silent empty digest).
+
+Last digest line is ALWAYS `capture: <path> (<N> lines)`.
+
 ### `tools/testrun.py` (extend, behavior-preserving)
 
 - `--distill` joins `OWN_SWITCH_FLAGS`.
@@ -88,10 +122,16 @@ canonical line (testrun mode only).
 ### `tools/distill.py` (new CLI, build/clippy/generic commands)
 
 ```
-python tools/distill.py --format markdown cargo clippy -- -D warnings
 python tools/distill.py cargo build --release
-python tools/distill.py --input-file capture.txt     # offline parse (test seam)
+python tools/distill.py -- cargo clippy -- -D warnings
+python tools/distill.py --kind generic python -m unittest discover -s tools
+python tools/distill.py --input-file capture.txt --child-exit 3   # offline (test seam)
 ```
+
+- `--kind build|generic` (default `auto`: first child argv token `cargo` ->
+  build, otherwise generic). `--capture PATH` override; default
+  `target/distill-capture.txt`. `--child-exit N` supplies the verdict when
+  parsing offline with `--input-file` (default 0) — the test seam.
 
 - Runs the child with `subprocess` argv (no `shell=True`), inherits repo cwd,
   timeout passthrough (default 900 s). Verdict = child exit code (I2).
@@ -104,12 +144,26 @@ python tools/distill.py --input-file capture.txt     # offline parse (test seam)
 
 ## 4. Adoption (a tool nothing calls does not exist)
 
+- **Standing contract doc**: `docs/specs/tool-output-distillation.md` — the
+  durable policy AGENTS.md and skills cite (digest shapes per family, capture
+  paths, evidence rules). The plan file is history; the contract doc is law.
 - `AGENTS.md` Testing section: agents run tests via
   `python tools/testrun.py --distill [scoped args]`; raw mode remains for humans.
-- `.kilo/skills/tool-runner/SKILL.md`: output contract becomes
-  command + exit code + digest + capture path; pasting raw full output is
-  replaced by "quote the digest; read the capture file only when the digest
-  names a location you must see in full."
+- `.kilo/skills/tool-runner/SKILL.md`: rewritten as the distillation POLICY
+  owner, not a paste-through proxy. When invoked it returns exactly
+  `command + exit code + digest + capture path`; for commands lacking a pinned
+  distiller it runs them under `tools/distill.py`. Deployment note (I8):
+  nested subagent delegation is optional — the implementer running distilling
+  entry points directly is a fully supported mode; the protection is the
+  tool, not the routing. The `<tool output>` paste field is deleted.
+- `.kilo/skills/implementer` guidance via handoff discipline: bare runs of
+  known high-volume commands (`cargo test/build/clippy` without a distiller,
+  full `unittest discover`, `ui_smoke`, `bench_compare`) in an implementer
+  session are a reviewer blocker; gate evidence in reports must be digest +
+  capture path.
+- `.kilo/skills/review-gate/SKILL.md`: add report-evidence check — missing
+  digest/capture evidence or raw log pastes in the implementer report =
+  numbered finding.
 - `.kilo/skills/handoff-spec/SKILL.md` + `resume-checkpoint/SKILL.md`: green
   evidence line = distill-mode run; the canonical line is still what gets
   quoted verbatim (I1 keeps their existing contract valid).
@@ -123,7 +177,11 @@ python tools/distill.py --input-file capture.txt     # offline parse (test seam)
   ----` blocks + panicked-at lines; 9-failure output proving cap + `... and 4
   more`; ANSI-colored variant; drift-shaped `test result:` line must NOT be
   digested to PASS.
-- Green: implement `digest_cargo_test` + `write_capture` + `Digest` types.
+- Green: implement `digest_cargo_test` + `digest_generic` + `write_capture`
+  + `Digest`/namedtuple types. `digest_generic` fixtures: unittest FAIL/ERROR
+  names; 3 Tracebacks (only 2 excerpted); exception-summary line; empty-match
+  output (head/tail fallback, verdict from exit code — the anti-prototype
+  test); 50-line budget never exceeded in any shape.
 - Refactor: keep every function < 40 lines; parse loop extracts helpers.
 
 ### T2 — `testrun.py --distill` (depends T1)
@@ -136,28 +194,42 @@ python tools/distill.py --input-file capture.txt     # offline parse (test seam)
 - Refactor: no duplication of excerpt logic — module owns it.
 
 ### T3 — `tools/distill.py` build/clippy CLI (depends T1 scaffold only)
-- Red: `tools/distill_tests.py` using `--input-file` fixtures: two-error
-  compile output (error[E0308] + location `-->`), 15-warning clean build,
-  clippy failure, timeout path (injected fake), usage error exit 2. Verdicts
-  assert I2 (exit-code-driven, never substring).
+- Red: `tools/distill_tests.py` using `--input-file`/`--child-exit` fixtures:
+  two-error compile output (error[E0308] + location `-->`), 15-warning clean
+  build, clippy failure, generic-kind fallback delegation, timeout path
+  (injected fake), usage error exit 2. Verdicts assert I2 (exit-code-driven,
+  never substring) — a FAIL-exit fixture with no recognizable text must still
+  yield FAIL.
 - Green: argv runner (no shell=True), pinned build-shape parser, markdown/
   one-line digests, capture write.
 - Refactor: share excerpt cap constants with T1 module.
 
-### T4 — Adoption & governance (after T2, T3 review)
-- Edits: AGENTS.md, tool-runner SKILL.md, handoff-spec SKILL.md,
-  resume-checkpoint SKILL.md; ledger row + memory mirror; scoped commit via
-  `tools/commit_scoped.py` (touch-set below).
+### T4 — Adoption & governance (after T2, T3 review; separate handoff B)
+- Edits: new `docs/specs/tool-output-distillation.md` (standing contract),
+  AGENTS.md, tool-runner SKILL.md (policy rewrite + paste-field deletion),
+  review-gate SKILL.md (report-evidence check), handoff-spec SKILL.md +
+  resume-checkpoint SKILL.md (distill-mode evidence lines); ledger row +
+  memory mirror; scoped commit via `tools/commit_scoped.py`.
 
-**Touch-set:** `tools/distilled.py`, `tools/distilled_tests.py`,
-`tools/testrun.py`, `tools/testrun_tests.py`, `tools/distill.py`,
-`tools/distill_tests.py`, `AGENTS.md`, the three `.kilo/skills/*/SKILL.md`
-files, `tasks/milestone_ledger.md`.
+**Touch-set (handoff A, code):** `tools/distilled.py`,
+`tools/distilled_tests.py`, `tools/testrun.py`, `tools/testrun_tests.py`,
+`tools/distill.py`, `tools/distill_tests.py`, the handoff + journal files,
+this plan file (execution-results addendum only).
+**Touch-set (handoff B, governance):** `docs/specs/tool-output-distillation.md`,
+`AGENTS.md`, `.kilo/skills/tool-runner/SKILL.md`,
+`.kilo/skills/review-gate/SKILL.md`, `.kilo/skills/handoff-spec/SKILL.md`,
+`.kilo/skills/resume-checkpoint/SKILL.md`, `tasks/milestone_ledger.md`.
 
 ## 6. Acceptance gates
 
 - `python -m unittest discover -s tools -p "*_tests.py"` — all green (quote
   canonical count in handoff).
+- New digest suites: `digest_cargo_test` (pass/2-fail/cap-9/ANSI/drift),
+  `digest_generic` (unittest names/tracebacks capped/fallback head-tail/
+  budget <= 50/exit-code verdict with unrecognizable text), build parser
+  (2-error/warning-only/15-error cap), testrun `--distill` (5 replay-mode
+  tests incl. default-mode byte-identity regression lock), distill.py CLI
+  (offline verdict propagation, usage exit 2).
 - Live smoke: `python tools/testrun.py --distill -p ariadne-lang` — digest <=
   10 lines on a passing scoped run, canonical line last, capture path printed.
 - Live smoke: `python tools/distill.py cargo check` on workspace — one-line
