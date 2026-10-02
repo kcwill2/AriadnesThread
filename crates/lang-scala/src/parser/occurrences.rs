@@ -35,6 +35,9 @@ pub(crate) struct OccurrencePass {
     pub edges: Vec<SemanticEdge>,
     pub references: Vec<SymbolReference>,
     pub call_sites: Vec<CallSite>,
+    /// Typed `(subtype, supertype)` pairs from `extends`/`with` parent
+    /// positions only (plan M23, D-M23-8) — never occurrence edges.
+    pub extends_edges: Vec<(SymbolId, SymbolId)>,
 }
 
 pub(crate) struct Scope<'a> {
@@ -96,6 +99,7 @@ pub(crate) fn scan_occurrences(
         edges: Vec::new(),
         references: Vec::new(),
         call_sites: Vec::new(),
+        extends_edges: Vec::new(),
     };
     let mut cursor = 0usize;
     while cursor < tokens.len() {
@@ -284,6 +288,8 @@ fn emit_parent_edge(
         src_file: file_id.clone(),
         dst_file: file_id.clone(),
     });
+    pass.extends_edges
+        .push((src.id.clone(), SymbolId::new(&dst_symbol)));
 }
 
 /// Innermost tracked span containing the token (spans do not nest; the last

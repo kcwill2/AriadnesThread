@@ -153,12 +153,15 @@ impl LanguagePlugin for ScalaPlugin {
         }
     }
 
-    /// M21 bump (D19): the M21 Scala parser replaced the stub analyzer, so
-    /// the cache digest input moves from M20.1's "scala-1" to
-    /// "scala-parser-1". C++'s fingerprint literal is a separate digest
-    /// input and stays where it is (m18 parity).
+    /// M23 bump (D-M23-8): the parser now persists two new analysis surfaces
+    /// per Scala source (`SymbolRecord::modifiers` and
+    /// `TuAnalysis::extends_edges`), so cached pre-M23 shard bodies must not
+    /// be read as fresh — the cache digest input moves from
+    /// "scala-parser-1" to "scala-parser-2". C++'s fingerprint literal is a
+    /// separate digest input and stays where it is (m18 parity; C++ emits
+    /// neither surface, its JSON bytes are unchanged).
     fn analysis_fingerprint(&self) -> String {
-        "scala-parser-1".to_string()
+        "scala-parser-2".to_string()
     }
 
     /// The Scala shaper owns the sbt-layout unit-shaping literals
@@ -179,11 +182,12 @@ mod tests {
         assert_eq!(plugin.id(), LanguageId::Scala);
         assert_eq!(
             plugin.analysis_fingerprint(),
-            "scala-parser-1",
-            "bumped with the M21 parser (D19): ScalaAnalyzer/ScalaSourceParser are new \
-             analysis behavior feeding the cache digest; M20.1 introduced this lock at \
-             \"scala-1\" over the trait default \"v1\"; C++ keeps its own \"v1\" input \
-             untouched"
+            "scala-parser-2",
+            "bumped with the M23 typed extends channel (D-M23-8): Scala sources now carry \
+             SymbolRecord::modifiers + TuAnalysis::extends_edges, new cached-bytes inputs \
+             (m21 digest evolved byte-exactly in the same commit); M21 D19 moved this lock \
+             to \"scala-parser-1\", M20.1 introduced it at \"scala-1\" over the trait \
+             default \"v1\"; C++ keeps its own input untouched"
         );
         assert_eq!(plugin.detector().name(), "scala");
         let shaper = plugin.shaper().expect("ScalaUnitShaper landed in M19.2");

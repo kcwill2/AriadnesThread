@@ -476,7 +476,10 @@ fn scala_fingerprint_moves_only_the_scala_digest() -> Result<()> {
     };
 
     let cpp = digest(SourceLanguage::Cpp, "cpp-analyzer-1");
-    let scala = digest(SourceLanguage::Scala, "scala-parser-1");
+    // M23 evolution (D-M23-8, same-commit authority as the plugin bump): the
+    // live Scala fingerprint literal moved "scala-parser-1" -> "scala-parser-2"
+    // because Scala sources now persist modifiers + the typed extends channel.
+    let scala = digest(SourceLanguage::Scala, "scala-parser-2");
     assert_ne!(
         cpp.combined_hash, scala.combined_hash,
         "plan:413: one store cannot poison entries across languages"

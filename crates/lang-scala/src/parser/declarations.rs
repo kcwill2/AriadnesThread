@@ -21,6 +21,10 @@ pub(crate) struct TrackedDecl {
     /// runs until the next top-level boundary (braceless `def`/`val`).
     pub span_end: Option<usize>,
     pub is_package_object: bool,
+    /// Modifiers the analysis deliberately records — `sealed` only
+    /// (plan M23, D-M23-8); every other modifier keyword is consumed
+    /// silently as before.
+    pub modifiers: Vec<String>,
 }
 
 pub(crate) struct DeclPass {
@@ -39,6 +43,7 @@ pub(crate) struct ResolvedDecl {
     pub name_column: usize,
     pub span_start: usize,
     pub span_end_exclusive: usize,
+    pub modifiers: Vec<String>,
 }
 
 /// Kind mapping per D17 for the keywords that map independently of context.
@@ -121,11 +126,15 @@ pub(crate) fn collect_top_level_decls(tokens: &[Token], directives: &DirectiveSc
 /// decl plus the resume index (the body/`=` region is left to the walk).
 fn recognize_declaration(tokens: &[Token], index: usize) -> Option<(TrackedDecl, usize)> {
     let mut cursor = index;
+    let mut modifiers: Vec<String> = Vec::new();
     while tokens
         .get(cursor)
         .and_then(Token::ident)
         .is_some_and(is_modifier_keyword)
     {
+        if tokens.get(cursor).and_then(Token::ident) == Some("sealed") {
+            modifiers.push("sealed".to_string());
+        }
         cursor += 1;
         if tokens.get(cursor).is_some_and(|t| t.is_punct('[')) {
             cursor = skip_balanced(tokens, cursor, '[', ']');
@@ -173,6 +182,7 @@ fn recognize_declaration(tokens: &[Token], index: usize) -> Option<(TrackedDecl,
             span_start: index,
             span_end,
             is_package_object: false,
+            modifiers,
         },
         after_parameters,
     ))
@@ -193,6 +203,7 @@ fn recognize_package_object(
             span_start: index,
             span_end,
             is_package_object: true,
+            modifiers: Vec::new(),
         },
         name_index + 1,
     ))
@@ -315,6 +326,7 @@ pub(crate) fn resolve_decl_ids(
                 name_column: name_token.column,
                 span_start: decl.span_start,
                 span_end_exclusive,
+                modifiers: decl.modifiers,
             }
         })
         .collect()
@@ -374,8 +386,7 @@ pub(crate) fn symbol_payloads(
             owning_file: file_id.clone(),
             declarations: vec![decl.decl_id.clone()],
             definition: Some(decl.decl_id.clone()),
-
-            modifiers: Vec::new(),
+            modifiers: decl.modifiers.clone(),
         })
         .collect();
     let declarations = resolved

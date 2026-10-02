@@ -45,7 +45,7 @@ mod directives;
 mod occurrences;
 
 use crate::scanner::Token;
-use ariadne_lang_api::types::{DependencyKind, SemanticEdge, TuAnalysis};
+use ariadne_lang_api::types::{DependencyKind, SemanticEdge, SymbolId, TuAnalysis};
 use ariadne_repo::{FileId, SourceLanguage};
 pub(crate) use declarations::ResolvedDecl;
 use declarations::{collect_top_level_decls, resolve_decl_ids, symbol_payloads};
@@ -116,10 +116,17 @@ impl ScalaSourceParser {
             references: occurrences.references,
             call_sites: occurrences.call_sites,
             language: SourceLanguage::Scala,
-
-            extends_edges: Vec::new(),
+            extends_edges: dedupe_extends(occurrences.extends_edges),
         }
     }
+}
+
+fn dedupe_extends(edges: Vec<(SymbolId, SymbolId)>) -> Vec<(SymbolId, SymbolId)> {
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    edges
+        .into_iter()
+        .filter(|(sub, sup)| seen.insert((sub.0.clone(), sup.0.clone())))
+        .collect()
 }
 
 fn dedupe_edges(edges: Vec<SemanticEdge>) -> Vec<SemanticEdge> {

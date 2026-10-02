@@ -108,6 +108,8 @@ impl ReducedSemanticModel {
         let mut tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>> = BTreeMap::new();
         let mut file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
         let mut raw_edges: BTreeMap<(SymbolId, SymbolId), DependencyKind> = BTreeMap::new();
+        let mut extends: BTreeSet<(SymbolId, SymbolId)> = BTreeSet::new();
+        let mut sealed: BTreeSet<SymbolId> = BTreeSet::new();
 
         for tu in &index_result.tu_analyses {
             let tu_file = tu.tu_file_id;
@@ -139,6 +141,15 @@ impl ReducedSemanticModel {
             );
 
             Self::merge_tu_edges(&mut tu_usage, &mut raw_edges, tu_file, &tu.edges);
+
+            // D-M23-8 typed side channels: fold extends pairs and sealed
+            // modifiers (C++ analyses contribute nothing to either).
+            extends.extend(tu.extends_edges.iter().cloned());
+            for sym in &tu.symbols {
+                if sym.modifiers.iter().any(|modifier| modifier == "sealed") {
+                    sealed.insert(sym.id.clone());
+                }
+            }
 
             // References
             for ref_item in &tu.references {
@@ -178,8 +189,8 @@ impl ReducedSemanticModel {
             edges,
             tu_usage: tu_usage_vec,
             file_symbols: file_symbols_vec,
-            extends_edges: Vec::new(),
-            sealed_symbols: Vec::new(),
+            extends_edges: extends.into_iter().collect(),
+            sealed_symbols: sealed.into_iter().collect(),
         }
     }
 
