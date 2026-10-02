@@ -20,6 +20,7 @@ pub mod plugin;
 pub mod resolver;
 pub mod shaper;
 mod stubs;
+pub mod validator;
 
 pub use analyzer::ScalaAnalyzer;
 pub use boundary::EXTERNAL_PATH_MARKERS;
@@ -30,3 +31,7 @@ pub use planning::{scala_aggregation_filter, scala_declares_package_object, scal
 pub use plugin::ScalaPlugin;
 pub use resolver::ScalaImportResolver;
 pub use shaper::ScalaUnitShaper;
+pub use validator::{
+    CommandOutcome, CommandRunner, ProcessCommandRunner, ScalaToolchainValidator,
+    TOOLCHAIN_PROBE_ORDER,
+};

@@ -292,6 +292,16 @@ mod tests {
     }
 
     #[test]
+    fn validator_probes_instead_of_the_stub_default_status() {
+        let status = ScalaPlugin::new().validator().toolchain_status();
+        assert!(
+            !matches!(status, ariadne_lang::ToolchainStatus::Unknown),
+            "T4 (D-M23-6): ScalaToolchainValidator replaces the StubValidator trait-default \
+             Unknown; offline it resolves Missing (I7), on a Scala-equipped machine Available"
+        );
+    }
+
+    #[test]
     fn capabilities_match_the_plan_381_literal() {
         assert_eq!(
             ScalaPlugin::new().capabilities(),
