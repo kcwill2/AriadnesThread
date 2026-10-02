@@ -1,5 +1,6 @@
 //! Source file generation trait for language plugins.
 
+use ariadne_lang_api::types::SymbolKind;
 use std::path::PathBuf;
 
 /// A symbol's raw source text, ready to be written into a new file.
@@ -37,4 +38,26 @@ pub trait SourceExtractor: Send + Sync {
         namespace: &str,
         required_deps: &[String],
     ) -> GeneratedSourceFile;
+
+    /// Namespace the engine should pass back into [`SourceExtractor::extract`]
+    /// for units cut from `source_text` (plan M23, D-M23-2). The default is
+    /// empty — C++ headers need no namespace and ignores the `extract`
+    /// argument anyway (locked by `namespace_argument_is_ignored`); Scala
+    /// re-derives the file's package clause.
+    fn unit_namespace(&self, _source_text: &str) -> String {
+        String::new()
+    }
+
+    /// Verbatim declaration blocks for the named symbols located inside
+    /// `source_text` (plan M23, D-M23-1). Plugins locate bodies in their own
+    /// syntax at extract time; names that cannot be located are simply
+    /// omitted from the result, and the engine keeps its placeholder body
+    /// for them (invariant I4). The default finds nothing.
+    fn locate_symbol_bodies(
+        &self,
+        _source_text: &str,
+        _wanted: &[(String, SymbolKind)],
+    ) -> Vec<SymbolBody> {
+        Vec::new()
+    }
 }
