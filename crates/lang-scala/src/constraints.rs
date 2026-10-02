@@ -45,6 +45,13 @@ fn companion_groups(symbols: &[SymbolRecord]) -> Vec<Vec<SymbolId>> {
         .iter()
         .filter(|record| record.kind == SymbolKind::Object)
     {
+        // False-pair guard: a D17 companion carries the `$` on its id only
+        // (`name` stays the source identifier). An object literally named
+        // `Foo$` is not a companion id — stripping here would pair it with
+        // an unrelated `Foo`.
+        if record.name.ends_with('$') {
+            continue;
+        }
         if let Some(class_id) = record.id.0.strip_suffix('$') {
             if class_ids.contains(class_id) {
                 groups.insert(vec![class_id, record.id.0.as_str()]);
@@ -90,10 +97,13 @@ mod tests {
 
     #[test]
     fn companion_pairs_colocate() {
-        let batch = vec![
-            record("com.example.Foo", SymbolKind::Class),
-            record("com.example.Foo$", SymbolKind::Object),
-        ];
+        // D17 parser shape: the companion object's `name` is the source
+        // identifier `Foo`; only the id carries the `$`.
+        let companion = SymbolRecord {
+            name: "Foo".to_string(),
+            ..record("com.example.Foo$", SymbolKind::Object)
+        };
+        let batch = vec![record("com.example.Foo", SymbolKind::Class), companion];
         let groups = ScalaClusteringConstraints.colocated_groups(&batch);
         assert_eq!(
             group_ids(&groups),
@@ -119,6 +129,23 @@ mod tests {
             "unrelated and non-`$` symbols form no group: the planner leaves each in its own \
              singleton batch unchanged (a singleton is not a constraint), so unrelated symbols \
              stay colocated with nothing"
+        );
+    }
+
+    #[test]
+    fn lone_dollar_named_object_does_not_pair() {
+        // An object whose SOURCE name is literally `Foo$` (D17 appends the
+        // `$` only to the id of a class-paired companion, never to `name`)
+        // must not pair an unrelated `Foo` class through `$`-stripping.
+        let literal = SymbolRecord {
+            name: "Foo$".to_string(),
+            ..record("com.example.Foo$", SymbolKind::Object)
+        };
+        let batch = vec![record("com.example.Foo", SymbolKind::Class), literal];
+        assert!(
+            ScalaClusteringConstraints.colocated_groups(&batch).is_empty(),
+            "a `$`-named object is not a D17 companion id — pairing it with an \
+             unrelated class invents a constraint the source never declared"
         );
     }
 
