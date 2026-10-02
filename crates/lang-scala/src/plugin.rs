@@ -5,21 +5,22 @@
 //! analyzer ([`crate::analyzer::ScalaAnalyzer`] over the M21 parser), the
 //! M23.4 probe validator ([`crate::validator::ScalaToolchainValidator`]),
 //! the M23.5 extractor ([`crate::extractor::ScalaSourceExtractor`]), and
-//! the remaining M23 T6 rewriter stub (see [`crate::stubs`]) into
+//! the M23.6 rewriter ([`crate::dependency_rewriter::ScalaDependencyRewriter`]) into
 //! `ariadne_lang::LanguagePlugin`. The capability literals below are the
-//! gate that keeps the pipeline from reaching the stubs whose milestones
-//! have not landed; a wired component behind a still-false capability (the
-//! validator, pre-T7) is the M18 shape — reachable only by direct plugin
-//! use, never by the gated pipeline.
+//! gate that keeps the pipeline out of stages whose milestone has not
+//! landed; every wired component behind a still-false capability (the
+//! validator and rewriter, pre-T7) is the M18 shape — reachable only by
+//! direct plugin use, never by the gated pipeline. The T7 flip turns the
+//! planning/extraction/rewriting/validation bits on.
 
 use crate::analyzer::ScalaAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
 use crate::constraints::ScalaClusteringConstraints;
+use crate::dependency_rewriter::ScalaDependencyRewriter;
 use crate::detector::ScalaDetector;
 use crate::extractor::ScalaSourceExtractor;
 use crate::resolver::ScalaImportResolver;
 use crate::shaper::ScalaUnitShaper;
-use crate::stubs::StubRewriter;
 use crate::validator::ScalaToolchainValidator;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
@@ -45,7 +46,7 @@ pub struct ScalaPlugin {
     resolver: ScalaImportResolver,
     constraints: ScalaClusteringConstraints,
     extractor: ScalaSourceExtractor,
-    rewriter: StubRewriter,
+    rewriter: ScalaDependencyRewriter,
     validator: ScalaToolchainValidator,
 }
 
@@ -58,7 +59,7 @@ impl ScalaPlugin {
             resolver: ScalaImportResolver,
             constraints: ScalaClusteringConstraints,
             extractor: ScalaSourceExtractor,
-            rewriter: StubRewriter,
+            rewriter: ScalaDependencyRewriter,
             validator: ScalaToolchainValidator::new(),
         }
     }
@@ -306,6 +307,31 @@ mod tests {
             !matches!(status, ariadne_lang::ToolchainStatus::Unknown),
             "T4 (D-M23-6): ScalaToolchainValidator replaces the StubValidator trait-default \
              Unknown; offline it resolves Missing (I7), on a Scala-equipped machine Available"
+        );
+    }
+
+    #[test]
+    fn plugin_rewriter_emits_real_scala_directive_bytes_not_the_stub() {
+        let plugin = ScalaPlugin::new();
+        let spec = ariadne_lang::RewriteSpec {
+            old_deps: vec!["a.b.Old".to_string()],
+            new_deps: vec!["x.y.New".to_string()],
+        };
+        assert_eq!(
+            plugin.rewriter().rewrite("import a.b.Old\n", &spec),
+            "import x.y.New\n",
+            "T6 wired: the retired StubRewriter's source passthrough is gone"
+        );
+        assert_eq!(
+            plugin.rewriter().render_diff(&["a.b.C".to_string()], &[], &[]),
+            "    - import a.b.C\n"
+        );
+        assert!(
+            plugin
+                .rewriter()
+                .remove_top_level_symbols("class Drop\n", &["Drop".to_string()])
+                .is_some(),
+            "move semantics reachable through the plugin (engine consumes the hook)"
         );
     }
 

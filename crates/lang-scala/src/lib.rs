@@ -2,9 +2,10 @@
 //!
 //! Kickoff milestone: file-kind discovery, modeling literals, capability
 //! gating, and sbt-layout unit shaping; M20.1 added the import/export
-//! dependency resolver. Remaining pipeline components are documented stubs
-//! or landed components by milestone (analyzer M21, probe validator M23.4,
-//! extractor M23.5/T5; rewriter stub owned by M23 T6). The crate depends
+//! dependency resolver. Every pipeline component is landed by milestone
+//! (analyzer M21, probe validator M23.4, extractor M23.5/T5, rewriter
+//! M23.6/T6); the kickoff stubs are deleted (D-M23-6), the capability
+//! flip itself is T7. The crate depends
 //! inward only (repo -> lang-api -> lang); the m17 architecture guard
 //! enforces this edge rule from the moment the crate exists.
 
@@ -23,7 +24,6 @@ pub mod planning;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
-mod stubs;
 pub mod validator;
 
 pub use analyzer::ScalaAnalyzer;
