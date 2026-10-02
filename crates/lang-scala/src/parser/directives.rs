@@ -49,7 +49,7 @@ pub(crate) fn scan_directives(tokens: &[Token]) -> DirectiveScan {
     scan
 }
 
-fn preceded_by_dot(tokens: &[Token], index: usize) -> bool {
+pub(crate) fn preceded_by_dot(tokens: &[Token], index: usize) -> bool {
     index > 0 && tokens[index - 1].is_punct('.')
 }
 

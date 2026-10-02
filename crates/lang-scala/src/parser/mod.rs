@@ -50,6 +50,7 @@ use crate::scanner::Token;
 use declarations::{collect_top_level_decls, resolve_decl_ids, symbol_payloads};
 use directives::scan_directives;
 pub(crate) use declarations::ResolvedDecl;
+pub(crate) use directives::{read_dotted_chain, preceded_by_dot};
 use occurrences::scan_occurrences;
 use std::collections::BTreeSet;
 
