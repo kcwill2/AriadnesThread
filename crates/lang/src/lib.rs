@@ -40,6 +40,6 @@ pub use resolver::{
     first_ondisk_include_candidate, DependencyResolver, DirectiveStyle, RawDepEdge,
     ResolutionContext,
 };
-pub use rewriter::{DependencyRewriter, RewriteSpec};
+pub use rewriter::{DependencyRewriter, DirectiveHit, RewriteSpec};
 pub use unit::UnitShaper;
 pub use validator::CompilerValidator;

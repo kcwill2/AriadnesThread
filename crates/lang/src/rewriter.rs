@@ -14,6 +14,28 @@ pub struct RewriteSpec {
     pub new_deps: Vec<String>,
 }
 
+/// One dependency directive located in a source file (D-M23-7 iii, M23 T6).
+///
+/// Consumer-discovery call sites (CLI `transform`/`optimize`) previously ran
+/// a raw `#include "<target>"` substring scan and only used the hit as a
+/// yes/no; this record carries what a language plugin can honestly report:
+/// - `start_line` / `end_line`: **1-based, inclusive** line numbers of the
+///   directive statement in the source file (one line for single-line
+///   directives; a multi-line grouped directive spans its whole text),
+/// - `raw_directive`: the directive statement **verbatim** as it appears in
+///   the source, excluding any trailing newline (language plugins that
+///   cannot recover the exact bytes must not report a hit at all).
+///
+/// Hits must never come from inside comments or string literals; a plugin
+/// that scans lexically guarantees this (Scala: the M21 scanner; C++: the
+/// tokenizer scan reproducing the old substring semantics, T7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectiveHit {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub raw_directive: String,
+}
+
 /// Rewrites dependency directives in a consumer source file.
 ///
 /// Given the existing source text and a [`RewriteSpec`], returns the new
@@ -22,6 +44,25 @@ pub struct RewriteSpec {
 pub trait DependencyRewriter: Send + Sync {
     /// Apply `spec` to `source` and return the rewritten source text.
     fn rewrite(&self, source: &str, spec: &RewriteSpec) -> String;
+
+    /// Locate dependency directives in `source` that mention the extraction
+    /// `target` (D-M23-7 iii). The default is **empty** — deliberately NOT
+    /// the old C++ substring scan, so a language without an implementation
+    /// reports no consumers rather than false positives; `lang-cpp`
+    /// reproduces its substring scan explicitly in T7, and Scala scans its
+    /// import directives (M23 T6).
+    fn find_dependency_targets(&self, _source: &str, _target: &str) -> Vec<DirectiveHit> {
+        Vec::new()
+    }
+
+    /// Delete the named top-level symbols from `source` (D-M23-5 move
+    /// semantics), or `None` when any name is not safely removable — the
+    /// caller then proceeds **without** removal. The default is `None`:
+    /// C++ keeps copy-only isolation (I5 — the engine never removes), only
+    /// move-capable languages (Scala, via parser spans) implement this.
+    fn remove_top_level_symbols(&self, _source: &str, _qualified_names: &[String]) -> Option<String> {
+        None
+    }
 
     /// Render a unified-diff-style fragment listing dependencies removed,
     /// added, and preserved (side effects). The default is a language-neutral
@@ -61,5 +102,43 @@ mod tests {
         };
         assert_eq!(spec.old_deps.len(), 1);
         assert_eq!(spec.new_deps.len(), 2);
+    }
+
+    struct InertRewriter;
+
+    impl DependencyRewriter for InertRewriter {
+        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
+            source.to_string()
+        }
+    }
+
+    #[test]
+    fn find_dependency_targets_default_is_empty_not_a_substring_scan() {
+        let hits = InertRewriter.find_dependency_targets("#include \"a.h\"", "a.h");
+        assert!(
+            hits.is_empty(),
+            "D-M23-7 iii: the neutral default must be empty — C++ opts into its \
+             substring scan explicitly in T7, no language inherits it silently"
+        );
+    }
+
+    #[test]
+    fn remove_top_level_symbols_default_is_none_copy_semantics_preserved() {
+        assert_eq!(
+            InertRewriter.remove_top_level_symbols("int x;", &["x".to_string()]),
+            None,
+            "I5: default None — the engine never removes for copy-only languages (C++)."
+        );
+    }
+
+    #[test]
+    fn directive_hit_carries_line_range_and_verbatim_text() {
+        let hit = DirectiveHit {
+            start_line: 3,
+            end_line: 3,
+            raw_directive: "import a.b.C".to_string(),
+        };
+        assert_eq!(hit.start_line, hit.end_line);
+        assert_eq!(hit.raw_directive, "import a.b.C");
     }
 }
