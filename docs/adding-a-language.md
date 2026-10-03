@@ -17,13 +17,13 @@ Two honest qualifiers. The registration line is an edit to a file inside a
 guarded crate -- `crates/pipeline/src/registry.rs` is exempt from the neutrality
 guard by exact path because enumerating the plugin set is its single duty -- so
 the accurate claim is "zero edits to core stage logic". And the CLI, outside that
-guard's walk scope, is not language-neutral: three files, five dispatch sites, each
-applying the C++ hook pair or `CyclePolicy::Reject` unconditionally. In
-`crates/cli/src/commands/plan.rs`, `planning_hooks` has two `match` closures; in
-`crates/cli/src/optimize.rs`, 247 (collateral opportunities) and 272-281 (safe
-extractions); in `crates/cli/src/commands/ui.rs`, 359-368. ADR-0001's "Known
-exception: per-language planning hooks in the CLI" records all three files; expect
-to edit every site.
+guard's walk scope, is not language-neutral: three files, five dispatch sites. In
+`crates/cli/src/commands/plan.rs` the two are `planning_hooks` `match` closures, so
+they apply the Scala rule when the unit is Scala; the other three apply the C++
+hook pair or `CyclePolicy::Reject` unconditionally -- `crates/cli/src/optimize.rs`
+at 247 (collateral opportunities) and 272-281 (safe extractions), and
+`crates/cli/src/commands/ui.rs` at 359-368. ADR-0001's known-exception subsection
+records all three files; expect to edit every site.
 
 Your plugin crate depends inward only: `ariadne-repo`, `ariadne-lang-api`, and
 `ariadne-lang` and nothing else. It must NOT list `ariadne-graph`,
