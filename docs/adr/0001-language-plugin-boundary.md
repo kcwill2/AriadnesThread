@@ -234,11 +234,56 @@ The guard structurally cannot see it. `GUARD_CORE_CRATES` in
 Consequences already records, and the exclusion is defensible for a crate that only routes
 through the registry. `plan.rs` shows the CLI does not only route; it also dispatches.
 
-Two further sites in the same crate name plugin crates without any language `match` at all:
-`crates/cli/src/optimize.rs` (lines 272-281) and `crates/cli/src/commands/ui.rs` (lines 359-368)
-each construct an `OptimizationPlanner` with the C++ hook pair and `CyclePolicy::Reject` written
-in directly. Those are not R3 violations, because they never match on language identity, but they
-are further places in `crates/cli` that a new language would have to be taught about.
+The `plan.rs` closures are the only sites that *match* on language identity, but they are not the
+only sites that hardcode a plugin's hooks. An exhaustive search of `crates/cli/src` for the four
+hook-pair symbols (`cpp_aggregation_filter`, `cpp_target_path_for`, `scala_aggregation_filter`,
+`scala_target_path_for`) returns 16 hits, which classify as follows.
+
+- **Five production dispatch sites, across three files.** The two `match` closures in `plan.rs`
+  described above; `crates/cli/src/optimize.rs` line 247, where `analyze_collateral_opportunities`
+  applies `cpp_aggregation_filter` unconditionally inside a `.filter()` over the collateral-sources
+  map; and `crates/cli/src/optimize.rs` lines 272-281 together with
+  `crates/cli/src/commands/ui.rs` lines 359-368, each of which constructs an `OptimizationPlanner`
+  with the C++ hook pair and `CyclePolicy::Reject` written in directly (in `plan_safe_extractions`
+  and `build_extraction_proposals` respectively). These five sites account for nine of the sixteen
+  hits: one each for the `optimize.rs` filter and for each `OptimizationPlanner::new` call, two
+  each for the two `plan.rs` closures.
+- **One production non-dispatch reference.** The top-level
+  `use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};` at
+  `crates/cli/src/optimize.rs` line 102, which is what feeds the two `optimize.rs` dispatch sites.
+- **Six test-side hits.** All six remaining hits are inside `crates/cli/src/commands/plan.rs`'s
+  `mod tests`, which begins at line 275: the assertions and assertion messages at lines 392, 403,
+  408, 409, 413, and 414 that pin the current dispatch behavior.
+
+Nine dispatch hits, one import, and six test hits is the sixteen. Only the first group is dispatch.
+The three sites outside `plan.rs` never match on language identity, so they are not R3 violations;
+they are still places where the C++ aggregation and naming rules are applied unconditionally, and a
+new language has to be taught about every one of them. Note that the `optimize.rs` filter at line
+247 and the `OptimizationPlanner::new` call at lines 272-281 are two different functions -- one
+builds the collateral-opportunity list, the other cuts the plans -- and both are live on the
+`optimize` path.
+
+Separately, and not a dispatch site at all: the user-visible error string at
+`crates/cli/src/registry.rs` lines 51-52 reads "unknown language '{raw}'; expected cpp, scala, or
+other" and names the accepted languages outright. It branches on nothing, so it does not change the
+count above, but a new language would want that message updated.
+
+One further item, deliberately typed differently from the five above: a **modelling literal, not a
+dispatch site.** `crates/cli/src/commands/plan.rs` line 231, inside the same production
+`plan_extractions` that calls `planning_hooks`, passes `ariadne_lang::CyclePolicy::Reject` to the
+planner for every language. The modelling table transposed above gives C++ `CyclePolicy::Reject`
+and Scala `CyclePolicy::TolerateWithinPackage`, because mutually recursive classes are legal in
+Scala, so at this line the planner receives the C++ stance for every language rather than the
+plugin's declared `LanguageModeling::cycle_policy`, and report-side cycle classification therefore
+uses the C++ stance for every language. The inline comment at lines 227-230 is explicit that this is
+not an oversight: the field is informational to the planner, every policy shares the SCC
+co-proposal path (locked by the test `cycle_policy_variants_share_the_scc_coproposal_path_for_now`
+in `crates/cluster/tests/planner_injection.rs`), and the stance only steers report-side cycle
+classification. It is recorded, then, the way the rest of this subsection records its items: as
+language-declared behaviour the CLI currently hardcodes, and so as something a new language needs
+to be told about -- the same class of thing as the five dispatch sites, and equally not a defect
+claim. A third language would find its declared cycle policy overridden here just as it would have
+to be taught the five sites above.
 
 Two further locks sit alongside the guards, both in `crates/cli/src/registry.rs`:
 
@@ -288,11 +333,16 @@ size and knows nothing about languages; its `R2_SCANNED_SUFFIXES` set is `.rs`, 
   `crates/cli`, `crates/scheduler`, and `crates/build` sit outside the walk scope by design,
   because the invariant is analysis-core neutrality and composition roots are named rather than
   anonymous -- so those three crates' neutrality rests on review, not on this test.
-- A new language currently needs more than a crate and a registration. It also needs a
-  per-language arm in the CLI planning hooks and further plugin-crate references in
-  `crates/cli/src/optimize.rs` and `crates/cli/src/commands/ui.rs`, all recorded as the known
-  exception above. Closing those second and subsequent edit sites is outstanding work; this ADR
-  records the boundary, not a fix for it.
+- A new language currently needs more than a crate and a registration. It also needs teaching at
+  each of the five production dispatch sites in the known-exception subsection above -- two
+  `match` closures in `crates/cli/src/commands/plan.rs`, two hardcodes in
+  `crates/cli/src/optimize.rs` (line 247 and lines 272-281), and one in
+  `crates/cli/src/commands/ui.rs` -- plus a wording update to the error string in
+  `crates/cli/src/registry.rs`. Separately, and as a modelling literal rather than a sixth dispatch
+  site, a new language needs to know that the cycle policy handed to the planner at
+  `crates/cli/src/commands/plan.rs` line 231 is a hardcoded C++ stance rather than the value the
+  plugin declares. Closing those edit sites is outstanding work; this ADR records the
+  boundary, not a fix for it.
 - The vocabulary is not yet used everywhere it could be. The frozen field names listed above
   keep C++ flavor in stored artifacts, and the isolation engine in `crates/transform` still
   knows the concept of a unit generically while the *spelling* of what it writes has moved into

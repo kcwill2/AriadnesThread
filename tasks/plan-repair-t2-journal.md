@@ -65,3 +65,47 @@ Verified before writing, by Read/Grep only (no shell):
 - Non-ASCII re-scan of the amended file: clean.
 
 Left uncommitted for the orchestrator.
+
+## Checkpoint 5 -- known-exception subsection completed
+
+A verification pass found the exception section was incomplete. Read-only re-verification in
+`crates/cli/src` (Grep for the four hook-pair symbols, then Read of each hit and of the
+enclosing `fn`/`mod tests` boundaries) confirmed 16 hits, classified 9 production dispatch hits
+forming 5 sites across 3 files, 1 production import, and 6 test-side hits.
+
+The missing site was `crates/cli/src/optimize.rs:247` -- inside
+`analyze_collateral_opportunities` (declared line 212, `mod tests` begins line 461, so it is
+production), a `.filter()` applying `cpp_aggregation_filter` unconditionally. Distinct from the
+already-recorded `plan_safe_extractions` `OptimizationPlanner::new` call at lines 272-281; both
+are live on the `optimize` path. Also added the `crates/cli/src/registry.rs:51-52` error-string
+clause, which is explicitly NOT a dispatch site.
+
+Amended only the known-exception subsection and the one Consequences bullet added in Checkpoint
+4. File 325 -> 355 lines; no section order or pre-existing claim altered. Two arithmetic errors
+in my own first draft ("nine of the sixteen" where five, and "Nine plus one plus six") were caught
+on read-back and corrected before reporting.
+
+Left uncommitted for the orchestrator.
+
+## Checkpoint 6 -- sixth item recorded as a modelling literal (final amendment)
+
+Recorded `crates/cli/src/commands/plan.rs:231`, which passes `ariadne_lang::CyclePolicy::Reject`
+to the planner for every language from production `plan_extractions`. Typed explicitly as a
+**modelling literal, not a dispatch site**, so the five-site count and the 16-hit accounting are
+untouched.
+
+Verified by Read before writing: line 231 and its inline comment at lines 227-230; the comment's
+substance (informational to the planner; SCC co-proposal path shared by design; stance steers
+report-side classification only); and that `cycle_policy_variants_share_the_scc_coproposal_path_for_now`
+exists at `crates/cluster/tests/planner_injection.rs:334`, referenced from
+`crates/cluster/src/planner.rs:43`. Modelling values re-confirmed from
+`crates/lang-cpp/src/plugin.rs:208` (Reject) and `crates/lang-scala/src/plugin.rs:118`
+(TolerateWithinPackage).
+
+Note: the source comment at plan.rs:228 contains an em-dash, so the ADR paraphrases the comment
+rather than quoting it, keeping the new file pure ASCII. No defect claim is made -- the ADR states
+the shared SCC path is deliberate and test-locked, and frames the item as something a new language
+needs to be told about.
+
+Amended only the known-exception subsection and the one Consequences bullet. File 355 -> 375
+lines. Final amendment; no further trivia escalated. Left uncommitted for the orchestrator.
