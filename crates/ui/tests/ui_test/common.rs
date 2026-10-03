@@ -9,6 +9,51 @@ use axum::{
 use std::{collections::HashMap, sync::Arc};
 use tower::ServiceExt;
 
+/// Token-sweep escape hatch (plan 1790656207440 T1): color assertions must
+/// hold in BOTH states of the sweep — before it, the rule carries the literal
+/// color; after it, the rule references a themes.css token. Accept any listed
+/// needle so every converted assertion keeps its exactness without repeating
+/// the `var(--x) || #hex` dance inline ~18 times across the suite.
+pub fn assert_var_or(body: &str, alternatives: &[&str], msg: &str) {
+    assert!(
+        alternatives.iter().any(|needle| body.contains(needle)),
+        "{msg} (expected one of {alternatives:?})"
+    );
+}
+
+/// Canonical single-token form of `assert_var_or`: the rule body either still
+/// hardcodes `legacy_hex` or already reads `var(--<token>)`.
+pub fn assert_token_or_hex(body: &str, token: &str, legacy_hex: &str, msg: &str) {
+    let token_ref = format!("var(--{token})");
+    assert_var_or(body, &[&token_ref, legacy_hex], msg);
+}
+
+/// Drop /* … */ comments so literal/token sweeps only judge live declarations.
+pub fn strip_css_comments(css: &str) -> String {
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find("*/") else { break };
+        rest = &rest[start + end + "*/".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Drop <!-- … --> comments so literal/token sweeps only judge live markup.
+pub fn strip_html_comments(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find("-->") else { break };
+        rest = &rest[start + end + "-->".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn empty_reduced_model() -> ReducedSemanticModel {
     ReducedSemanticModel {
         repo_root: std::path::PathBuf::from("."),
@@ -68,6 +113,7 @@ pub fn page_content() -> String {
         ariadne_ui::FILE_VIEW_JS,
         ariadne_ui::HOTSPOTS_JS,
         ariadne_ui::MAIN_JS,
+        ariadne_ui::THEME_JS,
     ] {
         page.push_str(asset);
     }

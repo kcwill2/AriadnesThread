@@ -1,23 +1,6 @@
-    :root {
-      --bg-main: #0b0f17;
-      --bg-canvas: #0e1420;
-      --bg-surface: #111827;
-      --bg-sub: #161f2e;
-      --bg-card: #1e293b;
-      --bg-card-hover: #27354a;
-      --border: #243044;
-      --border-light: #334155;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --text-sub: #64748b;
-      --cyan: #38bdf8;
-      --cyan-glow: rgba(56, 189, 248, 0.4);
-      --indigo: #818cf8;
-      --purple: #c084fc;
-      --green: #4ade80;
-      --amber: #fb923c;
-      --red: #ef4444;
-    }
+    /* THEME TOKENS live in themes.css (the single definition site) and are
+       linked BEFORE this file; every color below must reach the palette via
+       var(--…) so all three themes repaint. */
     /* SCROLLBARS — themed chrome so scroll regions match the dark panels
        instead of showing native light scrollbars. `transparent` track keeps
        panel background; thumb uses border-light so it reads on every surface. */
@@ -81,16 +64,16 @@
       width: 32px;
       height: 32px;
       border-radius: 8px;
-      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      background: linear-gradient(135deg, var(--brand-grad-a), var(--brand-grad-b));
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+      box-shadow: 0 2px 8px var(--brand-glow);
     }
     .logo-badge svg {
       width: 18px;
       height: 18px;
-      stroke: #fff;
+      stroke: var(--on-accent);
     }
     .brand-title {
       font-size: 14px;
@@ -105,9 +88,9 @@
       font-family: monospace;
       padding: 2px 6px;
       border-radius: 4px;
-      background: rgba(14, 165, 233, 0.15);
-      color: #38bdf8;
-      border: 1px solid rgba(14, 165, 233, 0.3);
+      background: var(--tag-pill-bg);
+      color: var(--cyan);
+      border: 1px solid var(--tag-pill-border);
     }
     .repo-sub {
       font-size: 11px;
@@ -141,9 +124,9 @@
       color: var(--text-main);
     }
     .tab-btn.active {
-      background: #0284c7;
-      color: #ffffff;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      background: var(--primary-btn);
+      color: var(--on-accent);
+      box-shadow: 0 1px 3px var(--shadow-soft);
     }
 
     .tab-btn svg {
@@ -200,7 +183,7 @@
       background: var(--bg-surface);
       border: 1px solid var(--border-light);
       border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 8px 24px var(--shadow-ambient);
       z-index: 300;
       padding: 4px;
       font-size: 12px;
@@ -240,8 +223,8 @@
       align-items: center;
       gap: 5px;
       padding: 3px 9px;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.4);
+      background: var(--cyan-wash);
+      border: 1px solid var(--cyan-glow);
       color: var(--cyan);
       border-radius: 999px;
       font-size: 11px;
@@ -266,9 +249,9 @@
 
     .cycle-btn {
       padding: 4px 8px;
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #f87171;
+      background: var(--red-wash);
+      border: 1px solid var(--red-glow);
+      color: var(--red-text);
       border-radius: 5px;
       font-size: 11px;
       font-weight: 600;
@@ -280,15 +263,15 @@
     }
 
     .cycle-btn:hover {
-      background: rgba(239, 68, 68, 0.3);
+      background: var(--red-wash-hover);
     }
 
     .pulse-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #ef4444;
-      box-shadow: 0 0 6px #ef4444;
+      background: var(--red);
+      box-shadow: 0 0 6px var(--red);
     }
 
     .btn-export {
@@ -413,7 +396,7 @@
       overflow: hidden;
       background-color: var(--bg-canvas);
       background-size: 24px 24px;
-      background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
     }
 
     svg.graph-svg {
@@ -436,13 +419,13 @@
       rx: 8px;
       ry: 8px;
       stroke-width: 1.5px;
-      filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
+      filter: drop-shadow(0 4px 10px var(--shadow-node));
       transition: all 0.15s ease;
     }
 
     .node-group:hover rect {
       transform: translateY(-2px);
-      filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6));
+      filter: drop-shadow(0 8px 16px var(--shadow-lift));
     }
 
     .node-group.selected rect {
@@ -460,7 +443,7 @@
     .node-group.heat-root rect {
       stroke: var(--cyan) !important;
       stroke-width: 2.5px !important;
-      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.65));
+      filter: drop-shadow(0 0 8px var(--cyan-glow-strong));
     }
 
     .node-group.heat-critical rect {
@@ -488,7 +471,7 @@
     }
     .verdict-spine.justified { fill: var(--green); }
     .verdict-spine.mixed { fill: var(--amber); }
-    .verdict-spine.unused { fill: #ef4444; }
+    .verdict-spine.unused { fill: var(--red); }
 
     .heat-badge {
       font-size: 9px;
@@ -498,13 +481,13 @@
 
     .edge-path {
       fill: none;
-      stroke: #475569;
+      stroke: var(--edge-neutral);
       stroke-width: 1.5px;
       transition: stroke 0.15s ease, stroke-width 0.15s ease;
     }
 
     .edge-path.incomplete {
-      stroke: #64748b;
+      stroke: var(--edge-incomplete);
       stroke-dasharray: 4, 4;
     }
 
@@ -513,9 +496,9 @@
     }
 
     .edge-path.cycle-edge {
-      stroke: #ef4444 !important;
+      stroke: var(--red) !important;
       stroke-width: 2.5px !important;
-      filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8));
+      filter: drop-shadow(0 0 8px var(--red-glow-strong));
     }
 
     .edges-has-selection .edge-path {
@@ -531,12 +514,12 @@
 
     .edge-path.edge-entering {
       stroke: var(--green) !important;
-      filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.4));
+      filter: drop-shadow(0 0 6px var(--green-glow));
     }
 
     .edge-path.edge-leaving {
       stroke: var(--amber) !important;
-      filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.4));
+      filter: drop-shadow(0 0 6px var(--amber-glow));
     }
 
     /* Edge verdict story: root-relative arrow verdicts. Appended after
@@ -544,14 +527,14 @@
        and before the E3 preview block so preview rules still win. */
     .edge-path.edge-justified {
       stroke: var(--green) !important;
-      filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.4));
+      filter: drop-shadow(0 0 6px var(--green-glow));
     }
 
     .edge-path.edge-unused {
-      stroke: #ef4444 !important;
+      stroke: var(--red) !important;
       stroke-width: 2px !important;
       stroke-dasharray: 6 4;
-      filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.4));
+      filter: drop-shadow(0 0 6px var(--red-glow));
     }
 
     /* INSPECTOR SIDEBAR */
@@ -655,7 +638,7 @@
     .node-title {
       font-size: 14px;
       font-weight: 700;
-      color: #ffffff;
+      color: var(--text-strong);
       font-family: monospace;
       word-break: break-all;
     }
@@ -702,18 +685,18 @@
     }
 
     .insight-card {
-      background: rgba(251, 146, 60, 0.1);
-      border: 1px solid rgba(251, 146, 60, 0.3);
+      background: var(--amber-wash);
+      border: 1px solid var(--amber-border);
       border-radius: 8px;
       padding: 12px;
-      color: #fdba74;
+      color: var(--amber-text);
       font-size: 11px;
       line-height: 1.45;
     }
 
     .insight-title {
       font-weight: 700;
-      color: #fb923c;
+      color: var(--amber);
       margin-bottom: 4px;
       display: flex;
       align-items: center;
@@ -762,7 +745,7 @@
 
     .link-item {
       padding: 7px 10px;
-      background: rgba(30, 41, 59, 0.6);
+      background: var(--tile-bg);
       border: 1px solid var(--border);
       border-radius: 6px;
       font-family: monospace;
@@ -849,8 +832,8 @@
     .btn-primary {
       flex: 1;
       padding: 8px 12px;
-      background: #0284c7;
-      color: white;
+      background: var(--primary-btn);
+      color: var(--on-accent);
       border: none;
       border-radius: 6px;
       font-size: 12px;
@@ -864,7 +847,7 @@
     }
 
     .btn-primary:hover {
-      background: #0369a1;
+      background: var(--primary-btn-hover);
     }
 
     .btn-secondary {
@@ -886,13 +869,13 @@
       position: absolute;
       bottom: 16px;
       left: 16px;
-      background: rgba(17, 24, 39, 0.92);
+      background: var(--overlay-panel-bg);
       backdrop-filter: blur(8px);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 14px;
       font-size: 11px;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 14px var(--shadow-ambient);
       z-index: 25;
       display: flex;
       flex-direction: column;
@@ -925,10 +908,10 @@
       border-top: 2px solid;
       height: 0;
     }
-    .legend-line.edge-style-justified { border-top-color: #4ade80; }
-    .legend-line.edge-style-unused { border-top: 2px dashed #ef4444; }
+    .legend-line.edge-style-justified { border-top-color: var(--green); }
+    .legend-line.edge-style-unused { border-top: 2px dashed var(--red); }
     .legend-line.edge-style-partial { border-top: 2px solid var(--amber); }
-    .legend-line.edge-style-context { border-top: 2px solid #475569; }
+    .legend-line.edge-style-context { border-top: 2px solid var(--edge-neutral); }
 
     /* Mini node-card swatch for the heat legend: card-shaped chip whose left
        border carries the verdict spine color, mirroring the canvas cards. */
@@ -936,14 +919,14 @@
       width: 14px;
       height: 9px;
       border-radius: 3px;
-      background: #1e293b;
-      border: 1px solid #475569;
+      background: var(--bg-card);
+      border: 1px solid var(--node-other-border);
       border-left: 3px solid transparent;
       flex-shrink: 0;
     }
     .legend-card.spine-justified { border-left-color: var(--green); }
     .legend-card.spine-mixed { border-left-color: var(--amber); }
-    .legend-card.spine-unused { border-left-color: #ef4444; }
+    .legend-card.spine-unused { border-left-color: var(--red); }
     .legend-card.spine-none { border-left-color: transparent; }
 
     /* HOTSPOTS PANEL — workspace column (never an overlay over the legend) */
@@ -1013,7 +996,7 @@
 
     .extraction-card {
       padding: 7px 10px;
-      background: rgba(30, 41, 59, 0.6);
+      background: var(--tile-bg);
       border: 1px solid var(--border);
       border-left: 3px solid var(--amber);
       border-radius: 6px;
@@ -1065,8 +1048,8 @@
     }
 
     .hotspot-row.active {
-      background: rgba(56, 189, 248, 0.12);
-      outline: 1px solid rgba(56, 189, 248, 0.4);
+      background: var(--cyan-wash);
+      outline: 1px solid var(--cyan-glow);
     }
 
     .hotspot-rank {
@@ -1104,14 +1087,14 @@
       grid-column: 2 / span 2;
       height: 3px;
       border-radius: 2px;
-      background: rgba(148, 163, 184, 0.2);
+      background: var(--progress-track);
       overflow: hidden;
     }
 
     .hotspot-bar-fill {
       height: 100%;
       border-radius: 2px;
-      background: linear-gradient(90deg, #f97316, #ef4444);
+      background: linear-gradient(90deg, var(--heat-ramp-a), var(--red));
     }
 
     .btn-secondary.active {
@@ -1176,7 +1159,7 @@
       font-family: Consolas, "Fira Code", monospace;
       font-size: 12px;
       line-height: 1.5;
-      color: #e2e8f0;
+      color: var(--code-text);
       background: var(--bg-canvas);
     }
 
@@ -1197,7 +1180,7 @@
     }
 
     .line-highlight {
-      background: rgba(56, 189, 248, 0.15);
+      background: var(--cyan-highlight);
       border-left: 2px solid var(--cyan);
       display: block;
       width: 100%;
@@ -1227,8 +1210,8 @@
       gap: 6px;
     }
     .thread-item.active {
-      background: #0284c7;
-      color: white;
+      background: var(--primary-btn);
+      color: var(--on-accent);
     }
     .thread-sep {
       color: var(--text-muted);
@@ -1254,18 +1237,18 @@
       border-radius: 8px;
       z-index: 100;
       width: 400px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      box-shadow: 0 10px 25px var(--shadow-ambient);
     }
     .modal-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.5);
+      background: var(--overlay-scrim);
       z-index: 99;
     }
     .badge-expand {
-      fill: #334155;
-      stroke: #fff;
+      fill: var(--border-light);
+      stroke: var(--on-accent);
       cursor: pointer;
     }
     
@@ -1273,7 +1256,7 @@
       position: relative !important;
       z-index: 1002 !important;
       outline: 2px solid var(--cyan) !important;
-      box-shadow: 0 0 25px rgba(56, 189, 248, 0.7) !important;
+      box-shadow: 0 0 25px var(--tour-glow) !important;
       border-radius: 6px;
     }
 
@@ -1283,40 +1266,40 @@
        chips (red eliminated / amber still-reachable / green kept). These rules sit
        after the heat-tier rules so they win the equal-specificity cascade. */
     .node-group.preview-eliminated rect {
-      fill: #450a0a;
-      stroke: #ef4444 !important;
+      fill: var(--preview-eliminated-bg);
+      stroke: var(--red) !important;
       stroke-width: 2.5px !important;
       stroke-dasharray: 4 3;
-      filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.9));
+      filter: drop-shadow(0 0 12px var(--preview-eliminated-glow));
     }
 
     /* SVG2 text-decoration: line-through is supported in current browsers; if a
        renderer drops it, the red dashed card + legend already disambiguate. */
     .node-group.preview-eliminated text {
       text-decoration: line-through;
-      fill: #fca5a5 !important;
+      fill: var(--preview-eliminated-text) !important;
     }
 
     .node-group.preview-kept rect {
-      fill: #052e16;
-      stroke: #4ade80 !important;
+      fill: var(--preview-kept-bg);
+      stroke: var(--green) !important;
       stroke-width: 2.5px !important;
-      filter: drop-shadow(0 0 10px rgba(74, 222, 128, 0.85));
+      filter: drop-shadow(0 0 10px var(--preview-kept-glow));
     }
 
     .node-group.preview-still-reachable rect {
-      fill: #422006;
-      stroke: #f59e0b !important;
+      fill: var(--preview-still-bg);
+      stroke: var(--preview-amber-edge) !important;
       stroke-width: 2.5px !important;
       stroke-dasharray: 2 3;
-      filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.85));
+      filter: drop-shadow(0 0 10px var(--preview-amber-glow));
     }
 
     .just-preview-btn {
       align-self: flex-start;
       margin-top: 6px;
       padding: 3px 8px;
-      background: rgba(30, 41, 59, 0.6);
+      background: var(--tile-bg);
       border: 1px solid var(--border-light);
       border-radius: 4px;
       color: var(--cyan);
@@ -1346,10 +1329,10 @@
       align-items: center;
       gap: 6px;
       padding: 4px 10px;
-      background: rgba(69, 26, 3, 0.92);
-      border: 1px dashed #f59e0b;
+      background: var(--preview-hyp-bg);
+      border: 1px dashed var(--preview-amber-edge);
       border-radius: 6px;
-      color: #fbbf24;
+      color: var(--preview-amber-text);
       font-family: monospace;
       font-size: 11px;
       white-space: nowrap;
@@ -1362,11 +1345,11 @@
     }
 
     .preview-banner-glyph {
-      color: #f59e0b;
+      color: var(--preview-amber-edge);
     }
 
     #canvasContainer.preview-hypothetical {
-      outline: 1px dashed rgba(245, 158, 11, 0.55);
+      outline: 1px dashed var(--preview-amber-outline);
       outline-offset: -3px;
     }
 
@@ -1377,9 +1360,9 @@
     }
 
     .just-preview-btn-active {
-      border-color: #f59e0b;
-      color: #fbbf24;
-      background: rgba(69, 26, 3, 0.55);
+      border-color: var(--preview-amber-edge);
+      color: var(--preview-amber-text);
+      background: var(--preview-hyp-bg-active);
     }
 
     /* E3 proposed-header visualization: the extraction result appears as a
@@ -1392,21 +1375,21 @@
     }
 
     .node-group.preview-proposed-node rect {
-      fill: rgba(30, 27, 75, 0.85);
-      stroke: #a78bfa;
+      fill: var(--preview-proposed-bg);
+      stroke: var(--preview-proposed-stroke);
       stroke-dasharray: 5 4;
     }
 
     .node-group.preview-proposed-node circle {
-      fill: #a78bfa;
+      fill: var(--preview-proposed-stroke);
     }
 
     .node-group.preview-proposed-node text {
-      fill: #e9d5ff;
+      fill: var(--preview-proposed-text);
     }
 
     .edge-path.preview-proposed-edge {
-      stroke: #a78bfa;
+      stroke: var(--preview-proposed-stroke);
       stroke-width: 1.6px;
       stroke-dasharray: 6 4;
       opacity: 0.9;
@@ -1415,7 +1398,7 @@
     }
 
     .edge-path.preview-slim-edge {
-      stroke: #fbbf24 !important;
+      stroke: var(--preview-amber-text) !important;
       stroke-dasharray: 7 5;
       opacity: 1 !important;
     }

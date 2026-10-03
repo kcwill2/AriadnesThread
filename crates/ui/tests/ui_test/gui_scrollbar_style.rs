@@ -1,3 +1,4 @@
+use crate::common;
 use ariadne_ui::STYLES_CSS;
 
 fn css_rule_body(css: &str, selector: &str) -> String {
@@ -108,18 +109,52 @@ fn test_select_dark_matches_search_input_focus_treatment() {
 }
 
 #[test]
-fn test_graph_chrome_hex_rules_untouched_by_token_sweep() {
-    // The token sweep is GUI-chrome-only: the graph legend card and the SVG
-    // expand badge keep their literal hexes (they render on the canvas).
-    let legend_card = css_rule_body(STYLES_CSS, ".legend-card {");
+fn test_theme_select_carries_the_select_dark_contract() {
+    // T7 (D4): the theme selector reuses the form-control idiom rather than
+    // inventing new styling, so the hover/focus contract asserted above must
+    // apply to it — locked via the class on the actual markup element.
+    let html = ariadne_ui::INDEX_HTML;
+    let select_at = html
+        .find("id=\"themeSelect\"")
+        .expect("the toolbar must carry #themeSelect");
+    let tag_start = html[..select_at]
+        .rfind("<select")
+        .expect("#themeSelect must sit on a <select> element");
+    let tag_end = select_at
+        + html[select_at..]
+            .find('>')
+            .expect("the #themeSelect tag must close");
+    let tag = &html[tag_start..tag_end];
     assert!(
-        legend_card.contains("background: #1e293b"),
-        ".legend-card must keep its literal canvas chip background; graph rules are out of the token sweep"
+        tag.contains("class=\"select-dark\""),
+        "#themeSelect must carry .select-dark so it inherits the focus/hover \
+         contract asserted at test_select_dark_matches_search_input_focus_treatment"
+    );
+}
+
+#[test]
+fn test_graph_chrome_rules_follow_theme_tokens() {
+    // INVERTED by D1 (plan 1790656207440): this test used to lock the graph
+    // legend card and the SVG expand badge to literal hexes, on the stated
+    // rationale that "graph rules are out of the token sweep because they
+    // render on the canvas". That rationale is exactly backwards: the canvas
+    // is precisely the surface that must follow the theme — a light theme
+    // with dark node cards is unusable. These rules now reference tokens
+    // like every other surface, asserted via the sweep escape hatch so the
+    // test holds before and after the styles.css token sweep lands.
+    let legend_card = css_rule_body(STYLES_CSS, ".legend-card {");
+    common::assert_token_or_hex(
+        &legend_card,
+        "bg-card",
+        "background: #1e293b",
+        ".legend-card must paint the themed card surface; canvas chrome follows the theme (D1)",
     );
 
     let badge = css_rule_body(STYLES_CSS, ".badge-expand {");
-    assert!(
-        badge.contains("fill: #334155"),
-        ".badge-expand must keep its literal SVG fill; graph rules are out of the token sweep"
+    common::assert_token_or_hex(
+        &badge,
+        "border-light",
+        "fill: #334155",
+        ".badge-expand must fill with the themed badge surface; canvas chrome follows the theme (D1)",
     );
 }

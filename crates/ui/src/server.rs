@@ -125,12 +125,14 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
     Router::new()
         .route("/", get(api_index))
         .route("/styles.css", get(asset_styles_css))
+        .route("/themes.css", get(asset_themes_css))
         .route("/app/api.js", get(asset_api_js))
         .route("/app/graph.js", get(asset_graph_js))
         .route("/app/file-view.js", get(asset_file_view_js))
         .route("/app/hotspots.js", get(asset_hotspots_js))
         .route("/app/preview.js", get(asset_preview_js))
         .route("/app/main.js", get(asset_main_js))
+        .route("/app/theme.js", get(asset_theme_js))
         .route("/api/status", get(api_status))
         .route("/api/repo-info", get(api_repo_info))
         .route("/api/graph/include", get(api_graph_include))
@@ -176,6 +178,10 @@ async fn asset_styles_css() -> axum::response::Response {
     ui_asset(crate::STYLES_CSS, "text/css; charset=utf-8")
 }
 
+async fn asset_themes_css() -> axum::response::Response {
+    ui_asset(crate::THEMES_CSS, "text/css; charset=utf-8")
+}
+
 async fn asset_api_js() -> axum::response::Response {
     ui_asset(crate::API_JS, "text/javascript; charset=utf-8")
 }
@@ -198,6 +204,10 @@ async fn asset_preview_js() -> axum::response::Response {
 
 async fn asset_main_js() -> axum::response::Response {
     ui_asset(crate::MAIN_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_theme_js() -> axum::response::Response {
+    ui_asset(crate::THEME_JS, "text/javascript; charset=utf-8")
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

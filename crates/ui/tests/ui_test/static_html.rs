@@ -713,7 +713,9 @@ fn test_index_markup_has_no_inline_style_or_script_bodies() {
     );
 
     // Inspect every <script> tag: src-tagged assets are fine; the only inline
-    // body allowed is the data placeholder comment consumed by the export.
+    // bodies allowed are the data placeholder consumed by the export and the
+    // anti-flash theme bootstrap in <head> (it cannot be an external asset:
+    // it must run synchronously before the themed CSS paints).
     let mut rest = html;
     let mut inline_script_count = 0;
     while let Some(open) = rest.find("<script") {
@@ -731,18 +733,22 @@ fn test_index_markup_has_no_inline_style_or_script_bodies() {
         } else {
             inline_script_count += 1;
             let body = after_open[tag_end + 1..close].trim();
-            assert_eq!(
-                body, "/*__ARIADNE_DATA__*/",
-                "only the data placeholder may be an inline script body"
+            assert!(
+                body == "/*__ARIADNE_DATA__*/" || body.contains("ariadne_theme"),
+                "inline script bodies are limited to the data placeholder and \
+                 the anti-flash theme bootstrap (identified by its storage key)"
             );
         }
         rest = &after_open[close + "</script>".len()..];
     }
-    assert_eq!(inline_script_count, 1, "exactly one inline script body");
+    assert_eq!(
+        inline_script_count, 2,
+        "exactly two inline script bodies: data placeholder + theme bootstrap"
+    );
     assert_eq!(
         html.matches("<script src=").count(),
-        6,
-        "exactly six classic asset scripts"
+        7,
+        "exactly seven classic asset scripts"
     );
 }
 
@@ -754,6 +760,7 @@ fn tag_start_is_asset(tag: &str) -> bool {
         "/app/hotspots.js",
         "/app/preview.js",
         "/app/main.js",
+        "/app/theme.js",
     ]
     .iter()
     .any(|src| tag.contains(src))
@@ -771,6 +778,9 @@ fn test_script_tag_order_preserves_original_execution_order() {
         "/app/hotspots.js",
         "/app/preview.js",
         "/app/main.js",
+        // theme.js is new (T6) but its position is just as load-bearing: it
+        // re-renders through renderSvg(), so it must sit after main.js.
+        "/app/theme.js",
     ];
     let mut pos = 0usize;
     for src in order {

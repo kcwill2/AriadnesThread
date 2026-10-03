@@ -4,6 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AriadnesThread Graph Visualizer</title>
+  <!-- Anti-flash theme bootstrap. DUPLICATES the read-validate-apply pair in
+       /app/theme.js on purpose: theme.js loads at the end of <body> (it must
+       re-render through graph.js), which is always AFTER the themed CSS has
+       painted, so a deferred-only bootstrap would flash the wrong theme.
+       This snippet must run before the /themes.css link below; the three
+       accepted ids mirror the THEMES registry in theme.js — adding a fourth
+       theme there REQUIRES mirroring it here. No color literals: styles.css/
+       themes.css own every color, and this script only picks an attribute. -->
+  <script>
+    var bootTheme = null;
+    try { bootTheme = localStorage.getItem('ariadne_theme'); } catch (err) { /* private mode: default */ }
+    if (bootTheme !== 'light' && bootTheme !== 'dark' && bootTheme !== 'dark-steampunk') bootTheme = 'dark';
+    document.documentElement.dataset.theme = bootTheme;
+  </script>
+  <link rel="stylesheet" href="/themes.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -166,6 +181,17 @@
     </div>
 
     <div class="toolbar-right">
+      <div class="tool-group">
+        <span>Theme:</span>
+        <!-- option values are the THEMES ids in theme.js (locked by test);
+             labels are human-facing, dark is preselected so static markup
+             and the default palette agree on first paint -->
+        <select class="select-dark" id="themeSelect" title="Color theme">
+          <option value="light">Light</option>
+          <option value="dark" selected>Dark</option>
+          <option value="dark-steampunk">Dark (Steampunk)</option>
+        </select>
+      </div>
       <button class="btn-icon" onclick="resetZoom()" title="Fit to Screen">
         <svg style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
@@ -203,25 +229,25 @@
       <svg id="graphSvg" class="graph-svg">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#64748b"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--edge-incomplete)"/>
           </marker>
           <marker id="arrow-selected" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#38bdf8"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--cyan)"/>
           </marker>
           <marker id="arrow-cycle" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--red)"/>
           </marker>
           <marker id="arrow-entering" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#4ade80"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--green)"/>
           </marker>
           <marker id="arrow-leaving" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#fb923c"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--amber)"/>
           </marker>
           <marker id="arrow-proposed" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#a78bfa"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--preview-proposed-stroke)"/>
           </marker>
           <marker id="arrow-unused" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444"/>
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--red)"/>
           </marker>
         </defs>
         <g id="viewportGroup">
@@ -353,8 +379,8 @@
   </div>
 
   <!-- ONBOARDING & HELP CENTER MODALS -->
-  <div class="modal-overlay" id="tourOverlay" onclick="endTour()" style="z-index: 1000; background: rgba(0,0,0,0.7); display: none;"></div>
-  <div id="tourCard" style="display: none; position: fixed; z-index: 1003; transition: top 0.25s cubic-bezier(0.4, 0, 0.2, 1), left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 8px; width: 320px; padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+  <div class="modal-overlay" id="tourOverlay" onclick="endTour()" style="z-index: 1000; background: var(--tour-scrim); display: none;"></div>
+  <div id="tourCard" style="display: none; position: fixed; z-index: 1003; transition: top 0.25s cubic-bezier(0.4, 0, 0.2, 1), left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 8px; width: 320px; padding: 16px; box-shadow: 0 4px 20px var(--shadow-ambient);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 style="margin:0; font-size: 14px; color: var(--cyan);" id="tourTitle">Tour Step</h3>
       <button onclick="endTour()" style="background:none; border:none; color: var(--text-muted); cursor: pointer;">✕</button>
@@ -416,7 +442,8 @@
         </div>
         <div id="helpTab-legend" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">Graph Concepts</h4>
-          <p><strong>Node Colors:</strong> Headers (.h) are cyan, Sources (.cpp) are indigo, Cycles are red.</p>
+          <p><strong>Node Colors:</strong> Headers (.h), Sources (.cpp), and Cycles each carry a distinct card color; check the legend swatches &mdash; node colors vary by theme.</p>
+          <p><strong>Theme:</strong> The toolbar's <em>Theme:</em> dropdown switches Light / Dark / Dark (Steampunk); the choice persists across reloads and exports, and standalone exported reports carry the same selector. Semantic colors (verdict spines, heat tiers, cycle red) keep their meaning in all three themes.</p>
           <p><strong>Edges:</strong> Complete dependencies are solid, incomplete (forward declarations) are dashed.</p>
           <p><strong>Closure:</strong> Number of transitive dependencies.</p>
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
@@ -445,5 +472,8 @@
   <script src="/app/hotspots.js"></script>
   <script src="/app/preview.js"></script>
   <script src="/app/main.js"></script>
+  <!-- theme.js loads after main.js: applyTheme re-renders via renderSvg(),
+       which only exists once graph.js/main.js have evaluated. -->
+  <script src="/app/theme.js"></script>
 </body>
 </html>

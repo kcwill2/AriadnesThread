@@ -3,6 +3,8 @@
 // justified included); colored tier glows are deleted and glow is reserved
 // for selection/root. String-level asset assertions, edge_verdict_story.rs style.
 
+use crate::common;
+
 fn css_rule_body(css: &str, selector: &str) -> String {
     let at = css.find(selector).unwrap_or_else(|| {
         panic!("styles.css must contain a rule for {selector}");
@@ -50,19 +52,25 @@ fn test_styles_spine_verdict_colors_and_flat_tiers() {
     let css = ariadne_ui::STYLES_CSS;
 
     let justified = css_rule_body(css, ".verdict-spine.justified");
-    assert!(
-        justified.contains("var(--green)") || justified.contains("#4ade80"),
-        ".verdict-spine.justified must be green like .edge-path.edge-justified"
+    common::assert_token_or_hex(
+        &justified,
+        "green",
+        "#4ade80",
+        ".verdict-spine.justified must be green like .edge-path.edge-justified",
     );
     let mixed = css_rule_body(css, ".verdict-spine.mixed");
-    assert!(
-        mixed.contains("var(--amber)") || mixed.contains("#fb923c"),
-        ".verdict-spine.mixed must be amber like .edge-path.edge-leaving"
+    common::assert_token_or_hex(
+        &mixed,
+        "amber",
+        "#fb923c",
+        ".verdict-spine.mixed must be amber like .edge-path.edge-leaving",
     );
     let unused = css_rule_body(css, ".verdict-spine.unused");
-    assert!(
-        unused.contains("#ef4444"),
-        ".verdict-spine.unused must be red like .edge-path.edge-unused"
+    common::assert_token_or_hex(
+        &unused,
+        "red",
+        "#ef4444",
+        ".verdict-spine.unused must be red like .edge-path.edge-unused",
     );
 
     assert!(

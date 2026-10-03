@@ -50,38 +50,38 @@
     // Legends config
     const legends = {
       include: [
-        { color: '#38bdf8', label: 'Local Header (.h)' },
-        { color: '#818cf8', label: 'Source File (.cpp)' },
-        { color: '#ef4444', label: 'Include Cycle' },
+        { color: 'var(--node-header-text)', label: 'Local Header (.h)' },
+        { color: 'var(--node-source-text)', label: 'Source File (.cpp)' },
+        { color: 'var(--red)', label: 'Include Cycle' },
       ],
       symbol: [
-        { color: '#c084fc', label: 'Class / Struct' },
-        { color: '#4ade80', label: 'Function' },
-        { color: '#38bdf8', label: 'Complete Edge (Solid)' },
-        { color: '#94a3b8', label: 'Incomplete Edge (Dashed)' },
+        { color: 'var(--node-class-text)', label: 'Class / Struct' },
+        { color: 'var(--node-function-text)', label: 'Function' },
+        { color: 'var(--cyan)', label: 'Complete Edge (Solid)' },
+        { color: 'var(--text-muted)', label: 'Incomplete Edge (Dashed)' },
       ],
       call: [
-        { color: '#4ade80', label: 'Function' },
-        { color: '#38bdf8', label: 'Direct Call' },
-        { color: '#ef4444', label: 'Recursive Cycle' },
+        { color: 'var(--node-function-text)', label: 'Function' },
+        { color: 'var(--cyan)', label: 'Direct Call' },
+        { color: 'var(--red)', label: 'Recursive Cycle' }
       ]
     };
 
     // Color mapper for node cards
     function getNodeColors(kind, isCycle) {
-      if (isCycle) return { bg: '#3b0d0d', border: '#ef4444', text: '#fca5a5' };
+      if (isCycle) return { bg: 'var(--node-cycle-bg)', border: 'var(--node-cycle-border)', text: 'var(--node-cycle-text)' };
       switch (kind) {
         case 'HEADER':
-          return { bg: '#082f49', border: '#0284c7', text: '#38bdf8' };
+          return { bg: 'var(--node-header-bg)', border: 'var(--node-header-border)', text: 'var(--node-header-text)' };
         case 'SOURCE':
-          return { bg: '#1e1b4b', border: '#4f46e5', text: '#818cf8' };
+          return { bg: 'var(--node-source-bg)', border: 'var(--node-source-border)', text: 'var(--node-source-text)' };
         case 'CLASS':
         case 'STRUCT':
-          return { bg: '#2e1065', border: '#9333ea', text: '#c084fc' };
+          return { bg: 'var(--node-class-bg)', border: 'var(--node-class-border)', text: 'var(--node-class-text)' };
         case 'FUNCTION':
-          return { bg: '#052e16', border: '#16a34a', text: '#4ade80' };
+          return { bg: 'var(--node-function-bg)', border: 'var(--node-function-border)', text: 'var(--node-function-text)' };
         default:
-          return { bg: '#1e293b', border: '#475569', text: '#94a3b8' };
+          return { bg: 'var(--node-other-bg)', border: 'var(--node-other-border)', text: 'var(--node-other-text)' };
       }
     }
 
@@ -90,19 +90,19 @@
     // not from the degree-limited canvas.
     function getHeatColor(collateral, maxCollateral) {
       const t = maxCollateral > 0 ? collateral / maxCollateral : 0;
-      if (t <= 0.15) return { bg: '#06283d', border: '#38bdf8', text: '#7dd3fc', tier: 0 }; // Cool Ice
-      if (t <= 0.35) return { bg: '#063721', border: '#22c55e', text: '#86efac', tier: 1 }; // Emerald
-      if (t <= 0.60) return { bg: '#382a04', border: '#eab308', text: '#fde047', tier: 2 }; // Amber
-      if (t <= 0.85) return { bg: '#431407', border: '#f97316', text: '#fdba74', tier: 3 }; // Hot Orange
-      return { bg: '#450a0a', border: '#ef4444', text: '#fca5a5', tier: 4 };                // Blazing Crimson
+      if (t <= 0.15) return { bg: 'var(--heat-0-bg)', border: 'var(--heat-0-border)', text: 'var(--heat-0-text)', tier: 0 }; // Cool Ice
+      if (t <= 0.35) return { bg: 'var(--heat-1-bg)', border: 'var(--heat-1-border)', text: 'var(--heat-1-text)', tier: 1 }; // Emerald
+      if (t <= 0.60) return { bg: 'var(--heat-2-bg)', border: 'var(--heat-2-border)', text: 'var(--heat-2-text)', tier: 2 }; // Amber
+      if (t <= 0.85) return { bg: 'var(--heat-3-bg)', border: 'var(--heat-3-border)', text: 'var(--heat-3-text)', tier: 3 }; // Hot Orange
+      return { bg: 'var(--heat-4-bg)', border: 'var(--heat-4-border)', text: 'var(--heat-4-text)', tier: 4 };                 // Blazing Crimson
     }
 
     const HEAT_LEGEND = [
-      { color: '#38bdf8', label: 'Cool — Low Collateral' },
-      { color: '#22c55e', label: 'Mild Collateral' },
-      { color: '#eab308', label: 'Moderate Collateral' },
-      { color: '#f97316', label: 'High Collateral' },
-      { color: '#ef4444', label: 'Critical Collateral' },
+      { color: 'var(--heat-0-border)', label: 'Cool — Low Collateral' },
+      { color: 'var(--heat-1-border)', label: 'Mild Collateral' },
+      { color: 'var(--heat-2-border)', label: 'Moderate Collateral' },
+      { color: 'var(--heat-3-border)', label: 'High Collateral' },
+      { color: 'var(--heat-4-border)', label: 'Critical Collateral' },
     ];
 
     // Edge verdict story: root-relative verdict helpers. Null when the payload

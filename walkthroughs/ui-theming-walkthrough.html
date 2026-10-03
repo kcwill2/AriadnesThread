@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: UI Theming — Full Token Sweep + Three Themes</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            white-space: pre;
+            line-height: 1.45;
+        }
+        .before { border-left: 4px solid #f44336; }
+        .after  { border-left: 4px solid #4caf50; }
+        .tag {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 2px;
+        }
+        .tag.before-tag { background: #fdecea; color: #b91c1c; }
+        .tag.after-tag  { background: #e8f5e9; color: #15803d; }
+        .tag.file-tag   { background: #e3f2fd; color: #0369a1; font-family: 'Courier New', monospace; text-transform: none; }
+        .tag.dec-tag    { background: #fef9c3; color: #854d0e; }
+        .tag.lock-tag   { background: #fee2e2; color: #b91c1c; }
+        .compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        @media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
+        .callout {
+            border-left: 4px solid #007acc;
+            background: #eef6fb;
+            padding: 10px 14px;
+            border-radius: 4px;
+            margin: 12px 0;
+        }
+        .callout.warn { border-left-color: #fb923c; background: #fff4e8; }
+        table.tokens {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 13px;
+            margin: 12px 0;
+        }
+        table.tokens th, table.tokens td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+            text-align: left;
+        }
+        table.tokens th { background: #f1f5f9; }
+        table.tokens td.mono, table.tokens th.mono { font-family: 'Courier New', monospace; }
+        .swatch {
+            display: inline-block;
+            width: 11px; height: 11px;
+            border: 1px solid #999;
+            border-radius: 2px;
+            margin-right: 5px;
+            vertical-align: -1px;
+        }
+        ul.checklist li { margin: 6px 0; }
+        .big-number { font-size: 34px; font-weight: 700; color: #007acc; }
+        .stat { display: inline-block; margin: 0 24px 12px 0; text-align: center; }
+        .stat .lbl { color: #666; font-size: 12px; }
+        .dec {
+            display: inline-block;
+            background: #0f172a;
+            color: #7dd3fc;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            padding: 1px 7px;
+            border-radius: 4px;
+            margin-right: 6px;
+        }
+        code {
+            background: #eef1f4;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 90%;
+        }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+        .muted { color: #666; }
+    </style>
+</head>
+<body>
+
+<!-- ============ SLIDE 1: TITLE ============ -->
+<div class="slide">
+    <h1>UI Theming — Full Token Sweep + Three Themes</h1>
+    <p style="font-size:19px; color:#444;">Every color literal in <code>crates/ui/assets/</code> replaced by a declared CSS token, behind a Light / Dark / Dark (Steampunk) selector — locked by a contract test suite.</p>
+    <p>
+        <strong>Branch:</strong> <code>jeweled-neon</code> (uncommitted: 16 modified files + 4 new files)<br>
+        <strong>Plan:</strong> <code>.kilo/plans/1790656207440-ui-theming-token-sweep-light-theme.md</code> (decisions D1–D8 drive this deck)<br>
+        <strong>Date:</strong> 2026-09-30 · <strong>Verdict:</strong> Code-reviewer APPROVED, all findings fixed
+    </p>
+    <p class="muted">Navigate with the buttons or <kbd>←</kbd> <kbd>→</kbd> / <kbd>Space</kbd>. 14 slides.</p>
+</div>
+
+<!-- ============ SLIDE 2: OVERVIEW ============ -->
+<div class="slide">
+    <h1>Overview</h1>
+    <h2>What was implemented</h2>
+    <ul>
+        <li><strong>A token contract:</strong> new <code>themes.css</code> (437 lines) is the <em>single definition site</em> for every color — 106 tokens declared identically in three parity-locked blocks (default-dark, light, dark-steampunk).</li>
+        <li><strong>The sweep:</strong> ~120 color sites tokenized across <code>styles.css</code>, <code>main.js</code>, <code>graph.js</code>, <code>preview.js</code>, and <code>index.html</code> (including the 7 SVG arrowhead markers and inline tour styles).</li>
+        <li><strong>Switching:</strong> new 61-line <code>theme.js</code> + anti-flash <code>&lt;head&gt;</code> bootstrap + toolbar <code>#themeSelect</code>, with <code>localStorage</code> persistence and a mandatory <code>renderSvg()</code> re-render.</li>
+        <li><strong>Wiring:</strong> <code>lib.rs</code> consts, <code>server.rs</code> no-store routes, and <code>export.rs</code> standalone inlining in the correct order.</li>
+        <li><strong>The gauntlet:</strong> 2 new test files plus rewired existing assertions — N-way token parity, registry↔select↔CSS-block↔bootstrap agreement, and strict-zero-literal sweeps.</li>
+    </ul>
+    <h2>Why it was needed</h2>
+    <p>The UI was dark-locked: node cards, heat tiers, and arrowheads were hardcoded hexes, so a light theme was physically impossible — dark node cards on a white canvas (decision D1 overturned a test whose stated rationale was that these hexes were out of scope <em>because</em> they render on the canvas; the canvas is exactly the surface that must follow the theme).</p>
+    <h2>Key benefits</h2>
+    <p>Three shipped themes from one change; a fourth theme is one block + one option (parity tests force completeness); verdict semantics (<span class="lock-tag tag">green/amber/red, heat ramp</span>) are structurally separated from re-tintable chrome.</p>
+</div>
+
+<!-- ============ SLIDE 3: WHY / D1 REVERSAL ============ -->
+<div class="slide">
+    <h1>Why: the D1 reversal <span class="dec">D1</span></h1>
+    <p><span class="tag file-tag">crates/ui/tests/ui_test/gui_scrollbar_style.rs</span></p>
+    <p>An existing test <em>prohibited</em> tokenizing the graph canvas chrome. The first step of the plan was to invert it — the change set begins with a Red-Green refactor of the tests so every later task starts from a token-asserting baseline (T1).</p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before — locked to hexes</span>
+            <div class="code-block before">// The token sweep is GUI-chrome-only: the graph
+// legend card and the SVG expand badge keep
+// their literal hexes (they render on the
+// canvas).
+assert!(
+    legend_card.contains("background: #1e293b"),
+    ".legend-card must keep its literal canvas
+     chip background; graph rules are out of
+     the token sweep"
+);</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After — follows tokens</span>
+            <div class="code-block after">// INVERTED by D1 (plan 1790656207440): ...
+// that rationale is exactly backwards: the
+// canvas is precisely the surface that must
+// follow the theme ...
+common::assert_token_or_hex(
+    &amp;legend_card,
+    "bg-card",
+    "background: #1e293b",
+    ".legend-card must paint the themed card
+     surface; canvas chrome follows the
+     theme (D1)",
+);</div>
+        </div>
+    </div>
+    <div class="callout">The old rationale ("they render on the canvas") was an argument <strong>for</strong> tokenizing: a light theme with dark node cards is unusable. The reversal is recorded in the test's comment so it stays discoverable (T9). Same-file sibling test <code>test_select_dark_matches_search_input_focus_treatment</code> and the <code>#0d1117/#161b22</code> GitHub-palette ban were left untouched.</div>
+</div>
+
+<!-- ============ SLIDE 4: TOKEN CONTRACT ============ -->
+<div class="slide">
+    <h1>The token contract <span class="dec">D2</span> <span class="dec">D3</span></h1>
+    <p><span class="tag file-tag">crates/ui/assets/themes.css</span> (new, 437 lines)</p>
+    <h2>Named bg/text pairs, no <code>color-mix</code></h2>
+    <p>Dark-specific tints (<code>#450a0a</code>, <code>#052e16</code>, <code>#082f49</code>…) are surface-dependent and cannot be shared across themes. Explicit named tokens per theme are <strong>statically testable</strong>; a <code>color-mix(in srgb, …)</code> derivation is not — every tint is a real declaration the parity test can compare:</p>
+    <div class="code-block">/* node kind cards (getNodeColors) — bg/text/border per kind */
+--node-header-bg: #082f49;
+--node-header-text: #38bdf8;
+--node-header-border: #0284c7;
+...
+--node-cycle-bg: #3b0d0d;
+--node-cycle-text: #fca5a5;
+--node-cycle-border: #ef4444;
+/* 5-tier collateral heat ramp (getHeatColor) — cool -&gt; hot, always */
+--heat-0-bg: #06283d;
+...
+--heat-4-bg: #450a0a;</div>
+    <h2>The specificity trick (why the default block can't be bare <code>:root</code>)</h2>
+    <div class="code-block">SPECIFICITY: the default block deliberately cannot match a themed
+&lt;html&gt; — `:root:not([data-theme])` only matches when the attribute
+is absent, and `:root[data-theme="dark"]` re-selects the same values
+when JS pins "dark" ... With this form the light/steampunk blocks win
+unambiguously, and a JS failure or stale attribute degrades to
+today's slate dark — byte-for-byte.</div>
+    <div class="callout">Single definition site enforced by test: <code>styles.css</code> must no longer contain <code>:root</code> at all. Link order is contractual too — <code>themes.css</code> (tokens) before <code>styles.css</code> (rules) — asserted in the DOM and in the export.</div>
+</div>
+
+<!-- ============ SLIDE 5: THREE PALETTES ============ -->
+<div class="slide">
+    <h1>Three palettes, one contract</h1>
+    <div class="code-block">:root:not([data-theme]),
+:root[data-theme="dark"]          { /* 106 tokens — today's slate dark, byte-for-byte */ }
+:root[data-theme="light"]         { /* light-surface tints, every -text clears 4.5:1 */ }
+:root[data-theme="dark-steampunk"]{ /* warm chrome, verdicts locked */ }</div>
+    <h2>Illustrative tokens across the three blocks</h2>
+    <table class="tokens">
+        <tr><th class="mono">token</th><th>dark (default)</th><th>light</th><th>dark-steampunk</th></tr>
+        <tr><td class="mono">--cyan</td>
+            <td class="mono"><span class="swatch" style="background:#38bdf8"></span>#38bdf8</td>
+            <td class="mono"><span class="swatch" style="background:#0369a1"></span>#0369a1 <span class="muted">sky-700, ~5.9:1 on white</span></td>
+            <td class="mono"><span class="swatch" style="background:#e6b84d"></span>#e6b84d <span class="muted">brass (D7)</span></td></tr>
+        <tr><td class="mono">--node-cycle-bg</td>
+            <td class="mono"><span class="swatch" style="background:#3b0d0d"></span>#3b0d0d</td>
+            <td class="mono"><span class="swatch" style="background:#fee2e2"></span>#fee2e2</td>
+            <td class="mono"><span class="swatch" style="background:#4a140d"></span>#4a140d <span class="muted">warm rust</span></td></tr>
+        <tr><td class="mono">--grid-dot</td>
+            <td class="mono"><span class="swatch" style="background:rgba(255,255,255,0.5)"></span>rgba(255,255,255,0.08)</td>
+            <td class="mono"><span class="swatch" style="background:rgba(15,23,42,0.6)"></span>rgba(15,23,42,0.07) <span class="muted">white-on-white would vanish</span></td>
+            <td class="mono"><span class="swatch" style="background:rgba(230,184,77,0.6)"></span>rgba(230,184,77,0.09) <span class="muted">brass on leather</span></td></tr>
+        <tr><td class="mono">--brand-grad-a</td>
+            <td class="mono"><span class="swatch" style="background:#0284c7"></span>#0284c7</td>
+            <td class="mono"><span class="swatch" style="background:#0369a1"></span>#0369a1</td>
+            <td class="mono"><span class="swatch" style="background:#b45309"></span>#b45309 <span class="muted">copper</span></td></tr>
+        <tr><td class="mono">--bg-canvas</td>
+            <td class="mono"><span class="swatch" style="background:#0e1420"></span>#0e1420</td>
+            <td class="mono"><span class="swatch" style="background:#f8fafc"></span>#f8fafc</td>
+            <td class="mono"><span class="swatch" style="background:#191208"></span>#191208 <span class="muted">never blue-black</span></td></tr>
+    </table>
+    <div class="callout warn">Every light <code>-text</code> token clears 4.5:1 on its own tint, and light shadows are ink-tinted (<code>rgba(15,23,42,…)</code>) — pure black turns muddy-gray on white. Nothing statically verifies contrast; the parity test covers <strong>presence</strong>, a human must eyeball legibility (slide 13).</div>
+</div>
+
+<!-- ============ SLIDE 6: STEAMPUNK D6/D7 ============ -->
+<div class="slide">
+    <h1>Steampunk: brass chrome, locked verdicts <span class="dec">D6</span> <span class="dec">D7</span></h1>
+    <p>Steampunk's signature color is amber — and amber <strong>already means</strong> "partly needed" in the verdict spine. Retinting verdicts for cohesion would make them indistinguishable from decoration. So the palette is split into two layers, and the split is written into the file's header:</p>
+    <div class="code-block">* SEMANTIC layer — LOCKED. These hues ARE the information; do
+  not retint them for "cohesion" in any new theme:
+    --green / --amber / --red verdicts ... the 5-tier heat ramp
+    (--heat-0..4-*: must always read cool -&gt; hot) ...
+  Rationale: steampunk's signature color is amber, and amber
+  ALREADY means "partly needed" in the verdict spine. A
+  steampunk cycle card must still read "cycle" via rust-red,
+  never brass.
+* DECORATIVE layer — free to retint per theme:
+    --cyan and all cyan washes/glows (D7: steampunk reuses the
+      --cyan NAME as its brass/gaslight accent so every existing
+      var(--cyan) call site flips to brass for free — do NOT
+      introduce an --accent alias) ...</div>
+    <div class="compare">
+        <div>
+            <span class="tag dec-tag">Decorative — retinted</span>
+            <div class="code-block">/* accents — --cyan IS the brass/gaslight
+   accent (D7); verdicts locked */
+--cyan: #e6b84d;
+--brand-grad-a: #b45309;
+--brand-grad-b: #e6b84d;
+--edge-neutral: #7d6239; /* aged brass wire */</div>
+        </div>
+        <div>
+            <span class="tag lock-tag">Semantic — byte-identical to dark</span>
+            <div class="code-block">--green: #4ade80;
+--amber: #fb923c;
+--red: #ef4444;
+/* heat ramp tier-0 stays cool ON PURPOSE
+   (cool -&gt; hot is information, not style) */
+--heat-0-bg: #06283d;
+--heat-4-bg: #450a0a;</div>
+        </div>
+    </div>
+    <p><strong>Brass vs amber, actively disambiguated:</strong> the hypothetical preview frame moves from amber-500 <code>#f59e0b</code> to copper-orange <code>--preview-amber-edge: #f97316</code> in steampunk, so the frame marking never reads as brass chrome. All node-kind <code>-bg</code> tints are genuinely warm (bronze, patina, moss) so cards don't float as cool patches. D6 is a <em>discipline</em>, not a mechanism — the header comment is the mitigation; no test can detect a future editor retinting the ramp.</p>
+</div>
+
+<!-- ============ SLIDE 7: CSS SWEEP ============ -->
+<div class="slide">
+    <h1>The sweep in practice: styles.css</h1>
+    <p><span class="tag file-tag">crates/ui/assets/styles.css</span> — all remaining literals outside <code>:root</code> became tokens. Alpha washes got dedicated tokens (<code>--red-wash</code> etc.) rather than <code>color-mix</code>, one per fixed alpha/role, per D2.</p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before</span>
+            <div class="code-block before">.cycle-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+.cycle-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+}</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After</span>
+            <div class="code-block after">.cycle-btn {
+  background: var(--red-wash);
+  border: 1px solid var(--red-glow);
+  color: var(--red-text);
+}
+.cycle-btn:hover {
+  background: var(--red-wash-hover);
+}</div>
+        </div>
+    </div>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before</span>
+            <div class="code-block before">/* canvas dot grid */
+background-image: radial-gradient(
+  circle, rgba(255, 255, 255, 0.08) 1px,
+  transparent 1px);
+
+/* .logo-badge */
+background: linear-gradient(135deg,
+  #0284c7, #4f46e5);
+box-shadow: 0 2px 8px
+  rgba(2, 132, 199, 0.4);</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After</span>
+            <div class="code-block after">/* canvas dot grid */
+background-image: radial-gradient(
+  circle, var(--grid-dot) 1px,
+  transparent 1px);
+
+/* .logo-badge */
+background: linear-gradient(135deg,
+  var(--brand-grad-a), var(--brand-grad-b));
+box-shadow: 0 2px 8px
+  var(--brand-glow);</div>
+        </div>
+    </div>
+    <p class="muted">Guaranteed by <code>test_styles_css_carries_no_color_literals</code> (slide 12): zero <code>#hex</code> and zero <code>rgb()/rgba()</code> outside comments. <code>.css</code> is exempt from the R2 hygiene line gate, so palettes were moved out to <code>themes.css</code> instead of growing <code>styles.css</code>.</p>
+</div>
+
+<!-- ============ SLIDE 8: JS SWEEP ============ -->
+<div class="slide">
+    <h1>The sweep in practice: JS color tables</h1>
+    <p><span class="tag file-tag">crates/ui/assets/main.js</span> — <code>themes.css</code> loads in <code>&lt;head&gt;</code> before any script runs, so <code>var(--token)</code> resolves in SVG presentation attributes and inline styles exactly like in CSS. No <code>getComputedStyle</code> plumbing needed.</p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before</span>
+            <div class="code-block before">function getNodeColors(kind, isCycle) {
+  if (isCycle) return { bg: '#3b0d0d',
+    border: '#ef4444', text: '#fca5a5' };
+  switch (kind) {
+    case 'HEADER':
+      return { bg: '#082f49',
+        border: '#0284c7', text: '#38bdf8' };
+      ...
+function getHeatColor(collateral, maxCollateral) {
+  ...
+  if (t &lt;= 0.15) return { bg: '#06283d',
+    border: '#38bdf8', text: '#7dd3fc',
+    tier: 0 }; // Cool Ice
+  ...
+  return { bg: '#450a0a', border: '#ef4444',
+    text: '#fca5a5', tier: 4 }; // Blazing Crimson</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After</span>
+            <div class="code-block after">function getNodeColors(kind, isCycle) {
+  if (isCycle) return { bg: 'var(--node-cycle-bg)',
+    border: 'var(--node-cycle-border)',
+    text: 'var(--node-cycle-text)' };
+  switch (kind) {
+    case 'HEADER':
+      return { bg: 'var(--node-header-bg)',
+        border: 'var(--node-header-border)',
+        text: 'var(--node-header-text)' };
+      ...
+function getHeatColor(collateral, maxCollateral) {
+  ...
+  if (t &lt;= 0.15) return { bg: 'var(--heat-0-bg)',
+    border: 'var(--heat-0-border)',
+    text: 'var(--heat-0-text)',
+    tier: 0 }; // Cool Ice
+  ...
+  return { bg: 'var(--heat-4-bg)',
+    border: 'var(--heat-4-border)',
+    text: 'var(--heat-4-text)',
+    tier: 4 };  // Blazing Crimson</div>
+        </div>
+    </div>
+    <p>The <code>legends</code> config and <code>HEAT_LEGEND</code> color fields, <code>preview.js</code> legend rows and PROPOSED badge, and the graph text fill all followed the same pattern. In <code>graph.js</code>, the three insight-card branches went from inline rgba to wash tokens:</p>
+    <div class="code-block">- insight.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+- insight.style.background  = 'rgba(239, 68, 68, 0.1)';
++ insight.style.borderColor = 'var(--red-glow)';
++ insight.style.background  = 'var(--red-wash-soft)';
+...
+- text.setAttribute('fill', '#f8fafc');   + text.setAttribute('fill', 'var(--text-main)');</div>
+    <div class="callout"><span class="dec">D5</span> <code>graph.js</code> is the hygiene-gate binding file: <strong>990/1000 lines</strong> after the change — the sweep only replaced lines in place, and all <em>new</em> logic landed in the separate <code>theme.js</code> asset instead of the 10 lines of headroom.</div>
+</div>
+
+<!-- ============ SLIDE 9: INDEX.HTML ============ -->
+<div class="slide">
+    <h1>Static surfaces: index.html</h1>
+    <p><span class="tag file-tag">crates/ui/assets/index.html</span> — 4 changes. The 7 SVG <code>&lt;marker&gt;</code> arrowhead fills render before any JS runs, so a literal there is a first-paint theme leak.</p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before — 7 markers, 7 literals</span>
+            <div class="code-block before">&lt;marker id="arrow" ...&gt;
+  &lt;path d="M 0 1.5 L 10 5 L 0 8.5 z"
+        fill="#64748b"/&gt;
+&lt;/marker&gt;
+&lt;marker id="arrow-cycle" ...&gt;
+  &lt;path ... fill="#ef4444"/&gt;
+&lt;/marker&gt;
+... (5 more)</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After — tokenized</span>
+            <div class="code-block after">&lt;marker id="arrow" ...&gt;
+  &lt;path d="M 0 1.5 L 10 5 L 0 8.5 z"
+        fill="var(--edge-incomplete)"/&gt;
+&lt;/marker&gt;
+&lt;marker id="arrow-cycle" ...&gt;
+  &lt;path ... fill="var(--red)"/&gt;
+&lt;/marker&gt;
+... selected→--cyan, entering→--green,
+leaving→--amber, proposed→--preview-proposed-stroke</div>
+        </div>
+    </div>
+    <h2>The toolbar control <span class="dec">D4</span></h2>
+    <div class="code-block">&lt;select class="select-dark" id="themeSelect" title="Color theme"&gt;
+  &lt;option value="light"&gt;Light&lt;/option&gt;
+  &lt;option value="dark" selected&gt;Dark&lt;/option&gt;
+  &lt;option value="dark-steampunk"&gt;Dark (Steampunk)&lt;/option&gt;
+&lt;/select&gt;</div>
+    <p class="muted">Reuses the <code>.select-dark</code> form-control idiom (D4) so it inherits the focus/hover contract already asserted for that class; a test locks the class onto the element and the option values onto the THEMES registry. The now-stale class name ("dark" in 2 of 3 themes) was deliberately accepted — the control is fully token-driven, and renaming churns test selectors for no visual gain. The tour overlay's inline <code>rgba(0,0,0,0.7)</code> / shadow literals became <code>var(--tour-scrim)</code> / <code>var(--shadow-ambient)</code>, and the Help Center gained a Theme line explaining that semantic colors keep their meaning in all three themes. <span class="dec">D8</span>: no <code>prefers-color-scheme</code> auto-detect — a light theme silently repainting a dark-first analysis tool is unwanted; the user chooses.</p>
+</div>
+
+<!-- ============ SLIDE 10: SWITCHING MECHANICS ============ -->
+<div class="slide">
+    <h1>Theme switching: snippet + theme.js <span class="dec">D3</span></h1>
+    <p><span class="tag file-tag">index.html &lt;head&gt;</span> — the anti-flash bootstrap runs <strong>synchronously before the themed CSS paints</strong>:</p>
+    <div class="code-block">&lt;script&gt;
+  var bootTheme = null;
+  try { bootTheme = localStorage.getItem('ariadne_theme'); } catch (err) { /* private mode: default */ }
+  if (bootTheme !== 'light' &amp;&amp; bootTheme !== 'dark' &amp;&amp; bootTheme !== 'dark-steampunk') bootTheme = 'dark';
+  document.documentElement.dataset.theme = bootTheme;
+&lt;/script&gt;
+&lt;link rel="stylesheet" href="/themes.css"&gt;
+&lt;link rel="stylesheet" href="/styles.css"&gt;</div>
+    <p><span class="tag file-tag">crates/ui/assets/theme.js</span> (new, 61 lines, loads last) owns the deferred half:</p>
+    <div class="code-block">const THEMES = ['light', 'dark', 'dark-steampunk'];
+const DEFAULT_THEME = 'dark';
+
+function resolveTheme(name) {
+  return THEMES.includes(name) ? name : DEFAULT_THEME;
+}
+
+function applyTheme(name) {
+  const theme = resolveTheme(name);
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch (err) { /* Private-mode localStorage: the attribute still themes. */ }
+  const select = document.getElementById('themeSelect');
+  if (select) select.value = theme;
+  if (typeof renderSvg === 'function') renderSvg();
+}</div>
+    <ul>
+        <li><strong>Why the re-render is required:</strong> node <code>fill</code>/<code>stroke</code> are baked as SVG attributes and the heat palette is recomputed per render — without <code>renderSvg()</code> every card keeps stale colors until the next interaction (the most likely shipped bug, called out in the plan's Risks).</li>
+        <li><strong>Why the <code>typeof</code> guard:</strong> <code>applyTheme</code> must stay safe on pages where the graph assets haven't loaded.</li>
+        <li><strong>Stale/unknown stored value</strong> (e.g. a theme removed in a later release) falls back to <code>dark</code> and the key is rewritten — <code>&lt;html&gt;</code> never carries a <code>data-theme</code> matching no block.</li>
+    </ul>
+    <div class="callout warn"><strong>The deliberate duplication:</strong> the bootstrap hand-mirrors <code>theme.js</code>'s read-validate-apply pair because it cannot import it — every deferred/end-of-body asset (including <code>theme.js</code>, which must load after <code>graph.js</code> to call <code>renderSvg</code>) loads <em>after</em> the themed CSS has painted. Both copies carry sync comments saying so, and <code>test_bootstrap_theme_ids_mirror_the_theme_registry</code> parses the snippet's quoted ids and locks them to the registry — so adding a fourth theme without mirroring fails the suite rather than silently flashing the wrong theme.</div>
+</div>
+
+<!-- ============ SLIDE 11: EXPORT ============ -->
+<div class="slide">
+    <h1>Standalone export: order matters</h1>
+    <p><span class="tag file-tag">crates/ui/src/export.rs</span> — a standalone report opens under <code>file://</code>, where <code>/styles.css</code>, <code>/themes.css</code> and <code>/app/*.js</code> routes do not exist. Every asset must be inlined, and a missed entry fails <em>silently</em>: the report just boots unthemed with no error.</p>
+    <div class="code-block">// Link order is themes.css (tokens) then styles.css (rules); inlining in
+// the same order preserves the token-before-rule cascade for the export.
+let mut html = INDEX_HTML.replace(
+    "&lt;link rel=\"stylesheet\" href=\"/themes.css\"&gt;",
+    &amp;format!("&lt;style&gt;\n{}\n&lt;/style&gt;", THEMES_CSS.trim_end()),
+);
+html = html.replace(
+    "&lt;link rel=\"stylesheet\" href=\"/styles.css\"&gt;",
+    &amp;format!("&lt;style&gt;\n{}\n&lt;/style&gt;", STYLES_CSS.trim_end()),
+);
+...
+("main.js", MAIN_JS),
+("theme.js", THEME_JS),</div>
+    <ul>
+        <li><strong>themes.css inlined before styles.css:</strong> same tokens-before-rules cascade as the served page — an export test asserts the token text appears before a styles.css rule in the output.</li>
+        <li><strong>theme.js last in the inlining tuple:</strong> matching the served page's script order, so <code>applyTheme()</code> only runs once <code>renderSvg()</code> exists.</li>
+        <li>Wiring mirrored everywhere else too: <span class="tag file-tag">lib.rs</span> <code>THEMES_CSS</code> / <code>THEME_JS</code> <code>include_str!</code> consts; <span class="tag file-tag">server.rs</span> <code>/themes.css</code> + <code>/app/theme.js</code> routes on the existing no-store asset idiom (a cached theme bootstrap could pin a stale registry after an upgrade).</li>
+    </ul>
+</div>
+
+<!-- ============ SLIDE 12: TESTS ============ -->
+<div class="slide">
+    <h1>The test gauntlet that locks it</h1>
+    <p><strong>T1 escape hatch</strong> <span class="tag file-tag">tests/ui_test/common.rs</span> — converted assertions hold in <em>both</em> states of the sweep (before: literal; after: token), extracted once instead of repeated ~18 times:</p>
+    <div class="code-block">pub fn assert_var_or(body: &amp;str, alternatives: &amp;[&amp;str], msg: &amp;str) { ... }
+/// Canonical single-token form: the rule body either still hardcodes
+/// `legacy_hex` or already reads `var(--&lt;token&gt;)`.
+pub fn assert_token_or_hex(body: &amp;str, token: &amp;str, legacy_hex: &amp;str, msg: &amp;str) { ... }</div>
+    <h2>New suites (both registered in <code>main.rs</code>)</h2>
+    <p><span class="tag file-tag">theme_contract.rs</span> (409 lines) — the contract:</p>
+    <ul>
+        <li><strong>Placement:</strong> themes.css linked before styles.css; <code>:root</code> gone from styles.css (single definition site); theme blocks authored default-first.</li>
+        <li><strong>Transport:</strong> <code>/themes.css</code> and <code>/app/theme.js</code> served with exact bytes and <code>no-store</code>; standalone export inlines tokens + theme.js verbatim, references neither external route, and keeps tokens ahead of rules.</li>
+        <li><strong>Zero literals:</strong> styles.css and index.html carry no <code>#hex</code>/<code>rgb()</code>/<code>rgba()</code> outside comments (comments stripped first; <code>&amp;#128293;</code>-style entities are parsed out as non-colors).</li>
+        <li><strong>Four-way id agreement:</strong> <code>&lt;option value&gt;</code>s = <code>THEMES</code> array = <code>[data-theme]</code> block ids = bootstrap snippet ids — the registry is parsed from each source, so no test hardcodes a fourth copy of the theme names; half-added themes are impossible.</li>
+        <li><strong>N-way token parity:</strong> every <code>[data-theme]</code> block must declare exactly the default block's token-name set — and it <em>iterates the blocks found in the file</em>, so a fourth theme is forced into parity automatically.</li>
+    </ul>
+    <p><span class="tag file-tag">theme_js_zero_hex.rs</span> (173 lines) — strict zero for <code>main.js</code>/<code>graph.js</code>/<code>preview.js</code>/<code>theme.js</code>: no raw hex (with a hand-rolled scanner that rejects <code>&amp;#8250;</code> entities and <code>url(#arrow-cycle)</code> refs), no <code>rgba(</code> at all — the Phase-2b carve-outs became real tokens, so there is no exception table. Plus a <strong>declared-vs-used</strong> guard: every <code>var(--x)</code> in JS, styles.css, and index.html must exist in the default block (<code>var(--x, fallback)</code> exempt — the inline default is its own escape hatch, used for genuinely non-color vars like <code>--source-panel-w</code>).</p>
+    <p class="muted">Existing suites rewired through the escape hatch, exactness preserved: <code>preview_hypothetical.rs</code>, <code>static_html_sections.rs</code>, <code>edge_verdict_story.rs</code>, <code>node_verdict_spine.rs</code>, <code>static_html.rs</code>, and the inverted D1 test.</p>
+</div>
+
+<!-- ============ SLIDE 13: VERIFICATION ============ -->
+<div class="slide">
+    <h1>Verification numbers</h1>
+    <div>
+        <span class="stat"><div class="big-number">163 / 0</div><div class="lbl">cargo test -p ariadne-ui<br>passed / failed (baseline was 146)</div></span>
+        <span class="stat"><div class="big-number">exit 0</div><div class="lbl">python tools/hygiene_check.py</div></span>
+        <span class="stat"><div class="big-number">990/1000</div><div class="lbl">graph.js after the sweep (D5)</div></span>
+        <span class="stat"><div class="big-number">999/1000</div><div class="lbl">static_html.rs — tightest .rs file</div></span>
+    </div>
+    <ul>
+        <li>~120 color sites tokenized; 106 tokens × 3 parity-locked blocks; clippy clean.</li>
+        <li>Code-reviewer verdict: <strong>APPROVED</strong>, with all review findings fixed.</li>
+    </ul>
+    <h2>What tests cannot verify — manual eyeball checklist (per theme)</h2>
+    <div class="callout warn">
+        <ul class="checklist">
+            <li><strong>Steampunk legibility:</strong> cycle card still reads <em>cycle</em> (rust-red), heat ramp still reads cool→hot, brass chrome never confusable with the amber verdict spine. Two new palettes = twice the eyeball surface, not the same — "tests green" must not be read as "palettes legible."</li>
+            <li><strong>Stale-fill-on-switch:</strong> change theme with nodes selected and confirm every card, edge, and arrowhead repaints immediately (the <code>renderSvg()</code> call is the fix; verify on all three themes).</li>
+            <li><strong>Reload with no flash:</strong> stored non-default theme paints correctly on first frame (bootstrap precedes the themed CSS link — locked by test, but confirm visually).</li>
+            <li><strong>Standalone export under <code>file://</code>:</strong> selector present, theme applies, persists across reloads of the exported file.</li>
+            <li>Legend, heat map, preview overlay, inspector, source drawer, focus rings, scrollbars repaint in every theme (plan's Validation list).</li>
+        </ul>
+    </div>
+</div>
+
+<!-- ============ SLIDE 14: SUMMARY ============ -->
+<div class="slide">
+    <h1>Summary &amp; next steps</h1>
+    <h2>Recap</h2>
+    <ul>
+        <li><span class="dec">D1</span> Canvas hexes tokenized — the old out-of-scope test was inverted, its "renders on the canvas" rationale was backwards.</li>
+        <li><span class="dec">D2</span> Named bg/text/border token pairs — no <code>color-mix</code>, so parity is statically testable (106 tokens × 3 blocks).</li>
+        <li><span class="dec">D3/D4/D8</span> Explicit toolbar selector, no auto-detect, anti-flash head bootstrap, <code>localStorage</code> persistence.</li>
+        <li><span class="dec">D5</span> New logic in <code>theme.js</code>; <code>graph.js</code> held at 990/1000.</li>
+        <li><span class="dec">D6/D7</span> Steampunk: brass decorative layer (<code>--cyan</code> name reused for free flip of ~19 call sites), semantic verdicts and heat ramp structurally locked.</li>
+        <li>~120 sites swept; server/export/lib wiring complete; 163/0 tests lock the contract from every direction (ids, tokens, literals, order, transport).</li>
+    </ul>
+    <h2>Next steps</h2>
+    <ul>
+        <li>Run the manual checklist above before merging — it is the one gate automation cannot cover.</li>
+        <li>Commit the change set (16 modified + 4 new files) together with the plan file, per repo convention.</li>
+    </ul>
+    <h2>If you take one rule from this deck</h2>
+    <p><strong>Adding a fourth theme:</strong> add the <code>themes.css</code> block, the <code>THEMES</code> entry, the <code>&lt;option&gt;</code>, and the <code>&lt;head&gt;</code> bootstrap comparison — the parity and id-agreement tests will tell you instantly if you forgot one. <strong>Editing steampunk:</strong> read the D6 header comment first; verdict hues are information, not style. Questions?</p>
+</div>
+
+<div class="navigation">
+    <button onclick="prevSlide()">Previous</button>
+    <span id="slideNumber">1 / 14</span>
+    <button onclick="nextSlide()">Next</button>
+</div>
+
+<script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+
+    function showSlide(n) {
+        slides.forEach(slide => slide.classList.remove('active'));
+        slides[n].classList.add('active');
+        document.getElementById('slideNumber').textContent =
+            `${n + 1} / ${slides.length}`;
+    }
+
+    function nextSlide() {
+        currentSlide = (currentSlide + 1) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+        currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    showSlide(0);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+        if (e.key === 'ArrowLeft') prevSlide();
+    });
+</script>
+</body>
+</html>

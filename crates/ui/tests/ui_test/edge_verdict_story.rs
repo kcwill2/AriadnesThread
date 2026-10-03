@@ -2,6 +2,8 @@
 // carry the verdict via tri-color, u/t used badges, tooltips, legend rows, and
 // help copy. UI-only: string-level asset assertions in static_html.rs style.
 
+use crate::common;
+
 #[test]
 fn test_edge_verdict_marker_and_css_cascade() {
     let html = ariadne_ui::INDEX_HTML;
@@ -33,7 +35,7 @@ fn test_edge_verdict_marker_and_css_cascade() {
     );
 
     let unused_body = &css[unused..unused + css[unused..].find('}').expect("unused rule close")];
-    assert!(unused_body.contains("#ef4444"), "edge-unused must be red");
+    common::assert_token_or_hex(unused_body, "red", "#ef4444", "edge-unused must be red");
     assert!(
         unused_body.contains("stroke-dasharray: 6 4"),
         "edge-unused must be dashed 6 4"
