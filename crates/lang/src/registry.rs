@@ -9,9 +9,8 @@ use crate::rewriter::DependencyRewriter;
 use crate::unit::UnitShaper;
 use crate::validator::CompilerValidator;
 use ariadne_lang_api::capability::LanguageCapabilities;
-use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
+use ariadne_lang_api::identity::LanguageId;
 use ariadne_lang_api::modeling::LanguageModeling;
-use ariadne_repo::FileKind;
 use std::fs;
 use std::path::Path;
 
@@ -101,17 +100,26 @@ impl LanguageRegistry {
         self.plugins.iter().map(|p| p.id()).collect()
     }
 
-    /// Language of `path`, but only when BOTH the file kind maps to a real
-    /// language (`FileKind::Other` ⇒ `SourceLanguage::Other` ⇒ `None`, plan
-    /// §3.3: `Other` deliberately has no plugin) AND a registered plugin's
-    /// detector claims the path. With several claiming plugins, the first
-    /// registered wins (deterministic, registration-order precedence).
-    pub fn detect_language(&self, path: &Path) -> Option<LanguageId> {
-        if language_of_file_kind(FileKind::from_path(path)) == LanguageId::Other {
-            return None;
-        }
-        self.plugin_for(path).map(|plugin| plugin.id())
-    }
+/// Language of `path`, decided by the registered plugin's detector.
+///
+/// M24 Part A, D-A2 -- plugin detection is AUTHORITATIVE. This used to
+/// require BOTH that the closed `FileKind` table map to a real language AND
+/// that a registered plugin's detector claim the path, returning `None`
+/// whenever the table said `FileKind::Other`. That veto is what made a third
+/// language unreachable: no closed table can name it, so a third language's
+/// files were refused outright. The plugin now decides, and `None` means
+/// exactly one thing -- **no registered plugin claims this path**.
+///
+/// With several claiming plugins the FIRST registered wins (deterministic,
+/// registration-order precedence; invariant I3, locked by
+/// `detect_language_first_registered_claiming_plugin_wins`).
+///
+/// Behaviour for C++ and Scala repositories is unchanged: every path those
+/// detectors claim was already classified by the `FileKind` table, so the
+/// removed branch never fired for them.
+pub fn detect_language(&self, path: &Path) -> Option<LanguageId> {
+    self.plugin_for(path).map(|plugin| plugin.id())
+}
 
     /// Build-stage unit shaper for registry-driven discovery (plan M18.3):
     /// the single registered plugin with a shaper — today exactly one — wins.
@@ -496,14 +504,47 @@ mod tests {
     }
 
     #[test]
-    fn detect_language_yields_none_when_file_kind_maps_to_other() {
-        // `.mock` is not a recognised FileKind ⇒ SourceLanguage::Other, and
-        // Other deliberately has no plugin even though this plugin's
-        // detector claims the extension.
+    fn detect_language_defers_to_the_claiming_plugin_not_the_file_kind_table() {
+        // M24 Part A, D-A2 -- CONTRACT CHANGE, not a bug fix. `.mock` is not a
+        // recognised FileKind, so `FileKind::from_path` sends it to
+        // `FileKind::Other`. Before this milestone `detect_language` consulted
+        // that closed table first and returned `None`, discarding the answer of
+        // a plugin whose detector demonstrably claims the extension -- so a
+        // third language's files were refused rather than mislabelled. The
+        // registered plugin's detector is now the authority.
         let registry = LanguageRegistry::new().register(Box::new(MockPlugin::new()));
         assert!(registry.plugin_for(Path::new("src/main.mock")).is_some());
-        assert_eq!(registry.detect_language(Path::new("src/main.mock")), None);
+        assert_eq!(
+            registry.detect_language(Path::new("src/main.mock")),
+            Some(LanguageId::Cpp),
+            "the claiming plugin's identity is the answer; the FileKind spine no longer vetoes it"
+        );
+        // A path NO plugin claims still has no language -- and that is now the
+        // only way to get `None`.
         assert_eq!(registry.detect_language(Path::new("notes.txt")), None);
+    }
+
+    #[test]
+    fn other_is_never_a_plugin_identity_and_never_a_detection_result() {
+        // D-A3: `Other` is legacy-only. It stays the `#[serde(default)]` value so
+        // pre-existing artifacts read as C++-compatible, but it is never a
+        // plugin's `id()` and never a `detect_language` answer.
+        let registry = LanguageRegistry::new()
+            .register(Box::new(MockPlugin::with_extension("scala", LanguageId::Scala)));
+        assert!(
+            registry.plugin_for_id(LanguageId::Other).is_none(),
+            "no plugin is registered for the legacy sentinel"
+        );
+        assert_eq!(
+            registry.detect_language(Path::new("src/Main.scala")),
+            Some(LanguageId::Scala),
+            "the claimed path resolves to the plugin's own identity, not Other"
+        );
+        assert_eq!(
+            registry.detect_language(Path::new("notes.txt")),
+            None,
+            "an unclaimed path has no language rather than a wrong one"
+        );
     }
 
     #[test]
