@@ -120,14 +120,23 @@
   
   <div class="modal-overlay" id="modalOverlay" onclick="closeModals()"></div>
   <div class="modal" id="pathfinderModal">
-    <h3>Pathfinder</h3>
-    <input type="text" id="pathFrom" placeholder="From Node ID">
-    <input type="text" id="pathTo" placeholder="To Node ID">
-    <button onclick="findPath()">Find Path</button>
-    <div id="pathResult"></div>
+    <div class="modal-header">
+      <h3>Pathfinder</h3>
+      <button class="modal-close" onclick="closeModals()" title="Close">&#10005;</button>
+    </div>
+    <div class="pathfinder-row">
+      <input type="text" class="path-input" id="pathFrom" placeholder="From Node ID" autocomplete="off">
+      <span class="path-arrow">&rarr;</span>
+      <input type="text" class="path-input" id="pathTo" placeholder="To Node ID" autocomplete="off">
+    </div>
+    <button class="btn-primary" onclick="findPath()">Find Path</button>
+    <div class="path-result" id="pathResult"></div>
   </div>
   <div class="modal" id="entrypointsModal">
-    <h3>Curated Entrypoints</h3>
+    <div class="modal-header">
+      <h3>Curated Entrypoints</h3>
+      <button class="modal-close" onclick="closeModals()" title="Close">&#10005;</button>
+    </div>
     <div id="entrypointsList"></div>
   </div>
     
@@ -411,19 +420,19 @@
     </div>
   </div>
 
-  <div class="modal" id="helpCenterModal" style="z-index: 999; display: none; width: 600px; max-width: 90vw;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
-      <h3 style="margin:0;">Help & Reference Center</h3>
-      <button onclick="closeHelpCenter()" style="background:none; border:none; color: var(--text-muted); cursor: pointer;">✕</button>
+  <div class="modal help-center" id="helpCenterModal" style="z-index: 999; display: none;">
+    <div class="modal-header">
+      <h3>Help & Reference Center</h3>
+      <button class="modal-close" onclick="closeHelpCenter()">✕</button>
     </div>
-    <div style="display: flex; gap: 16px;">
-      <div style="width: 140px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); padding-right: 16px;">
-        <button class="btn-secondary help-tab-btn active" onclick="openHelpCenterTab('onboarding')" style="text-align:left; border:none; background:transparent;">Tour & Onboarding</button>
-        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('shortcuts')" style="text-align:left; border:none; background:transparent;">Keyboard Shortcuts</button>
-        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('legend')" style="text-align:left; border:none; background:transparent;">Graph Legend</button>
-        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('recipes')" style="text-align:left; border:none; background:transparent;">How-To Recipes</button>
+    <div class="help-layout">
+      <div class="help-tab-rail">
+        <button class="btn-secondary help-tab-btn active" onclick="openHelpCenterTab('onboarding')">Tour & Onboarding</button>
+        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('shortcuts')">Keyboard Shortcuts</button>
+        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('legend')">Graph Legend</button>
+        <button class="btn-secondary help-tab-btn" onclick="openHelpCenterTab('recipes')">How-To Recipes</button>
       </div>
-      <div style="flex: 1; font-size: 12px; min-height: 200px;">
+      <div class="help-body">
         <div id="helpTab-onboarding" class="help-tab-content">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">Guided Tour</h4>
           <p style="margin-bottom: 12px;">Get familiar with the main tools and interactions.</p>
@@ -434,12 +443,25 @@
         </div>
         <div id="helpTab-shortcuts" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">Keyboard Shortcuts</h4>
-          <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 8px;">
-            <div><kbd>Ctrl+K</kbd> or <kbd>/</kbd></div><div>Focus Search</div>
-            <div><kbd>↓</kbd> (from Search)</div><div>Open directory quick-open navigator, then <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Enter</kbd> to open a file or set a directory scope, <kbd>←</kbd>/<kbd>→</kbd> to collapse/expand folders</div>
-            <div><kbd>?</kbd> or <kbd>Shift+/</kbd> or <kbd>F1</kbd></div><div>Open Help Center</div>
-            <div><kbd>Esc</kbd></div><div>Dismiss modals/tour or clear selection</div>
-            <div><kbd>ArrowLeft</kbd> / <kbd>ArrowRight</kbd></div><div>Navigate Tour</div>
+          <div class="help-shortcut-row">
+            <span class="help-keys"><kbd>Ctrl+K</kbd> or <kbd>/</kbd></span>
+            <span class="help-desc">Focus Search</span>
+          </div>
+          <div class="help-shortcut-row">
+            <span class="help-keys"><kbd>↓</kbd> (from Search)</span>
+            <span class="help-desc">Open directory quick-open navigator, then <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Enter</kbd> to open a file or set a directory scope, <kbd>←</kbd>/<kbd>→</kbd> to collapse/expand folders</span>
+          </div>
+          <div class="help-shortcut-row">
+            <span class="help-keys"><kbd>?</kbd> or <kbd>Shift+/</kbd> or <kbd>F1</kbd></span>
+            <span class="help-desc">Open Help Center</span>
+          </div>
+          <div class="help-shortcut-row">
+            <span class="help-keys"><kbd>Esc</kbd></span>
+            <span class="help-desc">Dismiss modals/tour or clear selection</span>
+          </div>
+          <div class="help-shortcut-row">
+            <span class="help-keys"><kbd>ArrowLeft</kbd> / <kbd>ArrowRight</kbd></span>
+            <span class="help-desc">Navigate Tour</span>
           </div>
         </div>
         <div id="helpTab-legend" class="help-tab-content" style="display: none;">
@@ -449,18 +471,76 @@
           <p><strong>Edges:</strong> Complete dependencies are solid, incomplete (forward declarations) are dashed.</p>
           <p><strong>Closure:</strong> Number of transitive dependencies.</p>
           <p><strong>Degree:</strong> Connection distance from selected node.</p>
-          <p><strong>Collateral Heat Map:</strong> Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight. Noticeable fading hides unrelated nodes, and heat badges (+XX col) show specific counts. Every reachable dependency card states its verdict on a left spine: a <strong>green spine</strong> means every supplied symbol is used (needed), an <strong>amber spine</strong> means partly needed, a <strong>red spine</strong> means it supplies nothing and the include can go; no spine means no verdict data. The card fill stays pure collateral heat &mdash; a flat tier color, never a glow (glow marks selection and the root only). The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along. With Preview after extraction (on justification rows and proposal cards) the map marks what the selected file would stop including (red dashed), what still arrives via other paths (amber dashed), and what the slim edge keeps (green); the spines hide while previewing. The picture is a hypothetical after-state: a warning banner and amber dashed canvas frame say so, the extracted result appears as a violet dashed PROPOSED header node with a placeholder name, its proposed edges fan out in violet, and the slimmed consumer edge turns amber dashed. With a file selected, its outgoing arrows state the verdict: green solid arrows (<code>N/N used</code>) are includes whose every supplied symbol is used, red dashed arrows (<code>0/N used</code>) supply nothing the selection needs and are droppable or slimmable, and amber arrows (<code>J/T used</code>) are partially needed. Grey arrows join two dependencies inside the selection's include closure: they are transitive dependencies of the selection, but no verdict is stated against it &mdash; verdicts exist only on the selection's own outgoing arrows. Each card's spine and its arrow carry the same verdict. These verdicts are root-relative and cover project includes only &mdash; system/stdlib headers are not analyzed or counted, so an arrow's badge never describes what the dependency itself includes. A collapsed side panel (Node Inspector or Source Code) leaves a vertical restore tab on the canvas' right edge that brings it back.</p>
-          <p><strong>Path Illumination:</strong> Illuminates the exact include path when clicking a collateral contributor.</p>
-          <p><strong>Hotspots:</strong> The 🔥 Hotspots panel (opened from the Hotspots tab on the left edge of the canvas) ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation). Clicking a row selects the file and renders its heat map live beside the open list. The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</p>
+          <h5 class="help-section-title">Collateral Heat Map</h5>
+          <p>Color tiers (Cold/Teal, Green, Amber, Orange, Red) show inclusion weight; noticeable fading hides unrelated nodes and heat badges (+XX col) show specific counts. The map also previews extraction as a hypothetical after-state: a violet dashed PROPOSED header node with a placeholder name and an amber dashed slimmed consumer edge.</p>
+          <h5 class="help-section-title">Card verdict spines</h5>
+          <p>Every reachable dependency card states its verdict on a left spine:</p>
+          <ul>
+            <li><span class="help-swatch justified"></span>A <strong>green spine</strong> means every supplied symbol is used (needed).</li>
+            <li><span class="help-swatch mixed"></span>An <strong>amber spine</strong> means partly needed.</li>
+            <li><span class="help-swatch unused"></span>A <strong>red spine</strong> means it supplies nothing and the include can go.</li>
+            <li>No spine means no verdict data.</li>
+            <li>The card fill stays pure collateral heat &mdash; a flat tier color, never a glow (glow marks selection and the root only).</li>
+          </ul>
+          <h5 class="help-section-title">Selection verdict arrows</h5>
+          <p>With a file selected, its outgoing arrows state the verdict:</p>
+          <ul>
+            <li>Green solid arrows (<code>N/N used</code>) are includes whose every supplied symbol is used.</li>
+            <li>Red dashed arrows (<code>0/N used</code>) supply nothing the selection needs and are droppable or slimmable.</li>
+            <li>Amber arrows (<code>J/T used</code>) are partially needed.</li>
+            <li>Grey arrows join two dependencies inside the selection's include closure: they are transitive dependencies of the selection, but no verdict is stated against it &mdash; verdicts exist only on the selection's own outgoing arrows.</li>
+            <li>Each card's spine and its arrow carry the same verdict.</li>
+            <li>These verdicts are root-relative and cover project includes only &mdash; system/stdlib headers are not analyzed or counted, so an arrow's badge never describes what the dependency itself includes.</li>
+          </ul>
+          <h5 class="help-section-title">Include Justification breakdown</h5>
+          <p>The inspector's Include Justification breakdown expands the top contributing header of the selected file: the symbols it is included for, the headers those symbols need, and the collateral symbols it drags along.</p>
+          <h5 class="help-section-title">Preview after extraction</h5>
+          <p>With Preview after extraction (on justification rows and proposal cards) the map marks what the selected file would stop including (red dashed), what still arrives via other paths (amber dashed), and what the slim edge keeps (green); the spines hide while previewing.</p>
+          <ul>
+            <li>The picture is a hypothetical after-state: a warning banner and amber dashed canvas frame say so.</li>
+            <li>The extracted result appears as a violet dashed PROPOSED header node with a placeholder name, its proposed edges fan out in violet, and the slimmed consumer edge turns amber dashed.</li>
+          </ul>
+          <h5 class="help-section-title">Path Illumination</h5>
+          <p>Illuminates the exact include path when clicking a collateral contributor.</p>
+          <h5 class="help-section-title">Hotspots</h5>
+          <ul>
+            <li>The 🔥 Hotspots panel (opened from the Hotspots tab on the left edge of the canvas) ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation).</li>
+            <li>Clicking a row selects the file and renders its heat map live beside the open list.</li>
+            <li>The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</li>
+          </ul>
+          <h5 class="help-section-title">Restore tab</h5>
+          <p>A collapsed side panel (Node Inspector or Source Code) leaves a vertical restore tab on the canvas' right edge that brings it back.</p>
         </div>
         <div id="helpTab-recipes" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">How-To Recipes</h4>
-          <p><strong>Finding & Decoupling Header Bloat:</strong> Select a header -> inspect Collateral Breakdown -> click a heavy contributor to illuminate the include path -> refactor or forward-declare.</p>
-          <p><strong>Triage Worst Offenders:</strong> Open 🔥 Hotspots from the left-edge tab -> switch the metric to rank by burden, degree, closure, or cycles -> click a row to inspect its heat map -> optionally set a directory scope chip first to rank one subtree.</p>
-          <p><strong>Isolating Focused Subgraphs:</strong> Set Direction (Dependencies / Consumers) and step Degree (1 deg, 2 deg) or use ALL-WITH-CAP with safety node caps.</p>
-          <p><strong>Breaking Circular Dependencies:</strong> Toggle Highlight Cycle -> inspect circular links -> use Pathfinder to see the loop.</p>
+          <h5 class="help-section-title">Finding & Decoupling Header Bloat</h5>
+          <ol>
+            <li>Select a header.</li>
+            <li>Inspect its Collateral Breakdown.</li>
+            <li>Click a heavy contributor to illuminate the include path.</li>
+            <li>Refactor or forward-declare.</li>
+          </ol>
+          <h5 class="help-section-title">Triage Worst Offenders</h5>
+          <ol>
+            <li>Open 🔥 Hotspots from the left-edge tab.</li>
+            <li>Switch the metric to rank by burden, degree, closure, or cycles.</li>
+            <li>Click a row to inspect its heat map.</li>
+            <li>Optionally set a directory scope chip first to rank one subtree.</li>
+          </ol>
+          <h5 class="help-section-title">Isolating Focused Subgraphs</h5>
+          <ol>
+            <li>Set Direction (Dependencies / Consumers).</li>
+            <li>Step Degree (1 deg, 2 deg) or use ALL-WITH-CAP with safety node caps.</li>
+          </ol>
+          <h5 class="help-section-title">Breaking Circular Dependencies</h5>
+          <ol>
+            <li>Toggle Highlight Cycle.</li>
+            <li>Inspect circular links.</li>
+            <li>Use Pathfinder to see the loop.</li>
+          </ol>
         </div>
       </div>
+    </div>
     <div id="quickOpenPanel" style="display:none;"></div>
   </div>
 

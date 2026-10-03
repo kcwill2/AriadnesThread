@@ -1246,6 +1246,195 @@
       background: var(--overlay-scrim);
       z-index: 99;
     }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      font-size: 13px;
+      line-height: 1;
+      padding: 4px 7px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: color 0.15s ease, background 0.15s ease;
+    }
+    .modal-close:hover {
+      color: var(--text-main);
+      background: var(--bg-card-hover);
+    }
+    /* Help & Reference Center: contained scrolling, visible active tab,
+       scannable legend/shortcut/recipe typography. Tokens only so all
+       three themes repaint. */
+    .help-center {
+      width: 720px;
+      max-width: 92vw;
+      max-height: 84vh;
+    }
+    .help-layout {
+      display: flex;
+      gap: 16px;
+    }
+    .help-tab-rail {
+      width: 140px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border-right: 1px solid var(--border);
+      padding-right: 16px;
+    }
+    .help-body {
+      flex: 1;
+      min-width: 0;
+      min-height: 200px;
+      overflow-y: auto;
+      max-height: 70vh;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .help-body p {
+      margin: 0 0 10px;
+    }
+    .help-body h5.help-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--cyan);
+      margin: 16px 0 6px;
+    }
+    .help-body ul,
+    .help-body ol {
+      margin: 0 0 10px;
+      padding-left: 18px;
+    }
+    .help-body li {
+      margin-bottom: 4px;
+    }
+    .help-tab-btn {
+      background: transparent;
+      border: none;
+      text-align: left;
+      color: var(--text-sub);
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .help-tab-btn:hover {
+      color: var(--text-main);
+      background: var(--bg-card-hover);
+    }
+    .help-tab-btn.active {
+      color: var(--cyan);
+      background: var(--cyan-wash-soft);
+      font-weight: 600;
+    }
+    .help-tab-btn.active:hover {
+      background: var(--cyan-wash);
+    }
+    .help-swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+    .help-swatch.justified {
+      background: var(--green);
+    }
+    .help-swatch.mixed {
+      background: var(--amber);
+    }
+    .help-swatch.unused {
+      background: var(--red);
+    }
+    .help-shortcut-row {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .help-desc {
+      color: var(--text-sub);
+    }
+    kbd {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+      color: var(--text-main);
+    }
+    .pathfinder-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .path-input {
+      flex: 1;
+      min-width: 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 12px;
+      color: var(--text-main);
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .path-input::placeholder {
+      color: var(--text-sub);
+    }
+    .path-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 1px var(--cyan);
+    }
+    .path-arrow {
+      flex: 0 0 auto;
+      color: var(--text-sub);
+      font-size: 13px;
+    }
+    .path-result {
+      margin-top: 14px;
+      padding: 10px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      line-height: 2;
+      color: var(--text-muted);
+      word-break: break-all;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .path-result:empty {
+      display: none;
+    }
+    .path-node {
+      display: inline-block;
+      padding: 2px 8px;
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border-light);
+      border-radius: 10px;
+      color: var(--cyan);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .path-sep {
+      color: var(--text-sub);
+      margin: 0 2px;
+    }
     .badge-expand {
       fill: var(--border-light);
       stroke: var(--on-accent);

@@ -6,6 +6,7 @@ mod export_order;
 mod file_view;
 mod graph_api;
 mod gui_scrollbar_style;
+mod help_center_readability;
 mod justification_builders;
 mod justification_golden;
 mod node_verdict_spine;
