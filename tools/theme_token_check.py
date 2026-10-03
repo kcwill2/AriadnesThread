@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""Theme token drift guard (T13, drift-guard scope only).
+"""Theme token drift guard.
 
-The three-theme system (plan 1790656207440) was specced but never landed
-(E16), so token-parity assertions CANNOT pass today -- they belong to the
-theming plan's own Rust tests when it executes. What ships here stops drift
-in the meantime:
+Originally (T13) this shipped as a stopgap: the three-theme system (plan
+1790656207440) was specced but never landed (E16), so it only froze counts
+while the plan's own Rust tests carried the parity assertions. That plan has
+since executed -- themes.css/theme.js landed and swept every literal out of
+styles.css, main.js, preview.js and index.html -- so the split is now:
+
   1. --check-added --base <rev>: flag NEW hardcoded hex literals in
      crates/ui/assets/** (a literal is new if it is absent from the file at
-     <rev>), and
+     <rev>), EXCEPT in TOKEN_FILES, whose literals ARE the sanctioned palette
+     and are instead pinned by the count freeze; and
   2. freeze the per-file hex COUNT recorded in the committed baseline, so new
      hardcoded colors cannot hide in styles.css (invisible to the R2 size
-     gate: .css is not in R2_SCANNED_SUFFIXES).
+     gate: .css is not in R2_SCANNED_SUFFIXES) and cannot inflate the token
+     file unnoticed.
+
+Rule files must reach their colors through var(--token); the token file is the
+one place a hex literal is expected. tests/ui_test/theme_contract.rs asserts
+both halves (styles.css carries no literals; tokens live only in themes.css).
 
 Usage:
   python tools/theme_token_check.py --check-added --base <rev>
@@ -26,6 +34,10 @@ from pathlib import Path
 
 ASSETS_DIR = "crates/ui/assets"
 BASELINE_PATH = "tools/theme_token_baseline.json"
+# The token file is where hardcoded colors are SUPPOSED to live: its literals
+# are the palette, not drift. Exempt it from the added-literal scan and let the
+# frozen count below pin it instead.
+TOKEN_FILES = ("themes.css",)
 HEX_LENGTHS = (8, 6, 4, 3)
 HEX_LITERAL = re.compile(
     r"#[0-9a-fA-F]{8}(?![0-9a-fA-F])"
@@ -105,6 +117,8 @@ def scan_added_literals(root, base_rev):
         if not line.startswith("+") or line.startswith("+++"):
             continue
         if current_file is None:
+            continue
+        if current_file.rsplit("/", 1)[-1] in TOKEN_FILES:
             continue
         if current_file not in base_cache:
             base_cache[current_file] = (

@@ -7,6 +7,7 @@ pub use export::*;
 pub use server::*;
 
 pub const INDEX_HTML: &str = include_str!("../assets/index.html");
+pub const THEMES_CSS: &str = include_str!("../assets/themes.css");
 pub const STYLES_CSS: &str = include_str!("../assets/styles.css");
 pub const API_JS: &str = include_str!("../assets/api.js");
 pub const GRAPH_JS: &str = include_str!("../assets/graph.js");
@@ -15,3 +16,4 @@ pub const HOTSPOTS_JS: &str = include_str!("../assets/hotspots.js");
 pub const PREVIEW_JS: &str = include_str!("../assets/preview.js");
 pub const PROVENANCE_JS: &str = include_str!("../assets/provenance.js");
 pub const MAIN_JS: &str = include_str!("../assets/main.js");
+pub const THEME_JS: &str = include_str!("../assets/theme.js");

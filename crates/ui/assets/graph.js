@@ -308,7 +308,7 @@
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', '32');
         text.setAttribute('y', '25');
-        text.setAttribute('fill', '#f8fafc');
+        text.setAttribute('fill', 'var(--text-main)');
         text.setAttribute('font-size', '11');
         text.setAttribute('font-family', 'monospace');
         text.setAttribute('font-weight', '600');
@@ -509,20 +509,20 @@
       const insight = document.getElementById('inspInsight');
       const insightText = document.getElementById('inspInsightText');
       if (node.is_cycle) {
-        insight.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-        insight.style.background = 'rgba(239, 68, 68, 0.1)';
+        insight.style.borderColor = 'var(--red-glow)';
+        insight.style.background = 'var(--red-wash-soft)';
         insightText.textContent = `Circular dependency detected involving ${node.label}. Breaking this cycle eliminates compile-time ordering hazards.`;
       } else if (downstream.length > 4 && !justificationShown) {
-        insight.style.borderColor = 'rgba(251, 146, 60, 0.3)';
-        insight.style.background = 'rgba(251, 146, 60, 0.1)';
+        insight.style.borderColor = 'var(--amber-border)';
+        insight.style.background = 'var(--amber-wash)';
         insightText.textContent = `High fan-out (${downstream.length} dependencies). Consider header extraction or forward declaration to reduce collateral load.`;
       } else if (downstream.length > 4) {
-        insight.style.borderColor = 'rgba(251, 146, 60, 0.3)';
-        insight.style.background = 'rgba(251, 146, 60, 0.1)';
+        insight.style.borderColor = 'var(--amber-border)';
+        insight.style.background = 'var(--amber-wash)';
         insightText.textContent = `High fan-out (${downstream.length} dependencies). See the Include Justification breakdown below for what each dependency is needed for.`;
       } else {
-        insight.style.borderColor = 'rgba(56, 189, 248, 0.3)';
-        insight.style.background = 'rgba(56, 189, 248, 0.08)';
+        insight.style.borderColor = 'var(--cyan-border)';
+        insight.style.background = 'var(--cyan-wash-soft)';
         insightText.textContent = `Stable node with ${upstream.length} consumer(s) and ${downstream.length} direct dependency(s).`;
       }
 
@@ -549,7 +549,7 @@
         return `
           <div class="link-item" onclick="selectNode('${e.target}')">
             <span style="color:var(--cyan);">${name}</span>
-            <span style="color:${e.is_cycle ? '#ef4444' : 'var(--text-sub)'};">${e.is_cycle ? 'Cycle' : (e.kind || 'Direct')}</span>
+            <span style="color:${e.is_cycle ? 'var(--red)' : 'var(--text-sub)'};">${e.is_cycle ? 'Cycle' : (e.kind || 'Direct')}</span>
           </div>
         `;
       }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Leaf)</div>';

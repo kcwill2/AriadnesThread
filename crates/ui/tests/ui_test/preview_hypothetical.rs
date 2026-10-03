@@ -1,3 +1,5 @@
+use crate::common;
+
 fn css_rule_body(css: &str, selector: &str) -> String {
     let at = css.find(selector).unwrap_or_else(|| {
         panic!("styles.css must contain a rule for {selector}");
@@ -158,12 +160,19 @@ fn test_hypothetical_affordance_css() {
         ".preview-banner must stack above the legend box ({banner_z} > {legend_z})"
     );
     assert!(
-        banner.contains("dashed") && banner.contains("#f59e0b"),
+        banner.contains("dashed"),
         ".preview-banner must carry the amber dashed hypothetical theme"
     );
-    assert!(
-        banner.contains("rgba(69, 26, 3") || banner.contains("rgba(69,26,3"),
-        ".preview-banner needs the translucent dark amber backdrop"
+    common::assert_token_or_hex(
+        &banner,
+        "preview-amber-edge",
+        "#f59e0b",
+        ".preview-banner must stroke the hypothetical amber",
+    );
+    common::assert_var_or(
+        &banner,
+        &["var(--preview-hyp-bg)", "rgba(69, 26, 3", "rgba(69,26,3"],
+        ".preview-banner needs the translucent dark amber backdrop",
     );
     assert!(
         banner.contains("monospace"),
@@ -177,9 +186,15 @@ fn test_hypothetical_affordance_css() {
     );
 
     let active = css_rule_body(css, ".just-preview-btn-active");
-    assert!(
-        active.contains("#f59e0b") || active.contains("#fbbf24"),
-        "the active preview button must be clearly amber, distinct from hover"
+    common::assert_var_or(
+        &active,
+        &[
+            "var(--preview-amber-edge)",
+            "var(--preview-amber-text)",
+            "#f59e0b",
+            "#fbbf24",
+        ],
+        "the active preview button must be clearly amber, distinct from hover",
     );
 }
 
@@ -275,9 +290,13 @@ fn test_proposed_header_node_construction() {
         !preview.contains("proposed edges'),"),
         "the view label must not re-list the proposed edges (N4)"
     );
-    assert!(
-        preview.contains("background:transparent;border:1px dashed #a78bfa"),
-        "the legend proposal swatch must be a violet dashed outline, not a solid chip"
+    common::assert_var_or(
+        preview,
+        &[
+            "background:transparent;border:1px dashed var(--preview-proposed-stroke)",
+            "background:transparent;border:1px dashed #a78bfa",
+        ],
+        "the legend proposal swatch must be a violet dashed outline, not a solid chip",
     );
 }
 
@@ -292,9 +311,11 @@ fn test_proposed_edges_and_slim_edge_wiring() {
     );
     let arrow = &html[html.find("id=\"arrow-proposed\"").unwrap()..];
     let arrow_path_end = arrow.find("</marker>").expect("unterminated arrow-proposed marker");
-    assert!(
-        arrow[..arrow_path_end].contains("#a78bfa"),
-        "arrow-proposed must be violet like the proposed edges"
+    common::assert_token_or_hex(
+        &arrow[..arrow_path_end],
+        "preview-proposed-stroke",
+        "#a78bfa",
+        "arrow-proposed must be violet like the proposed edges",
     );
 
     let edges = preview_fn_source(preview, "function previewInjectProposedEdges");
@@ -332,8 +353,14 @@ fn test_proposed_visual_css() {
     let css = ariadne_ui::STYLES_CSS;
 
     let card = css_rule_body(css, ".node-group.preview-proposed-node rect");
+    common::assert_token_or_hex(
+        &card,
+        "preview-proposed-stroke",
+        "#a78bfa",
+        "the proposed card must read as a violet dashed hypothetical header",
+    );
     assert!(
-        card.contains("#a78bfa") && card.contains("stroke-dasharray"),
+        card.contains("stroke-dasharray"),
         "the proposed card must read as a violet dashed hypothetical header"
     );
 
@@ -344,8 +371,14 @@ fn test_proposed_visual_css() {
     );
 
     let edge = css_rule_body(css, ".edge-path.preview-proposed-edge {");
+    common::assert_token_or_hex(
+        &edge,
+        "preview-proposed-stroke",
+        "#a78bfa",
+        ".preview-proposed-edge must be a violet dashed bezier",
+    );
     assert!(
-        edge.contains("stroke-dasharray") && edge.contains("#a78bfa") && edge.contains("fill: none"),
+        edge.contains("stroke-dasharray") && edge.contains("fill: none"),
         ".preview-proposed-edge must be a violet dashed bezier"
     );
     assert!(
@@ -354,8 +387,14 @@ fn test_proposed_visual_css() {
     );
 
     let slim = css_rule_body(css, ".edge-path.preview-slim-edge {");
+    common::assert_token_or_hex(
+        &slim,
+        "preview-amber-text",
+        "#fbbf24",
+        ".preview-slim-edge must be the amber slimmed-consumer treatment",
+    );
     assert!(
-        slim.contains("#fbbf24") && slim.contains("stroke-dasharray"),
+        slim.contains("stroke-dasharray"),
         ".preview-slim-edge must be the amber slimmed-consumer treatment"
     );
     assert!(

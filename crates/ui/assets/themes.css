@@ -1,0 +1,437 @@
+/* ============================================================================
+   THEME TOKENS — single definition site for every color in the UI
+   (plan 1790656207440). styles.css must contain ZERO color literals outside
+   this file: each block is one theme, selected by <html data-theme="…">.
+
+   DECORATIVE vs SEMANTIC (D6) — the split that governs every future edit:
+
+   * SEMANTIC layer — LOCKED. These hues ARE the information; do not retint
+     them for "cohesion" in any new theme:
+       --green / --amber / --red verdicts and their glows/washes,
+       the 5-tier heat ramp (--heat-0..4-*: must always read cool -> hot),
+       the preview after-state verdicts (--preview-eliminated/kept/still-*),
+       --heat-ramp-a (hotspot burden gradient), --node-cycle-* (cycle = rust red).
+     Rationale: steampunk's signature color is amber, and amber ALREADY means
+     "partly needed" in the verdict spine. A steampunk cycle card must still
+     read "cycle" via rust-red, never brass. Steampunk may only adjust these
+     for contrast on the warm surface, never for style.
+
+   * DECORATIVE layer — free to retint per theme:
+       --cyan and all cyan washes/glows (D7: steampunk reuses the --cyan NAME
+         as its brass/gaslight accent so every existing var(--cyan) call site
+         flips to brass for free — do NOT introduce an --accent alias),
+       --brand-grad-*, --primary-btn*, --tag-pill-*, --grid-dot,
+       all surfaces/borders/text, shadows, scrims, --tile-bg, --overlay-panel-bg,
+       node KIND identities (--node-header/source/class/function/other-*) and
+       --edge-neutral/--edge-incomplete, and the proposed-hypothetical violet
+       family (--preview-proposed-*: "hypothetical" identity, patina in
+       steampunk). --preview-amber-* is the hypothetical FRAME marking: keep
+       it clearly distinct from brass chrome in warm themes.
+
+   SPECIFICITY: the default block deliberately cannot match a themed <html> —
+   `:root:not([data-theme])` only matches when the attribute is absent, and
+   `:root[data-theme="dark"]` re-selects the same values when JS pins "dark"
+   (theme.js always sets the attribute, so a default of bare `:root` would
+   collide by source order with the [data-theme=...] blocks below). With this
+   form the light/steampunk blocks win unambiguously, and a JS failure or
+   stale attribute degrades to today's slate dark — byte-for-byte.
+   ========================================================================= */
+
+    :root:not([data-theme]),
+    :root[data-theme="dark"] {
+      /* surfaces & ink (slate dark) */
+      --bg-main: #0b0f17;
+      --bg-canvas: #0e1420;
+      --bg-surface: #111827;
+      --bg-sub: #161f2e;
+      --bg-card: #1e293b;
+      --bg-card-hover: #27354a;
+      --border: #243044;
+      --border-light: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-sub: #64748b;
+      /* accents */
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.4);
+      --green: #4ade80;
+      --amber: #fb923c;
+      --red: #ef4444;
+      /* bright ink & on-accent strokes */
+      --text-strong: #ffffff;
+      --on-accent: #fff;
+      --code-text: #e2e8f0;
+      /* brand & primary controls */
+      --brand-grad-a: #0284c7;
+      --brand-grad-b: #4f46e5;
+      --brand-glow: rgba(2, 132, 199, 0.4);
+      --primary-btn: #0284c7;
+      --primary-btn-hover: #0369a1;
+      --tag-pill-bg: rgba(14, 165, 233, 0.15);
+      --tag-pill-border: rgba(14, 165, 233, 0.3);
+      /* cyan washes (one per fixed alpha/role; 0.4 washes reuse --cyan-glow) */
+      --cyan-wash: rgba(56, 189, 248, 0.12);
+      --cyan-highlight: rgba(56, 189, 248, 0.15);
+      --cyan-glow-strong: rgba(56, 189, 248, 0.65);
+      --tour-glow: rgba(56, 189, 248, 0.7);
+      /* insight-card washes (graph.js selectNode): border + soft fill on the
+         stable-node card; the cycle card fills with --red-wash-soft */
+      --cyan-border: rgba(56, 189, 248, 0.3);
+      --cyan-wash-soft: rgba(56, 189, 248, 0.08);
+      /* red verdict washes/glows */
+      --red-wash: rgba(239, 68, 68, 0.15);
+      --red-wash-soft: rgba(239, 68, 68, 0.1);
+      --red-wash-hover: rgba(239, 68, 68, 0.3);
+      --red-glow: rgba(239, 68, 68, 0.4);
+      --red-glow-strong: rgba(239, 68, 68, 0.8);
+      --red-text: #f87171;
+      /* green verdict washes/glows */
+      --green-glow: rgba(74, 222, 128, 0.4);
+      /* amber verdict washes/glows */
+      --amber-wash: rgba(251, 146, 60, 0.1);
+      --amber-border: rgba(251, 146, 60, 0.3);
+      --amber-glow: rgba(251, 146, 60, 0.4);
+      --amber-text: #fdba74;
+      /* edge base strokes (context/transitive + incomplete) */
+      --edge-neutral: #475569;
+      --edge-incomplete: #64748b;
+      /* canvas dot grid */
+      --grid-dot: rgba(255, 255, 255, 0.08);
+      /* shadows at the four alphas used across the app */
+      --shadow-soft: rgba(0, 0, 0, 0.3);
+      --shadow-node: rgba(0, 0, 0, 0.4);
+      --shadow-ambient: rgba(0, 0, 0, 0.5);
+      --shadow-lift: rgba(0, 0, 0, 0.6);
+      /* overlays & translucent surfaces — --tour-scrim is the guided-tour
+         scrim, a step stronger than --overlay-scrim (0.7 vs 0.5 alpha) */
+      --overlay-scrim: rgba(0, 0, 0, 0.5);
+      --tour-scrim: rgba(0, 0, 0, 0.7);
+      --overlay-panel-bg: rgba(17, 24, 39, 0.92);
+      --tile-bg: rgba(30, 41, 59, 0.6);
+      --progress-track: rgba(148, 163, 184, 0.2);
+      --heat-ramp-a: #f97316;
+      /* node kind cards (getNodeColors) */
+      --node-header-bg: #082f49;
+      --node-header-text: #38bdf8;
+      --node-header-border: #0284c7;
+      --node-source-bg: #1e1b4b;
+      --node-source-text: #818cf8;
+      --node-source-border: #4f46e5;
+      --node-class-bg: #2e1065;
+      --node-class-text: #c084fc;
+      --node-class-border: #9333ea;
+      --node-function-bg: #052e16;
+      --node-function-text: #4ade80;
+      --node-function-border: #16a34a;
+      --node-other-bg: #1e293b;
+      --node-other-text: #94a3b8;
+      --node-other-border: #475569;
+      --node-cycle-bg: #3b0d0d;
+      --node-cycle-text: #fca5a5;
+      --node-cycle-border: #ef4444;
+      /* 5-tier collateral heat ramp (getHeatColor) — cool -> hot, always */
+      --heat-0-bg: #06283d;
+      --heat-0-border: #38bdf8;
+      --heat-0-text: #7dd3fc;
+      --heat-1-bg: #063721;
+      --heat-1-border: #22c55e;
+      --heat-1-text: #86efac;
+      --heat-2-bg: #382a04;
+      --heat-2-border: #eab308;
+      --heat-2-text: #fde047;
+      --heat-3-bg: #431407;
+      --heat-3-border: #f97316;
+      --heat-3-text: #fdba74;
+      --heat-4-bg: #450a0a;
+      --heat-4-border: #ef4444;
+      --heat-4-text: #fca5a5;
+      /* preview after-state overlay (E3) */
+      --preview-eliminated-bg: #450a0a;
+      --preview-eliminated-text: #fca5a5;
+      --preview-eliminated-glow: rgba(239, 68, 68, 0.9);
+      --preview-kept-bg: #052e16;
+      --preview-kept-text: #4ade80;
+      --preview-kept-glow: rgba(74, 222, 128, 0.85);
+      --preview-still-bg: #422006;
+      --preview-still-text: #fbbf24;
+      --preview-amber-edge: #f59e0b;
+      --preview-amber-text: #fbbf24;
+      --preview-amber-glow: rgba(245, 158, 11, 0.85);
+      --preview-amber-outline: rgba(245, 158, 11, 0.55);
+      --preview-hyp-bg: rgba(69, 26, 3, 0.92);
+      --preview-hyp-bg-active: rgba(69, 26, 3, 0.55);
+      --preview-proposed-bg: rgba(30, 27, 75, 0.85);
+      --preview-proposed-text: #e9d5ff;
+      --preview-proposed-stroke: #a78bfa;
+    }
+
+    /* LIGHT — tints are light-surface tints; every -text clears 4.5:1 on its
+       own tint; the decorative accent is a deep blue (sky-700, ~5.9:1 on
+       white) instead of a darkened cyan. Shadows are ink-tinted, not pure
+       black, which turns muddy-gray on white surfaces. */
+    :root[data-theme="light"] {
+      /* surfaces & ink */
+      --bg-main: #f1f5f9;
+      --bg-canvas: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-sub: #e2e8f0;
+      --bg-card: #e2e8f0;
+      --bg-card-hover: #cbd5e1;
+      --border: #cbd5e1;
+      --border-light: #94a3b8;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-sub: #526077;
+      /* accents */
+      --cyan: #0369a1;
+      --cyan-glow: rgba(3, 105, 161, 0.4);
+      --green: #15803d;
+      --amber: #92400e;
+      --red: #b91c1c;
+      /* bright ink & on-accent strokes */
+      --text-strong: #020617;
+      --on-accent: #ffffff;
+      --code-text: #1e293b;
+      /* brand & primary controls */
+      --brand-grad-a: #0369a1;
+      --brand-grad-b: #4338ca;
+      --brand-glow: rgba(3, 105, 161, 0.3);
+      --primary-btn: #0369a1;
+      --primary-btn-hover: #075985;
+      --tag-pill-bg: rgba(2, 132, 199, 0.10);
+      --tag-pill-border: rgba(2, 132, 199, 0.25);
+      /* cyan washes */
+      --cyan-wash: rgba(2, 132, 199, 0.10);
+      --cyan-highlight: rgba(2, 132, 199, 0.18);
+      --cyan-glow-strong: rgba(2, 132, 199, 0.35);
+      --tour-glow: rgba(2, 132, 199, 0.45);
+      /* insight-card washes — border darkened to sky, fills stay whisper-soft
+         so the card reads as tinted paper, not a colored block */
+      --cyan-border: rgba(2, 132, 199, 0.25);
+      --cyan-wash-soft: rgba(2, 132, 199, 0.08);
+      /* red verdict washes/glows */
+      --red-wash: rgba(220, 38, 38, 0.08);
+      --red-wash-soft: rgba(220, 38, 38, 0.08);
+      --red-wash-hover: rgba(220, 38, 38, 0.16);
+      --red-glow: rgba(220, 38, 38, 0.35);
+      --red-glow-strong: rgba(220, 38, 38, 0.6);
+      --red-text: #b91c1c;
+      /* green verdict washes/glows */
+      --green-glow: rgba(22, 163, 74, 0.35);
+      /* amber verdict washes/glows */
+      --amber-wash: rgba(217, 119, 6, 0.08);
+      --amber-border: rgba(217, 119, 6, 0.25);
+      --amber-glow: rgba(217, 119, 6, 0.35);
+      --amber-text: #92400e;
+      /* edge base strokes — darker than dark-theme defaults so 1.5px lines
+         clear ~3:1 on the light canvas */
+      --edge-neutral: #64748b;
+      --edge-incomplete: #94a3b8;
+      /* canvas dot grid — dark speckle; white-on-white would be invisible */
+      --grid-dot: rgba(15, 23, 42, 0.07);
+      /* shadows */
+      --shadow-soft: rgba(15, 23, 42, 0.08);
+      --shadow-node: rgba(15, 23, 42, 0.14);
+      --shadow-ambient: rgba(15, 23, 42, 0.20);
+      --shadow-lift: rgba(15, 23, 42, 0.26);
+      /* overlays & translucent surfaces — tour scrim keeps the same +0.2
+         alpha step over --overlay-scrim as the dark theme */
+      --overlay-scrim: rgba(15, 23, 42, 0.45);
+      --tour-scrim: rgba(15, 23, 42, 0.65);
+      --overlay-panel-bg: rgba(255, 255, 255, 0.92);
+      --tile-bg: rgba(226, 232, 240, 0.7);
+      --progress-track: rgba(100, 116, 139, 0.18);
+      --heat-ramp-a: #ea580c;
+      /* node kind cards */
+      --node-header-bg: #e0f2fe;
+      --node-header-text: #0369a1;
+      --node-header-border: #0284c7;
+      --node-source-bg: #e0e7ff;
+      --node-source-text: #4338ca;
+      --node-source-border: #4f46e5;
+      --node-class-bg: #f3e8ff;
+      --node-class-text: #7e22ce;
+      --node-class-border: #9333ea;
+      --node-function-bg: #dcfce7;
+      --node-function-text: #15803d;
+      --node-function-border: #16a34a;
+      --node-other-bg: #e2e8f0;
+      --node-other-text: #334155;
+      --node-other-border: #475569;
+      --node-cycle-bg: #fee2e2;
+      --node-cycle-text: #b91c1c;
+      --node-cycle-border: #dc2626;
+      /* 5-tier collateral heat ramp — light tints, locked cool -> hot hue order */
+      --heat-0-bg: #e0f2fe;
+      --heat-0-border: #0284c7;
+      --heat-0-text: #075985;
+      --heat-1-bg: #dcfce7;
+      --heat-1-border: #16a34a;
+      --heat-1-text: #15803d;
+      --heat-2-bg: #fef9c3;
+      --heat-2-border: #ca8a04;
+      --heat-2-text: #854d0e;
+      --heat-3-bg: #ffedd5;
+      --heat-3-border: #ea580c;
+      --heat-3-text: #9a3412;
+      --heat-4-bg: #fee2e2;
+      --heat-4-border: #dc2626;
+      --heat-4-text: #b91c1c;
+      /* preview after-state overlay */
+      --preview-eliminated-bg: #fee2e2;
+      --preview-eliminated-text: #b91c1c;
+      --preview-eliminated-glow: rgba(220, 38, 38, 0.4);
+      --preview-kept-bg: #dcfce7;
+      --preview-kept-text: #15803d;
+      --preview-kept-glow: rgba(22, 163, 74, 0.4);
+      --preview-still-bg: #fef3c7;
+      --preview-still-text: #92400e;
+      --preview-amber-edge: #b45309;
+      --preview-amber-text: #92400e;
+      --preview-amber-glow: rgba(217, 119, 6, 0.45);
+      --preview-amber-outline: rgba(217, 119, 6, 0.5);
+      --preview-hyp-bg: rgba(254, 243, 199, 0.92);
+      --preview-hyp-bg-active: rgba(254, 243, 199, 0.6);
+      --preview-proposed-bg: rgba(237, 233, 254, 0.9);
+      --preview-proposed-text: #5b21b6;
+      --preview-proposed-stroke: #7c3aed;
+    }
+
+    /* DARK STEAMPUNK — D6 discipline: the DECORATIVE layer is brass / copper /
+       copper-patina / aged brass; the SEMANTIC layer (--green/--amber/--red,
+       the heat ramp, the preview verdicts, --heat-ramp-a, --node-cycle-*) KEEPS
+       its hues so a cycle card still reads "cycle", not "brass". Per D7 the
+       brass accent REUSES the --cyan token name (~19 existing var() call sites
+       flip for free). Every node/kind -bg tint is genuinely warm (bronze,
+       patina, aged copper, moss) so cards do not float on the warm canvas as
+       cool patches; the heat ramp's tier-0 cool blue stays cool ON PURPOSE
+       (cool -> hot is information, not style). The hypothetical preview frame
+       moves from amber-500 to copper-orange #f97316 to stay distinguishable
+       from the brass chrome. */
+    :root[data-theme="dark-steampunk"] {
+      /* surfaces & ink — warm near-black brown, never blue-black */
+      --bg-main: #120d07;
+      --bg-canvas: #191208;
+      --bg-surface: #221a10;
+      --bg-sub: #2b2115;
+      --bg-card: #362a1a;
+      --bg-card-hover: #453622;
+      --border: #4a3a24;
+      --border-light: #6b5433;
+      --text-main: #f5e9d0;
+      --text-muted: #c4ad85;
+      --text-sub: #9a8058;
+      /* accents — --cyan IS the brass/gaslight accent (D7); verdicts locked */
+      --cyan: #e6b84d;
+      --cyan-glow: rgba(230, 184, 77, 0.4);
+      --green: #4ade80;
+      --amber: #fb923c;
+      --red: #ef4444;
+      /* bright ink & on-accent strokes — dark ink reads on brass */
+      --text-strong: #fdf6e3;
+      --on-accent: #241608;
+      --code-text: #e8d8b0;
+      /* brand & primary controls — copper -> brass */
+      --brand-grad-a: #b45309;
+      --brand-grad-b: #e6b84d;
+      --brand-glow: rgba(180, 83, 9, 0.45);
+      --primary-btn: #8f5e1e;
+      --primary-btn-hover: #6f4712;
+      --tag-pill-bg: rgba(230, 184, 77, 0.12);
+      --tag-pill-border: rgba(230, 184, 77, 0.3);
+      /* cyan washes */
+      --cyan-wash: rgba(230, 184, 77, 0.10);
+      --cyan-highlight: rgba(230, 184, 77, 0.15);
+      --cyan-glow-strong: rgba(230, 184, 77, 0.6);
+      --tour-glow: rgba(230, 184, 77, 0.7);
+      /* insight-card washes — D7: the --cyan washes here are brass, since
+         the stable-node card frame is decorative chrome, not a verdict */
+      --cyan-border: rgba(230, 184, 77, 0.3);
+      --cyan-wash-soft: rgba(230, 184, 77, 0.08);
+      /* red verdict washes/glows — locked */
+      --red-wash: rgba(239, 68, 68, 0.15);
+      --red-wash-soft: rgba(239, 68, 68, 0.1);
+      --red-wash-hover: rgba(239, 68, 68, 0.3);
+      --red-glow: rgba(239, 68, 68, 0.4);
+      --red-glow-strong: rgba(239, 68, 68, 0.8);
+      --red-text: #f87171;
+      /* green verdict washes/glows — locked */
+      --green-glow: rgba(74, 222, 128, 0.4);
+      /* amber verdict washes/glows — locked */
+      --amber-wash: rgba(251, 146, 60, 0.10);
+      --amber-border: rgba(251, 146, 60, 0.3);
+      --amber-glow: rgba(251, 146, 60, 0.4);
+      --amber-text: #fdba74;
+      /* edge base strokes — aged brass wire on the warm canvas */
+      --edge-neutral: #7d6239;
+      --edge-incomplete: #9a8058;
+      /* canvas dot grid — brass speckle on leather */
+      --grid-dot: rgba(230, 184, 77, 0.09);
+      /* shadows — warm black, not blue black */
+      --shadow-soft: rgba(10, 5, 0, 0.35);
+      --shadow-node: rgba(10, 5, 0, 0.45);
+      --shadow-ambient: rgba(10, 5, 0, 0.6);
+      --shadow-lift: rgba(10, 5, 0, 0.7);
+      /* overlays & translucent surfaces — warm tour scrim, same +0.2 step */
+      --overlay-scrim: rgba(10, 5, 0, 0.6);
+      --tour-scrim: rgba(10, 5, 0, 0.8);
+      --overlay-panel-bg: rgba(34, 26, 16, 0.92);
+      --tile-bg: rgba(64, 49, 29, 0.6);
+      --progress-track: rgba(230, 184, 77, 0.15);
+      --heat-ramp-a: #f97316;
+      /* node kind cards — warm kind identities (decorative layer) */
+      --node-header-bg: #3a2c10;
+      --node-header-text: #e6b84d;
+      --node-header-border: #b45309;
+      --node-source-bg: #0f3a38;
+      --node-source-text: #56c9b8;
+      --node-source-border: #2d7d70;
+      --node-class-bg: #46250f;
+      --node-class-text: #f4a95f;
+      --node-class-border: #b45309;
+      --node-function-bg: #12311e;
+      --node-function-text: #4ade80;
+      --node-function-border: #16a34a;
+      --node-other-bg: #3b2f1d;
+      --node-other-text: #c9b48c;
+      --node-other-border: #6b5433;
+      --node-cycle-bg: #4a140d;
+      --node-cycle-text: #fca5a5;
+      --node-cycle-border: #ef4444;
+      /* 5-tier collateral heat ramp — semantically LOCKED: hue order and
+         contrast on the warm surface only; tier-0 stays cool by design */
+      --heat-0-bg: #06283d;
+      --heat-0-border: #38bdf8;
+      --heat-0-text: #7dd3fc;
+      --heat-1-bg: #063721;
+      --heat-1-border: #22c55e;
+      --heat-1-text: #86efac;
+      --heat-2-bg: #382a04;
+      --heat-2-border: #eab308;
+      --heat-2-text: #fde047;
+      --heat-3-bg: #431407;
+      --heat-3-border: #f97316;
+      --heat-3-text: #fdba74;
+      --heat-4-bg: #450a0a;
+      --heat-4-border: #ef4444;
+      --heat-4-text: #fca5a5;
+      /* preview after-state overlay — verdicts locked; frame shifts to
+         copper-orange so it never reads as brass chrome */
+      --preview-eliminated-bg: #450a0a;
+      --preview-eliminated-text: #fca5a5;
+      --preview-eliminated-glow: rgba(239, 68, 68, 0.9);
+      --preview-kept-bg: #052e16;
+      --preview-kept-text: #4ade80;
+      --preview-kept-glow: rgba(74, 222, 128, 0.85);
+      --preview-still-bg: #422006;
+      --preview-still-text: #fdba74;
+      --preview-amber-edge: #f97316;
+      --preview-amber-text: #fdba74;
+      --preview-amber-glow: rgba(249, 115, 22, 0.85);
+      --preview-amber-outline: rgba(249, 115, 22, 0.55);
+      --preview-hyp-bg: rgba(69, 26, 3, 0.92);
+      --preview-hyp-bg-active: rgba(69, 26, 3, 0.55);
+      --preview-proposed-bg: rgba(15, 58, 56, 0.85);
+      --preview-proposed-text: #b9ece0;
+      --preview-proposed-stroke: #56c9b8;
+    }

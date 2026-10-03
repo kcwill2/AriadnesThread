@@ -700,65 +700,11 @@ fn test_breadcrumbs_render_in_thread_bar() {
     );
 }
 
-#[test]
-fn test_index_markup_has_no_inline_style_or_script_bodies() {
-    let html = ariadne_ui::INDEX_HTML;
-    assert!(
-        !html.contains("<style"),
-        "markup must not inline CSS: it belongs in /styles.css"
-    );
-    assert!(
-        !html.contains("function "),
-        "no JS function bodies may remain inline in index markup"
-    );
-
-    // Inspect every <script> tag: src-tagged assets are fine; the only inline
-    // body allowed is the data placeholder comment consumed by the export.
-    let mut rest = html;
-    let mut inline_script_count = 0;
-    while let Some(open) = rest.find("<script") {
-        let after_open = &rest[open..];
-        let tag_end = after_open.find('>').expect("unterminated <script> tag");
-        let close = after_open
-            .find("</script>")
-            .expect("unterminated <script> body");
-        let tag = &after_open[..tag_end];
-        if tag.contains("src=") {
-            assert!(
-                tag_start_is_asset(tag),
-                "unexpected script tag with src: {tag}"
-            );
-        } else {
-            inline_script_count += 1;
-            let body = after_open[tag_end + 1..close].trim();
-            assert_eq!(
-                body, "/*__ARIADNE_DATA__*/",
-                "only the data placeholder may be an inline script body"
-            );
-        }
-        rest = &after_open[close + "</script>".len()..];
-    }
-    assert_eq!(inline_script_count, 1, "exactly one inline script body");
-    assert_eq!(
-        html.matches("<script src=").count(),
-        7,
-        "exactly seven classic asset scripts"
-    );
-}
-
-fn tag_start_is_asset(tag: &str) -> bool {
-    [
-        "/app/api.js",
-        "/app/graph.js",
-        "/app/file-view.js",
-        "/app/hotspots.js",
-        "/app/preview.js",
-        "/app/provenance.js",
-        "/app/main.js",
-    ]
-    .iter()
-    .any(|src| tag.contains(src))
-}
+// `test_index_markup_has_no_inline_style_or_script_bodies` (with its
+// `tag_start_is_asset` helper) moved to theme_contract.rs: since theming
+// landed, its contract is the anti-flash bootstrap exception and the eight
+// asset scripts theming extended, not general index-markup structure. It also
+// keeps this file under the R2 1000-line ceiling after the merge.
 
 #[test]
 fn test_script_tag_order_preserves_original_execution_order() {
@@ -773,6 +719,9 @@ fn test_script_tag_order_preserves_original_execution_order() {
         "/app/preview.js",
         "/app/provenance.js",
         "/app/main.js",
+        // theme.js is new (T6) but its position is just as load-bearing: it
+        // re-renders through renderSvg(), so it must sit after main.js.
+        "/app/theme.js",
     ];
     let mut pos = 0usize;
     for src in order {

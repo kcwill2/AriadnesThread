@@ -100,9 +100,9 @@
         + ` &middot; ${still} still reach via other paths`
         + ` &middot; ${impact.symbols_no_longer_parsed || 0} symbols no longer parsed</div>`;
       const rows = [
-        ['#ef4444', 'Eliminated — never included again'],
-        ['#f59e0b', 'Still reachable via other paths'],
-        ['#4ade80', 'Kept — needed by the slim edge'],
+        ['var(--red)', 'Eliminated — never included again'],
+        ['var(--preview-amber-edge)', 'Still reachable via other paths'],
+        ['var(--green)', 'Kept — needed by the slim edge'],
       ].map(item => `
         <div class="legend-row">
           <div class="legend-color" style="background:${item[0]};"></div>
@@ -110,7 +110,7 @@
         </div>`).join('');
       const proposalRow = `
         <div class="legend-row">
-          <div class="legend-color" style="background:transparent;border:1px dashed #a78bfa;"></div>
+          <div class="legend-color" style="background:transparent;border:1px dashed var(--preview-proposed-stroke);"></div>
           <span>Proposed header (placeholder name)</span>
         </div>`;
       document.getElementById('legendItems').innerHTML = summary + rows + proposalRow;
@@ -296,7 +296,7 @@
       badge.setAttribute('x', '128');
       badge.setAttribute('y', '12');
       badge.setAttribute('font-size', '7');
-      badge.setAttribute('fill', '#a78bfa');
+      badge.setAttribute('fill', 'var(--preview-proposed-stroke)');
       badge.textContent = 'PROPOSED';
       card.appendChild(badge);
       layer.appendChild(card);
