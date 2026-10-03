@@ -221,3 +221,162 @@ Per task: commit hash + `git show --stat`; red evidence; green evidence as a can
 line + exit code; deviations + reason; out-of-scope observations report-only. Never paste
 raw tool output. Use `commit_scoped.py` **only if present** -- on this branch it is not,
 so scope plain `git add` by hand and never `git add .`.
+
+---
+
+# CLOSEOUT -- Part A landed 2026-10-03
+
+Six commits on `multi-language-support`, base `fe1d649`:
+
+| Task | Commit | What it did |
+|---|---|---|
+| T1 | `994ff71` | Open `LanguageId` as a `Cow<'static, str>` newtype (D-A1) |
+| T2 | `7aee77e` | Plugin-authoritative `detect_language`; the `FileKind` veto is gone (D-A2) |
+| T5 | `15d7c6b` | `FileKind` policy/language split pinned (D-A6) |
+| T4 | `ce9a55b` | Registry is the dispatch authority, not `FileRecord.language` (D-A5) |
+| T3 | `e627601` | The silent C++ misroute in the planning dispatch is dead (D-A4) |
+| T6 | `f6ad4ba` | `m24_language_identity_test.rs`, 8 acceptance tests |
+
+53 files changed, +1718/-270. **Executed in the architect session, not delegated:** a global
+rule (`{"permission":"bash","action":"deny","pattern":"*","source":"global"}`) denies `bash`
+to every subagent, verified by probe against both an `implementer` and a `tool-caller`
+subagent, so no delegation topology could run a test or a build on this branch.
+
+## Gate numbers (§6, all seven)
+
+1. `cargo test --workspace --no-fail-fast` → **exit 0, 1106 passed / 0 failed / 3 ignored**
+   across 82 suites. Baseline at `fe1d649` was 1088/0/3; the +18 are this milestone's tests.
+2. `git diff -- tests/golden` → **EMPTY**. `m00_golden_baseline_test` green (2/2). The six
+   golden files carrying a language field (`repository_files.json`, `build_contexts.json`,
+   `index_index.json`, x2 fixtures) are byte-identical.
+3. `m17_plugin_seam_test.rs` → **UNEDITED and green (6/6)**, including
+   `core_crates_do_not_name_languages`. It earned its keep: it caught two of this author's
+   own violations (`crates/report:243,281` spelling `LanguageId::Cpp` inside a guarded
+   crate), both fixed to `cpp()`.
+4. A registered plugin with a non-Cpp/Scala id resolves through `detect_language`,
+   `plugin_for_id`, `plugin_for` and the CLI dispatch path —
+   `a_third_language_plugin_resolves_through_detection_and_id_lookup` and
+   `a_third_language_dispatches_through_the_cli_catalog`.
+5. A language with no plugin yields the explicit unhandled-language error
+   (`a_language_with_no_plugin_yields_an_explicit_unhandled_language_error`, which also
+   asserts the message does not mention `Cpp`), and
+   `no_cpp_fallback_survives_in_a_core_crate_dispatch_match` finds **zero** C++ fallbacks
+   across eleven core crates. That scan was validated with a negative control: a planted
+   `_ => ariadne_lang_cpp::cpp_aggregation_filter(...)` made it FAIL and name
+   `plan.rs:44`.
+6. `python tools/hygiene_check.py` → **exit 0**.
+7. `git diff -- Cargo.lock` → **EMPTY**, 0 packages added. I4 holds: no dependency at all.
+
+## Did the compiler find the match sites? (D-A4, the T3 census)
+
+Opening `LanguageId` produced 13 compile-error waves across 53 files. **The complete list of
+sites that broke, and how each was resolved:**
+
+| Site | Resolution |
+|---|---|
+| `build/discovery.rs:245,264` | `record.language` — both fields stay `SourceLanguage` (ADAPT-8) |
+| `graph/builder.rs` — `edge_from_outcome`, `resolved_edge`, `include_edge` | param type → `LanguageId` |
+| `graph/builder.rs:487,491,540` | three R2-guard sites, not one (ADAPT-6) → `LanguageId::cpp()` |
+| `graph/graph.rs` — `edge()` helper, 5 `IncludeEdge` literals, 3 `let cpp` | → `LanguageId`; `cpp.clone()` at call sites |
+| `graph/{traversal,load_*}.rs` — 12 `IncludeEdge` literals | → `crate::types::LanguageId::cpp()` |
+| `cluster/planner.rs:128` | `gap.language.clone()` (no longer `Copy`) |
+| `cluster/planner.rs:678` | `matches!` const pattern impossible — `Cow` is not structural-match → equality guard |
+| `cluster/frontier.rs` — 3 sites | → `ariadne_lang::LanguageId::cpp()` |
+| `report/manifests.rs` — 4 `languages` fields + `collect_stage_languages` | → `Vec<LanguageId>`, generic over `Into<LanguageId>` |
+| `report/{graph_io,metrics_io}.rs` | `.clone()` / `LanguageId::from(..)` |
+| `index/cache.rs` — `TuCacheFingerprint.language` + `compute` | → `LanguageId` (ADAPT-5); `Default` = Cpp; **epoch NOT bumped** |
+| `scheduler/tu_store.rs:357` — `compute_tu_closure_plugin` | `language: LanguageId`; 5 `plugin.id()` callers unchanged |
+| `scheduler/{engine,worker}.rs`, `pipeline/lib.rs` x4, `cli/*` x9 | `.clone()` or `LanguageId::from(..)` |
+| `lang-cpp/{resolver,shaper}.rs`, `lang/registry.rs:388,392` | `IncludeEdge.language` → `LanguageId::Cpp`; `self.language.clone()` |
+| `cli/registry.rs`, `cli/commands/{analyze,includes,plan,transform,ui/node_maps}.rs` | `.clone()` / `from(..)`; `capability_backend_for_language` now speaks `LanguageId` |
+| **`cli/commands/plan.rs` — the two dispatch `match`es** | **D-A4's real target.** `_ => cpp_...` deleted; explicit Scala / Cpp / no-rule arms |
+
+**Correctly NOT migrated** (still the closed `SourceLanguage` label, by design):
+`FileRecord.language`, `TuAnalysis.language`, `TranslationUnit.language`,
+`CompilationContext.language`, `SourceLanguage::from_file_kind`.
+
+## Which core crates were touched — the promise WAS false
+
+`build` 1, `cli` 7, `cluster` 6, `graph` 10, `index` 1, `lang` 1, `lang-api` 2,
+`lang-cpp` 2, `pipeline` 2, `report` 4, `scheduler` 3, `ui` 4, plus 8 integration tests.
+`crates/repo` and `crates/lang-scala` (source) were **not** touched at all.
+
+The plan's "a new language = 1 crate + 1 registry entry, 0 edits to core crates" is **not yet
+true**, and Part A did not make it true: it removed the reason the promise was *structurally*
+impossible. The remaining edits were the price of the type change itself, and after T1–T6 a
+genuine third language needs **one crate plus one registration line** — no further core-crate
+edits. Parts B/C/D still change core crates for reasons unrelated to identity.
+
+## Deviations, adaptations and corrections to this document
+
+**ADAPT-1 — `crates/repo` was NOT changed, and §2's shape had to bend.** `m17` (frozen)
+asserts `FileRecord.language == SourceLanguage::Cpp` and `TuAnalysis.language ==
+SourceLanguage::Cpp`, so those fields keep the closed label and `LanguageId` becomes the
+PLUGIN identity. This also means §2's premise that `FileRecord.language` would become the
+newtype is **false as written**, and it is why I1 holds by construction.
+
+**ADAPT-2 — `Cow<'static, str>`, not `Arc<str>`.** Workspace serde is `features = ["derive"]`
+only; serde gates its `Arc` impls behind `rc`. §2's "or `Cow<'static, str>`" sanctioned this.
+
+**ADAPT-3 — hand-written `Debug`/`Display` emitting the BARE name.** **Not covered anywhere
+in §0.** `index/cache.rs:78` hashes `format!("{language:?}")` into the TU cache fingerprint;
+a derived `Debug` would emit `Cpp(Cow::Borrowed("Cpp"))` and silently change every cache
+fingerprint, with no failing golden test. This was the single highest-risk item in Part A.
+
+**ADAPT-4 — PascalCase value constants `Cpp`/`Scala`/`Other` retained**, plus snake_case
+`cpp()`/`scala()`/`other()` accessors for the R2 guard's case-sensitive `Cpp` ban.
+
+**ADAPT-5 — `TuCacheFingerprint.language` → `LanguageId`.** Forced by five
+`compute_tu_closure_plugin(..., language: SourceLanguage, ...)` call sites passing
+`plugin.id()`. Byte-safe (transparent serde + bare Debug), so `CURRENT_ANALYSIS_VERSION`
+stays `2.0.0` and **no cache store is invalidated**.
+
+**ADAPT-6 — the R2 exposure in `graph/builder.rs` is three sites (`:487`, `:491`, `:540`),
+not one.**
+
+**ADAPT-7 / D-A8 — the task order was corrected and §3's claim is false as written.**
+"D-A4 makes `plan.rs:70` and `plan.rs:78` compile errors" does not hold for T1: under
+ADAPT-1 `SourceLanguage` stays closed, so `plan.rs` keeps matching on it and T1 alone fixes
+nothing there. The compile errors fire when the **CLI dispatch data** changes type, which is
+the old-T4 change. Old-T4 therefore ran **before** old-T3, and T3's red is re-specified as
+"the compiler errors emitted by the catalog type change". End state identical; ordering fixed.
+
+**Scope deviation — `crates/cli/src/optimize.rs:523` WAS touched.** §3 states Part A "does not
+surface `optimize.rs`". **False**: its `test_include_edge` helper builds an `IncludeEdge`,
+whose `language` became `LanguageId`. One literal changed. No Part D hook redesign.
+
+**`crates/ui/Cargo.toml` NOT modified.** `ariadne-ui` has no `lang` dependency and adding one
+would change `Cargo.lock` (I4). `LanguageId` is re-exported from `graph::types` alongside
+`IncludeEdge` instead, giving access with zero new dependency edges.
+
+**Frozen-lock breaches — 4 frozen integration tests needed value-preserving type edits,
+12 lines total.** §5 said a change to these "is a finding to report, not a liberty to take";
+it is reported here. `m18_cpp_plugin_parity/{external_boundary_parity,resolver_parity}.rs`,
+`m20_scala_dependency_graph_test.rs`, `m22_scala_load_analysis_test.rs`,
+`m23_symbol_isolation_test.rs` (+ non-frozen `m19`, `m21`, and `m23`'s `catalog_languages`
+arity). Every edit is `.into()` at a type boundary or one added argument; **no asserted value
+changed** and all of them pass. The frozen file that mattered most — `m17` — survived unedited.
+
+## What remains
+
+**Part B — dispatch.** The planning hooks in `plan.rs` still hardcode
+`ariadne_lang_cpp::cpp_aggregation_filter` / `cpp_target_path_for` and
+`ariadne_lang_scala::scala_aggregation_filter` / `scala_target_path_for`, matched by explicit
+identity. A third language therefore gets "no rule" (not an aggregation unit, unchanged
+target) rather than a wrong answer — correct, but it cannot yet plan. Making the hooks
+plugin-supplied is Part D. `incremental_backend` still dispatches on `tu.language`, a closed
+label, so a real third language reports "unhandled language" there until Part B.
+
+**Part C — a third-language plugin.** No real plugin ships; `Fortran` in the acceptance suite
+is a deliberately minimal identity-and-detection stand-in.
+
+**Part D — the six CLI hook sites.** `optimize.rs:102/247/272-281` and `ui.rs:359-368` pass
+hook *functions* directly and contain no language `match`, so Part A did not surface them.
+`ui.rs` in particular still takes hook functions with no language dispatch at all. **Recorded
+as remaining, not fixed** — except for the one `IncludeEdge` literal at `optimize.rs:523`,
+which was compile-forced.
+
+**Still parked / untouched:** real compiler invocation and extraction include-closure
+(D-M23-12); the `source_file` planner-provenance refinement (deferred at Gate-G3);
+`ScalaToolchainAnalyzer`; package-scoped SCC condensation; dynamic / `libloading` / WASM
+plugin loading.
