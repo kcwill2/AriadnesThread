@@ -1,7 +1,7 @@
 # Multi-Language Architecture — Implementation Plan
 
-Status: **DRAFT for approval** (no source changed yet)
-Date: 2026-09-24 · Refined 2026-09-29 (symbol-isolation + placement modeling, §0.1/D6/D7) · Baseline: `664e014` + uncommitted WIP · `cargo check --workspace --all-targets` = green (warnings only)
+Status: **EXECUTED -- closed through M23** (2026-10-03). Plan approved and executed M17-M23; M24 remains parked, not scheduled (see "Deferred, specified but not executed here" in section 5, and "Sequencing after M23" in section 9). Final gate at M23 closure: `cargo test --workspace` = 1088 pass / 0 fail / 3 ignored, verified at `f9bcf69`. Milestone records and the landing ledger for M15-M23 live in `Plan.md` Part II.
+Date: 2026-09-24 · Refined 2026-09-29 (symbol-isolation + placement modeling, §0.1/D6/D7) · Baseline: `664e014` + uncommitted WIP · `cargo check --workspace --all-targets` = green (warnings only) | Executed M17-M23 between 2026-09-30 and 2026-10-03 | Amended 2026-10-03 (plan-repair T5): this Status line, the section 2 non-goals note, the section 5 Deferred bullets (M23 recorded closed; M24 reclassified as parked, on its real trigger conditions), and the section 9 todo list (M23 block added; D.1-D.4 checked). The `664e014` baseline named above is the pre-execution one and is retained as this plan's original provenance, not as the current HEAD.
 
 ---
 
@@ -66,6 +66,8 @@ Verified in the working tree (each row is a real call site, not a guess):
 4. Incremental cache correctness is preserved per language (`CURRENT_ANALYSIS_VERSION` + plugin fingerprint + per-unit fingerprint).
 
 **Non-goals (this plan):** Scala transforms (M23), dynamic plugin loading (M24), a third language, UI redesign, changes to `Plan.md` milestones M0–M16.
+
+Annotation (2026-10-03): M23 was excluded from *this plan's execution window* but was subsequently executed as its own gated milestone and closed on 2026-10-03; M24 remains excluded and is parked pending the evidence named in "Sequencing after M23".
 
 **Success criteria (machine-checkable)**
 - `cargo test --workspace` green at the end of **every** milestone.
@@ -434,7 +436,16 @@ Acceptance (`m22_scala_load_analysis_test.rs`): `ariadne load --symbol com.examp
   - **Scala:** `ScalaSourceExtractor: SourceExtractor` (package clause + minimal imports + real bodies), `ScalaDependencyRewriter: DependencyRewriter` (import-line replacement preserving every other byte — `TransactionApplier::apply` calls `rewrite()` instead of `content.replace("#include …")`), planner target `{symbol}.scala` in the source package dir (`target_path_for`, §3.4), `ClusteringConstraints` enforcement (companion object ↔ class, `sealed trait` ↔ subtypes stay together), tiers 1–2 ported, tier 3 = `Skipped` without a Scala toolchain.
   - `SymbolPlacement` selects the isolation unit per language at plan time (§3.4 "Isolation unit" row): C++ isolates the declaration site (header), Scala isolates the whole top-level symbol.
   - Highest-risk milestone; approve separately.
-- **M24 — out-of-process plugin host** (`libloading` / WASM). Worth it only when a plugin is built by another team; the trait boundary here is the precondition, nothing more.
+  - **COMPLETED 2026-10-03.** Executed as a gated milestone under `plans/m23-symbol-isolation-kickoff.md`, closed at `36b182a`; final gate `cargo test --workspace` = 1088 pass / 0 fail / 3 ignored at `f9bcf69`, with both Gate-G3 lanes APPROVED (G3a shared-engine + core lane, G3b Scala + wiring lane). Two things it deliberately did **not** do, which is exactly why its follow-up backlog exists: (1) real compiler invocation was **not** wired, for either language (amendment D-M23-12, after Gate-G1 reviewer finding F3 that extracted units are not self-contained -- include-closure computation at extraction time is a workstream of its own, and wiring the invocation would turn deterministic offline green into guaranteed red wherever a compiler exists); (2) a `source_file` provenance refinement (member defining file rather than the candidate) was ruled **incomplete, not incorrect** by both lanes and deferred, because planner rework churns the C++ plan goldens. The decisions D-M23-1..D-M23-13, the per-slice landing ledger, the Gate-G3 findings, and the follow-up backlog are recorded in the kickoff file; they are deliberately not restated here.
+- **M24 — out-of-process plugin host** (`libloading` / WASM). **Reclassified 2026-10-03: parked, not scheduled.** No milestone, no plan file, no owner. The original wording -- "worth it only when a plugin is built by another team" -- used a proxy for the three conditions that would actually justify a runtime-loaded host; none of the three holds in this repository:
+
+  | Condition | Status in this repository |
+  | --- | --- |
+  | The plugin needs a heavyweight third-party dependency that must not be taken in-process (binary size, compile time, licensing) | Not present. `ariadne-lang-scala` has no third-party runtime dependency; its parser is hand-written by design (assumption A3). |
+  | Fault isolation -- a plugin crash must not kill an analysis run | Not present. Analysis is in-process and statically linked, so there is no fault boundary -- though it is not single-threaded: the load stage runs under rayon and the scheduler under tokio. |
+  | Independent release cadence -- a plugin ships without relinking the main binary | Not present. Both plugins are built and released with this repository. |
+
+  The cost is why this is a decision rather than a chore: a runtime-loaded plugin escapes the compile-time dependency graph, so review rule R1's `plugin_crates_do_not_depend_on_core_pipeline` check -- which reads the plugin `Cargo.toml` manifests -- can no longer police it. A dylib or WASM host therefore **weakens the machine-checkable boundary** this plan spent M17-M18 building, and would need its own ADR plus an explicit answer to how that guard is preserved; see `docs/adr/0001-language-plugin-boundary.md` ("Machine-checkable enforcement" and its known-exception section). Re-decide M24 only once the third-language evidence named in "Sequencing after M23" exists -- until then it stays parked.
 
 
 ## 6. Test strategy
@@ -577,17 +588,41 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 - [x] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
 - [x] M22.3 `m22_scala_load_analysis_test.rs`; golden re-check; workspace green
 
+**M23 -- Symbol isolation, shared engine (C++ + Scala)**
+- [x] M23.1 (kickoff T1) C++ verbatim symbol bodies into the neutral engine: `locate_symbol_bodies`, `source_file` wired through planner `propose_batch` / `assemble_plan`, engine content provider at the `transform.rs` / `optimize.rs` call sites, placeholder fallback retained for no-content units (D-M23-1/2/3)
+- [x] M23.2 (kickoff T1, golden refresh -- split out here because it is the only M23 slice that changes golden bytes) Deliberate golden refresh, deliberately separated from the byte-identical M18 lock: `zz_capture_isolation` recapture of `isolation_output_parity.rs` BASIC/EXPENSIVE plan locks; m00 goldens refreshed only where additive `source_file` appears; `preview_json` / `diff_text` locks byte-identical
+- [x] M23.3 (kickoff T2) Single generated-unit emitter + shim removal (D-M23-4): applier delegates to the extractor, shared `render_unit` helper, `TransitionalDefaultRewriter` and the `#[allow(deprecated)]` annotations deleted
+- [x] M23.4 (kickoff T3) Guard hardening (D-M23-10, closing M18.11 execution note (b)): every `ariadne_lang_cpp::*` reference moved out of core `src/`, `crates/pipeline` added to the guard walk scope, `FORBIDDEN` widened to `Cpp` / `lang_cpp` / `ariadne-lang-cpp`, `c++20`-style language-standard literals recorded as an explicit carve-out
+- [x] M23.5 (kickoff T4) `ScalaToolchainValidator` replaces `StubValidator`: PATH-stripped probe reports `Missing`, tier-3 `Skipped` asserted through `TierValidator`, `validate_compile` never runs without a toolchain. Real compiler invocation deliberately NOT wired (D-M23-12)
+- [x] M23.6 (kickoff T5) `ScalaSourceExtractor`: package clause + verbatim top-level region + referenced-imports-only import block (`unit_namespace`, text-locating span entry point); import plumbing is producer-side module paths, not engine unit-deps (D-M23-13)
+- [x] M23.7 (kickoff T6) `ScalaDependencyRewriter`: import-line rewrite preserving every other byte, wildcard-aggregate narrowing, `remove_top_level_symbols` real implementation, `render_diff` in the C++ diff grammar's shape
+- [x] M23.8 (kickoff T7) Wiring: capability flip + per-language registry / planner / backend dispatch (D-M23-6/7), `colocated_groups_with_edges` sealed-trait pairing fed by the planner extends-edge merge (D-M23-8), additive `modifiers` on `SymbolRecord`; T7b added the defining-file filter, the collapsed self-target guard, and move-removal inside the snapshot/rollback transaction
+- [x] M23.9 (kickoff T8) Acceptance suite `m23_symbol_isolation_test.rs` on the new `scala-isolation` fixture (end-to-end discover->build->graph->index->reduce->load->plan->preview->apply: verbatim bodies, move-removal, rollback dir-hash identity, untouched-file byte preservation, tiers `[Pass, Pass, Skipped]`), `m22` plan-rejection expectation refresh, closeout (Gate G3)
+
+> EXECUTION NOTES (M23, recorded 2026-10-03 at closure `36b182a`): M23 was executed under `plans/m23-symbol-isolation-kickoff.md`, not under this plan's section 5 task list, so this block is derived from that kickoff. **Where the kickoff and this plan conflict, the kickoff is authoritative** -- D-M23-12 supersedes the Deferred-M23 tier-3 "real compile" row above (probe-backed honesty instead), and D-M23-13 supersedes the original T5 "minimal imports from the source file" phrasing. Slice names are the kickoff's own T1..T8 task names, cross-checked against the `feat(m23.7)` / `feat(m23.8)` commit subjects.
+
 **Docs**
-- [ ] D.1 Append M17–M22 to `Plan.md` using its Proves / Does-not-prove format
-- [ ] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + §3.6 isolation contract + rules R1–R3
-- [ ] D.3 "Adding a language in 5 steps" page (new crate → implement traits → register → fixture → tests)
-- [ ] D.4 `docs/adr/0002-symbol-placement-and-isolation.md` — C++ `SplitDeclaration` vs single-file placement; why isolation (symbol → own file) is the language-neutral primitive (D6/D7 rationale)
+- [x] D.1 Append M15-M23 to `Plan.md` using its Proves / Does-not-prove format -- scope corrected 2026-10-03 from "M17-M22": M15 and M16 were equally absent from `Plan.md`, so appending only M17+ would have opened a fresh numbering gap; landed: `bc6efa0` (the M15-M23 records), `a232957` (remediation: drops the M16 record's false `tools/clang-worker` absence claim and nests the Part II sub-headings)
+- [x] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + §3.6 isolation contract + rules R1–R3 -- landed: `f6a995f` (ADR-0001), `a17fcb3` (adds the known CLI planning-hook exception: a live R3 gap plus the guard walk-scope hole behind it)
+- [x] D.3 `docs/adding-a-language.md` ("Adding a language to Ariadnes") page (new crate → implement traits → register → fixture → tests) -- landed: `dfb1425` (`docs/adding-a-language.md`)
+- [x] D.4 `docs/adr/0002-symbol-placement-and-isolation.md` — C++ `SplitDeclaration` vs single-file placement; why isolation (symbol → own file) is the language-neutral primitive (D6/D7 rationale) -- landed: `017d51f` (ADR-0002)
 
 **Sequencing note:** M17 is mostly mechanical; **M18 is the largest single block (~45 % of the work — the transform neutralization and provenance fix join the original dispatch rewiring)**; M19–M20 are small; M21's parser is the second-largest item; M22 is medium. Each milestone should ship as its own reviewable PR set.
+
+### Sequencing after M23
+
+*Recorded at M23 closure, 2026-10-03.*
+
+1. **Plan repair first.** The project plan had no record of M15-M23 -- `Plan.md` stopped at M14 -- so there was no single source of truth for milestone state, and neither the ADRs nor the "adding a language" guide existed. That gap is closed: see `Plan.md` Part II, `docs/adr/0001-language-plugin-boundary.md`, `docs/adr/0002-symbol-placement-and-isolation.md`, and `docs/adding-a-language.md`.
+2. **Next milestone: prove the mechanism, do not extend it.** Review rule R1 promises that a new language touches no core crate, but it has never been falsifiable -- both existing plugins were added in this repository by the team that wrote the core crates, and the C++ "plugin" was produced by extracting core code rather than authored independently. The next milestone therefore adds a small third language as an independent plugin crate, to test that promise honestly. It is deliberately left **unnumbered**: it has no plan file yet, and assigning it an ID here would recreate the very incoherence this repair just closed.
+3. **That third language will hit four CLI sites immediately, and closing them is outstanding work.** The plan's headline promise -- "1 new crate + 1 registry entry + fixtures/tests, 0 edits to the core crates" -- is incomplete as stated. `crates/cli/src/commands/plan.rs` (`planning_hooks`: two boxed closures that `match` `SourceLanguage` and call the C++ and Scala hook pairs by name) needs one new arm per language; that `match` sits outside `lang-api` and `cli/src/registry.rs`, so it is a live review-rule R3 exception, recorded rather than closed in the known-exception section of `docs/adr/0001-language-plugin-boundary.md`; the `GUARD_CORE_CRATES` walk in `tests/integration/tests/m17_plugin_seam_test.rs` lists seven core crates and not `crates/cli`, so `core_crates_do_not_name_languages` structurally cannot see that file; and `crates/cli/src/optimize.rs` plus `crates/cli/src/commands/ui.rs` name plugin crates with no `match` at all -- not R3 violations, but still places a new language must be taught about. Settling that exception policy (ADR coverage, guard walk scope, or both) belongs to that milestone, not to this repair.
+4. **M24 stays parked until that evidence exists.** The third-language milestone is what makes the M24 decision decidable: if a new plugin needs weight the binary cannot carry, or if the guard cannot hold, the triggers in section 5 fire with evidence rather than speculation. Re-decide M24 after it lands.
 
 ---
 
 *No source files were modified while producing this plan.*
+
+*(Clarification added 2026-10-03: that sentence describes the original authoring of this plan, and it was true then. The plan has since been executed -- M17-M23 -- and those milestones changed source. This file is now a dated reconciliation of the plan against what actually landed; the planning-tense prose above is retained unchanged as the historical record.)*
 
 
 
