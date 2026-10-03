@@ -38,3 +38,30 @@ Two claims from the handoff were softened rather than copied, both for honesty:
   assertion are the same object. The ADR says so and explains why the test is still kept.
 
 Files left uncommitted for the orchestrator, per the override in the task message.
+
+## Checkpoint 4 -- follow-up amendment (CLI planning-hook exception)
+
+Triggered by T4 (`docs/adding-a-language.md`), which found a language-identity dispatch that
+the ADR did not mention. Purely additive amendment to
+`docs/adr/0001-language-plugin-boundary.md`; no existing wording or section order changed.
+
+Added one `### Known exception: per-language planning hooks in the CLI` subsection inside
+`## Machine-checkable enforcement`, one accepted-cost bullet in `## Consequences`, and one
+clause in `## What this ADR does not decide`. File grew 268 -> 325 lines.
+
+Verified before writing, by Read/Grep only (no shell):
+- `planning_hooks` is at `crates/cli/src/commands/plan.rs:62-88`, called from
+  `pub fn plan_extractions` (line 192) at line 210 -- production, not test.
+- The CLI registry doc comment forbids "a concrete plugin type"; `plan.rs` calls plugin-crate
+  *functions*, not constructing a plugin. The ADR records both the literal reading and the
+  intent rather than asserting a flat contradiction.
+- `GUARD_CORE_CRATES` is 7 entries, `crates/cli` absent -- guard cannot see the file.
+- Two ADDITIONAL plugin-crate reference sites found beyond the reported one:
+  `crates/cli/src/optimize.rs:272-281` and `crates/cli/src/commands/ui.rs:359-368`, both
+  hardcoding the C++ hook pair with no language `match`. Recorded as extra edit sites; they are
+  NOT R3 violations.
+- Narrowed the opening claim from "one place in the tree" to "one place in the CLI", because
+  that is the scope actually verified by the grep.
+- Non-ASCII re-scan of the amended file: clean.
+
+Left uncommitted for the orchestrator.

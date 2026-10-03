@@ -193,6 +193,53 @@ boundary is auditable only while plugins are statically linked into the binary. 
 dynamic loading has to replace the enforcement mechanism, not just the loading mechanism, which
 is why it needs its own decision rather than an amendment to this one.
 
+### Known exception: per-language planning hooks in the CLI
+
+One place in the CLI dispatches on language identity outside `lang-api` and outside the registry
+builder: `crates/cli/src/commands/plan.rs`, function `planning_hooks` (lines 62-88). It builds the
+two boxed closures of a `PlanningHooks` pair, and each closure is a `match` on the candidate
+path's `SourceLanguage` with a `SourceLanguage::Scala` arm and a `_` fallback arm. The Scala arm
+calls `ariadne_lang_scala::scala_aggregation_filter` and
+`ariadne_lang_scala::scala_target_path_for`; the fallback arm calls
+`ariadne_lang_cpp::cpp_aggregation_filter` and `ariadne_lang_cpp::cpp_target_path_for`, by name.
+The production caller is the `plan_extractions` path at line 210, and its behavior is locked by a
+test named `planning_hooks_route_scala_by_language_and_keep_cpp_hook_bytes`.
+
+This is recorded rather than defended, for three reasons.
+
+It sits against the rule the CLI states about itself. The module doc comment at the top of
+`crates/cli/src/registry.rs` says that module "stays the CLI's only registry-facing seam - no
+other CLI code may reference a concrete plugin type". `plan.rs` names two plugin crates directly
+and bypasses the registry for this stage. Read strictly, that sentence forbids a concrete plugin
+*type*, and `plan.rs` calls plugin-crate *functions* rather than constructing a plugin, so the
+literal wording is arguable. The intent it states -- CLI code reaches plugins through the
+registry rather than by name -- is not arguable, and this is the site where the intent is not met.
+The same file is inconsistent with itself here: its clustering-constraints dispatch a few lines
+further down routes through the registry (`LanguageRoutingConstraints { registry,
+language_of_file }`), so the planner hooks are the odd site out.
+
+It is a live review rule R3 exception. R3 requires a `match` on language identity outside
+`lang-api` and `cli/src/registry.rs` to be covered by an ADR in `docs/adr/`. No such ADR exists.
+The code is explicit that the dispatch was chosen (its call site is annotated as the D-M23-7 i
+"per-language planning dispatch replaces the pre-M23 C++ hardcode"), so this is a decision that
+was made without the ADR the rules require, not an accidental leak. This subsection records the
+exception. It does not approve it, and it should be read as outstanding work rather than as
+precedent.
+
+The guard structurally cannot see it. `GUARD_CORE_CRATES` in
+`tests/integration/tests/m17_plugin_seam_test.rs` is a fixed seven-entry list:
+`crates/index`, `crates/graph`, `crates/cluster`, `crates/transform`, `crates/validate`,
+`crates/report`, `crates/pipeline`. `crates/cli` is not among them, so
+`core_crates_do_not_name_languages` never walks this file. This is the same walk-scope exclusion
+Consequences already records, and the exclusion is defensible for a crate that only routes
+through the registry. `plan.rs` shows the CLI does not only route; it also dispatches.
+
+Two further sites in the same crate name plugin crates without any language `match` at all:
+`crates/cli/src/optimize.rs` (lines 272-281) and `crates/cli/src/commands/ui.rs` (lines 359-368)
+each construct an `OptimizationPlanner` with the C++ hook pair and `CyclePolicy::Reject` written
+in directly. Those are not R3 violations, because they never match on language identity, but they
+are further places in `crates/cli` that a new language would have to be taught about.
+
 Two further locks sit alongside the guards, both in `crates/cli/src/registry.rs`:
 
 - `registries_enumerate_identical_languages` in `crates/cli/src/registry.rs` asserts that the
@@ -241,6 +288,11 @@ size and knows nothing about languages; its `R2_SCANNED_SUFFIXES` set is `.rs`, 
   `crates/cli`, `crates/scheduler`, and `crates/build` sit outside the walk scope by design,
   because the invariant is analysis-core neutrality and composition roots are named rather than
   anonymous -- so those three crates' neutrality rests on review, not on this test.
+- A new language currently needs more than a crate and a registration. It also needs a
+  per-language arm in the CLI planning hooks and further plugin-crate references in
+  `crates/cli/src/optimize.rs` and `crates/cli/src/commands/ui.rs`, all recorded as the known
+  exception above. Closing those second and subsequent edit sites is outstanding work; this ADR
+  records the boundary, not a fix for it.
 - The vocabulary is not yet used everywhere it could be. The frozen field names listed above
   keep C++ flavor in stored artifacts, and the isolation engine in `crates/transform` still
   knows the concept of a unit generically while the *spelling* of what it writes has moved into
@@ -268,3 +320,6 @@ size and knows nothing about languages; its `R2_SCANNED_SUFFIXES` set is `.rs`, 
   not decided here. Those are recorded in the spec's sections 3.5 and 3.6 and in `Plan.md`
   Part II. What this ADR fixes is only that they are expressed in the boundary's neutral
   vocabulary, so that a future language reaches them without editing core crates.
+- How the per-language planning-hook dispatch in the CLI should be removed is not decided here,
+  including whether the hook pair should become plugin-supplied rather than language-matched.
+  Only the exception is recorded, above.
