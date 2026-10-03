@@ -26,6 +26,25 @@ use crate::imports::{
     char_to_byte_map, scan_imports, ImportPass, ImportStatement, ParsedSelector, SelectorForm,
 };
 use ariadne_lang::{DependencyRewriter, DirectiveHit, RewriteSpec};
+use std::path::{Path, PathBuf};
+
+/// The package a standard sbt-layout source path declares: the directory
+/// components between the `src/main/scala` root marker and the file name
+/// (the same shape `ScalaUnitShaper` shapes units from). `None` outside a
+/// recognized root — callers stay conservative there.
+fn source_package(path: &Path) -> Option<String> {
+    let parts: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let root = ["src".to_string(), "main".to_string(), "scala".to_string()];
+    let start = parts.windows(root.len()).position(|w| w == root)? + root.len();
+    if start >= parts.len().saturating_sub(1) {
+        return None;
+    }
+    let package = parts[start..parts.len() - 1].join(".");
+    (!package.is_empty()).then_some(package)
+}
 
 /// Statement-level target relation (D-M23-7 iii consumer discovery): a named
 /// or grouped selector whose module path EQUALS the target, or a wildcard
@@ -109,6 +128,57 @@ impl DependencyRewriter for ScalaDependencyRewriter {
             out.push_str(&format!("    ~ import {dep} // side-effect preserved\n"));
         }
         out
+    }
+
+    /// Consumer discovery probes with the moved units' module paths (T8b
+    /// fence lift, D-M23-7 iii): a wildcard `import <base>._` is target-
+    /// affected for every id under `base`, a named statement for its exact
+    /// id. Companion-object ids (`X$`) are not import syntax — the class id
+    /// already covers the companion (D17).
+    fn consumer_discovery_targets(
+        &self,
+        _target_file: &Path,
+        moved_module_ids: &[String],
+    ) -> Vec<String> {
+        moved_module_ids
+            .iter()
+            .filter(|id| !id.contains('$'))
+            .cloned()
+            .collect()
+    }
+
+    /// The path-space rewrite payload translated into import grammar (T8b,
+    /// the mapping C++ never needed because its directive text IS the path):
+    /// the shared file's old dep is its package (the wildcard's aggregate —
+    /// `selector_affected` equality), and the new deps are the moved units'
+    /// module paths under that package. Ids outside the package (co-proposed
+    /// symbols that keep their own package) are NOT importable through the
+    /// narrowed directive and are dropped; `$`-suffixed companion ids are
+    /// import syntax only via their class id. A path outside the standard
+    /// source root yields `None`: the caller keeps the path strings, which
+    /// match no import and rewrite nothing (conservative, never corrupt).
+    fn consumer_rewrite_spec(
+        &self,
+        old_includes: &[PathBuf],
+        _new_includes: &[PathBuf],
+        moved_module_ids: &[String],
+    ) -> Option<RewriteSpec> {
+        let package = source_package(old_includes.first()?)?;
+        let mut new_deps: Vec<String> = moved_module_ids
+            .iter()
+            .filter(|id| {
+                !id.contains('$')
+                    && id.rsplit_once('.')
+                        .is_some_and(|(parent, _)| parent == package)
+            })
+            .cloned()
+            .collect();
+        new_deps.sort();
+        new_deps.dedup();
+        Some(RewriteSpec {
+            old_deps: vec![package],
+            new_deps,
+        })
     }
 
 }
@@ -451,5 +521,57 @@ mod tests {
             "    - import a.b.C\n    + import a.b.Cmodel\n    ~ import scala.collection.mutable._ // side-effect preserved\n"
         );
         assert_eq!(ScalaDependencyRewriter.render_diff(&[], &[], &[]), "");
+    }
+
+    #[test]
+    fn consumer_discovery_targets_are_the_module_paths_without_companions() {
+        let ids = vec![
+            "com.example.legacy.LegacyReport".to_string(),
+            "com.example.legacy.LegacyLedger".to_string(),
+            "com.example.legacy.LegacyLedger$".to_string(),
+        ];
+        assert_eq!(
+            ScalaDependencyRewriter.consumer_discovery_targets(
+                Path::new("src/main/scala/com/example/legacy/legacy.scala"),
+                &ids,
+            ),
+            vec![
+                "com.example.legacy.LegacyReport".to_string(),
+                "com.example.legacy.LegacyLedger".to_string(),
+            ],
+            "D-M23-7 iii: named module paths; the companion `$` id is not import syntax"
+        );
+    }
+
+    #[test]
+    fn consumer_rewrite_spec_maps_shared_file_to_package_and_moved_units() {
+        let spec = ScalaDependencyRewriter
+            .consumer_rewrite_spec(
+                &[PathBuf::from("src/main/scala/com/example/legacy/legacy.scala")],
+                &[PathBuf::from("src/main/scala/com/example/legacy/LegacyReport.scala")],
+                &[
+                    "com.example.legacy.LegacyReport".to_string(),
+                    "com.example.legacy.LegacyLedger$".to_string(),
+                    "com.example.legacy.records.AuditTrail".to_string(),
+                ],
+            )
+            .expect("an sbt-layout source path names a package");
+        assert_eq!(spec.old_deps, vec!["com.example.legacy".to_string()]);
+        assert_eq!(
+            spec.new_deps,
+            vec!["com.example.legacy.LegacyReport".to_string()],
+            "only ids under the shared package narrow into the directive"
+        );
+    }
+
+    #[test]
+    fn consumer_rewrite_spec_is_none_outside_the_source_root() {
+        assert!(ScalaDependencyRewriter
+            .consumer_rewrite_spec(
+                &[PathBuf::from("weird/place/legacy.scala")],
+                &[],
+                &["com.example.LegacyReport".to_string()],
+            )
+            .is_none());
     }
 }

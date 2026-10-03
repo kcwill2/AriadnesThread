@@ -16,6 +16,7 @@ fn test_save_extraction_artifacts() {
 
     let sym1 = ariadne_transform::ExtractedSymbol {
         name: "MyClass".to_string(),
+        qualified_id: "MyClass".to_string(),
         kind: ariadne_index::types::SymbolKind::Class,
         body: "// body1".to_string(),
     };

@@ -76,6 +76,14 @@ impl SourceExtractor for ScalaSourceExtractor {
             None => unit_paths.to_vec(),
         }
     }
+
+    /// Move semantics (D-M23-5, I5, T8b): the extracted file IS the plan's
+    /// repo-relative target beside the source — the package dir is where the
+    /// compiler reads it; a `generated/` staging dir would strand the moved
+    /// symbol outside its package tree.
+    fn places_generated_units_in_place(&self) -> bool {
+        true
+    }
 }
 
 /// `package <ns>\n\n` — omitted entirely for an empty namespace (LOCK: an

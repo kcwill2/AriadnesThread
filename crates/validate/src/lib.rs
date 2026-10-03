@@ -153,7 +153,11 @@ impl TransactionApplier {
         let mut paths_to_snapshot = Vec::new();
         let mut new_paths = Vec::new();
 
-        let gen_dir = repo_root.join("generated");
+        let gen_dir = if extractor.places_generated_units_in_place() {
+            repo_root.to_path_buf()
+        } else {
+            repo_root.join("generated")
+        };
         for unit in &extraction.headers {
             paths_to_snapshot.push(gen_dir.join(&unit.path));
         }
@@ -200,18 +204,26 @@ impl TransactionApplier {
         for rw in &migration.rewrites {
             let path = repo_root.join(&rw.consumer_file);
             let source = fs::read_to_string(&path)?;
-            let spec = RewriteSpec {
-                old_deps: rw
-                    .old_includes
-                    .iter()
-                    .map(|dep| dep.display().to_string())
-                    .collect(),
-                new_deps: rw
-                    .new_includes
-                    .iter()
-                    .map(|dep| dep.display().to_string())
-                    .collect(),
-            };
+            let moved_module_ids: Vec<String> = extraction
+                .headers
+                .iter()
+                .filter(|unit| rw.new_includes.contains(&unit.path))
+                .flat_map(|unit| unit.symbols.iter().map(|sym| sym.qualified_id.clone()))
+                .collect();
+            let spec = rewriter
+                .consumer_rewrite_spec(&rw.old_includes, &rw.new_includes, &moved_module_ids)
+                .unwrap_or_else(|| RewriteSpec {
+                    old_deps: rw
+                        .old_includes
+                        .iter()
+                        .map(|dep| dep.display().to_string())
+                        .collect(),
+                    new_deps: rw
+                        .new_includes
+                        .iter()
+                        .map(|dep| dep.display().to_string())
+                        .collect(),
+                });
             let content = rewriter.rewrite(&source, &spec);
             fs::write(&path, content)?;
         }
@@ -571,6 +583,7 @@ mod tests {
                 path: "new.h".into(),
                 symbols: vec![ExtractedSymbol {
                     name: "Widget".into(),
+                    qualified_id: "Widget".into(),
                     kind: SymbolKind::Class,
                     body: "class Widget {};".into(),
                 }],

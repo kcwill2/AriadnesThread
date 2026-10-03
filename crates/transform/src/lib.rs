@@ -28,6 +28,11 @@ impl TransformEngine {
 #[derive(Debug, Clone)]
 pub struct ExtractedSymbol {
     pub name: String,
+    /// The plan's fully-qualified symbol id this unit member came from
+    /// (plan M23, T8b): the dependency-space name the consumer rewrite needs
+    /// when directive text and file paths diverge (Scala imports name FQNs).
+    /// Neutral plan data — the engine copies it from the proposal verbatim.
+    pub qualified_id: String,
     pub kind: SymbolKind,
     pub body: String,
 }

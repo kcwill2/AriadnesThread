@@ -201,6 +201,7 @@ pub fn analyze_closure_with(
     let mut combined_edges = Vec::new();
     let mut combined_call_sites = Vec::new();
     let mut combined_references = Vec::new();
+    let mut combined_extends_edges = Vec::new();
     let mut language = SourceLanguage::default();
 
     for (index, (file_id, _, file_content)) in closure.files.iter().enumerate() {
@@ -213,6 +214,7 @@ pub fn analyze_closure_with(
         combined_edges.append(&mut file_analysis.edges);
         combined_call_sites.append(&mut file_analysis.call_sites);
         combined_references.append(&mut file_analysis.references);
+        combined_extends_edges.append(&mut file_analysis.extends_edges);
     }
 
     TuAnalysis {
@@ -225,7 +227,7 @@ pub fn analyze_closure_with(
         call_sites: combined_call_sites,
         language,
 
-        extends_edges: Vec::new(),
+        extends_edges: combined_extends_edges,
     }
 }
 

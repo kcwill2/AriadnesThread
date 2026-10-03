@@ -71,6 +71,7 @@ mod tests {
             path: std::path::PathBuf::from("ns_unit.h"),
             symbols: vec![ExtractedSymbol {
                 name: "A".to_string(),
+                qualified_id: "A".to_string(),
                 kind: ariadne_index::SymbolKind::Class,
                 body: "class A { int x; };".to_string(),
             }],
@@ -99,6 +100,7 @@ mod tests {
             path: std::path::PathBuf::from("bare_unit.h"),
             symbols: vec![ExtractedSymbol {
                 name: "A".to_string(),
+                qualified_id: "A".to_string(),
                 kind: ariadne_index::SymbolKind::Class,
                 body: "// Symbol: A (Class)".to_string(),
             }],
@@ -124,6 +126,7 @@ mod tests {
             path: std::path::PathBuf::from("generated").join("nested").join("deep_x.h"),
             symbols: vec![ExtractedSymbol {
                 name: "X".to_string(),
+                qualified_id: "X".to_string(),
                 kind: ariadne_index::SymbolKind::Class,
                 body: "// Symbol: X (Class)".to_string(),
             }],

@@ -85,6 +85,7 @@ fn extraction_with_moved_symbol() -> ExtractionResult {
             path: "pkg/LegacyReport.src".into(),
             symbols: vec![ExtractedSymbol {
                 name: MOVED_NAME.to_string(),
+                qualified_id: format!("pkg.{MOVED_NAME}"),
                 kind: SymbolKind::Class,
                 body: "SYM body".into(),
             }],

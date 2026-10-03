@@ -55,6 +55,42 @@ pub trait DependencyRewriter: Send + Sync {
         Vec::new()
     }
 
+    /// The dependency-space spellings a consumer file is probed with (via
+    /// [`Self::find_dependency_targets`]) when discovering consumers of an
+    /// extraction plan (plan M23, T8b fence lift). The default reports the
+    /// target file's bare name — today's C++ `#include "<file>"` scan
+    /// spelling, byte-identical (I1). Move languages override with the moved
+    /// units' dependency identifiers (module paths for Scala imports);
+    /// `moved_module_ids` are the plan's fully-qualified symbol ids, neutral
+    /// plan data the CLI passes through untouched.
+    fn consumer_discovery_targets(
+        &self,
+        target_file: &std::path::Path,
+        _moved_module_ids: &[String],
+    ) -> Vec<String> {
+        target_file
+            .file_name()
+            .map(|name| vec![name.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+    }
+
+    /// Build the consumer's [`RewriteSpec`] from a rewrite's file-path
+    /// payload. Consumer rewrites are computed path-neutral (old/new include
+    /// paths), but `RewriteSpec` carries **bare dependency identifiers** —
+    /// equal to the paths where a language's directive text *is* the path
+    /// (C++), and not where it isn't (Scala imports name module paths, never
+    /// files). The default is `None`: the caller keeps the path strings —
+    /// today's C++ behavior byte-identical (I1). `moved_module_ids` holds the
+    /// plan's fully-qualified ids of the units this rewrite points at.
+    fn consumer_rewrite_spec(
+        &self,
+        _old_includes: &[std::path::PathBuf],
+        _new_includes: &[std::path::PathBuf],
+        _moved_module_ids: &[String],
+    ) -> Option<RewriteSpec> {
+        None
+    }
+
     /// Delete the named top-level symbols from `source` (D-M23-5 move
     /// semantics), or `None` when any name is not safely removable — the
     /// caller then proceeds **without** removal. The default is `None`:

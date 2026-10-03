@@ -108,6 +108,7 @@ impl<'a> IsolationEngine<'a> {
 
             symbols.push(ExtractedSymbol {
                 name: ext.symbol_name.clone(),
+                qualified_id: ext.symbol_id.0.clone(),
                 kind,
                 body,
             });

@@ -9,6 +9,7 @@ use ariadne_lang::SymbolBody;
 fn test_generated_unit_fields() {
     let sym = ExtractedSymbol {
         name: "MyClass".to_string(),
+        qualified_id: "MyClass".to_string(),
         kind: ariadne_index::SymbolKind::Class,
         body: "// body".to_string(),
     };

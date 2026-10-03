@@ -16,14 +16,20 @@
 use anyhow::Result;
 use ariadne_build::BuildDiscoverer;
 use ariadne_cli::commands::index::build_source_index_filtered;
-use ariadne_cli::registry::default_registry;
-use ariadne_cli::plan_extractions;
+use ariadne_cli::commands::transform::{
+    plan_rewrite_targets, plan_target_consumers, repository_source_reader,
+};
+use ariadne_cli::registry::{catalog_languages, default_registry, plan_backend};
+use ariadne_cli::{apply_transform_plan, build_migration_preview, plan_extractions};
 use ariadne_graph::{build_dependency_graph, LoadAnalyzer};
 use ariadne_index::DependencyKind;
 use ariadne_lang_scala::ScalaUnitShaper;
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{FileId, FileKind, FileOwnership, OptimizationPolicy, Repository, SourceLanguage};
+use ariadne_transform::{IncludeRewriter, IsolationEngine};
+use ariadne_validate::TransactionApplier;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -230,11 +236,12 @@ fn graph_and_index_are_green_on_the_fixture() -> Result<()> {
         has_edge(&index, LEGACY_REPORT_ID, AUDIT_TRAIL_ID, DependencyKind::Complete),
         "the grouped-named import reference `AuditTrail` resolves Complete"
     );
-    // TODO(M23 S4-landing): assert `SymbolRecord.modifiers` carries `sealed`
-    // on LegacyShape. NOT assertable at this gate HEAD (b3a9958): the field
-    // does not exist in ariadne-lang-api yet; the T7-S4 successor (typed
-    // extends channel + modifiers, orchestrator ruling board_cef7c44)
-    // enables this assertion without touching the rest of this suite.
+    let shape = symbol_in_index(&index, LEGACY_SHAPE_ID).expect("LegacyShape is in the index");
+    assert!(
+        shape.modifiers.iter().any(|modifier| modifier == "sealed"),
+        "D-M23-8: SymbolRecord.modifiers carries `sealed` on the sealed trait, got {:?}",
+        shape.modifiers
+    );
     Ok(())
 }
 
@@ -406,10 +413,24 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
     );
 
     assert_persisted_plan_stage(&repo.root, plans.len())?;
-    // TODO(M23 S4-landing): assert the sealed pair (LegacyShape+LegacyCircle)
-    // lands in ONE batch/target once the typed extends channel feeds
-    // colocated_groups_with_edges; today (HEAD b3a9958) they are separate
-    // singleton batches, which the assertions above deliberately do not lock.
+    let target_of = |symbol_id: &str| {
+        plan.proposed_extractions
+            .iter()
+            .find(|ext| ext.symbol_id.0 == symbol_id)
+            .map(|ext| normalized_rel(&ext.target_header))
+    };
+    let shape_target = target_of(LEGACY_SHAPE_ID).expect("LegacyShape is proposed");
+    let circle_target = target_of(LEGACY_CIRCLE_ID).expect("LegacyCircle is proposed");
+    assert_eq!(
+        shape_target, circle_target,
+        "D-M23-8: the sealed pair (LegacyShape+LegacyCircle) lands in ONE batch, \
+         so both members co-target the batch anchor's file"
+    );
+    assert_ne!(
+        shape_target,
+        SHARED_REL.to_string(),
+        "the sealed batch moves to a new file, not the candidate itself"
+    );
     Ok(())
 }
 
@@ -426,5 +447,343 @@ fn assert_persisted_plan_stage(root: &Path, plan_count: usize) -> Result<()> {
         Some(plan_count as u64),
         "the plan manifest counts the proposed plans: {manifest}"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 5. T8 acceptance (T8b fence lift): preview -> apply -> load win -> rollback.
+//    Style of m22: every test owns a temp copy; the flow is the wired CLI
+//    route (no injected hooks). Kickoff §5-T8.
+// ---------------------------------------------------------------------------
+
+/// The consumer's whole closure (semantic ∪ collateral, sorted ids) plus the
+/// collateral load, fresh-analyzed from the tree as it currently stands.
+fn closure_ids(root: &Path) -> Result<(Vec<String>, usize)> {
+    let mut pipeline = Pipeline::new(&root.to_path_buf(), None)?;
+    let (graph, closures) = pipeline.get_or_build_include_graph()?;
+    let model = pipeline.get_or_build_reduced()?;
+    let analyzer = LoadAnalyzer::with_closures(&graph, &model, closures);
+    let metric = analyzer.analyze_symbol_load(DASHBOARD_ID)?;
+    let mut ids: Vec<String> = metric
+        .semantic_symbols
+        .iter()
+        .chain(metric.collateral_symbols.iter())
+        .map(|id| id.0.clone())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok((ids, metric.collateral_load))
+}
+
+/// The exact bytes between two markers (end-exclusive), trimmed of trailing
+/// whitespace — the verbatim-region oracle (D-M23-1).
+fn region_between(text: &str, start_marker: &str, end_marker: &str) -> String {
+    let start = text.find(start_marker).expect(start_marker);
+    let end = text[start..]
+        .find(end_marker)
+        .map(|offset| start + offset)
+        .expect(end_marker);
+    text[start..end].trim_end().to_string()
+}
+
+/// Top-level declaration lines (a declaration-introducing keyword at the
+/// line's first non-whitespace position) — the move-proof oracle (I5).
+fn declaration_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| {
+            let head = line.trim_start();
+            ["class ", "object ", "trait ", "sealed ", "final ", "case class ", "abstract ", "package object "]
+                .iter()
+                .any(|prefix| head.starts_with(prefix))
+        })
+        .collect()
+}
+
+/// sha256(relpath ‖ bytes) per file, whole tree, sorted — the rollback
+/// dir-hash identity digest.
+fn tree_digest(root: &Path) -> Result<Vec<(String, String)>> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) -> Result<()> {
+        let mut entries: Vec<PathBuf> = fs::read_dir(dir)?.map(|entry| entry.unwrap().path()).collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(&path, root, out)?;
+            } else {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let mut hasher = Sha256::new();
+                hasher.update(rel.as_bytes());
+                hasher.update(fs::read(&path)?);
+                out.push((rel, format!("{:x}", hasher.finalize())));
+            }
+        }
+        Ok(())
+    }
+    let mut digest = Vec::new();
+    walk(root, root, &mut digest)?;
+    Ok(digest)
+}
+
+/// The serde label of a `ValidationStatus` value ("Pass" | "Fail" | "Skipped").
+fn status_label(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    value
+        .as_object()
+        .and_then(|map| map.keys().next().cloned())
+        .unwrap_or_default()
+}
+
+fn plan_json_string_array(value: &Value, field: &str) -> Vec<String> {
+    value[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected array field {field} in {value}"))
+        .iter()
+        .map(|entry| normalized_rel(Path::new(entry.as_str().unwrap_or_default())))
+        .collect()
+}
+
+#[test]
+fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<()> {
+    let repo = isolated_scala_repo("full-apply")?;
+    let shared_before = fs::read_to_string(repo.root.join(SHARED_REL))?;
+    let (ids_before, load_before) = closure_ids(&repo.root)?;
+    assert!(
+        ids_before.iter().any(|id| id == PACKAGE_OBJECT_ID),
+        "precondition: the package object rides in the consumer closure today"
+    );
+
+    let plans = plan_extractions(&repo.root)?;
+    let plan = plans
+        .iter()
+        .find(|plan| normalized_rel(&plan.target_file) == SHARED_REL)
+        .expect("the shared package-object file is the plan target");
+    let plan_id = plan.id.0.clone();
+    let shared_file_id = FileId::from_relative_path(SHARED_REL);
+    let candidate_set: Vec<&_> = plan
+        .proposed_extractions
+        .iter()
+        .filter(|ext| ext.source_file == Some(shared_file_id))
+        .collect();
+    assert!(
+        !candidate_set.is_empty(),
+        "the plan extracts the shared file's own symbols (D-M23-3 source_file provenance)"
+    );
+
+    build_migration_preview(&repo.root, &plan_id, false)?;
+    let preview = read_json(&repo.root.join("artifacts/migration/preview.json"))?;
+    let consumer_rewrite = preview["rewrites"]
+        .as_array()
+        .expect("preview rewrites array")
+        .iter()
+        .find(|rw| {
+            normalized_rel(Path::new(rw["consumer_file"].as_str().unwrap_or_default()))
+                .ends_with(CONSUMER_REL)
+        })
+        .expect("T8b fence lift: the Scala import scan finds Dashboard as a consumer");
+    let new_includes = plan_json_string_array(consumer_rewrite, "new_includes");
+    assert!(
+        new_includes
+            .iter()
+            .any(|path| path == &format!("{SHARED_DIR}/LegacyReport.scala")),
+        "the rewrite redirects the consumer at the moved unit (new_includes: {new_includes:?})"
+    );
+
+    apply_transform_plan(&repo.root, &plan_id)?;
+    let manifest = read_json(&repo.root.join("artifacts/transaction/manifest.json"))?;
+    assert_eq!(manifest["outcome"], "Committed", "offline apply commits (I7)");
+    let outcome = read_json(&repo.root.join("artifacts/transaction/outcome.json"))?;
+    let statuses: Vec<String> = outcome["Committed"]["tiers_passed"]
+        .as_array()
+        .expect("committed tiers")
+        .iter()
+        .map(|tier| status_label(&tier["status"]))
+        .collect();
+    assert_eq!(
+        statuses,
+        vec!["Pass", "Pass", "Skipped"],
+        "kickoff §5-T8: validation tiers [Pass, Pass, Skipped]"
+    );
+
+    for ext in &candidate_set {
+        let extracted = fs::read_to_string(repo.root.join(&ext.target_header))
+            .unwrap_or_else(|_| panic!("extracted unit at {}", ext.target_header.display()));
+        let simple = ext.symbol_name.strip_suffix('$').unwrap_or(&ext.symbol_name);
+        assert!(
+            extracted.contains(simple),
+            "the extracted unit carries {}'s text",
+            ext.symbol_name
+        );
+        assert!(
+            extracted.contains("package com.example.legacy"),
+            "the extracted unit keeps the package clause (D-M23-5)"
+        );
+    }
+    let report_unit = fs::read_to_string(repo.root.join(format!("{SHARED_DIR}/LegacyReport.scala")))?;
+    let report_region = region_between(
+        &shared_before,
+        "class LegacyReport {",
+        "/** A heavyweight sibling",
+    );
+    assert!(
+        report_unit.contains(&report_region),
+        "the extracted body is the VERBATIM source region (D-M23-1)"
+    );
+    assert!(
+        report_unit.contains("com.example.legacy.records"),
+        "the referenced import rides along (T5)"
+    );
+    assert!(
+        !report_unit.contains("AuditSeal"),
+        "referenced-only import selection (D-M23-13b)"
+    );
+
+    let sealed_target = plan
+        .proposed_extractions
+        .iter()
+        .find(|ext| ext.symbol_id.0 == LEGACY_SHAPE_ID)
+        .map(|ext| repo.root.join(&ext.target_header))
+        .expect("the sealed batch target");
+    let sealed_unit = fs::read_to_string(&sealed_target)?;
+    assert!(
+        sealed_unit.contains("sealed trait LegacyShape") && sealed_unit.contains("LegacyCircle"),
+        "D-M23-8: the sealed pair moved together into one unit"
+    );
+
+    let shared_after = fs::read_to_string(repo.root.join(SHARED_REL))?;
+    for ext in &candidate_set {
+        let simple = ext.symbol_name.strip_suffix('$').unwrap_or(&ext.symbol_name);
+        assert!(
+            !declaration_lines(&shared_after)
+                .iter()
+                .any(|line| line.contains(simple)),
+            "I5: {simple} is no longer declared in the source file (move, not copy)"
+        );
+    }
+    assert_eq!(
+        declaration_lines(&shared_after),
+        vec!["package object legacy {"],
+        "the un-moved package object survives, byte-shaped as before"
+    );
+    assert!(
+        shared_after.contains("package object legacy")
+            && shared_after.contains("legacy isolation fixture"),
+        "I5: neighbours of the moved regions stay intact"
+    );
+
+    let dashboard = fs::read_to_string(repo.root.join(CONSUMER_REL))?;
+    assert!(
+        dashboard.contains("import com.example.legacy.LegacyReport"),
+        "the wildcard narrowed to the moved symbols (D-M23-5)"
+    );
+    assert!(
+        !dashboard.contains("import com.example.legacy._"),
+        "the wildcard import is gone"
+    );
+    assert!(
+        dashboard.contains("class Dashboard {")
+            && dashboard.contains("def headline: String = new LegacyReport().title"),
+        "non-directive consumer bytes stay byte-identical (I1 analogue)"
+    );
+
+    for rel in [
+        "src/main/scala/com/example/legacy/records/AuditSeal.scala",
+        "build.sbt",
+        "project/build.properties",
+    ] {
+        assert_eq!(
+            fs::read(repo.root.join(rel))?,
+            fs::read(fixture_path(FIXTURE).join(rel))?,
+            "{rel} stays byte-identical"
+        );
+    }
+
+    fs::remove_dir_all(repo.root.join("artifacts"))?;
+    let (ids_after, load_after) = closure_ids(&repo.root)?;
+    assert!(
+        !ids_after.iter().any(|id| id == PACKAGE_OBJECT_ID),
+        "the load win: the non-extracted package object left the consumer closure"
+    );
+    assert!(
+        ids_after.iter().any(|id| id == LEGACY_REPORT_ID),
+        "the justified symbol survives the move"
+    );
+    assert!(
+        load_after < load_before,
+        "collateral shed: {load_before} -> {load_after}"
+    );
+    assert!(
+        !repo.root.join("generated").exists(),
+        "D-M23-5: move targets land in the package dir, never a generated staging dir"
+    );
+    Ok(())
+}
+
+#[test]
+fn transaction_rollback_restores_the_whole_fixture_tree() -> Result<()> {
+    let repo = isolated_scala_repo("rollback")?;
+    let plans = plan_extractions(&repo.root)?;
+    let plan = plans
+        .into_iter()
+        .find(|plan| normalized_rel(&plan.target_file) == SHARED_REL)
+        .expect("the shared package-object file is the plan target");
+
+    let mut pipeline = Pipeline::new(&repo.root, None)?;
+    let model = pipeline.get_or_build_reduced()?;
+    let registry = default_registry();
+    let source_reader = repository_source_reader(&pipeline.repo)?;
+    let extractor =
+        plan_backend(&registry, &plan.target_file, |caps| caps.extraction, "extraction")?
+            .extractor();
+    let rewriter =
+        plan_backend(&registry, &plan.target_file, |caps| caps.rewriting, "rewriting")?
+            .rewriter();
+    let extraction = IsolationEngine::new(&model).extract(&plan, &source_reader, extractor);
+
+    let moved_ids: Vec<String> = plan
+        .proposed_extractions
+        .iter()
+        .map(|ext| ext.symbol_id.0.clone())
+        .collect();
+    let targets = rewriter.consumer_discovery_targets(&plan.target_file, &moved_ids);
+    let all_names: Vec<String> = plan
+        .proposed_extractions
+        .iter()
+        .map(|ext| ext.symbol_name.clone())
+        .collect();
+    let consumers = plan_target_consumers(
+        &registry,
+        &catalog_languages(&pipeline.discovery),
+        &pipeline.build.translation_units,
+        &repo.root,
+        &targets,
+        &plan.target_file,
+        &all_names,
+    );
+    let (symbol_name_to_header, units) = plan_rewrite_targets(&plan);
+    let migration =
+        IncludeRewriter::new(symbol_name_to_header, units).build_preview(plan.id.0.clone(), &consumers);
+    assert!(
+        !migration.rewrites.is_empty(),
+        "the neutral discovery finds consumers before apply"
+    );
+
+    let before = tree_digest(&repo.root)?;
+    let (snapshot, new_paths) =
+        TransactionApplier::apply_with(&repo.root, &extraction, &migration, rewriter, extractor)?;
+    let during = tree_digest(&repo.root)?;
+    assert_ne!(during, before, "apply mutates the tree (sanity)");
+
+    TransactionApplier::rollback(&snapshot, &new_paths)?;
+    assert_eq!(
+        tree_digest(&repo.root)?,
+        before,
+        "rollback restores dir-hash identity across the WHOLE fixture tree"
+    );
+    assert!(TransactionApplier::verify_restored(&snapshot).is_ok());
     Ok(())
 }

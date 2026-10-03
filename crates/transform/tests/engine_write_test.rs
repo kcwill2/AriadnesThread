@@ -19,6 +19,7 @@ fn test_write_to_disk() {
 
     let sym1 = ExtractedSymbol {
         name: "MyClass".to_string(),
+        qualified_id: "MyClass".to_string(),
         kind: ariadne_index::SymbolKind::Class,
         body: "// body1".to_string(),
     };
@@ -31,6 +32,7 @@ fn test_write_to_disk() {
 
     let sym2 = ExtractedSymbol {
         name: "MyFunc".to_string(),
+        qualified_id: "MyFunc".to_string(),
         kind: ariadne_index::SymbolKind::Function,
         body: "// body2".to_string(),
     };
@@ -77,11 +79,13 @@ fn test_write_to_disk_byte_parity_full_content() {
         symbols: vec![
             ExtractedSymbol {
                 name: "A".to_string(),
+                qualified_id: "A".to_string(),
                 kind: ariadne_index::SymbolKind::Class,
                 body: "// body1".to_string(),
             },
             ExtractedSymbol {
                 name: "B".to_string(),
+                qualified_id: "B".to_string(),
                 kind: ariadne_index::SymbolKind::Function,
                 body: "// body2".to_string(),
             },

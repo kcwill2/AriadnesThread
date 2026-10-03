@@ -122,6 +122,51 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
         groups
     }
 
+    /// D-M23-8 routing: the typed extends channel must reach the plugin that
+    /// owns each edge — without this override the trait default would drop
+    /// the channel for every language and the wired CLI route could never
+    /// co-locate sealed pairs. Empty edges (every C++ model, D-M23-8 fold)
+    /// take the byte-identical `colocated_groups` path; otherwise edges are
+    /// filtered to the records of each language's file language before
+    /// delegation.
+    fn colocated_groups_with_edges(
+        &self,
+        symbols: &[ariadne_lang::SymbolRecord],
+        extends_edges: &[(ariadne_lang::SymbolId, ariadne_lang::SymbolId)],
+    ) -> Vec<Vec<ariadne_lang::SymbolId>> {
+        if extends_edges.is_empty() {
+            return self.colocated_groups(symbols);
+        }
+        let mut groups = Vec::new();
+        for language in self.registry.languages() {
+            let Some(plugin) = self.registry.plugin_for_id(language) else {
+                continue;
+            };
+            let subset: Vec<ariadne_lang::SymbolRecord> = symbols
+                .iter()
+                .filter(|record| self.language_of_file.get(&record.owning_file) == Some(&language))
+                .cloned()
+                .collect();
+            if subset.is_empty() {
+                continue;
+            }
+            let ids: std::collections::HashSet<&ariadne_lang::SymbolId> =
+                subset.iter().map(|record| &record.id).collect();
+            let subset_edges: Vec<(ariadne_lang::SymbolId, ariadne_lang::SymbolId)> =
+                extends_edges
+                    .iter()
+                    .filter(|(src, dst)| ids.contains(src) && ids.contains(dst))
+                    .cloned()
+                    .collect();
+            groups.extend(
+                plugin
+                    .constraints()
+                    .colocated_groups_with_edges(&subset, &subset_edges),
+            );
+        }
+        groups
+    }
+
     fn frozen_symbols(
         &self,
         symbols: &[ariadne_lang::SymbolRecord],

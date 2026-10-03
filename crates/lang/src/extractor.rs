@@ -83,6 +83,17 @@ pub trait SourceExtractor: Send + Sync {
     ) -> Vec<String> {
         unit_paths.to_vec()
     }
+
+    /// Whether generated units land at their **repo-relative plan target**
+    /// path (in-place) instead of under the applier's `generated/` staging
+    /// directory (plan M23, T8b; D-M23-5 naming already resolves targets
+    /// beside the source). The default is `false` — C++ copy semantics keep
+    /// staging under `generated/` byte-identically (I1); move semantics
+    /// (Scala) require the file to live where the plan says, or the move
+    /// would strand the symbol in a staging dir the compiler never reads.
+    fn places_generated_units_in_place(&self) -> bool {
+        false
+    }
 }
 
 /// Render the complete text of one generated unit — **the single emitter**

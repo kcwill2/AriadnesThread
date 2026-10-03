@@ -169,6 +169,14 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
         text_extractor,
     )?;
 
+    // T8b: move-language units land in place (repo-relative plan targets);
+    // the tier-2 header directory follows the same plugin decision.
+    let header_output_dir = if text_extractor.places_generated_units_in_place() {
+        repository.root.clone()
+    } else {
+        repository.root.join("generated")
+    };
+
     commit_or_rollback(
         &artifacts,
         plan_id,
@@ -179,6 +187,7 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
         &new_paths,
         &registry,
         &plan.target_file,
+        &header_output_dir,
     )
 }
 
@@ -202,7 +211,9 @@ fn load_plan_for_action(
         .ok_or_else(|| anyhow::anyhow!("Plan {} not found", plan_id))
 }
 
-fn plan_rewrite_targets(
+/// Path-space rewrite targets of a plan: symbol name -> generated unit path,
+/// plus the conservative unit list (no required deps) the preview maps.
+pub fn plan_rewrite_targets(
     plan: &ariadne_cluster::plan::OptimizationPlan,
 ) -> (BTreeMap<String, PathBuf>, Vec<GeneratedUnit>) {
     // Build symbol_name_to_header map from plan's proposed_extractions
@@ -226,21 +237,47 @@ fn plan_rewrite_targets(
 /// Consumer rewrite input: (TU source path, old includes, symbol names).
 pub(crate) type PlanConsumers = Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>;
 
-/// Neutral consumer discovery (plan M23, D-M23-7 iii, T7 S2): for every TU,
-/// the plugin of that file's **catalog language** (never a C++ default)
-/// scans its own directive syntax for `target_include`; a hit ⇔ consumer,
-/// keeping today's conservative (path, old-include, all-symbols) payload.
-/// `lang-cpp` reproduces the pre-neutralization raw substring scan
-/// byte-for-byte, so C++ consumer sets are set-equal (I1 — locked by the
-/// untouched m10/m14/m19/m20 characterization suites); Scala consumers are
-/// located by import scan but stay rewrite-empty until the T7b move-removal
-/// transaction (orchestrator scope fence — hits are membership-only).
-pub(crate) fn plan_target_consumers(
+/// The plan-language dependency spellings consumer discovery probes with
+/// (plan M23, T8b): the plan backend's rewriter turns the plan's target file
+/// and moved symbol ids into its own dependency space (C++: the bare file
+/// name — today's scan spelling; Scala: the moved units' module paths — a
+/// wildcard import names the package, never a file). No language is named
+/// here (I2): the routing is the registry's, the grammar is the plugin's.
+pub fn plan_consumer_discovery_targets(
+    registry: &ariadne_lang::LanguageRegistry,
+    plan: &ariadne_cluster::plan::OptimizationPlan,
+) -> Result<Vec<String>> {
+    let moved_module_ids: Vec<String> = plan
+        .proposed_extractions
+        .iter()
+        .map(|ext| ext.symbol_id.0.clone())
+        .collect();
+    let rewriter = crate::registry::plan_backend(
+        registry,
+        &plan.target_file,
+        |caps| caps.rewriting,
+        "rewriting",
+    )?
+    .rewriter();
+    Ok(rewriter.consumer_discovery_targets(&plan.target_file, &moved_module_ids))
+}
+
+/// Neutral consumer discovery (plan M23, D-M23-7 iii, T7 S2; targets widened
+/// to the plugin's dependency spellings at T8b): for every TU, the plugin of
+/// that file's **catalog language** (never a C++ default) scans its own
+/// directive syntax for any of `targets`; a hit ⇔ consumer, keeping today's
+/// conservative (path, old-include, all-symbols) payload. `lang-cpp`
+/// reproduces the pre-neutralization raw substring scan byte-for-byte on its
+/// single default target, so C++ consumer sets are set-equal (I1 — locked by
+/// the untouched m10/m14/m19/m20 characterization suites); Scala consumers
+/// are located by import scan on the moved units' module paths (T8b fence
+/// lift).
+pub fn plan_target_consumers(
     registry: &ariadne_lang::LanguageRegistry,
     catalog: &std::collections::BTreeMap<FileId, ariadne_repo::SourceLanguage>,
     translation_units: &[ariadne_build::TranslationUnit],
     repo_root: &std::path::Path,
-    target_include: &str,
+    targets: &[String],
     target_file: &PathBuf,
     all_symbol_names: &[String],
 ) -> PlanConsumers {
@@ -254,10 +291,10 @@ pub(crate) fn plan_target_consumers(
         else {
             continue;
         };
-        if !plugin
-            .rewriter()
-            .find_dependency_targets(&content, target_include)
-            .is_empty()
+        let rewriter = plugin.rewriter();
+        if targets
+            .iter()
+            .any(|target| !rewriter.find_dependency_targets(&content, target).is_empty())
         {
             consumers.push((
                 tu.source_path.clone(),
@@ -282,11 +319,7 @@ fn find_plan_consumers(
         .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root));
     let build_result = build_discoverer.discover()?;
 
-    let target_include = plan
-        .target_file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let targets = plan_consumer_discovery_targets(&registry, plan)?;
 
     let all_symbol_names: Vec<String> = plan
         .proposed_extractions
@@ -299,7 +332,7 @@ fn find_plan_consumers(
         &crate::registry::catalog_languages(&repo_discovery),
         &build_result.translation_units,
         &repository.root,
-        target_include,
+        &targets,
         &plan.target_file,
         &all_symbol_names,
     ))
@@ -308,13 +341,14 @@ fn find_plan_consumers(
 fn commit_or_rollback(
     artifacts: &ArtifactManager,
     plan_id: &str,
-    repository: &Repository,
+    _repository: &Repository,
     extraction: &ariadne_transform::ExtractionResult,
     migration: &ariadne_transform::MigrationPreview,
     snapshot: &ariadne_validate::FileSnapshot,
     new_paths: &[PathBuf],
     registry: &ariadne_lang::LanguageRegistry,
     plan_target_file: &std::path::Path,
+    header_output_dir: &std::path::Path,
 ) -> Result<()> {
     let mut tiers_passed = Vec::new();
 
@@ -336,9 +370,8 @@ fn commit_or_rollback(
         return report_rollback(artifacts, plan_id, t1, tiers_passed, snapshot, new_paths);
     }
 
-    let header_output_dir = repository.root.join("generated");
     let t2 =
-        ariadne_validate::TierValidator::validate_generated_headers(extraction, &header_output_dir);
+        ariadne_validate::TierValidator::validate_generated_headers(extraction, header_output_dir);
     if !t2.status.is_fail() {
         tiers_passed.push(t2);
     } else {

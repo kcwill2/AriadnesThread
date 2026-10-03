@@ -313,31 +313,29 @@ fn find_including_translation_units(
     repo_discovery: &RepositoryDiscoveryResult,
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
-) -> Vec<(PathBuf, Vec<PathBuf>, Vec<String>)> {
+) -> anyhow::Result<Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>> {
     // D-M23-7 iii (T7 S2): language-routed consumer discovery — the C++
     // plugin reproduces this function's former raw substring scan exactly
     // (set-equal consumers, I1); see commands/transform.rs
-    // `plan_target_consumers` for the shared rule.
-    let target_include = plan
-        .target_file
-        .file_name()
-        .and_then(|n: &std::ffi::OsStr| n.to_str())
-        .unwrap_or("");
+    // `plan_target_consumers` for the shared rule. T8b: the probe strings
+    // come from the plan backend's dependency-space hook (C++: the bare
+    // file name — the same string as before).
+    let targets = crate::commands::transform::plan_consumer_discovery_targets(registry, plan)?;
     let all_symbol_names: Vec<String> = plan
         .proposed_extractions
         .iter()
         .map(|e| e.symbol_name.clone())
         .collect();
 
-    crate::commands::transform::plan_target_consumers(
+    Ok(crate::commands::transform::plan_target_consumers(
         registry,
         &crate::registry::catalog_languages(repo_discovery),
         &build_discovery.translation_units,
         &repo_discovery.root,
-        target_include,
+        &targets,
         &plan.target_file,
         &all_symbol_names,
-    )
+    ))
 }
 
 fn apply_safe_plan(
@@ -366,7 +364,7 @@ fn apply_safe_plan(
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
 
     let consumers =
-        find_including_translation_units(&plugin_registry, repo_discovery, build_discovery, plan);
+        find_including_translation_units(&plugin_registry, repo_discovery, build_discovery, plan)?;
 
     let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
