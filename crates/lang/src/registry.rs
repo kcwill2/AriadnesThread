@@ -504,6 +504,44 @@ mod tests {
     }
 
     #[test]
+    fn file_kind_language_column_is_advisory_and_no_longer_gates_detection() {
+        // M24 Part A, D-A6. `FileKind` KEEPS its policy role -- `crates/repo`'s
+        // ThirdParty/Generated/Frozen classification is driven by path rules in
+        // `policy.rs` and never consulted FileKind, so that role is untouched
+        // (invariant I6). What changed is that `FileKind`'s LANGUAGE column is
+        // now advisory only. This test pins that split by making the two
+        // disagree in public: a Python plugin claims `.py`, the closed table
+        // sends `.py` to `FileKind::Other`, and detection still resolves.
+        let registry =
+            LanguageRegistry::new().register(Box::new(MockPlugin::with_extension("py", LanguageId::new("Python"))));
+
+        assert_eq!(
+            ariadne_lang_api::identity::language_of_file_kind(ariadne_repo::FileKind::from_path(
+                Path::new("src/main.py")
+            )),
+            LanguageId::Other,
+            "the closed table still has no name for .py - it maps to the Other label"
+        );
+
+        assert_eq!(
+            registry.detect_language(Path::new("src/main.py")),
+            Some(LanguageId::new("Python")),
+            "detection resolves through the claiming plugin anyway: the advisory \\
+             language column is not a gate (D-A2 + D-A6)"
+        );
+
+        // The taxonomy itself is intact -- no FileKind variant was removed.
+        assert_eq!(
+            ariadne_repo::FileKind::from_path(Path::new("src/a.hpp")),
+            ariadne_repo::FileKind::Header
+        );
+        assert_eq!(
+            ariadne_repo::FileKind::from_path(Path::new("src/Main.scala")),
+            ariadne_repo::FileKind::ScalaSource
+        );
+    }
+
+    #[test]
     fn detect_language_defers_to_the_claiming_plugin_not_the_file_kind_table() {
         // M24 Part A, D-A2 -- CONTRACT CHANGE, not a bug fix. `.mock` is not a
         // recognised FileKind, so `FileKind::from_path` sends it to
