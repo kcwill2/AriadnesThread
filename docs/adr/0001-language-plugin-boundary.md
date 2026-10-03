@@ -271,19 +271,33 @@ count above, but a new language would want that message updated.
 One further item, deliberately typed differently from the five above: a **modelling literal, not a
 dispatch site.** `crates/cli/src/commands/plan.rs` line 231, inside the same production
 `plan_extractions` that calls `planning_hooks`, passes `ariadne_lang::CyclePolicy::Reject` to the
-planner for every language. The modelling table transposed above gives C++ `CyclePolicy::Reject`
-and Scala `CyclePolicy::TolerateWithinPackage`, because mutually recursive classes are legal in
-Scala, so at this line the planner receives the C++ stance for every language rather than the
-plugin's declared `LanguageModeling::cycle_policy`, and report-side cycle classification therefore
-uses the C++ stance for every language. The inline comment at lines 227-230 is explicit that this is
-not an oversight: the field is informational to the planner, every policy shares the SCC
-co-proposal path (locked by the test `cycle_policy_variants_share_the_scc_coproposal_path_for_now`
-in `crates/cluster/tests/planner_injection.rs`), and the stance only steers report-side cycle
-classification. It is recorded, then, the way the rest of this subsection records its items: as
-language-declared behaviour the CLI currently hardcodes, and so as something a new language needs
-to be told about -- the same class of thing as the five dispatch sites, and equally not a defect
-claim. A third language would find its declared cycle policy overridden here just as it would have
-to be taught the five sites above.
+planner for every language, while the modelling table transposed above declares
+`CyclePolicy::TolerateWithinPackage` for Scala. Nothing observable is currently wrong, and the
+reason is recorded here because the item is easy to read backwards.
+
+The hardcode is **inert.** `OptimizationPlanner::cycle_policy` (`crates/cluster/src/planner.rs:49`)
+is write-only: its only occurrences in that file are the field docs, the field declaration, the
+constructor parameter, the field initializer at line 106, and one further doc reference. Nothing
+reads it. Report-side cycle classification therefore does not come from the planner at all. It is
+sourced independently, through the registry, by `cycle_policy_by_file`
+(`crates/pipeline/src/lib.rs:748-763`), which resolves each file's language with `plugin_for_id`
+and reads `plugin.modeling().cycle_policy` at line 758, falling back to `Reject` only for a file
+no plugin claims; that map is handed to `generate_report_with_cycle_policies` at line 328. A Scala
+run already classifies with `TolerateWithinPackage`, which is the shipped behaviour
+`docs/adr/0002-symbol-placement-and-isolation.md` already records. The inline comment at `plan.rs`
+lines 227-230 declares the same intent from the other end: the field is informational to the
+planner and the SCC co-proposal path is shared by every policy, locked by the test
+`cycle_policy_variants_share_the_scc_coproposal_path_for_now`
+(`crates/cluster/tests/planner_injection.rs`). The verified data path is the registry route above,
+not this field.
+
+The hazard is therefore forward-looking, not present-tense. The literal becomes live the moment
+any consumer reads the planner field, and at that point a third language's declared cycle policy
+would be silently overridden by a hardcoded C++ stance that no test would object to. Until some
+consumer reads it, this line is a latent trap rather than a defect. It is recorded for the same
+reason the rest of this subsection records its items: as something a new language needs to be told
+about before it inherits it by accident. This records the item. It does not approve it, and it
+should be read as outstanding work rather than as precedent.
 
 Two further locks sit alongside the guards, both in `crates/cli/src/registry.rs`:
 
@@ -341,8 +355,10 @@ size and knows nothing about languages; its `R2_SCANNED_SUFFIXES` set is `.rs`, 
   `crates/cli/src/registry.rs`. Separately, and as a modelling literal rather than a sixth dispatch
   site, a new language needs to know that the cycle policy handed to the planner at
   `crates/cli/src/commands/plan.rs` line 231 is a hardcoded C++ stance rather than the value the
-  plugin declares. Closing those edit sites is outstanding work; this ADR records the
-  boundary, not a fix for it.
+  plugin declares. That planner field is currently never read, and report-side cycle
+  classification is sourced separately from the registry, so nothing is observably wrong today;
+  the cost is that the literal becomes a live override the moment anything starts reading it.
+  Closing those edit sites is outstanding work; this ADR records the boundary, not a fix for it.
 - The vocabulary is not yet used everywhere it could be. The frozen field names listed above
   keep C++ flavor in stored artifacts, and the isolation engine in `crates/transform` still
   knows the concept of a unit generically while the *spelling* of what it writes has moved into

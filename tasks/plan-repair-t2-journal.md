@@ -109,3 +109,29 @@ needs to be told about.
 
 Amended only the known-exception subsection and the one Consequences bullet. File 355 -> 375
 lines. Final amendment; no further trivia escalated. Left uncommitted for the orchestrator.
+
+## Checkpoint 7 -- corrective edit, false clause removed (closes the reviewer gate)
+
+A reviewer found that Checkpoint 6 asserted a FALSE consequence: that "report-side cycle
+classification therefore uses the C++ stance for every language". I independently confirmed the
+reviewer right on every point, and the defect was mine -- I had verified the substance of the
+source *comment* rather than the actual data path.
+
+Verified by Read/Grep before editing:
+- `cycle_policy` in `crates/cluster/src/planner.rs` has exactly five occurrences: 43 (doc), 49
+  (field declaration), 96 (constructor parameter), 106 (field initializer), 261 (doc reference).
+  No read anywhere in the crate. Write-only, as claimed.
+- `cycle_policy_by_file` is defined at `crates/pipeline/src/lib.rs:748-763`; line 758 evaluates
+  `registry.plugin_for_id(record.language).map(|plugin| plugin.modeling().cycle_policy)` with
+  `.unwrap_or(CyclePolicy::Reject)` at 759 for unclaimed files. Called at 327, fed to
+  `generate_report_with_cycle_policies` at 328.
+- `docs/adr/0002-...:222` does state the shipped Scala cycle policy tolerates cycles within a
+  package, so the false clause contradicted a sibling ADR.
+
+Correction: the false clause was deleted and the paragraph now records the verified mechanism --
+the hardcode is inert, report-side classification is registry-sourced, a Scala run already uses
+`TolerateWithinPackage` -- and states the real forward-looking hazard (the literal becomes a live
+override the moment any consumer reads the planner field). Non-defect framing preserved; the
+inert field is intentional per the source comment. The Consequences bullet was aligned to the same
+mechanism. Five-site count, 16-hit accounting, and modelling-literal typing all untouched.
+File 375 -> 392 lines. Left uncommitted for the orchestrator.
