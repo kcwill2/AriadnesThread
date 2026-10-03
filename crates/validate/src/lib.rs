@@ -167,7 +167,7 @@ impl TransactionApplier {
         }
 
         let move_removals = collect_move_removals(repo_root, migration, extraction);
-        for source in move_removals.keys() {
+        for (source, _) in &move_removals {
             paths_to_snapshot.push(repo_root.join(source));
         }
 
@@ -271,44 +271,41 @@ impl TransactionApplier {
 }
 
 /// The existing source files whose moved symbols `apply_with` must offer to
-/// `remove_top_level_symbols`, keyed by repo-relative path, valued with the
-/// moved symbol names (sorted). Derivation is fully neutral (I2): a rewrite's
-/// `old_includes` entries that exist on disk, are not the consumer itself,
-/// and are not a generated target (the T7b self-target mirror — stripping a
-/// unit's own output would corrupt it); the names come from the generated
-/// units the rewrite's `new_includes` point at.
+/// `remove_top_level_symbols`, as (repo-relative path, one unit's moved
+/// symbol names sorted) pairs — one entry per moved UNIT per source file
+/// (T8b): the unit is the atomic move region, so an unlocatable unit (an
+/// external batch member that kept its placeholder fallback, I4) is skipped
+/// whole by its own `None` hook result without blocking the strip of the
+/// units that genuinely live in that file. Derivation stays fully neutral
+/// (I2): a rewrite's `old_includes` entries that exist on disk, are not the
+/// consumer itself, and are not a generated target (the T7b self-target
+/// mirror — stripping a unit's own output would corrupt it); the names come
+/// from the generated units the rewrite's `new_includes` point at.
 fn collect_move_removals(
     repo_root: &Path,
     migration: &MigrationPreview,
     extraction: &ExtractionResult,
-) -> BTreeMap<PathBuf, Vec<String>> {
-    let mut names_by_source: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
+) -> BTreeSet<(PathBuf, Vec<String>)> {
+    let mut removals: BTreeSet<(PathBuf, Vec<String>)> = BTreeSet::new();
     for rewrite in &migration.rewrites {
-        let moved: BTreeSet<String> = extraction
-            .headers
-            .iter()
-            .filter(|unit| rewrite.new_includes.contains(&unit.path))
-            .flat_map(|unit| unit.symbols.iter().map(|sym| sym.name.clone()))
-            .collect();
-        if moved.is_empty() {
-            continue;
-        }
         for old_dep in &rewrite.old_includes {
             if old_dep == &rewrite.consumer_file || is_generated_target(old_dep, extraction) {
                 continue;
             }
-            if repo_root.join(old_dep).is_file() {
-                names_by_source
-                    .entry(old_dep.clone())
-                    .or_default()
-                    .extend(moved.iter().cloned());
+            if !repo_root.join(old_dep).is_file() {
+                continue;
+            }
+            for unit in &extraction.headers {
+                if !rewrite.new_includes.contains(&unit.path) || unit.symbols.is_empty() {
+                    continue;
+                }
+                let names: Vec<String> =
+                    unit.symbols.iter().map(|sym| sym.name.clone()).collect();
+                removals.insert((old_dep.clone(), names));
             }
         }
     }
-    names_by_source
-        .into_iter()
-        .map(|(source, names)| (source, names.into_iter().collect()))
-        .collect()
+    removals
 }
 
 /// A rewrite's old dependency path that is itself one of this plan's
@@ -318,12 +315,12 @@ fn is_generated_target(path: &Path, extraction: &ExtractionResult) -> bool {
     extraction.headers.iter().any(|unit| unit.path == path)
 }
 
-/// Offer each moved source file to the plugin's removal hook; a `Some`
-/// result is written back inside the caller's snapshot (I5 move), a `None`
-/// result (C++ default) leaves the file byte-identical (copy-only, I5).
+/// Offer each moved unit to the plugin's removal hook inside the caller's
+/// snapshot; a `Some` result is written back (I5 move), a `None` result (the
+/// C++ default, or a unit the file does not declare) leaves bytes untouched.
 fn strip_moved_symbols(
     repo_root: &Path,
-    removals: &BTreeMap<PathBuf, Vec<String>>,
+    removals: &BTreeSet<(PathBuf, Vec<String>)>,
     rewriter: &dyn DependencyRewriter,
 ) -> Result<()> {
     for (relative, names) in removals {

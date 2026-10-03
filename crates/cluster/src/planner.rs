@@ -324,16 +324,6 @@ impl<'a> OptimizationPlanner<'a> {
     /// `{name}_extracted.h`, never equal to the candidate — provably a
     /// no-op there, locked by the byte-identical m00 goldens and the
     /// untouched planner characterization suites.
-    /// T8b defining-site filter (neutral, sibling of the T7b self-target
-    /// filter): only symbols **defined in the candidate file** may be batch
-    /// members. Tarjan over the full edge set reaches referenced symbols and
-    /// emits them as singleton SCCs; proposing them would "move" a symbol out
-    /// of a file it does not live in (mislabeled `source_file`, placeholder
-    /// body, and — under all-or-nothing removal — a blocked strip for the
-    /// whole candidate). The filter is pure `defining_file` equality, never a
-    /// language test (I2); C++ candidates only ever batch their own
-    /// definitions, so this is provably no-op there — locked byte-identically
-    /// by the untouched m00/m18/m20 characterization suites.
     fn propose_batch(
         &self,
         batch: &[SymbolId],
@@ -348,7 +338,6 @@ impl<'a> OptimizationPlanner<'a> {
         let members: Vec<(&SymbolId, _)> = batch
             .iter()
             .filter_map(|symbol| Some((symbol, self.model.symbols.get(symbol)?)))
-            .filter(|(_, record)| record.defining_file == Some(candidate.file_id))
             .collect();
         let Some((_, anchor)) = members.first() else {
             return Vec::new();

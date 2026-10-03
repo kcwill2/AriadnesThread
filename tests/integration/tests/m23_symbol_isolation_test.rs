@@ -413,8 +413,18 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
     );
 
     assert_persisted_plan_stage(&repo.root, plans.len())?;
+    assert_sealed_pair_single_batch(&plan.proposed_extractions);
+    Ok(())
+}
+
+/// D-M23-8 (T8b TODO retirement): the typed extends channel makes the sealed
+/// pair one colocated batch, so both members co-target the anchor's file —
+/// never the candidate itself.
+fn assert_sealed_pair_single_batch(
+    extractions: &[ariadne_cluster::plan::ProposedExtraction],
+) {
     let target_of = |symbol_id: &str| {
-        plan.proposed_extractions
+        extractions
             .iter()
             .find(|ext| ext.symbol_id.0 == symbol_id)
             .map(|ext| normalized_rel(&ext.target_header))
@@ -431,7 +441,6 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
         SHARED_REL.to_string(),
         "the sealed batch moves to a new file, not the candidate itself"
     );
-    Ok(())
 }
 
 fn assert_persisted_plan_stage(root: &Path, plan_count: usize) -> Result<()> {
@@ -575,7 +584,19 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
     );
 
     build_migration_preview(&repo.root, &plan_id, false)?;
-    let preview = read_json(&repo.root.join("artifacts/migration/preview.json"))?;
+    assert_dashboard_preview_consumer(&repo.root)?;
+    apply_transform_plan(&repo.root, &plan_id)?;
+    assert_committed_offline_tiers(&repo.root)?;
+    assert_moved_units_and_stripped_source(&repo.root, &shared_before, plan, &candidate_set)?;
+    assert_consumer_narrowed_and_untouched_bytes(&repo.root)?;
+    assert_the_load_win(&repo.root, &ids_before, load_before)?;
+    Ok(())
+}
+
+/// T8b fence lift, preview stage: the import-scan consumer discovery reaches
+/// Dashboard through the CLI route and redirects it at the moved units.
+fn assert_dashboard_preview_consumer(root: &Path) -> Result<()> {
+    let preview = read_json(&root.join("artifacts/migration/preview.json"))?;
     let consumer_rewrite = preview["rewrites"]
         .as_array()
         .expect("preview rewrites array")
@@ -592,11 +613,14 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
             .any(|path| path == &format!("{SHARED_DIR}/LegacyReport.scala")),
         "the rewrite redirects the consumer at the moved unit (new_includes: {new_includes:?})"
     );
+    Ok(())
+}
 
-    apply_transform_plan(&repo.root, &plan_id)?;
-    let manifest = read_json(&repo.root.join("artifacts/transaction/manifest.json"))?;
+/// Kickoff §5-T8: offline apply commits with tiers [Pass, Pass, Skipped].
+fn assert_committed_offline_tiers(root: &Path) -> Result<()> {
+    let manifest = read_json(&root.join("artifacts/transaction/manifest.json"))?;
     assert_eq!(manifest["outcome"], "Committed", "offline apply commits (I7)");
-    let outcome = read_json(&repo.root.join("artifacts/transaction/outcome.json"))?;
+    let outcome = read_json(&root.join("artifacts/transaction/outcome.json"))?;
     let statuses: Vec<String> = outcome["Committed"]["tiers_passed"]
         .as_array()
         .expect("committed tiers")
@@ -608,9 +632,21 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
         vec!["Pass", "Pass", "Skipped"],
         "kickoff §5-T8: validation tiers [Pass, Pass, Skipped]"
     );
+    Ok(())
+}
 
-    for ext in &candidate_set {
-        let extracted = fs::read_to_string(repo.root.join(&ext.target_header))
+/// Post-apply disk state: every planned unit exists at its in-place target
+/// with package clause + symbol text (verbatim for the report, D-M23-1), the
+/// sealed pair shares its batch unit, and the source file lost its moved
+/// declarations while keeping the package object and its neighbours (I5).
+fn assert_moved_units_and_stripped_source(
+    root: &Path,
+    shared_before: &str,
+    plan: &ariadne_cluster::plan::OptimizationPlan,
+    candidate_set: &[&ariadne_cluster::plan::ProposedExtraction],
+) -> Result<()> {
+    for ext in candidate_set {
+        let extracted = fs::read_to_string(root.join(&ext.target_header))
             .unwrap_or_else(|_| panic!("extracted unit at {}", ext.target_header.display()));
         let simple = ext.symbol_name.strip_suffix('$').unwrap_or(&ext.symbol_name);
         assert!(
@@ -623,12 +659,8 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
             "the extracted unit keeps the package clause (D-M23-5)"
         );
     }
-    let report_unit = fs::read_to_string(repo.root.join(format!("{SHARED_DIR}/LegacyReport.scala")))?;
-    let report_region = region_between(
-        &shared_before,
-        "class LegacyReport {",
-        "/** A heavyweight sibling",
-    );
+    let report_unit = fs::read_to_string(root.join(format!("{SHARED_DIR}/LegacyReport.scala")))?;
+    let report_region = region_between(shared_before, "class LegacyReport {", "/** A heavyweight sibling");
     assert!(
         report_unit.contains(&report_region),
         "the extracted body is the VERBATIM source region (D-M23-1)"
@@ -646,7 +678,7 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
         .proposed_extractions
         .iter()
         .find(|ext| ext.symbol_id.0 == LEGACY_SHAPE_ID)
-        .map(|ext| repo.root.join(&ext.target_header))
+        .map(|ext| root.join(&ext.target_header))
         .expect("the sealed batch target");
     let sealed_unit = fs::read_to_string(&sealed_target)?;
     assert!(
@@ -654,8 +686,8 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
         "D-M23-8: the sealed pair moved together into one unit"
     );
 
-    let shared_after = fs::read_to_string(repo.root.join(SHARED_REL))?;
-    for ext in &candidate_set {
+    let shared_after = fs::read_to_string(root.join(SHARED_REL))?;
+    for ext in candidate_set {
         let simple = ext.symbol_name.strip_suffix('$').unwrap_or(&ext.symbol_name);
         assert!(
             !declaration_lines(&shared_after)
@@ -674,8 +706,13 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
             && shared_after.contains("legacy isolation fixture"),
         "I5: neighbours of the moved regions stay intact"
     );
+    Ok(())
+}
 
-    let dashboard = fs::read_to_string(repo.root.join(CONSUMER_REL))?;
+/// The consumer's wildcard narrowed to the moved symbols (D-M23-5) while
+/// its non-directive bytes and the untouched fixture files stay byte-exact.
+fn assert_consumer_narrowed_and_untouched_bytes(root: &Path) -> Result<()> {
+    let dashboard = fs::read_to_string(root.join(CONSUMER_REL))?;
     assert!(
         dashboard.contains("import com.example.legacy.LegacyReport"),
         "the wildcard narrowed to the moved symbols (D-M23-5)"
@@ -696,14 +733,23 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
         "project/build.properties",
     ] {
         assert_eq!(
-            fs::read(repo.root.join(rel))?,
+            fs::read(root.join(rel))?,
             fs::read(fixture_path(FIXTURE).join(rel))?,
             "{rel} stays byte-identical"
         );
     }
+    assert!(
+        !root.join("generated").exists(),
+        "D-M23-5: move targets land in the package dir, never a generated staging dir"
+    );
+    Ok(())
+}
 
-    fs::remove_dir_all(repo.root.join("artifacts"))?;
-    let (ids_after, load_after) = closure_ids(&repo.root)?;
+/// The point of the extraction: re-analyzing the applied tree takes the
+/// non-extracted package object out of the consumer's closure.
+fn assert_the_load_win(root: &Path, ids_before: &[String], load_before: usize) -> Result<()> {
+    fs::remove_dir_all(root.join("artifacts"))?;
+    let (ids_after, load_after) = closure_ids(root)?;
     assert!(
         !ids_after.iter().any(|id| id == PACKAGE_OBJECT_ID),
         "the load win: the non-extracted package object left the consumer closure"
@@ -715,10 +761,6 @@ fn apply_isolates_the_shared_file_and_sheds_the_consumer_collateral() -> Result<
     assert!(
         load_after < load_before,
         "collateral shed: {load_before} -> {load_after}"
-    );
-    assert!(
-        !repo.root.join("generated").exists(),
-        "D-M23-5: move targets land in the package dir, never a generated staging dir"
     );
     Ok(())
 }
