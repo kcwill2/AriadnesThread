@@ -90,7 +90,9 @@ fn test_m12_incremental_analysis_cold_run() {
             .is_empty(),
         "index manifest must carry an input fingerprint"
     );
-    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "1.0.0");
+    // Pinned epoch (M18.10 bump 1.0.0 → 2.0.0: symbols.bin bincode layout +
+    // fingerprint language/plugin inputs): a bump must fail this assert.
+    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "2.0.0");
 }
 
 #[test]
@@ -182,13 +184,18 @@ fn test_m12_incremental_analysis_version_mismatch() {
     let repo_discovery = repo.discover().unwrap();
     let build_discovery = BuildDiscoverer::new(root).discover().unwrap();
 
-    let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery);
+    let cpp_plugin = ariadne_lang_cpp::CppPlugin::new();
+    let mut analyzer1 =
+        IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery, &cpp_plugin);
     let result1 = analyzer1.analyze().unwrap();
     result1.save_artifacts(&repo).unwrap();
 
-    // Second run with different version
-    let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-        .with_analysis_version("2.0.0");
+    // Second run with a version distinct from CURRENT_ANALYSIS_VERSION
+    // ("2.0.0" since the M18.10 epoch bump, so the old sentinel value is
+    // stale here — any never-current version keeps the mismatch semantics).
+    let mut analyzer2 =
+        IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery, &cpp_plugin)
+            .with_analysis_version("9.9.9");
     let result2 = analyzer2.analyze().unwrap();
 
     assert_eq!(result2.stats.reused_tus, 0);

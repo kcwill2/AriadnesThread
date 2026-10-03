@@ -13,6 +13,7 @@ impl ArtifactManager {
         &self,
         result: &ariadne_transform::ExtractionResult,
         output_dir: &Path,
+        extractor: &dyn ariadne_lang::SourceExtractor,
     ) -> Result<PathBuf> {
         fs::create_dir_all(output_dir).with_context(|| {
             format!(
@@ -33,7 +34,7 @@ impl ArtifactManager {
 
         let headers_dir = output_dir.join("headers");
         result
-            .write_to_disk(&headers_dir)
+            .write_to_disk(&headers_dir, extractor)
             .context("Failed to write extracted headers to disk")?;
 
         Ok(output_dir.to_path_buf())

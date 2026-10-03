@@ -1,0 +1,3 @@
+JAR-SENTINEL-ASCII-001 This is not a real archive. The lib/ directory is the
+Scala external-boundary marker (ScalaPlugin external_path_markers, M20 lock);
+this ASCII sentinel file exists only so discovery has a lib/ entry to exclude.

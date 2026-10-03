@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod optimize;
+pub mod registry;
 
 pub use commands::analyze::*;
 pub use commands::discover::*;
@@ -12,9 +13,8 @@ pub use commands::transform::*;
 pub use commands::ui::*;
 pub use optimize::*;
 
-pub use ariadne_graph::build_include_graph;
-
 use anyhow::{bail, Result};
+use ariadne_repo::SourceLanguage;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -143,6 +143,10 @@ pub enum Commands {
         /// Number of parallel workers
         #[arg(long)]
         workers: Option<usize>,
+        /// Restrict analyzed units to one language (cpp|scala|other);
+        /// default: per-file detection over the registered plugins
+        #[arg(long, value_parser = registry::parse_language_arg)]
+        lang: Option<SourceLanguage>,
         #[command(subcommand)]
         command: Option<AnalyzeSubcommands>,
     },
@@ -172,6 +176,10 @@ pub enum Commands {
     Index {
         /// Path to repository root
         repo: PathBuf,
+        /// Restrict indexed units to one language (cpp|scala|other);
+        /// default: per-file detection over the registered plugins
+        #[arg(long, value_parser = registry::parse_language_arg)]
+        lang: Option<SourceLanguage>,
     },
     /// Query semantic model
     Query {
@@ -259,9 +267,10 @@ pub fn run_cli() -> Result<()> {
         Some(Commands::Analyze {
             repo,
             workers,
+            lang,
             command,
         }) => {
-            dispatch_analyze(repo, workers, command)?;
+            dispatch_analyze(repo, workers, lang, command)?;
         }
         Some(Commands::Explain { command }) => {
             dispatch_explain(command)?;
@@ -277,8 +286,8 @@ pub fn run_cli() -> Result<()> {
         Some(Commands::Includes { repo, command }) => {
             dispatch_includes(repo, command)?;
         }
-        Some(Commands::Index { repo }) => {
-            build_source_index(&repo)?;
+        Some(Commands::Index { repo, lang }) => {
+            build_source_index_filtered(&repo, lang)?;
         }
         Some(Commands::Query { command }) => {
             dispatch_query(command)?;
@@ -326,6 +335,7 @@ pub fn run_cli() -> Result<()> {
 fn dispatch_analyze(
     repo: Option<PathBuf>,
     workers: Option<usize>,
+    lang: Option<SourceLanguage>,
     command: Option<AnalyzeSubcommands>,
 ) -> Result<()> {
     match (repo, command) {
@@ -349,9 +359,9 @@ fn dispatch_analyze(
         }
         (Some(repo_path), None) => {
             if let Some(w) = workers {
-                run_production_scale_analysis(&repo_path, Some(w))?;
+                run_production_scale_analysis_filtered(&repo_path, Some(w), lang)?;
             } else {
-                run_incremental_analysis(&repo_path)?;
+                run_incremental_analysis_filtered(&repo_path, lang)?;
             }
         }
         (None, None) => {
@@ -463,6 +473,7 @@ mod tests {
             Commands::Analyze {
                 repo,
                 workers: _,
+                lang: _,
                 command:
                     Some(AnalyzeSubcommands::Load {
                         repo: load_repo,
@@ -689,6 +700,7 @@ mod tests {
             Commands::Analyze {
                 repo,
                 workers,
+                lang: _,
                 command,
             } => {
                 assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
@@ -707,6 +719,7 @@ mod tests {
             Commands::Analyze {
                 repo,
                 workers,
+                lang: _,
                 command,
             } => {
                 assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");

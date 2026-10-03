@@ -1,174 +1,15 @@
-use ariadne_repo::FileId;
+//! Semantic index value types.
+//!
+//! The shared plugin vocabulary types now live in `ariadne-lang-api`
+//! (plan §3.1); this module re-exports them verbatim so every existing path
+//! (`ariadne_index::types::SymbolId`, the crate-root `pub use types::*`, and
+//! `ariadne_index::SymbolId`) keeps resolving with zero call-site churn.
+//! `IndexResult` stays here — it is an index product, not plugin vocabulary.
+
+pub use ariadne_lang_api::types::*;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct SymbolId(pub String);
-
-impl SymbolId {
-    pub fn new<S: Into<String>>(name: S) -> Self {
-        Self(name.into())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct DeclId(pub String);
-
-impl DeclId {
-    pub fn new<S: Into<String>>(id: S) -> Self {
-        Self(id.into())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum SymbolKind {
-    Class,
-    Struct,
-    Union,
-    Enum,
-    Function,
-    Variable,
-    TypeAlias,
-    Field,
-    Concept,
-    Other,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum DependencyKind {
-    Complete,
-    Incomplete,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FileLocation {
-    pub file_id: FileId,
-    pub line: usize,
-    pub column: usize,
-}
-
-impl Default for FileLocation {
-    fn default() -> Self {
-        Self {
-            file_id: FileId(0),
-            line: 0,
-            column: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SymbolDecl {
-    pub id: DeclId,
-    pub symbol_id: SymbolId,
-    pub location: FileLocation,
-    pub is_definition: bool,
-}
-
-impl Default for SymbolDecl {
-    fn default() -> Self {
-        Self {
-            id: DeclId(String::new()),
-            symbol_id: SymbolId(String::new()),
-            location: FileLocation::default(),
-            is_definition: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SymbolRecord {
-    pub id: SymbolId,
-    pub name: String,
-    pub kind: SymbolKind,
-    pub owning_file: FileId,
-    pub declarations: Vec<DeclId>,
-    pub definition: Option<DeclId>,
-}
-
-impl Default for SymbolRecord {
-    fn default() -> Self {
-        Self {
-            id: SymbolId(String::new()),
-            name: String::new(),
-            kind: SymbolKind::Other,
-            owning_file: FileId(0),
-            declarations: Vec::new(),
-            definition: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SemanticEdge {
-    pub src_symbol: SymbolId,
-    pub dst_symbol: SymbolId,
-    pub kind: DependencyKind,
-    pub src_file: FileId,
-    pub dst_file: FileId,
-}
-
-impl Default for SemanticEdge {
-    fn default() -> Self {
-        Self {
-            src_symbol: SymbolId(String::new()),
-            dst_symbol: SymbolId(String::new()),
-            kind: DependencyKind::Incomplete,
-            src_file: FileId(0),
-            dst_file: FileId(0),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CallSite {
-    pub caller_symbol: SymbolId,
-    pub callee_name: String,
-    pub location: FileLocation,
-}
-
-impl Default for CallSite {
-    fn default() -> Self {
-        Self {
-            caller_symbol: SymbolId(String::new()),
-            callee_name: String::new(),
-            location: FileLocation::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SymbolReference {
-    pub symbol_id: SymbolId,
-    pub file_id: FileId,
-    pub location: FileLocation,
-    pub is_write: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TuAnalysis {
-    pub tu_file_id: FileId,
-    pub context_name: String,
-    pub symbols: Vec<SymbolRecord>,
-    pub declarations: Vec<SymbolDecl>,
-    pub edges: Vec<SemanticEdge>,
-    pub references: Vec<SymbolReference>,
-    pub call_sites: Vec<CallSite>,
-}
-
-impl Default for TuAnalysis {
-    fn default() -> Self {
-        Self {
-            tu_file_id: FileId(0),
-            context_name: String::new(),
-            symbols: Vec::new(),
-            declarations: Vec::new(),
-            edges: Vec::new(),
-            references: Vec::new(),
-            call_sites: Vec::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexResult {
@@ -218,6 +59,7 @@ impl IndexResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_repo::{FileId, SourceLanguage};
 
     #[test]
     fn test_types_and_index_result_aggregation() {
@@ -236,6 +78,8 @@ mod tests {
             owning_file: file2.clone(),
             declarations: vec![decl_a.clone()],
             definition: Some(decl_a),
+
+            modifiers: Vec::new(),
         };
 
         let edge = SemanticEdge {
@@ -254,6 +98,9 @@ mod tests {
             edges: vec![edge],
             references: vec![],
             call_sites: vec![],
+            language: SourceLanguage::Cpp,
+
+            extends_edges: Vec::new(),
         };
 
         let result = IndexResult::new(PathBuf::from("/test"), vec![tu]);

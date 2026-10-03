@@ -1,0 +1,18 @@
+[package]
+name = "ariadne-lang-scala"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Plugin crate (plan sec 3.1, M19.1): depends inward only. Deliberately NOT
+# depended on: ariadne-build / ariadne-scheduler / ariadne-graph /
+# ariadne-cluster / ariadne-transform / ariadne-validate. The m17 guard
+# `plugin_crates_do_not_depend_on_core_pipeline` starts asserting on this
+# manifest the moment the crate exists (M19.1 kickoff).
+[dependencies]
+ariadne-repo = { path = "../repo" }
+ariadne-lang-api = { path = "../lang-api" }
+ariadne-lang = { path = "../lang" }
+
+[dev-dependencies]
+tempfile.workspace = true

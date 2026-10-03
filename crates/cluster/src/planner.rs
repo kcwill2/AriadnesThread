@@ -1,43 +1,39 @@
 use crate::checker::ConstraintChecker;
 use crate::frontier::FrontierAnalyzer;
-use crate::plan::{OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, RiskLevel};
+use crate::plan::{
+    OptimizationPlan, PlanId, PlanRejection, ProposedExtraction, RejectionReason, RiskLevel,
+};
 use crate::scc;
 use ariadne_graph::load::LoadAnalyzer;
 use ariadne_graph::reduced::ReducedSemanticModel;
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadMetric};
 use ariadne_index::types::SymbolId;
+use ariadne_lang::{ClusteringConstraints, CyclePolicy, LanguageId, SymbolRecord};
 use ariadne_repo::{FileId, FileOwnership, FileRecord, OptimizationPolicy};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub fn is_header_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| matches!(ext, "h" | "hpp" | "hxx" | "hh" | "inl"))
-        .unwrap_or(false)
-}
-
-/// Precomputed candidate-screening inputs for one header, decoupled from the
-/// load DTOs: the stage's load pass already knows a header's collateral load
-/// and dominant collateral source, so `with_screening_facts` never re-runs
-/// the cold `LoadAnalyzer` scan per header. Field types mirror `LoadMetric`
-/// (`collateral_load: usize`, largest source keyed by `FileId` — its path is
-/// re-resolved from the include graph, the same way `LoadAnalyzer` derived
-/// it in `contributing_sources`).
+/// Precomputed candidate-screening inputs for one aggregation unit,
+/// decoupled from the load DTOs: the stage's load pass already knows a unit's
+/// collateral load and dominant collateral source, so `with_screening_facts`
+/// never re-runs the cold `LoadAnalyzer` scan per candidate. Field types
+/// mirror `LoadMetric` (`collateral_load: usize`, largest source keyed by
+/// `FileId` — its path is re-resolved from the include graph, the same way
+/// `LoadAnalyzer` derived it in `contributing_sources`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeaderScreeningFacts {
     pub collateral_load: usize,
     pub largest_collateral_source: Option<FileId>,
 }
 
-/// Build the header screening facts map from a stage `LoadReport`'s
+/// Build the screening facts map from a stage `LoadReport`'s
 /// `file_metrics`: each metric's `target_file` path is resolved to its
 /// `FileId` through the include graph, and metrics whose target path is
 /// unregistered (or absent) are skipped — an unregistered target can never
-/// be a candidate. Metrics exist exactly for files with symbols, so headers
+/// be a candidate. Metrics exist exactly for files with symbols, so units
 /// without symbols end up fact-less and are screened as load 0, matching the
-/// cold path's outcome of zero proposals (no own symbols ⇒ no extraction).
+/// cold path's outcome of zero proposals (no own symbols, no extraction).
 pub fn screening_facts_from_metrics(
     include_graph: &IncludeGraph,
     file_metrics: &[LoadMetric],
@@ -65,15 +61,62 @@ pub fn screening_facts_from_metrics(
         .collect()
 }
 
+/// Builds extraction plans for one repository snapshot (plan §3.4).
+///
+/// The engine is language-neutral (plan §7 rule R2): which files are
+/// aggregation units and what an extraction target is called are injected
+/// per language (`aggregation_filter`, `target_path_for`); for C++ the
+/// plugin supplies `ariadne_lang_cpp::{cpp_aggregation_filter,
+/// cpp_target_path_for}`.
 pub struct OptimizationPlanner<'a> {
     pub include_graph: &'a IncludeGraph,
     pub model: &'a ReducedSemanticModel,
     pub file_records: &'a [FileRecord],
     pub tu_file_ids: &'a [FileId],
-    /// `Some` on the UI fast path: per-header screening inputs and the
-    /// stage's include closures, precomputed by the pipeline stages.
+    /// Only files passing this filter become candidate aggregation units
+    /// (plan M18.6); the pipeline supplies it from the language plugin.
+    pub aggregation_filter: &'a (dyn Fn(&Path) -> bool + Sync),
+    /// Produces the proposal target path for one co-proposed batch, called
+    /// with (candidate aggregation file path, batch anchor symbol name)
+    /// (plan M18.6, §3.6 "Target file naming").
+    pub target_path_for: &'a (dyn Fn(&Path, &str) -> PathBuf + Sync),
+    /// Optional language clustering constraints (plan M18.7): colocated
+    /// groups union-merge SCC proposal batches; frozen symbols are skipped.
+    pub constraints: Option<&'a dyn ClusteringConstraints>,
+    /// Cycle stance (plan M18.7): `Reject` rejects any proposal that would
+    /// split an SCC via `ConstraintChecker`. `Tolerate` and
+    /// `TolerateWithinPackage` share that path here — SCC members are already
+    /// co-proposed as one batch, so cycles are never split, and the planner
+    /// keeps behaving identically under every policy (locked by
+    /// `tests/planner_injection.rs:315` `cycle_policy_variants_share_the_scc_coproposal_path_for_now`).
+    /// What shipped in M20 (D11): the stance is consumed on the *report* side
+    /// — `IncludeGraph::generate_report_with_cycle_policies` classifies a
+    /// cycle as informational when every member's policy is non-`Reject`.
+    /// Package-scoped cycle precision is superseded by the M23.5
+    /// group-condensation milestone, not by this field.
+    pub cycle_policy: CyclePolicy,
+    /// `Some` on the UI fast path: per-candidate screening inputs and the
+    /// stage's include closures, precomputed by the pipeline stages. `None`
+    /// keeps the cold `LoadAnalyzer` scan this planner was constructed with.
     screening_facts: Option<HashMap<FileId, HeaderScreeningFacts>>,
     stage_closures: Option<&'a HashMap<FileId, IncludeClosure>>,
+    /// Languages injected by the caller whose plugins report
+    /// `capabilities().planning == false` (plan M22, D23). Each gap yields one
+    /// explanatory rejection from `plan_with_rejections`, so planning output is
+    /// never silently empty. Empty (the default) keeps `plan()` and
+    /// `plan_with_rejections().0` byte-identical to today.
+    planning_gaps: Vec<PlanningGap>,
+}
+
+/// A language present in the repository whose plugin disables the planning
+/// stage (plan M22, D23). Computed by the caller from discovery records and
+/// the registry — the engine never consults a registry itself (rule R2): the
+/// language arrives as neutral `LanguageId` data with a representative
+/// discovered path so the resulting rejection has an honest `target_file`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanningGap {
+    pub language: LanguageId,
+    pub sample_path: PathBuf,
 }
 
 /// Optimization policy and ownership views built once per planning run.
@@ -83,9 +126,9 @@ struct FilePolicyMaps {
     policy_by_path: HashMap<PathBuf, OptimizationPolicy>,
 }
 
-/// A header that passed the load, collateral-source, and policy screens and
+/// A file that passed the load, collateral-source, and policy screens and
 /// is eligible for extraction proposals.
-struct HeaderCandidate {
+struct AggregationCandidate {
     file_id: FileId,
     path: PathBuf,
     collateral_load: usize,
@@ -93,42 +136,77 @@ struct HeaderCandidate {
     collateral_source_path: PathBuf,
 }
 
-/// A screened header plus its validated extractions, awaiting sequential plan
-/// assembly and dense `PLAN-{:03}` numbering. Kept id-free so the per-header
-/// step is pure and the parallel collect can renumber afterwards.
+/// A screened candidate plus its proposal batch, before id assignment.
 struct PendingPlan {
-    candidate: HeaderCandidate,
+    candidate: AggregationCandidate,
     proposed_extractions: Vec<ProposedExtraction>,
 }
 
-/// Read-only inputs shared by every per-header planning step, built once per
-/// planning run. Holds the hoisted model-wide symbol adjacency (A2: the SCC
-/// pass no longer rebuilds it per header) and the cold analyzer, which is
-/// `None` on the facts path.
+/// Everything the per-candidate step needs, built once per planning run. The
+/// facts path must never construct the cold analyzer: building it and scanning
+/// every candidate serially is exactly the tail work the UI path avoids, so it
+/// is materialized here only when no screening facts were supplied.
 struct PlanningContext<'a> {
-    cold_analyzer: Option<LoadAnalyzer<'a>>,
     frontier_analyzer: FrontierAnalyzer,
     policies: FilePolicyMaps,
     checker: ConstraintChecker,
-    adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
-    header_consumers: HashMap<FileId, Vec<FileId>>,
+    mapped_edges: Vec<ariadne_index::types::SemanticEdge>,
+    aggregation_consumers: HashMap<FileId, Vec<FileId>>,
+    cold_analyzer: Option<LoadAnalyzer<'a>>,
+}
+
+impl<'a> PlanningContext<'a> {
+    fn build(planner: &'a OptimizationPlanner<'a>) -> Self {
+        let policies = planner.collect_file_policies();
+        let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
+        let mapped_edges = planner.model_edges_without_file_endpoints();
+        // Facts path: reuse the include stage's closures instead of
+        // recomputing them (`map_aggregation_consumers` would re-derive them).
+        let aggregation_consumers = match planner.stage_closures {
+            Some(closures) => planner
+                .include_graph
+                .map_header_consuming_tus_with_closures(planner.tu_file_ids, closures),
+            None => planner
+                .include_graph
+                .map_aggregation_consumers(planner.tu_file_ids),
+        };
+        let cold_analyzer = planner
+            .screening_facts
+            .is_none()
+            .then(|| LoadAnalyzer::new(planner.include_graph, planner.model));
+        Self {
+            frontier_analyzer: FrontierAnalyzer::new(),
+            policies,
+            checker,
+            mapped_edges,
+            aggregation_consumers,
+            cold_analyzer,
+        }
+    }
 }
 
 impl<'a> OptimizationPlanner<'a> {
-    /// Cold path (CLI `tool optimize`/`plan`): screening re-analyzes each
-    /// header serially with a fresh `LoadAnalyzer`. Behavior is untouched by
-    /// the facts fast path below.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         include_graph: &'a IncludeGraph,
         model: &'a ReducedSemanticModel,
         file_records: &'a [FileRecord],
         tu_file_ids: &'a [FileId],
+        aggregation_filter: &'a (dyn Fn(&Path) -> bool + Sync),
+        target_path_for: &'a (dyn Fn(&Path, &str) -> PathBuf + Sync),
+        constraints: Option<&'a dyn ClusteringConstraints>,
+        cycle_policy: CyclePolicy,
     ) -> Self {
         Self {
             include_graph,
             model,
             file_records,
             tu_file_ids,
+            aggregation_filter,
+            target_path_for,
+            constraints,
+            cycle_policy,
+            planning_gaps: Vec::new(),
             screening_facts: None,
             stage_closures: None,
         }
@@ -138,12 +216,19 @@ impl<'a> OptimizationPlanner<'a> {
     /// precomputed [`HeaderScreeningFacts`] and consumer mapping reuses the
     /// stage's include `closures`, so `plan()` never constructs the cold
     /// `LoadAnalyzer` and never recomputes closures. Plan output is parity-
-    /// locked against the cold path by `tests/planner_facts_parity.rs`.
+    /// locked against the cold path by `tests/planner_facts_parity.rs` (unit
+    /// fixtures) and `tests/integration/tests/m00_facts_path_parity_test.rs`
+    /// (real C++ fixtures, byte-for-byte against the production `plans.json`).
+    #[allow(clippy::too_many_arguments)]
     pub fn with_screening_facts(
         include_graph: &'a IncludeGraph,
         model: &'a ReducedSemanticModel,
         file_records: &'a [FileRecord],
         tu_file_ids: &'a [FileId],
+        aggregation_filter: &'a (dyn Fn(&Path) -> bool + Sync),
+        target_path_for: &'a (dyn Fn(&Path, &str) -> PathBuf + Sync),
+        constraints: Option<&'a dyn ClusteringConstraints>,
+        cycle_policy: CyclePolicy,
         screening_facts: HashMap<FileId, HeaderScreeningFacts>,
         closures: &'a HashMap<FileId, IncludeClosure>,
     ) -> Self {
@@ -152,77 +237,85 @@ impl<'a> OptimizationPlanner<'a> {
             model,
             file_records,
             tu_file_ids,
+            aggregation_filter,
+            target_path_for,
+            constraints,
+            cycle_policy,
+            planning_gaps: Vec::new(),
             screening_facts: Some(screening_facts),
             stage_closures: Some(closures),
         }
     }
 
-    /// Screening + proposal discovery run in parallel over sorted header ids
-    /// (`par_iter` collect preserves input order, mirroring
-    /// `collect_file_metrics` in the pipeline); assembly and dense
-    /// `PLAN-{:03}` numbering then follow collected order, so output is
-    /// byte-identical to the pre-A2 serial loop — locked against
-    /// [`plan_serial_for_test`] by `tests/planner_facts_parity.rs`.
+    /// Injects the caller-computed planning gaps (plan M22, D23) without
+    /// widening the constructor; returns `self` for builder-style use.
+    pub fn with_planning_gaps(&mut self, planning_gaps: Vec<PlanningGap>) -> &mut Self {
+        self.planning_gaps = planning_gaps;
+        self
+    }
+
+    /// Plans exactly as `plan()` and additionally returns one explanatory
+    /// rejection per injected planning gap (plan M22, D23), independent of the
+    /// candidate pass. With no gaps injected the rejection channel is empty
+    /// and the plans are byte-identical to `plan()`.
+    pub fn plan_with_rejections(&self) -> (Vec<OptimizationPlan>, Vec<PlanRejection>) {
+        let rejections = self
+            .planning_gaps
+            .iter()
+            .map(|gap| PlanRejection {
+                target_file: gap.sample_path.clone(),
+                reason: RejectionReason::PlanningUnsupported(gap.language.clone()),
+                explanation: format!(
+                    "Planning is not supported for {:?}: the registered plugin disables the planning stage, so no extraction plans are proposed for {:?} files such as {}.",
+                    gap.language,
+                    gap.language,
+                    gap.sample_path.display()
+                ),
+            })
+            .collect();
+        (self.plan(), rejections)
+    }
+
+    /// Candidate screening and proposal discovery run in parallel over sorted
+    /// candidate ids (`par_iter` + `filter_map` + `collect` preserves input
+    /// order element-for-element, mirroring `collect_file_metrics` in the
+    /// pipeline); dense `PLAN-{:03}` numbering then follows collected order,
+    /// so output is byte-identical to the serial driver below — locked against
+    /// [`Self::plan_serial_for_test`] by `tests/planner_facts_parity.rs`.
     pub fn plan(&self) -> Vec<OptimizationPlan> {
-        let context = self.build_planning_context();
+        let context = PlanningContext::build(self);
         let pending: Vec<PendingPlan> = self
-            .sorted_header_ids()
+            .sorted_candidate_file_ids()
             .par_iter()
-            .filter_map(|&file_id| self.header_proposal(file_id, &context))
+            .filter_map(|&file_id| self.candidate_plan(&context, file_id))
             .collect();
         self.number_pending_plans(pending, &context)
     }
 
-    /// Characterization driver reproducing the pre-A2 serial loop through
-    /// the same shared steps, differing only in the driver under test, for
-    /// the parallel-parity lock. Gate-less
-    /// `doc(hidden)`: integration tests compile against the non-test cfg
-    /// crate, so `#[cfg(test)]`/`pub(crate)` would not be visible to
-    /// `tests/planner_facts_parity.rs`.
+    /// Characterization driver reproducing the serial loop through the same
+    /// shared steps, differing only in the driver under test, for the
+    /// parallel-parity lock. `#[doc(hidden)]`: integration tests compile
+    /// against the non-test cfg crate, so `#[cfg(test)]`/`pub(crate)` would
+    /// not be visible to `tests/planner_facts_parity.rs`.
     #[doc(hidden)]
     pub fn plan_serial_for_test(&self) -> Vec<OptimizationPlan> {
-        let context = self.build_planning_context();
+        let context = PlanningContext::build(self);
         let pending: Vec<PendingPlan> = self
-            .sorted_header_ids()
+            .sorted_candidate_file_ids()
             .into_iter()
-            .filter_map(|file_id| self.header_proposal(file_id, &context))
+            .filter_map(|file_id| self.candidate_plan(&context, file_id))
             .collect();
         self.number_pending_plans(pending, &context)
     }
 
-    fn build_planning_context(&self) -> PlanningContext<'a> {
-        // Facts path must never construct the cold analyzer: building it and
-        // scanning every header serially is exactly the tail A1 removes.
-        let cold_analyzer = if self.screening_facts.is_some() {
-            None
-        } else {
-            Some(LoadAnalyzer::new(self.include_graph, self.model))
-        };
-        let policies = self.collect_file_policies();
-        let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
-        PlanningContext {
-            cold_analyzer,
-            frontier_analyzer: FrontierAnalyzer::new(),
-            policies,
-            checker,
-            adjacency: self.symbol_adjacency(),
-            header_consumers: self.map_header_consumers(),
-        }
-    }
-
-    /// The per-header step with no id assignment (pure over `context`):
-    /// screen, then propose extractions from the shared adjacency. Rejects
-    /// (unscreenable headers, zero-proposal candidates) collapse to `None`,
+    /// The per-candidate step with no id assignment (pure over `context`):
+    /// screen, then propose extractions from the shared mapped edges. Rejects
+    /// (unscreenable units, zero-proposal candidates) collapse to `None`,
     /// exactly like the old `continue`s.
-    fn header_proposal(
-        &self,
-        file_id: FileId,
-        context: &PlanningContext<'a>,
-    ) -> Option<PendingPlan> {
-        let candidate =
-            self.candidate_header(file_id, context.cold_analyzer.as_ref(), &context.policies)?;
+    fn candidate_plan(&self, context: &PlanningContext<'a>, file_id: FileId) -> Option<PendingPlan> {
+        let candidate = self.candidate_aggregation_file(file_id, context)?;
         let proposed_extractions =
-            self.propose_extractions(&candidate, &context.adjacency, &context.checker);
+            self.propose_extractions(&candidate, &context.mapped_edges, &context.checker);
         if proposed_extractions.is_empty() {
             return None;
         }
@@ -232,9 +325,10 @@ impl<'a> OptimizationPlanner<'a> {
         })
     }
 
-    /// Sequential assembly after collection: enumerating the collected
-    /// pending plans reproduces the serial loop's dense `plans.len() + 1`
-    /// numbering exactly.
+    /// Dense `PLAN-{:03}` numbering over collected order. Assembly runs after
+    /// collection so ids follow the sorted candidate order rather than
+    /// completion order, which is what keeps the parallel driver byte-equal
+    /// to the serial one.
     fn number_pending_plans(
         &self,
         pending: Vec<PendingPlan>,
@@ -250,23 +344,10 @@ impl<'a> OptimizationPlanner<'a> {
                     index + 1,
                     &context.frontier_analyzer,
                     &context.policies,
-                    &context.header_consumers,
+                    &context.aggregation_consumers,
                 )
             })
             .collect()
-    }
-
-    /// Consumer TUs per header: reuse the stage closure map on the facts
-    /// path; recompute closures on the cold path, as before.
-    fn map_header_consumers(&self) -> HashMap<FileId, Vec<FileId>> {
-        match self.stage_closures {
-            Some(closures) => self
-                .include_graph
-                .map_header_consuming_tus_with_closures(self.tu_file_ids, closures),
-            None => self
-                .include_graph
-                .map_header_consuming_tus(self.tu_file_ids),
-        }
     }
 
     fn collect_file_policies(&self) -> FilePolicyMaps {
@@ -293,34 +374,50 @@ impl<'a> OptimizationPlanner<'a> {
         }
     }
 
-    fn sorted_header_ids(&self) -> Vec<FileId> {
-        let mut sorted_headers: Vec<FileId> = self
+    fn sorted_candidate_file_ids(&self) -> Vec<FileId> {
+        let mut sorted: Vec<FileId> = self
             .include_graph
             .file_paths
             .iter()
-            .filter(|(_, path)| is_header_file(path))
+            .filter(|(_, path)| (self.aggregation_filter)(path))
             .map(|(id, _)| *id)
             .collect();
-        sorted_headers.sort();
-        sorted_headers
+        sorted.sort();
+        sorted
     }
 
-    fn candidate_header(
+    /// Screens one aggregation unit, preferring the stage's precomputed facts and
+    /// falling back to the cold `LoadAnalyzer` scan. Both paths must agree
+    /// exactly: they feed the same `AggregationCandidate` fields, and the
+    /// facts path re-resolves the collateral source path from the include
+    /// graph because `HeaderScreeningFacts` carries only its `FileId`.
+    fn candidate_aggregation_file(
         &self,
         file_id: FileId,
-        cold_analyzer: Option<&LoadAnalyzer>,
-        policies: &FilePolicyMaps,
-    ) -> Option<HeaderCandidate> {
+        context: &PlanningContext<'a>,
+    ) -> Option<AggregationCandidate> {
         let path = self.include_graph.file_paths.get(&file_id)?.clone();
-        let (collateral_load, collateral_source_id) = match &self.screening_facts {
-            Some(facts) => self.screen_from_facts(file_id, facts)?,
-            None => self.screen_cold(&path, cold_analyzer?)?,
+
+        let (collateral_load, collateral_source_id) = match self.screening_facts.as_ref() {
+            Some(facts) => {
+                let facts = facts.get(&file_id)?;
+                (facts.collateral_load, facts.largest_collateral_source?)
+            }
+            None => {
+                let load_analyzer = context.cold_analyzer.as_ref()?;
+                let metric = load_analyzer.analyze_file_load(&path).ok()?;
+                (
+                    metric.collateral_load,
+                    metric.largest_collateral_source.as_ref()?.file_id,
+                )
+            }
         };
         if collateral_load == 0 {
             return None;
         }
 
-        let policy = policies
+        let policy = context
+            .policies
             .by_id
             .get(&file_id)
             .copied()
@@ -329,113 +426,207 @@ impl<'a> OptimizationPlanner<'a> {
             return None;
         }
 
-        Some(HeaderCandidate {
+        let collateral_source_path = self
+            .include_graph
+            .file_paths
+            .get(&collateral_source_id)
+            .cloned()
+            .unwrap_or_default();
+
+        Some(AggregationCandidate {
             file_id,
             path,
             collateral_load,
             collateral_source_id,
-            collateral_source_path: self.collateral_source_path(collateral_source_id),
+            collateral_source_path,
         })
     }
 
-    /// Facts screening: no metric means the header has no symbols, which on
-    /// the cold path yields no proposals and therefore no plan — screening
-    /// it out here is the same observable outcome.
-    fn screen_from_facts(
-        &self,
-        file_id: FileId,
-        facts: &HashMap<FileId, HeaderScreeningFacts>,
-    ) -> Option<(usize, FileId)> {
-        let fact = facts.get(&file_id)?;
-        Some((fact.collateral_load, fact.largest_collateral_source?))
+    /// Semantic edges with their file endpoints erased, as consumed by the
+    /// per-file SCC computation.
+    fn model_edges_without_file_endpoints(&self) -> Vec<ariadne_index::types::SemanticEdge> {
+        self.model
+            .edges
+            .iter()
+            .map(|e| ariadne_index::types::SemanticEdge {
+                src_symbol: e.src_symbol.clone(),
+                dst_symbol: e.dst_symbol.clone(),
+                kind: e.kind,
+                src_file: FileId(0),
+                dst_file: FileId(0),
+            })
+            .collect()
     }
 
-    /// Cold screening: the original per-header `analyze_file_load` scan,
-    /// kept verbatim so `new()`-constructed plans stay byte-identical.
-    fn screen_cold(&self, path: &Path, cold_analyzer: &LoadAnalyzer) -> Option<(usize, FileId)> {
-        let metric = cold_analyzer.analyze_file_load(path).ok()?;
-        let source = metric.largest_collateral_source.as_ref()?;
-        Some((metric.collateral_load, source.file_id))
-    }
-
-    /// Same path derivation `LoadAnalyzer::contributing_sources` used when
-    /// it built `largest_collateral_source`, keeping the rationale text
-    /// byte-identical between the cold and facts paths.
-    fn collateral_source_path(&self, source_id: FileId) -> PathBuf {
-        self.include_graph
-            .file_paths
-            .get(&source_id)
-            .cloned()
-            .unwrap_or_else(|| PathBuf::from("unknown"))
-    }
-
-    /// Model-wide symbol adjacency with file endpoints ignored (SCC uses only
-    /// symbol symbols), built once per planning run. Neighbor lists follow
-    /// `model.edges` iteration order — identical to the adjacency the old
-    /// per-candidate rebuild derived from the endpoint-erased edge clone.
-    fn symbol_adjacency(&self) -> HashMap<&'a SymbolId, Vec<&'a SymbolId>> {
-        let mut adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>> = HashMap::new();
-        for edge in self.model.edges.iter() {
-            adjacency
-                .entry(&edge.src_symbol)
-                .or_default()
-                .push(&edge.dst_symbol);
-        }
-        adjacency
-    }
-
+    /// One proposal batch per SCC (union-merged by colocated constraints);
+    /// every batch is co-proposed to one shared target path. Members of a
+    /// multi-symbol SCC keep today's `splits_scc` rejection regardless of
+    /// `cycle_policy` — see the field docs for the M18.7 stance.
     fn propose_extractions(
         &self,
-        candidate: &HeaderCandidate,
-        adjacency: &HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
+        candidate: &AggregationCandidate,
+        mapped_edges: &[ariadne_index::types::SemanticEdge],
         checker: &ConstraintChecker,
     ) -> Vec<ProposedExtraction> {
-        let file_syms = self
+        let file_symbols = self
             .model
             .file_symbols
             .get(&candidate.file_id)
             .cloned()
             .unwrap_or_default();
-        let sccs = scc::compute_symbol_sccs_from_adj(&file_syms, adjacency);
+        let sccs = scc::compute_symbol_sccs(&file_symbols, mapped_edges);
+        let cycle_members: HashSet<&SymbolId> = sccs
+            .iter()
+            .filter(|component| component.symbols.len() > 1)
+            .flat_map(|component| &component.symbols)
+            .collect();
+
+        let mut batches: Vec<Vec<SymbolId>> = sccs
+            .iter()
+            .map(|component| component.symbols.clone())
+            .collect();
+        let colocated_groups = self
+            .constraints
+            .map(|constraints| {
+                constraints.colocated_groups_with_edges(
+                    &self.symbol_records(&file_symbols),
+                    &self.file_extends_edges(&file_symbols),
+                )
+            })
+            .unwrap_or_default();
+        merge_colocated_batches(&mut batches, &colocated_groups);
+        let frozen = self.frozen_symbol_set(&file_symbols);
 
         let mut proposed_extractions = Vec::new();
-        for scc in &sccs {
-            for sym_id in &scc.symbols {
-                if let Some(record) = self.model.symbols.get(sym_id) {
-                    let new_header_path = candidate.path.with_file_name(format!(
-                        "{}_extracted.h",
-                        sanitize_header_stem(&record.name)
-                    ));
-                    if checker
-                        .validate_extraction(
-                            sym_id,
-                            &new_header_path,
-                            scc.symbols.len() > 1,
-                            false,
-                            None,
-                        )
-                        .is_ok()
-                    {
-                        proposed_extractions.push(ProposedExtraction {
-                            symbol_name: record.name.clone(),
-                            symbol_id: sym_id.clone(),
-                            target_header: new_header_path,
-                        });
-                    }
-                }
-            }
+        for batch in &batches {
+            proposed_extractions.extend(self.propose_batch(
+                batch,
+                candidate,
+                &cycle_members,
+                &frozen,
+                checker,
+            ));
         }
         proposed_extractions
     }
 
+    /// Emits one [`ProposedExtraction`] per batch member, all targeting the
+    /// path produced from the batch's anchor symbol (its first member with a
+    /// symbol record). A batch holding a frozen symbol is skipped whole:
+    /// colocated members must move together, and one immovable member makes
+    /// that impossible.
+    ///
+    /// T7b defining-file filter (kickoff §8 item 2; the self-target guard is
+    /// this same filter — one mechanism, not two): when the computed target
+    /// path equals the candidate's own path the batch is dropped — an
+    /// "extraction" into the very file that defines the symbol is a no-op
+    /// move, and planning it would only generate churn (witnessed on the
+    /// scala-isolation fixture, where `{Symbol}.scala` naming resolves the
+    /// package object `legacy` back to `legacy.scala`). The filter is pure
+    /// path equality, never a language test (I2); for C++ targets are
+    /// `{name}_extracted.h`, never equal to the candidate — provably a
+    /// no-op there, locked by the byte-identical m00 goldens and the
+    /// untouched planner characterization suites.
+    fn propose_batch(
+        &self,
+        batch: &[SymbolId],
+        candidate: &AggregationCandidate,
+        cycle_members: &HashSet<&SymbolId>,
+        frozen: &HashSet<SymbolId>,
+        checker: &ConstraintChecker,
+    ) -> Vec<ProposedExtraction> {
+        if batch.iter().any(|symbol| frozen.contains(symbol)) {
+            return Vec::new();
+        }
+        let members: Vec<(&SymbolId, _)> = batch
+            .iter()
+            .filter_map(|symbol| Some((symbol, self.model.symbols.get(symbol)?)))
+            .collect();
+        let Some((_, anchor)) = members.first() else {
+            return Vec::new();
+        };
+        let target_path = (self.target_path_for)(&candidate.path, &anchor.name);
+        if target_path == candidate.path {
+            return Vec::new();
+        }
+        members
+            .into_iter()
+            .filter_map(|(symbol, record)| {
+                let splits_scc = cycle_members.contains(symbol);
+                checker
+                    .validate_extraction(symbol, &target_path, splits_scc, false, None)
+                    .ok()?;
+                Some(ProposedExtraction {
+                    symbol_name: record.name.clone(),
+                    symbol_id: symbol.clone(),
+                    target_header: target_path.clone(),
+                    source_file: Some(candidate.file_id),
+                })
+            })
+            .collect()
+    }
+
+    /// The neutral symbol views handed to the language constraints trait.
+    /// `model.sealed_symbols` re-attaches the `sealed` modifier the frozen
+    /// `symbols.bin` layout cannot carry (plan M23, D-M23-8); C++ models
+    /// fold no sealed symbols, so their records keep empty modifiers.
+    fn symbol_records(&self, file_symbols: &[SymbolId]) -> Vec<SymbolRecord> {
+        let sealed: HashSet<&SymbolId> = self.model.sealed_symbols.iter().collect();
+        file_symbols
+            .iter()
+            .filter_map(|id| self.model.symbols.get(id))
+            .filter_map(|record| {
+                let owning_file = record.defining_file?;
+                let modifiers = if sealed.contains(&record.id) {
+                    vec!["sealed".to_string()]
+                } else {
+                    Vec::new()
+                };
+                Some(ariadne_index::types::SymbolRecord {
+                    id: record.id.clone(),
+                    name: record.name.clone(),
+                    kind: record.kind,
+                    owning_file,
+                    declarations: record.declarations.clone(),
+                    definition: record.definition.clone(),
+
+                    modifiers,
+                })
+            })
+            .collect()
+    }
+
+    /// The candidate file's slice of the typed extends channel: pairs with
+    /// both endpoints among the file's symbols (plan M23, D-M23-8). C++
+    /// models fold no extends edges, so this returns empty there.
+    fn file_extends_edges(&self, file_symbols: &[SymbolId]) -> Vec<(SymbolId, SymbolId)> {
+        if self.model.extends_edges.is_empty() {
+            return Vec::new();
+        }
+        let in_file: HashSet<&SymbolId> = file_symbols.iter().collect();
+        self.model
+            .extends_edges
+            .iter()
+            .filter(|(child, parent)| in_file.contains(child) && in_file.contains(parent))
+            .cloned()
+            .collect()
+    }
+
+    fn frozen_symbol_set(&self, file_symbols: &[SymbolId]) -> HashSet<SymbolId> {
+        match self.constraints {
+            Some(constraints) => constraints.frozen_symbols(&self.symbol_records(file_symbols)),
+            None => HashSet::new(),
+        }
+    }
+
     fn assemble_plan(
         &self,
-        candidate: &HeaderCandidate,
+        candidate: &AggregationCandidate,
         proposed_extractions: Vec<ProposedExtraction>,
         plan_number: usize,
         frontier_analyzer: &FrontierAnalyzer,
         policies: &FilePolicyMaps,
-        header_consumers: &HashMap<FileId, Vec<FileId>>,
+        aggregation_consumers: &HashMap<FileId, Vec<FileId>>,
     ) -> OptimizationPlan {
         let optimization_frontier = frontier_analyzer.find_frontiers(
             candidate.file_id,
@@ -445,7 +636,7 @@ impl<'a> OptimizationPlanner<'a> {
             &policies.ownership_by_id,
         );
 
-        let validation_required_tus = header_consumers
+        let validation_required_tus = aggregation_consumers
             .get(&candidate.file_id)
             .map(|tus| {
                 tus.iter()
@@ -496,127 +687,257 @@ impl<'a> OptimizationPlanner<'a> {
     }
 }
 
-/// Turn a symbol name into a filesystem-safe header stem. Closure-merged
-/// models surface qualified/template names (`std::vector`, `Thing<T>`) that
-/// are invalid in file names on Windows.
-fn sanitize_header_stem(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    let mut pending_underscore = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            if pending_underscore {
-                out.push('_');
-                pending_underscore = false;
+/// Union-merge proposal batches whose symbol sets intersect a colocated
+/// group (plan M18.7): the first intersected batch stays in place as the
+/// merge anchor, later intersected batches are appended in reverse
+/// encounter order (last-intersected batch first; removing back-to-front
+/// keeps earlier batch indices valid). Groups are applied sequentially, so
+/// a symbol shared by two groups transitively merges them.
+fn merge_colocated_batches(batches: &mut Vec<Vec<SymbolId>>, colocated_groups: &[Vec<SymbolId>]) {
+    for group in colocated_groups {
+        let group_symbols: HashSet<&SymbolId> = group.iter().collect();
+        let intersecting: Vec<usize> = batches
+            .iter()
+            .enumerate()
+            .filter(|(_, batch)| batch.iter().any(|symbol| group_symbols.contains(symbol)))
+            .map(|(index, _)| index)
+            .collect();
+        let Some((&anchor, rest)) = intersecting.split_first() else {
+            continue;
+        };
+        for &merge_index in rest.iter().rev() {
+            let merged = batches.remove(merge_index);
+            let anchor_batch = &mut batches[anchor];
+            for symbol in merged {
+                if !anchor_batch.contains(&symbol) {
+                    anchor_batch.push(symbol);
+                }
             }
-            out.push(ch);
-        } else {
-            pending_underscore = true;
         }
-    }
-    let stem = out.trim_matches('_').to_string();
-    if stem.is_empty() {
-        "symbol".to_string()
-    } else {
-        stem
     }
 }
 
 #[cfg(test)]
-#[path = "planner_characterization_tests.rs"]
-mod planner_characterization;
-
-#[cfg(test)]
-mod tests {
+mod planning_gap_tests {
     use super::*;
-    use ariadne_graph::reduced::{ReducedSemanticModel, ReducedSymbolRecord};
-    use ariadne_graph::IncludeGraph;
+    use ariadne_graph::reduced::ReducedSymbolRecord;
+    use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
     use ariadne_index::types::SymbolKind;
-    use ariadne_repo::{FileId, FileOwnership, FileRecord};
+    use ariadne_lang::LanguageId;
+    use ariadne_repo::{FileKind, SourceLanguage};
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
+
+    /// Snapshot the planner borrows: one optimizable aggregation candidate
+    /// with collateral load from a frozen source (neutral `.agg` fixture,
+    /// mirroring `tests/planner_injection.rs`).
+    struct GapFixture {
+        graph: IncludeGraph,
+        model: ReducedSemanticModel,
+        records: Vec<FileRecord>,
+        tu_file_ids: Vec<FileId>,
+    }
+
+    impl GapFixture {
+        fn empty() -> Self {
+            Self {
+                graph: IncludeGraph::default(),
+                model: ReducedSemanticModel {
+                    repo_root: PathBuf::from("/"),
+                    symbols: BTreeMap::new(),
+                    edges: Vec::new(),
+                    tu_usage: BTreeMap::new(),
+                    file_symbols: BTreeMap::new(),
+
+                    extends_edges: Vec::new(),
+                    sealed_symbols: Vec::new(),
+                },
+                records: Vec::new(),
+                tu_file_ids: Vec::new(),
+            }
+        }
+
+        fn record(
+            id: FileId,
+            name: &str,
+            ownership: FileOwnership,
+            policy: OptimizationPolicy,
+        ) -> FileRecord {
+            FileRecord {
+                id,
+                path: PathBuf::from(name),
+                canonical_path: PathBuf::from(name),
+                kind: FileKind::Other,
+                size: 0,
+                content_hash: String::new(),
+                ownership,
+                optimization_policy: policy,
+                language: SourceLanguage::Other,
+            }
+        }
+
+        fn symbol(&mut self, file: FileId, name: &str) {
+            let symbol_id = SymbolId::new(name);
+            self.model.symbols.insert(
+                symbol_id.clone(),
+                ReducedSymbolRecord {
+                    id: symbol_id.clone(),
+                    name: name.to_string(),
+                    kind: SymbolKind::Class,
+                    defining_file: Some(file),
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+            self.model
+                .file_symbols
+                .entry(file)
+                .or_default()
+                .push(symbol_id);
+        }
+
+        fn collateral_pair() -> Self {
+            let mut fixture = Self::empty();
+            fixture
+                .graph
+                .register_file(FileId(1), PathBuf::from("pkg.agg"));
+            fixture
+                .graph
+                .register_file(FileId(2), PathBuf::from("col.agg"));
+            fixture.graph.add_edge(IncludeEdge {
+                source: FileId(1),
+                destination: Some(FileId(2)),
+                context_name: "Default".into(),
+                source_location: SourceLocation::new(1, 1),
+                kind: IncludeKind::Local,
+                raw_path: "col.agg".to_string(),
+                resolved_path: Some(PathBuf::from("col.agg")),
+                language: LanguageId::Other,
+            });
+            fixture.records.push(Self::record(
+                FileId(1),
+                "pkg.agg",
+                FileOwnership::Repository,
+                OptimizationPolicy::Optimizable,
+            ));
+            fixture.records.push(Self::record(
+                FileId(2),
+                "col.agg",
+                FileOwnership::ThirdParty,
+                OptimizationPolicy::Frozen,
+            ));
+            fixture.symbol(FileId(1), "Alpha");
+            fixture.symbol(FileId(1), "Delta");
+            fixture.symbol(FileId(2), "Big");
+            fixture
+        }
+    }
+
+    fn accept_unit(path: &Path) -> bool {
+        path.file_name().is_some()
+    }
+
+    fn unit_template(path: &Path, symbol: &str) -> PathBuf {
+        path.with_file_name(format!("{symbol}_unit"))
+    }
+
+    fn planner_over(fixture: &GapFixture) -> OptimizationPlanner<'_> {
+        OptimizationPlanner::new(
+            &fixture.graph,
+            &fixture.model,
+            &fixture.records,
+            &fixture.tu_file_ids,
+            &accept_unit,
+            &unit_template,
+            None,
+            CyclePolicy::Reject,
+        )
+    }
+
+    fn neutral_gap(sample: &str) -> PlanningGap {
+        PlanningGap {
+            language: LanguageId::Other,
+            sample_path: PathBuf::from(sample),
+        }
+    }
 
     #[test]
-    fn test_planner_basic() {
-        let mut include_graph = IncludeGraph::new();
-        include_graph.register_file(FileId(1), PathBuf::from("start.h"));
-        include_graph.register_file(FileId(2), PathBuf::from("col.h"));
+    fn gaps_produce_rejections_per_language() {
+        let fixture = GapFixture::collateral_pair();
+        let mut planner = planner_over(&fixture);
+        planner.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
 
-        use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
-        include_graph.add_edge(IncludeEdge {
-            source: FileId(1),
-            destination: Some(FileId(2)),
-            context_name: "Default".into(),
-            source_location: SourceLocation::new(1, 1),
-            kind: IncludeKind::Local,
-            raw_path: "col.h".into(),
-            resolved_path: Some(PathBuf::from("col.h")),
-        });
+        let (plans, rejections) = planner.plan_with_rejections();
 
-        let mut model = ReducedSemanticModel {
-            repo_root: PathBuf::from("/"),
-            symbols: BTreeMap::new(),
-            edges: vec![],
-            tu_usage: BTreeMap::new(),
-            file_symbols: BTreeMap::new(),
-        };
-
-        let sym_a = SymbolId::new("A");
-        model.symbols.insert(
-            sym_a.clone(),
-            ReducedSymbolRecord {
-                id: sym_a.clone(),
-                name: "A".to_string(),
-                kind: SymbolKind::Class,
-                defining_file: Some(FileId(1)),
-                declarations: vec![],
-                definition: None,
-            },
+        assert_eq!(plans.len(), 1, "gaps do not disturb the candidate pass");
+        assert_eq!(
+            rejections.len(),
+            1,
+            "exactly one rejection per injected gap language"
         );
-        model.file_symbols.insert(FileId(1), vec![sym_a.clone()]);
-
-        let sym_b = SymbolId::new("B");
-        model.symbols.insert(
-            sym_b.clone(),
-            ReducedSymbolRecord {
-                id: sym_b.clone(),
-                name: "B".to_string(),
-                kind: SymbolKind::Class,
-                defining_file: Some(FileId(2)),
-                declarations: vec![],
-                definition: None,
-            },
+        let rejection = &rejections[0];
+        assert!(matches!(
+            rejection.reason,
+            // M24 Part A: `LanguageId` wraps a `Cow`, so it is not
+            // structural-match and cannot appear as a constant pattern; the
+            // equality guard states the same thing.
+            RejectionReason::PlanningUnsupported(ref language)
+                if *language == LanguageId::Other
+        ));
+        assert_eq!(
+            rejection.target_file,
+            PathBuf::from("payload.unknown_ext"),
+            "the gap's representative path is the honest target_file"
         );
-        model.file_symbols.insert(FileId(2), vec![sym_b.clone()]);
+        assert!(
+            rejection.explanation.contains("Other"),
+            "explanation names the language by data (Debug of LanguageId): {}",
+            rejection.explanation
+        );
 
-        let file_records = vec![
-            FileRecord {
-                id: FileId(1),
-                path: PathBuf::from("start.h"),
-                canonical_path: PathBuf::from("start.h"),
-                kind: ariadne_repo::FileKind::Header,
-                size: 0,
-                content_hash: String::new(),
-                ownership: FileOwnership::Repository,
-                optimization_policy: OptimizationPolicy::Optimizable,
-            },
-            FileRecord {
-                id: FileId(2),
-                path: PathBuf::from("col.h"),
-                canonical_path: PathBuf::from("col.h"),
-                kind: ariadne_repo::FileKind::Header,
-                size: 0,
-                content_hash: String::new(),
-                ownership: FileOwnership::ThirdParty,
-                optimization_policy: OptimizationPolicy::Frozen,
-            },
-        ];
-        let tu_file_ids = vec![];
+        let empty_fixture = GapFixture::empty();
+        let mut bare = planner_over(&empty_fixture);
+        bare.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
+        let (bare_plans, bare_rejections) = bare.plan_with_rejections();
+        assert!(bare_plans.is_empty());
+        assert_eq!(
+            bare_rejections.len(),
+            1,
+            "rejections are independent of the candidate pass"
+        );
+    }
 
-        let planner = OptimizationPlanner::new(&include_graph, &model, &file_records, &tu_file_ids);
-        let plans = planner.plan();
+    #[test]
+    fn no_gaps_rejections_empty() {
+        let fixture = GapFixture::collateral_pair();
+        let planner = planner_over(&fixture);
 
-        assert_eq!(plans.len(), 1, "Should generate exactly one plan");
-        assert_eq!(plans[0].id.0, "PLAN-001");
-        assert_eq!(plans[0].target_file_id, FileId(1));
+        let (plans, rejections) = planner.plan_with_rejections();
+
+        assert!(rejections.is_empty(), "no gaps, no rejections");
+        assert_eq!(
+            plans,
+            planner.plan(),
+            "delegation equality: gap-free plans are identical"
+        );
+    }
+
+    #[test]
+    fn plan_delegates_unchanged() {
+        let fixture = GapFixture::collateral_pair();
+        let mut with_gaps = planner_over(&fixture);
+        with_gaps.with_planning_gaps(vec![neutral_gap("payload.unknown_ext")]);
+        let without_gaps = planner_over(&fixture);
+
+        assert_eq!(
+            with_gaps.plan(),
+            without_gaps.plan(),
+            "plan() drops the rejection channel: gap-free plans are identical"
+        );
+        assert_eq!(
+            with_gaps.plan(),
+            with_gaps.plan_with_rejections().0,
+            "plan() equals the plans channel of plan_with_rejections()"
+        );
     }
 }

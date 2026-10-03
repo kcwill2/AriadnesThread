@@ -1,21 +1,24 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ariadne_build::BuildDiscoveryResult;
+use ariadne_build::{BuildDiscoveryResult, TranslationUnit};
 use ariadne_graph::ReducedSemanticModel;
 use ariadne_index::{IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
+use ariadne_lang::{LanguagePlugin, LanguageRegistry};
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::pool::{WorkerPool, WorkerPoolConfig};
 use crate::queue::PrioritizedTuQueue;
 use crate::shard::ShardedReducer;
 use crate::tu_store::{
-    compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint, TuStoreContext,
+    compute_tu_closure_plugin, load_shard, save_shard, shard_dir, ShardCheckpoint,
+    TuStoreContext,
 };
-use crate::worker::DefaultWorkerBackend;
+use crate::worker::{SharedPluginWorkerBackend, WorkerBackend};
 
 #[derive(Debug, Clone)]
 pub struct ProductionAnalysisStats {
@@ -74,6 +77,72 @@ pub struct ProductionAnalysisResult {
     pub stats: ProductionAnalysisStats,
 }
 
+/// Outcome of the shard prepass: checkpointed analyses that could be reused
+/// plus the TUs that must run through the worker pool, each with the
+/// fingerprint its result shard will be enveloped with.
+struct ShardPrepass {
+    reused_analyses: Vec<TuAnalysis>,
+    pending_tus: Vec<TranslationUnit>,
+    pending_fingerprints: HashMap<u64, String>,
+}
+
+/// Check for existing checkpointed shards; a shard is reused only when its
+/// envelope fingerprint still matches the code on disk. The closure walk runs
+/// through the unit's language plugin (M18.11: the registry path is the only
+/// path), so shard fingerprints match what the plugin workers re-stamp.
+fn shard_prepass(
+    translation_units: &[TranslationUnit],
+    repo_root: &Path,
+    store_ctx: &TuStoreContext,
+    checkpoint_dir: &Path,
+    registry: &LanguageRegistry,
+) -> Result<ShardPrepass> {
+    let mut prepass = ShardPrepass {
+        reused_analyses: Vec::new(),
+        pending_tus: Vec::new(),
+        pending_fingerprints: HashMap::new(),
+    };
+    for tu in translation_units {
+        let plugin = plugin_for_tu(registry, tu)?;
+        let closure = compute_tu_closure_plugin(
+            tu,
+            repo_root,
+            store_ctx,
+            CURRENT_ANALYSIS_VERSION,
+            plugin.resolver(),
+            plugin.id(),
+            &plugin.analysis_fingerprint(),
+        )?;
+        let fp = closure.fingerprint.combined_hash.clone();
+        if let Some(shard) = load_shard(checkpoint_dir, tu.file_id) {
+            if shard.fingerprint == fp {
+                prepass.reused_analyses.push(shard.analysis);
+                continue;
+            }
+        }
+        prepass.pending_fingerprints.insert(tu.file_id.0, fp);
+        prepass.pending_tus.push(tu.clone());
+    }
+    Ok(prepass)
+}
+
+/// The plugin that owns a unit's language; an unclaimed path is a clear
+/// "unhandled language" error (§3.3 fact 3), never a silent C++ analysis.
+fn plugin_for_tu<'a>(
+    registry: &'a LanguageRegistry,
+    tu: &TranslationUnit,
+) -> Result<&'a dyn LanguagePlugin> {
+    let language = registry.detect_language(&tu.source_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unhandled language for {} (no registered plugin claims it)",
+            tu.source_path.display()
+        )
+    })?;
+    registry
+        .plugin_for_id(language.clone())
+        .ok_or_else(|| anyhow::anyhow!("language plugin not registered: {language:?}"))
+}
+
 pub struct ProductionAnalyzer<'a> {
     pub repo: &'a Repository,
     pub repo_discovery: &'a RepositoryDiscoveryResult,
@@ -81,6 +150,13 @@ pub struct ProductionAnalyzer<'a> {
     pub num_workers: usize,
     pub num_reducers: usize,
     pub checkpoint_dir: Option<PathBuf>,
+    /// M18.3/M18.11: worker backend selected by the caller; when unset the
+    /// pool runs a [`SharedPluginWorkerBackend`] over the injected registry.
+    backend: Option<Arc<dyn WorkerBackend>>,
+    /// M18.11: the language registry whose plugins own every unit's closure
+    /// walk, fingerprint, and analysis. Required (the pre-M11 hardcoded-C++
+    /// default is removed); `analyze` errors when nothing was injected.
+    registry: Option<Arc<LanguageRegistry>>,
 }
 
 impl<'a> ProductionAnalyzer<'a> {
@@ -96,7 +172,22 @@ impl<'a> ProductionAnalyzer<'a> {
             num_workers: 4,
             num_reducers: 4,
             checkpoint_dir: None,
+            backend: None,
+            registry: None,
         }
+    }
+
+    /// Run the worker pool through this backend (plan M18.3 registry wiring).
+    pub fn with_backend(mut self, backend: Arc<dyn WorkerBackend>) -> Self {
+        self.backend = Some(backend);
+        self
+    }
+
+    /// Drive the shard prepass (and the default pool backend) through these
+    /// plugins (plan M18.3, required since M18.11).
+    pub fn with_registry(mut self, registry: Arc<LanguageRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
     }
 
     pub fn with_workers(mut self, workers: usize) -> Self {
@@ -115,6 +206,11 @@ impl<'a> ProductionAnalyzer<'a> {
     }
 
     pub async fn analyze(&self) -> Result<ProductionAnalysisResult> {
+        let registry = Arc::clone(
+            self.registry
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("ProductionAnalyzer requires with_registry(..): the hardcoded-C++ default was removed in M18.11"))?,
+        );
         let start_time = Instant::now();
         let total_tus = self.build_discovery.translation_units.len();
 
@@ -127,30 +223,19 @@ impl<'a> ProductionAnalyzer<'a> {
         let store_ctx =
             TuStoreContext::new(self.repo_discovery, self.build_discovery.contexts.clone());
 
-        let mut completed_analyses: Vec<TuAnalysis> = Vec::new();
-        let mut remaining_tus = Vec::new();
-        let mut reused = 0usize;
-        let mut reanalyzed = 0usize;
-        // Fingerprints of queued TUs, used to envelope their results.
-        let mut pending_fingerprints: HashMap<u64, String> = HashMap::new();
-
-        // Check for existing checkpointed shards; a shard is reused only when
-        // its envelope fingerprint still matches the code on disk.
-        for tu in &self.build_discovery.translation_units {
-            let closure =
-                compute_tu_closure(tu, &self.repo.root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
-            let fp = closure.fingerprint.combined_hash.clone();
-            if let Some(shard) = load_shard(&checkpoint_dir, tu.file_id) {
-                if shard.fingerprint == fp {
-                    completed_analyses.push(shard.analysis);
-                    reused += 1;
-                    continue;
-                }
-            }
-            reanalyzed += 1;
-            pending_fingerprints.insert(tu.file_id.0, fp);
-            remaining_tus.push(tu.clone());
-        }
+        // Reuse checkpointed shards; only fingerprint misses go to the pool.
+        let prepass = shard_prepass(
+            &self.build_discovery.translation_units,
+            &self.repo.root,
+            &store_ctx,
+            &checkpoint_dir,
+            &registry,
+        )?;
+        let mut completed_analyses = prepass.reused_analyses;
+        let reused = completed_analyses.len();
+        let remaining_tus = prepass.pending_tus;
+        let reanalyzed = remaining_tus.len();
+        let mut pending_fingerprints = prepass.pending_fingerprints;
 
         let mut peak_mem: u64 = 0;
 
@@ -160,8 +245,15 @@ impl<'a> ProductionAnalyzer<'a> {
                 remaining_tus,
                 Some(store_ctx.clone()),
             );
+            // M18.11: the default pool backend is the registry-dispatching
+            // plugin backend over the injected registry; callers may still
+            // inject a custom backend via `with_backend`.
+            let backend: Arc<dyn WorkerBackend> = self
+                .backend
+                .clone()
+                .unwrap_or_else(|| Arc::new(SharedPluginWorkerBackend::new(Arc::clone(&registry))));
             let pool = WorkerPool::new(
-                DefaultWorkerBackend,
+                backend,
                 WorkerPoolConfig {
                     num_workers: self.num_workers,
                     max_retries: 3,
@@ -297,6 +389,7 @@ mod tests {
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
                     content_hash: "hash1".into(),
+                    language: ariadne_repo::SourceLanguage::Cpp,
                 },
                 ariadne_repo::FileRecord {
                     id: f2_id.clone(),
@@ -307,6 +400,7 @@ mod tests {
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
                     content_hash: "hash2".into(),
+                    language: ariadne_repo::SourceLanguage::Cpp,
                 },
             ],
             ownership_summary: std::collections::HashMap::new(),
@@ -331,19 +425,26 @@ mod tests {
                     source_path: PathBuf::from("src/a.cpp"),
                     context_name: "default".into(),
                     compile_command: cmd.clone(),
+                    language: Default::default(),
                 },
                 TranslationUnit {
                     file_id: f2_id.clone(),
                     source_path: PathBuf::from("src/b.cpp"),
                     context_name: "default".into(),
                     compile_command: cmd,
+                    language: Default::default(),
                 },
             ],
         };
 
         let checkpoint_dir = repo_root.join("artifacts").join("shards");
+        let registry = Arc::new(
+            ariadne_lang::LanguageRegistry::new()
+                .register(Box::new(ariadne_lang_cpp::CppPlugin::new())),
+        );
         let analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
-            .with_checkpoint_dir(checkpoint_dir.clone());
+            .with_checkpoint_dir(checkpoint_dir.clone())
+            .with_registry(registry);
 
         // First run: cold run, creates checkpoints
         let res1 = analyzer.analyze().await.unwrap();

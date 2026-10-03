@@ -1,6 +1,6 @@
 use super::*;
 use crate::reduced::ReducedSymbolRecord;
-use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
+use crate::types::{IncludeEdge, IncludeKind, LanguageId, SourceLocation};
 use ariadne_index::types::{SymbolId, SymbolKind};
 use ariadne_repo::FileId;
 use std::collections::BTreeMap;
@@ -20,6 +20,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         kind: IncludeKind::Local,
         raw_path: "graphics.h".to_string(),
         resolved_path: Some(PathBuf::from("graphics.h")),
+        language: LanguageId::cpp(),
     });
     ig.add_edge(IncludeEdge {
         source: FileId(2),
@@ -29,6 +30,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         kind: IncludeKind::Local,
         raw_path: "HugeThirdParty.h".to_string(),
         resolved_path: Some(PathBuf::from("HugeThirdParty.h")),
+        language: LanguageId::cpp(),
     });
 
     let mut model = ReducedSemanticModel {
@@ -37,6 +39,9 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let sym_thing = SymbolId::new("Thing");
@@ -49,6 +54,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
             defining_file: Some(FileId(1)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model
@@ -65,6 +71,7 @@ fn setup_mock_data() -> (IncludeGraph, ReducedSemanticModel) {
             defining_file: Some(FileId(3)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(3), vec![sym_huge.clone()]);
@@ -280,6 +287,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
         kind: IncludeKind::Local,
         raw_path: "Dep.h".to_string(),
         resolved_path: Some(PathBuf::from("Dep.h")),
+        language: LanguageId::cpp(),
     });
 
     let mut model = ReducedSemanticModel {
@@ -288,6 +296,9 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let sym_main = SymbolId::new("Main");
@@ -300,6 +311,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
             defining_file: Some(FileId(10)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     let sym_sidecar = SymbolId::new("Sidecar");
@@ -312,6 +324,7 @@ fn test_explain_symbol_load_same_file_collateral_locks_single_step_path() {
             defining_file: Some(FileId(10)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model
@@ -364,6 +377,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         kind: IncludeKind::Local,
         raw_path: "edge.h".to_string(),
         resolved_path: None,
+        language: LanguageId::cpp(),
     });
     ig.add_edge(IncludeEdge {
         source: FileId(20),
@@ -373,6 +387,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         kind: IncludeKind::Local,
         raw_path: "edge.h".to_string(),
         resolved_path: None,
+        language: LanguageId::cpp(),
     });
 
     let mut model = ReducedSemanticModel {
@@ -381,6 +396,9 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -394,6 +412,7 @@ fn test_explain_unregistered_file_ids_render_unknown_placeholder() {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -451,6 +470,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
         kind: IncludeKind::Local,
         raw_path: "..".to_string(),
         resolved_path: None,
+        language: LanguageId::cpp(),
     });
 
     let mut model = ReducedSemanticModel {
@@ -459,6 +479,9 @@ fn test_explain_paths_without_file_name_render_full_path() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let host = SymbolId::new("Host");
@@ -471,6 +494,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
             defining_file: Some(FileId(40)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     let odd = SymbolId::new("Odd");
@@ -483,6 +507,7 @@ fn test_explain_paths_without_file_name_render_full_path() {
             defining_file: Some(FileId(41)),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(40), vec![host]);
@@ -525,6 +550,9 @@ fn test_missing_defining_file_yields_err_not_panic() {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     let ghost = SymbolId::new("Ghost");
     model.symbols.insert(
@@ -536,6 +564,7 @@ fn test_missing_defining_file_yields_err_not_panic() {
             defining_file: None,
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     model.file_symbols.insert(FileId(50), vec![ghost]);

@@ -17,6 +17,9 @@ ariadne-index = { path = "../index" }
 ariadne-cluster = { path = "../cluster" }
 ariadne-transform = { path = "../transform" }
 ariadne-validate = { path = "../validate" }
+# M18.8a: artifact IO threads a neutral SourceExtractor through to the engine.
+ariadne-lang = { path = "../lang" }
 
 [dev-dependencies]
 tempfile.workspace = true
+ariadne-lang-cpp = { path = "../lang-cpp" }

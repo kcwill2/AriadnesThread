@@ -1,0 +1,18 @@
+[
+  {
+    "compiler": "cl.exe",
+    "defines": [
+      "NDEBUG"
+    ],
+    "forced_includes": [],
+    "include_dirs": [
+      "<ROOT>/include"
+    ],
+    "language": "Cpp",
+    "language_standard": null,
+    "name": "Default|x64",
+    "raw_flags": [],
+    "system_include_dirs": [],
+    "target_arch": null
+  }
+]

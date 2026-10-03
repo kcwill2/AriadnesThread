@@ -1,0 +1,7 @@
+[
+  {
+    "directory": ".",
+    "file": "src/main.cpp",
+    "command": "clang++ -I third_party -I ext_sdk -c src/main.cpp -o main.o"
+  }
+]

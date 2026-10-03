@@ -1,11 +1,14 @@
 use anyhow::Result;
 use ariadne_build::BuildDiscoveryResult;
-use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
+use ariadne_index::{
+    IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
+};
+use ariadne_lang::LanguagePlugin;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 
 use crate::tu_store::{
-    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir, ShardCheckpoint,
-    SharedTuStoreContext, TuStoreContext,
+    analyze_closure_with, compute_tu_closure_plugin, load_shard, save_shard, shard_dir,
+    ShardCheckpoint, SharedTuStoreContext, TuClosure, TuStoreContext,
 };
 
 pub struct IncrementalAnalysisResult {
@@ -40,25 +43,56 @@ pub struct IncrementalAnalyzer<'a> {
     repo_discovery: &'a RepositoryDiscoveryResult,
     build_result: &'a BuildDiscoveryResult,
     analysis_version: String,
+    plugin: &'a dyn LanguagePlugin,
 }
 
 impl<'a> IncrementalAnalyzer<'a> {
+    /// Every unit analyzed through `plugin`'s resolver/analyzer and its
+    /// fingerprint identity (M18.11: the registry/plugin path is the required
+    /// injection — the transitional hardcoded-C++ walk is removed; callers
+    /// reach the plugin via `LanguageRegistry`, see M18.3's registry-aware
+    /// `run_incremental_analysis_filtered`).
     pub fn new(
         repo: &'a Repository,
         repo_discovery: &'a RepositoryDiscoveryResult,
         build_result: &'a BuildDiscoveryResult,
+        plugin: &'a dyn LanguagePlugin,
     ) -> Self {
         Self {
             repo,
             repo_discovery,
             build_result,
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+            plugin,
         }
     }
 
     pub fn with_analysis_version(mut self, version: impl Into<String>) -> Self {
         self.analysis_version = version.into();
         self
+    }
+
+    fn closure_for(
+        &self,
+        tu: &ariadne_build::TranslationUnit,
+        store_ctx: &SharedTuStoreContext,
+    ) -> Result<TuClosure> {
+        compute_tu_closure_plugin(
+            tu,
+            &self.repo.root,
+            store_ctx,
+            &self.analysis_version,
+            self.plugin.resolver(),
+            // M18.10 fingerprint identity: `LanguageId` IS `SourceLanguage`
+            // (plan §3.2); for C++ these equal the constants the pre-M18 walk
+            // hardcoded (parity contract).
+            self.plugin.id(),
+            &self.plugin.analysis_fingerprint(),
+        )
+    }
+
+    fn analysis_for(&self, tu: &ariadne_build::TranslationUnit, closure: &TuClosure) -> TuAnalysis {
+        analyze_closure_with(tu, closure, self.plugin.analyzer())
     }
 
     pub fn analyze(&mut self) -> Result<IncrementalAnalysisResult> {
@@ -71,16 +105,16 @@ impl<'a> IncrementalAnalyzer<'a> {
         let store_dir = shard_dir(&self.repo.root);
 
         for tu in &self.build_result.translation_units {
-            let closure =
-                compute_tu_closure(tu, &self.repo.root, &store_ctx, &self.analysis_version)?;
+            let closure = self.closure_for(tu, &store_ctx)?;
 
-            let analysis = if let Some(shard) = load_shard(&store_dir, tu.file_id) {
-                if shard.fingerprint == closure.fingerprint.combined_hash {
+            let analysis = match load_shard(&store_dir, tu.file_id) {
+                Some(shard) if shard.fingerprint == closure.fingerprint.combined_hash => {
                     reused += 1;
                     shard.analysis
-                } else {
+                }
+                _ => {
                     reanalyzed += 1;
-                    let analysis = analyze_closure(tu, &closure);
+                    let analysis = self.analysis_for(tu, &closure);
                     save_shard(
                         &store_dir,
                         &ShardCheckpoint {
@@ -90,17 +124,6 @@ impl<'a> IncrementalAnalyzer<'a> {
                     )?;
                     analysis
                 }
-            } else {
-                reanalyzed += 1;
-                let analysis = analyze_closure(tu, &closure);
-                save_shard(
-                    &store_dir,
-                    &ShardCheckpoint {
-                        fingerprint: closure.fingerprint.combined_hash.clone(),
-                        analysis: analysis.clone(),
-                    },
-                )?;
-                analysis
             };
 
             tu_analyses.push(analysis);
@@ -183,6 +206,7 @@ mod tests {
             content_hash: content_hash.to_string(),
             ownership: FileOwnership::Repository,
             optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
         }
     }
 
@@ -212,6 +236,7 @@ mod tests {
                 context_name: context_name.to_string(),
                 output: None,
             },
+            language: Default::default(),
         }
     }
 
@@ -230,7 +255,8 @@ mod tests {
     #[test]
     fn test_cold_run() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
-        let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let plugin = ariadne_lang_cpp::CppPlugin::new();
+        let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         let result = analyzer.analyze().unwrap();
 
         assert_eq!(result.stats.reused_tus, 0);
@@ -241,10 +267,11 @@ mod tests {
     #[test]
     fn test_warm_run() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
-        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let plugin = ariadne_lang_cpp::CppPlugin::new();
+        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         analyzer1.analyze().unwrap();
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         let result2 = analyzer2.analyze().unwrap();
 
         assert_eq!(result2.stats.reused_tus, 2);
@@ -255,7 +282,8 @@ mod tests {
     #[test]
     fn test_header_modification() {
         let (mut repo, mut repo_discovery, build_result, _temp) = setup_test_data();
-        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let plugin = ariadne_lang_cpp::CppPlugin::new();
+        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         analyzer1.analyze().unwrap();
 
         // modify header.h on disk and update its recorded hash
@@ -271,7 +299,7 @@ mod tests {
             root: repo.root.clone(),
         };
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         let result2 = analyzer2.analyze().unwrap();
 
         // main.cpp should be reanalyzed (because it includes header.h), utils.cpp reused
@@ -282,11 +310,12 @@ mod tests {
     #[test]
     fn test_analysis_version_mismatch() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
-        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let plugin = ariadne_lang_cpp::CppPlugin::new();
+        let mut analyzer1 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         analyzer1.analyze().unwrap();
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result)
-            .with_analysis_version("new_version");
+        let mut analyzer2 =
+            IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin).with_analysis_version("new_version");
         let result2 = analyzer2.analyze().unwrap();
 
         assert_eq!(result2.stats.reused_tus, 0);
@@ -296,7 +325,8 @@ mod tests {
     #[test]
     fn test_old_plain_shard_treated_stale() {
         let (repo, repo_discovery, build_result, _temp) = setup_test_data();
-        let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let plugin = ariadne_lang_cpp::CppPlugin::new();
+        let mut analyzer = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         let result = analyzer.analyze().unwrap();
 
         // Overwrite one shard with the old plain TuAnalysis format.
@@ -315,7 +345,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result);
+        let mut analyzer2 = IncrementalAnalyzer::new(&repo, &repo_discovery, &build_result, &plugin);
         let result2 = analyzer2.analyze().unwrap();
 
         assert_eq!(result2.stats.reused_tus, 1);

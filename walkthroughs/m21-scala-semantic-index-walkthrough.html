@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: M21 Scala Semantic Index - Offline, Deterministic</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            white-space: pre;
+        }
+        .before {
+            border-left: 4px solid #f44336;
+        }
+        .after {
+            border-left: 4px solid #4caf50;
+        }
+        .key { color: #569cd6; }
+        .str { color: #ce9178; }
+        .cm { color: #6a9955; }
+        .label { font-weight: 600; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: -6px; }
+        .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+        .pill.green { background: #e8f5e9; color: #2e7d32; }
+        .pill.red { background: #ffebee; color: #c62828; }
+        .pill.blue { background: #e3f2fd; color: #1565c0; }
+        .pill.amber { background: #fff8e1; color: #b26a00; }
+        .cols { display: flex; gap: 20px; }
+        .cols > div { flex: 1; min-width: 0; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+        th { background: #f0f0f0; }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active">
+    <h1>M21 - Scala Semantic Index (offline, deterministic)</h1>
+    <p style="font-size: 18px; color: #555;">The first foreign-language symbol index: a hand-written Scala parser, a real analyzer behind the plugin seam, a <code>--lang</code> shaper seam, and an acceptance suite that proves cold/warm/edit reuse on shard bytes - no Scala toolchain ever invoked.</p>
+    <p>
+        <span class="pill green">base 77bd0a7 &rarr; head f09869f</span>
+        <span class="pill green">4 tasks &middot; 4 reviewer gates APPROVED</span>
+        <span class="pill blue">final gate 842 / 0 / 3</span>
+        <span class="pill blue">goldens zero drift</span>
+    </p>
+    <p style="color: #888;">2026-10-02 &middot; branch <code>multi-language-support</code> &middot; T-A <code>21b4c4d</code> &middot; T-B <code>9fcc315</code> &middot; T-C <code>37d7b5c</code> &middot; T-D <code>acbb1a9</code></p>
+</div>
+
+<!-- Slide 2: Context -->
+<div class="slide">
+    <h1>Context: what recon found before writing a line</h1>
+    <p>The M17&ndash;M20 arc: <b>M17</b> built the plugin API &rarr; <b>M18</b> moved C++ behind it &rarr; <b>M19</b> made Scala discoverable/shapeable &rarr; <b>M20</b> gave Scala an import graph. <b>M21</b> makes Scala <i>analyzable</i>.</p>
+    <h2>The surprise: most of the M21 plan table was already discharged</h2>
+    <p>Recon at <code>77bd0a7</code> verified rows plan:405&ndash;410 were shipped by M18.10/M20 infrastructure - witness only, do not redo:</p>
+    <ul>
+        <li><b>Per-unit plugin dispatch</b> - <code>PluginWorkerBackend::analyze_task</code> (<code>scheduler/worker.rs:79-102</code>) and <code>index_unit_with_plugin</code> already pick the analyzer via <code>detect_language</code> &rarr; <code>plugin_for_id</code>; no C++ default left.</li>
+        <li><b>Closure walk</b> - "own file + files reached by resolved imports" is exactly <code>compute_tu_closure_plugin</code> + <code>analyze_closure_with</code> (M20 landed it).</li>
+        <li><b>Language-scoped cache digest</b> - <code>TuCacheFingerprint</code> already hashes <code>language</code> + <code>plugin_fingerprint</code>; <code>CURRENT_ANALYSIS_VERSION = "2.0.0"</code> (M18.10). Only action: the fingerprint bump (D19).</li>
+        <li><code>--lang</code> filtered registry handling already existed (<code>handle_index_with_registry_filtered</code>).</li>
+    </ul>
+    <h2>The gap M21 actually shipped</h2>
+    <p><b>T-A</b> parser &middot; <b>T-B</b> analyzer &middot; <b>T-C</b> the <code>--lang</code> shaper seam &middot; <b>T-D</b> acceptance suite. Before T-B, a Scala unit flowed the whole index path and got back an honest <i>empty</i> analysis from <code>StubAnalyzer</code> - <code>scheduler/{worker,incremental}</code> and <code>cache.rs</code> were untouched by M21.</p>
+</div>
+
+<!-- Slide 3: Architecture -->
+<div class="slide">
+    <h1>Architecture: one <code>--lang scala</code> run, end to end</h1>
+    <div class="label">the production path at HEAD f09869f</div>
+    <div class="code-block">ariadne index --lang scala
+  |-&gt; Pipeline::indexed_build()                  crates/pipeline/src/lib.rs:434  (D15 seam)
+  |     select_unit_shaper(registry, Some(Scala))  -&gt; ScalaUnitShaper
+  |     -&gt; 5 main-root units (test root stays excluded per the M19 shaper)
+  |-&gt; per TU: compute_tu_closure_plugin          own file + M20-resolved imports
+  |-&gt; per file: ScalaAnalyzer.analyze            parser output, stamped language+context
+  |-&gt; merged TuAnalysis per TU
+  |-&gt; shard envelopes  artifacts/shards/{FileId}.json   (fingerprint embedded)</div>
+    <div class="cols">
+        <div>
+            <div class="label">Before - StubAnalyzer (deleted at 9fcc315)</div>
+            <div class="code-block before"><span class="key">impl</span> SemanticAnalyzer <span class="key">for</span> StubAnalyzer {
+    <span class="key">fn</span> analyze(&amp;<span class="key">self</span>, file_id: FileId,
+              _source: &amp;<span class="key">str</span>, _context: &amp;<span class="key">str</span>) -&gt; TuAnalysis {
+        TuAnalysis {
+            tu_file_id: file_id,
+            language: SourceLanguage::Scala,
+            ..TuAnalysis::default()      <span class="cm">// empty: zero symbols,</span>
+        }                              <span class="cm">// zero edges - by contract</span>
+    }
+}</div>
+        </div>
+        <div>
+            <div class="label">After - real symbols (analyzer.rs:35-40)</div>
+            <div class="code-block after"><span class="key">fn</span> analyze(&amp;<span class="key">self</span>, file_id: FileId,
+                source: &amp;<span class="key">str</span>, context: &amp;<span class="key">str</span>) -&gt; TuAnalysis {
+    <span class="key">let mut</span> analysis = <span class="key">self</span>.parser.parse(
+        file_id, std::path::Path::new(<span class="str">""</span>), source);
+    analysis.context_name = context.to_string();
+    analysis.language = SourceLanguage::Scala;
+    analysis
+}</div>
+        </div>
+    </div>
+    <p>On the fixture's <code>OrderService.scala</code> that means: 1 symbol (<code>com.example.services.OrderService</code>) and 3 edges where the stub emitted nothing at all.</p>
+</div>
+
+<!-- Slide 4: Parser T-A -->
+<div class="slide">
+    <h1>The parser (T-A, <code>21b4c4d</code>): fidelity you can trust negatively</h1>
+    <p><code>crates/lang-scala/src/scanner.rs</code> + <code>parser/{mod,declarations,directives,occurrences}.rs</code> - hand-written, zero dependencies, total (invalid input never panics). Comment and string content is <b>removed by lexing</b>, so "commented-out / quoted code yields nothing" falls out of structure, not pattern-matching.</p>
+    <div class="cols">
+        <div>
+            <div class="label">Scanner scope (D18)</div>
+            <div class="code-block after">//  and nested /* */ block comments (depth-counted)
+'c'  "..."  """triple-quote..."""
+s"..."/f"..."/raw"..." interpolated:
+  <span class="cm">// ${...} splices ride inside the string token</span>
+  <span class="cm">// and are NOT analyzed (documented + negatively tested)</span>
+`backtick identifiers` -&gt; one Ident, verbatim content</div>
+        </div>
+        <div>
+            <div class="label">D17 kind mapping (declarations.rs, top-level only)</div>
+            <div class="code-block">class / case class   -&gt; Class
+trait                -&gt; Trait
+object / case object / package object -&gt; Object
+enum                 -&gt; Enum
+given (paramlist? Function : Variable)
+top-level def/val    -&gt; Function / Variable
+<span class="cm">// id = &lt;package&gt;.&lt;Name&gt;; companion object id takes the</span>
+<span class="cm">// JVM module-class suffix &lt;qual&gt;.&lt;Name&gt;$ so class X and</span>
+<span class="cm">// object X never collide; DeclId = &lt;symbol-id&gt;#L&lt;line&gt;</span></div>
+        </div>
+    </div>
+    <div class="label">corpus result on the real fixture OrderService.scala (locked twice: lang-scala corpus + m21 test 5)</div>
+    <div class="code-block">edges == [ (OrderService -&gt; scala.collection.mutable.ArrayBuffer, Incomplete),  <span class="cm">// line 7, wildcard-fed guess</span>
+           (OrderService -&gt; com.example.models.User,             Complete),     <span class="cm">// named import {Order, User}</span>
+           (OrderService -&gt; com.example.models.Order,            Complete) ]    <span class="cm">// source order</span>
+call_sites == 0                       <span class="cm">// ArrayBuffer[Int]() fabricates nothing</span>
+no reference on line 14               <span class="cm">// the s"${user.name}..." splice contributes nothing</span></div>
+    <p><b>Documented limits (each negatively tested where marked):</b> cross-file same-package siblings are invisible offline (a sibling in another file of the package produces nothing - plan:413 rides the grouped-import edge); anonymous givens (<code>given Ordering[Int] with&hellip;</code>) produce no symbol; <code>package x { }</code> blocks and Scala-3 <code>package x:</code> labels are skipped whole; import selector renames <code>{C =&gt; D}</code> consumed but not mapped; first wildcard import wins.</p>
+</div>
+
+<!-- Slide 5: Analyzer wiring T-B -->
+<div class="slide">
+    <h1>Analyzer wiring (T-B, <code>9fcc315</code>): thin wrapper, honest fingerprint</h1>
+    <p>The analyzer stamps only the two fields the parser cannot know - build <code>context</code> and (defensively, for the <code>tu_store</code> index-0 language rule) <code>language</code>. <code>StubAnalyzer</code> was deleted repo-wide in the same commit (<code>stubs.rs</code> &minus;41 lines of the analyzer stub).</p>
+    <div class="cols">
+        <div>
+            <div class="label">D19 bump - plugin.rs:138</div>
+            <div class="code-block after"><span class="cm">/// M21 bump (D19): the M21 Scala parser replaced the stub</span>
+<span class="cm">/// analyzer, so the cache digest input moves ... C++'s</span>
+<span class="cm">/// fingerprint literal is a separate digest input and</span>
+<span class="cm">/// stays where it is (m18 parity).</span>
+<span class="key">fn</span> analysis_fingerprint(&amp;<span class="key">self</span>) -&gt; String {
+    <span class="str">"scala-parser-1"</span>.to_string()   <span class="cm">// was "scala-1"</span>
+}</div>
+        </div>
+        <div>
+            <div class="label">Why that cannot poison C++ digests (m21 test 4)</div>
+            <div class="code-block">TuCacheFingerprint::compute(...) <span class="cm">hashes per-unit</span>
+  { language, plugin_fingerprint, context, ... }
+<span class="cm">// digest inputs are per-language: bumping Scala's</span>
+<span class="cm">// string moves ONLY the Scala digest -</span>
+assert_eq!(cpp, cpp_again, <span class="str">"C++ digest recomputes\n IDENTICAL while Scala's varies"</span>);
+assert_eq!(CURRENT_ANALYSIS_VERSION, <span class="str">"2.0.0"</span>);</div>
+        </div>
+    </div>
+    <p><span class="pill amber">Gate-B factual correction</span> The kickoff's shorthand "C++ <code>"v1"</code>" was wrong: the C++ fingerprint literal is <code>"cpp-analyzer-1"</code> (<code>lang-cpp/src/plugin.rs</code>); <code>"v1"</code> is only the <code>LanguagePlugin</code> trait <i>default</i>. Neither value moved - the correction landed in the execution notes, not a code change.</p>
+    <p>The plugin lock <code>plugin_identity_and_fingerprint</code> was updated honestly (comment <code>// bumped with the M21 parser</code>), and <code>analyzer_reports_real_scala_analysis_through_the_plugin</code> asserts <code>vec!["com.example.Main"]</code> - "the stub's empty analysis is retired."</p>
+</div>
+
+<!-- Slide 6: Seam D15 T-C -->
+<div class="slide">
+    <h1>The seam decision (T-C, <code>37d7b5c</code>, D15): placed where it can't do harm</h1>
+    <p><b>The bug D15 fixes:</b> <code>registry.unit_shaper_for()</code> is first-wins and C++ registers first - so <code>ariadne index --lang scala</code> on an sbt repo yielded <b>0 units</b>. T-A/T-B alone changed nothing end-to-end.</p>
+    <p><b>The planned placement was verified impossible <i>and</i> wrong.</b> Impossible: the <code>BuildDiscoverer</code> builder receives the language filter <i>after</i> construction, so <code>compute_inputs</code> cannot inject a filter-aware shaper. Wrong: filtering contexts at build-discovery time would poison <code>fps.index</code> freshness (build-stage fingerprints are derived from discovery). So the change landed at the <b>index stage</b>, which re-discovers through the filter-selected shaper:</p>
+    <div class="cols">
+        <div>
+            <div class="label">crates/pipeline/src/lib.rs:434 (trimmed)</div>
+            <div class="code-block after"><span class="key">fn</span> indexed_build(&amp;<span class="key">mut self</span>) -&gt; Result&lt;BuildDiscoveryResult&gt; {
+    <span class="key">let mut</span> build = <span class="key">match self</span>.language_filter {
+        None =&gt; <span class="key">self</span>.build.clone(),   <span class="cm">// unfiltered path:</span>
+                                     <span class="cm">// byte-identical</span>
+        Some(_) =&gt; {
+            <span class="key">let</span> reshaped = BuildDiscoverer::new(&amp;<span class="key">self</span>.repo.root)
+                .with_repo_discovery(&amp;<span class="key">self</span>.discovery)
+                .with_unit_shaper(select_unit_shaper(
+                    &amp;<span class="key">self</span>.registry, <span class="key">self</span>.language_filter))
+                .discover()?;
+            <span class="key">self</span>.store_ctx = TuStoreContext::new(
+                &amp;<span class="key">self</span>.discovery, reshaped.contexts.clone());
+            reshaped
+        }
+    };
+    <span class="key">if let</span> Some(language) = <span class="key">self</span>.language_filter {
+        build.translation_units.retain(|tu| <span class="key">self</span>.registry
+            .detect_language(&amp;tu.source_path) == Some(language));
+    }
+    Ok(build)
+}</div>
+        </div>
+        <div>
+            <div class="label">select_unit_shaper (lib.rs:731) - R3-clean</div>
+            <div class="code-block after"><span class="key">fn</span> select_unit_shaper&lt;<span class="str">'a</span>&gt;(
+    registry: &amp;<span class="str">'a</span> LanguageRegistry,
+    language_filter: Option&lt;SourceLanguage&gt;,
+) -&gt; Option&lt;&amp;<span class="str">'a</span> <span class="key">dyn</span> UnitShaper&gt; {
+    <span class="key">match</span> language_filter {
+        Some(language) =&gt; registry
+            .plugin_for_id(language)      <span class="cm">// registry lookup</span>
+            .and_then(|plugin| plugin.shaper()),
+        None =&gt; registry.unit_shaper_for(), <span class="cm">// first-wins</span>
+    }                                    <span class="cm">// UNMOVED</span>
+}
+<span class="cm">// no `match LanguageId`, no language nouns in pipeline</span></div>
+        </div>
+    </div>
+    <p><b>Proof obligations met:</b> the <code>None</code> path returns the construction-time result unchanged (<code>compute_inputs</code> is <i>absent from the diff</i>) &rarr; m00 goldens byte-identical; and warm-safe - second/third filtered runs reuse ("5 TUs reused, 0 reanalyzed"), because the store context is refreshed to exactly the contexts the shaping named.</p>
+</div>
+
+<!-- Slide 7: deviation governance -->
+<div class="slide">
+    <h1>Governance: how an accepted deviation actually moves</h1>
+    <div class="label">the D15 lifecycle - kickoff &rarr; handoff &rarr; gate ruling</div>
+    <table>
+        <tr><th>Stage</th><th>What happened</th><th>Artifact</th></tr>
+        <tr><td><b>Kickoff</b></td><td>Orchestrator rules D15&ndash;D21 in writing, incl. the literal <code>compute_inputs</code> placement for the shaper seam.</td><td><code>d31a038</code> (<code>plans/m21-scala-index-kickoff.md</code> + T-A&hellip;T-D handoff specs)</td></tr>
+        <tr><td><b>Handoff work</b></td><td>T-C discovers the literal placement is impossible (builder sets filter after construction) and wrong (would poison <code>fps.index</code>); lands the index-stage seam instead and documents the deviation rather than silently re-planning.</td><td><code>37d7b5c</code> + handoff report</td></tr>
+        <tr><td><b>Gate ruling</b></td><td><b>Gate-C APPROVED with deviation ACCEPTED</b> - ruling conditions were evidence: <code>None</code>-path byte-identical, m00 zero drift, warm reuse "5 TUs reused, 0 reanalyzed."</td><td>execution notes, kickoff &sect;Gate history</td></tr>
+    </table>
+    <p><b>The loop cuts both ways.</b> Gate-B returned a <i>factual correction</i> to the orchestrator's own D19 shorthand (<code>"cpp-analyzer-1"</code> vs <code>"v1"</code>), recorded verbatim in the plan's M21 execution notes. Gate-A accepted the implementer's six self-declared parser rulings (in-file-only sibling resolution, edge src/dst = analyzed TU mirroring lang-cpp) and authorized folding the six non-blocking reviewer notes into T-B's spec as docs commit <code>94d3d7d</code> - spec amendments stay in git, not in chat.</p>
+    <p><b>Protocol stress-tested:</b> two T-A dispatches died with empty summaries (the M18 size-risk memory anticipated exactly this); a disk-state inventory restart recovered with zero loss, and a third retry completed RED&rarr;GREEN in one pass.</p>
+</div>
+
+<!-- Slide 8: Acceptance T-D -->
+<div class="slide">
+    <h1>Acceptance (T-D, <code>acbb1a9</code>): plan:413 clause-mapped, proved on bytes</h1>
+    <p><code>tests/integration/tests/m21_scala_semantic_index_test.rs</code> - 554 lines, single-file commit scope (the whole T-D commit is this one file). A3 by construction: zero <code>std::process</code> anywhere, so scalac/sbt are unreachable even if on PATH.</p>
+    <table>
+        <tr><th>plan:413 clause</th><th>Test</th><th>Witness mechanism</th></tr>
+        <tr><td>"index contains <code>com.example.services.OrderService</code> with edges to <code>Order</code> and <code>User</code>"</td><td><b>1</b> <code>filtered_index_locks_symbols_and_complete_edges</code></td><td>product path <code>build_source_index_filtered</code>: 5 Scala-stamped units, D17 kinds, 2 Complete edges + the D16 wildcard Incomplete edge</td></tr>
+        <tr><td>"cold run analyses every unit"</td><td><b>2</b> <code>warm_run_reuses_every_unit_&hellip;</code></td><td>counting analyzer: cold <code>calls &gt; 0</code>; exactly 5 envelopes, each cross-checked against the path-derived <code>FileId</code></td></tr>
+        <tr><td>"second run reports 100 % hit-rate"</td><td><b>2</b> (warm leg)</td><td><b>zero</b> analyzer invocations + all five envelopes byte-identical (never rewritten)</td></tr>
+        <tr><td>"editing <code>models/Order.scala</code> reanalyzes only import-dependents"</td><td><b>3</b> <code>order_edit_reanalyzes_exactly_its_import_dependents</code></td><td>exact reanalyzed set <b>{Order, OrderService}</b> (fingerprint moved) vs reused <b>{Main, User, all}</b> (byte-identical)</td></tr>
+        <tr><td>"C++ cache entries not invalidated by the Scala fingerprint"</td><td><b>4</b> <code>scala_fingerprint_moves_only_the_scala_digest</code></td><td>digest inputs are per-language: C++ digest identical across Scala bumps; epoch <code>"2.0.0"</code> witness</td></tr>
+        <tr><td>(+ A3 determinism)</td><td><b>5</b> <code>order_service_analysis_is_deterministic_offline</code></td><td>same input twice through the CLI registry's plugin &rarr; byte-identical serde output; corpus shapes mirrored, not relitigated</td></tr>
+    </table>
+    <p><b>D21's counting analyzer (witnesses on content, not vibes):</b> <code>CountingAnalyzer</code> wraps the real <code>ScalaAnalyzer</code> verbatim - shards stay production output, the only addition is an <code>AtomicUsize</code>; injected through a bespoke test-only registry (<code>CountingScalaPlugin</code>), zero <code>src/</code> change. <b>Warm = 0 invocations &and; envelope byte identity &and; exact reanalyzed/reused sets</b> after the edit.</p>
+</div>
+
+<!-- Slide 9: gate ledger -->
+<div class="slide">
+    <h1>Lifecycle: four gates, one ledger</h1>
+    <table>
+        <tr><th>Gate</th><th>Focus</th><th>Verdict &amp; notable ruling</th></tr>
+        <tr><td><b>A</b> (parser, <code>21b4c4d</code>)</td><td>negative-case fidelity, no <code>directive_parser</code> edits, &sect;6.2 coverage</td><td><b>APPROVED</b> zero-blocking; six self-declared parser rulings ACCEPTED; 6 non-blocking notes folded into T-B (<code>94d3d7d</code>)</td></tr>
+        <tr><td><b>B</b> (analyzer, <code>9fcc315</code>)</td><td>fingerprint blast radius, stub-removal completeness</td><td><b>APPROVED</b> zero-blocking + factual correction: C++ fingerprint is <code>"cpp-analyzer-1"</code>, <code>"v1"</code> is only the trait default - neither moved</td></tr>
+        <tr><td><b>C</b> (seam, <code>37d7b5c</code>)</td><td><code>filter=None</code> byte-identical, pipeline names no language, m00 witness</td><td><b>APPROVED with deviation ACCEPTED</b> (planned placement impossible &amp; wrong; see slide 6)</td></tr>
+        <tr><td><b>D</b> (suite, <code>acbb1a9</code>)</td><td>plan:413 verbatim, D21 determinism, guard suites</td><td><b>APPROVED</b> clause-mapped; whole-milestone diff = 18 files, zero forbidden tokens in added production lines</td></tr>
+    </table>
+    <h2>RED evidence &amp; counts</h2>
+    <table>
+        <tr><th>Step</th><th>Scoped evidence</th></tr>
+        <tr><td>T-A</td><td>lang-scala RED <b>59</b> failing &rarr; GREEN <b>109</b> (captured assertion output before implementation)</td></tr>
+        <tr><td>T-B</td><td>lang-scala <b>115 / 0</b> with the plugin swap + fingerprint lock</td></tr>
+        <tr><td>T-C</td><td>pipeline <b>15 / 15</b>; <code>compute_inputs</code> absent from the diff; m00 byte-identical</td></tr>
+        <tr><td>T-D / final gate</td><td>workspace <b>767 &rarr; 842</b> passed (75 new), 0 failed, 3 ignored; m00 2/2 <b>zero golden drift</b> &middot; m17 5/5 &middot; m18 22/22 &middot; m19 5/5 &middot; m20_scala 5/5 &middot; old-numbering m20_apply 6/6 &middot; <code>hygiene_check.py</code> exit 0</td></tr>
+    </table>
+</div>
+
+<!-- Slide 10: carried forward -->
+<div class="slide">
+    <h1>Carried forward (reviewer-ruled, on disk, not in memory)</h1>
+    <ul>
+        <li><b>Unfiltered Scala shaping</b> - marker-based shaper auto-selection for runs without <code>--lang</code> stays deferred to <b>M22</b>, exactly as M20 carried it. M21 only added filter-driven selection.</li>
+        <li><b>Mixed-language incremental</b> - <code>cli/registry.rs::incremental_backend</code>'s explicit error and its lock test stay unedited; re-timing is M22/M23 territory.</li>
+        <li><b>Cross-file same-package edges</b> - the offline per-file parser cannot see siblings in other files; index-level coverage rides explicit imports. Open for the toolchain analyzer (M23).</li>
+        <li><b>Pipeline neutrality (R2) is review-enforced, not test-enforced</b> - the m17 guard does not cover <code>crates/pipeline</code> sources; widening it is an M23 item.</li>
+        <li><b><code>CountingScalaPlugin</code> delegation duty</b> - every new <code>LanguagePlugin</code> override needs a delegation arm there, or the test plugin silently takes the trait default.</li>
+        <li><b>Exact cold count</b> - today the warm test asserts <code>calls &gt; 0</code> cold; tightening to <code>== 5</code> is one line away if ever wanted. Also: <code>copy_tree</code> lacks <code>artifacts</code>/<code>.ariadne</code> dot-dir exclusion (harmless while fixtures stay clean).</li>
+        <li><b>M20 catalog carries</b> confirmed still open (<code>first_path_segment</code> <code>.</code>-trim, <code>by_module_path_suffix</code> index, backslash-query test) &rarr; M22/M23.</li>
+    </ul>
+    <p>The deferred ledger is verified on disk at Gate-D: what M21 deliberately did <i>not</i> do is as auditable as what it did.</p>
+</div>
+
+<!-- Slide 11: close -->
+<div class="slide">
+    <h1>Run it yourself</h1>
+    <table>
+        <tr><th>What</th><th>Command</th></tr>
+        <tr><td>The acceptance suite (5 tests, isolated tempdir copies)</td><td><code>cargo test -p ariadne-integration-tests --test m21_scala_semantic_index_test</code></td></tr>
+        <tr><td>Parser + scanner + analyzer unit tests</td><td><code>cargo test -p ariadne-lang-scala</code></td></tr>
+        <tr><td>The product path itself (the D15 seam)</td><td><code>ariadne index --lang scala</code></td></tr>
+        <tr><td>Full workspace + hygiene</td><td><code>cargo test --workspace</code> (842/0/3) &middot; <code>python tools/hygiene_check.py</code></td></tr>
+    </table>
+    <ul>
+        <li><b>Parser (T-A)</b>: offline-fidelity scanner + top-level decl extraction, D17 ids with the companion <code>$</code> suffix, D16 edge policy incl. the wildcard <code>ArrayBuffer</code> guess.</li>
+        <li><b>Analyzer (T-B)</b>: thin wrapper replaces <code>StubAnalyzer</code> repo-wide; fingerprint <code>"scala-parser-1"</code> moves only Scala digests.</li>
+        <li><b>Seam (T-C)</b>: D15 landed at the index stage as an accepted, evidence-backed deviation - <code>None</code> path byte-identical.</li>
+        <li><b>Suite (T-D)</b>: plan:413 clause-mapped; D21 warm/edit witnesses proved on bytes with zero analyzer invocations.</li>
+    </ul>
+    <p style="font-size: 18px; color: #555;">Scala now has a real semantic index - and C++ never noticed. M22 takes shaping past the filter.</p>
+    <p style="color: #888;">Questions? - docs: <code>plans/m21-scala-index-kickoff.md</code> &sect;Execution notes &middot; <code>plans/multi-language-support-implementation_plan.md</code> M21 execution notes block</p>
+</div>
+
+<div class="navigation">
+    <button onclick="prevSlide()">Previous</button>
+    <span id="slideNumber">1 / 11</span>
+    <button onclick="nextSlide()">Next</button>
+</div>
+
+<script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+
+    function showSlide(n) {
+        slides.forEach(slide => slide.classList.remove('active'));
+        slides[n].classList.add('active');
+        document.getElementById('slideNumber').textContent =
+            `${n + 1} / ${slides.length}`;
+    }
+
+    function nextSlide() {
+        currentSlide = (currentSlide + 1) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+        currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    showSlide(0);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+        if (e.key === 'ArrowLeft') prevSlide();
+    });
+</script>
+</body>
+</html>

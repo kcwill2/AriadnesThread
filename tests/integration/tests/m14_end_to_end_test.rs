@@ -123,7 +123,13 @@ fn test_m14_rollback_on_failed_validation() -> Result<()> {
         rewrites: vec![],
     };
 
-    let (snapshot, new_paths) = TransactionApplier::apply(&repo.root, &extraction, &migration)?;
+    let (snapshot, new_paths) = TransactionApplier::apply_with(
+        &repo.root,
+        &extraction,
+        &migration,
+        &ariadne_lang_cpp::CppDependencyRewriter,
+        &ariadne_lang_cpp::CppSourceExtractor,
+    )?;
 
     // Rollback
     TransactionApplier::rollback(&snapshot, &new_paths)?;

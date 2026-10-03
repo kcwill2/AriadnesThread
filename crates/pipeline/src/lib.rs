@@ -16,17 +16,21 @@ use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult};
+use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult, TranslationUnit};
 use ariadne_graph::{
-    build_include_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric,
+    build_dependency_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric,
     ReducedSemanticModel,
 };
-use ariadne_index::{IncrementalStats, IndexResult, StageFingerprints, CURRENT_ANALYSIS_VERSION};
-use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult};
+use ariadne_index::{
+    IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
+};
+use ariadne_lang::{CyclePolicy, LanguageId, LanguagePlugin, LanguageRegistry, UnitShaper};
+use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
-    analyze_closure, compute_tu_closure, load_shard, save_shard, shard_dir,
-    ProductionAnalysisStats, ProductionAnalyzer, ShardCheckpoint, TuStoreContext,
+    analyze_closure_with, compute_tu_closure_plugin, load_shard, save_shard, shard_dir,
+    ProductionAnalysisStats, ProductionAnalyzer, ShardCheckpoint, SharedPluginWorkerBackend,
+    SharedTuStoreContext, TuClosure, TuStoreContext,
 };
 
 pub const STAGE_INCLUDE_GRAPH: &str = "include-graph";
@@ -34,6 +38,14 @@ pub const STAGE_INDEX: &str = "index";
 pub const STAGE_REDUCED: &str = "reduced";
 pub const STAGE_CALLGRAPH: &str = "callgraph";
 pub const STAGE_LOAD: &str = "load";
+
+// The plugin enumeration moved to `registry.rs` (M23 T3, D-M23-10): the R2
+// architecture guard walks this crate's `src`, and `registry.rs` is the one
+// NAMED composition-root file it allowlists for plugin naming. Re-exports
+// keep `pipeline::default_registry` / `pipeline::build_default_registry`
+// callers unchanged (cli delegation contract, D9).
+mod registry;
+pub use registry::{build_default_registry, default_registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -144,9 +156,17 @@ pub struct Pipeline {
     /// during this pipeline. `None` when the index stage was loaded/reused:
     /// callers must then report honest zeros instead of invented numbers.
     pub production_stats: Option<ProductionAnalysisStats>,
-    store_ctx: ariadne_scheduler::SharedTuStoreContext,
+    store_ctx: SharedTuStoreContext,
     workers: Option<usize>,
     progress: Option<ProgressCb>,
+    /// Language plugins driving unit shaping, closure walks, analysis, and
+    /// worker dispatch (plan M18.3; required since M18.11 — the transitional
+    /// hardcoded-C++ paths are removed).
+    registry: Arc<LanguageRegistry>,
+    /// `--lang` restriction: the index rebuild keeps only units whose plugin
+    /// the registry detects for the unit path. Registration is validated by
+    /// the construction site; the index stage is the only consumer.
+    language_filter: Option<SourceLanguage>,
     include_cache: Option<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)>,
     index_cache: Option<IndexResult>,
     reduced_cache: Option<ReducedSemanticModel>,
@@ -155,8 +175,45 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// Pipeline over the shared default plugin set ([`build_default_registry`],
+    /// D9). The library-level entry point stays plugin-dispatched end to
+    /// end (M18.11 removed the hardcoded-C++ fallbacks - a pipeline without
+    /// plugins cannot shape, walk, or analyze units at all); the C++-first
+    /// registration order plus Scala's `false` capability literals keep C++
+    /// output byte-identical (locked by the m00 goldens and
+    /// `m18_cpp_plugin_parity_test`).
     pub fn new(repo_path: &Path, workers: Option<usize>) -> Result<Self> {
-        let (repo, discovery, build, fps) = Self::compute_inputs(repo_path)?;
+        Self::build(repo_path, workers, default_registry())
+    }
+
+    /// Pipeline whose index stage runs through the caller's plugin registry
+    /// (plan M18.3): registry-driven unit shaping, plugin-resolver closure
+    /// walks, plugin-analyzer merge, and registry-dispatching worker backends.
+    /// C++ output is byte-identical to the C++-default [`Pipeline::new`]
+    /// (locked by the m00 goldens and `m18_cpp_plugin_parity_test`). A unit
+    /// whose language no registered plugin claims is reported as "unhandled
+    /// language" (§3.3 fact 3), never silently parsed as C++.
+    pub fn with_registry(
+        repo_path: &Path,
+        workers: Option<usize>,
+        registry: Arc<LanguageRegistry>,
+    ) -> Result<Self> {
+        Self::build(repo_path, workers, registry)
+    }
+
+    /// Restrict the index stage to units of one language (`--lang`, plan
+    /// M18.3). Callers must have validated the language's plugin is registered.
+    pub fn language_filter(mut self, language: Option<SourceLanguage>) -> Self {
+        self.language_filter = language;
+        self
+    }
+
+    fn build(
+        repo_path: &Path,
+        workers: Option<usize>,
+        registry: Arc<LanguageRegistry>,
+    ) -> Result<Self> {
+        let (repo, discovery, build, fps) = Self::compute_inputs(repo_path, &registry)?;
         let manager = ArtifactManager::prepare_for_repo(&repo)?;
 
         // Repository + contexts artifacts are cheap; refresh them whenever
@@ -181,6 +238,8 @@ impl Pipeline {
             store_ctx,
             workers,
             progress: None,
+            registry,
+            language_filter: None,
             include_cache: None,
             index_cache: None,
             reduced_cache: None,
@@ -198,9 +257,13 @@ impl Pipeline {
     }
 
     /// Fresh discovery + build discovery + stage fingerprint chain, computed
-    /// identically by every path that derives fingerprints.
+    /// identically by every path that derives fingerprints. The unit shaper
+    /// comes from the registry's marker-based selection against the located
+    /// repository root (plan M22 D22; first-wins fallback preserved, so
+    /// every marker-free repository shapes exactly as before).
     fn compute_inputs(
         repo_path: &Path,
+        registry: &LanguageRegistry,
     ) -> Result<(
         Repository,
         RepositoryDiscoveryResult,
@@ -211,6 +274,7 @@ impl Pipeline {
         let discovery = repo.discover()?;
         let build = BuildDiscoverer::new(&repo.root)
             .with_repo_discovery(&discovery)
+            .with_unit_shaper(registry.unit_shaper_for_repo(&repo.root))
             .discover()?;
         let fps = StageFingerprints::from_inputs(
             &repo.root,
@@ -223,9 +287,11 @@ impl Pipeline {
 
     /// Re-derive the stage fingerprint chain from the current code on disk
     /// without opening, saving, or refreshing any artifacts. Used for pure
-    /// freshness checks (e.g. the UI watcher's no-op tick detection).
+    /// freshness checks (e.g. the UI watcher's no-op tick detection). Runs
+    /// over the same default plugin set [`Pipeline::new`] uses, so the chain
+    /// matches what that pipeline derives.
     pub fn rehash_inputs(repo_path: &Path) -> Result<StageFingerprints> {
-        Ok(Self::compute_inputs(repo_path)?.3)
+        Ok(Self::compute_inputs(repo_path, &default_registry())?.3)
     }
 
     pub fn artifact_root(&self) -> PathBuf {
@@ -270,8 +336,14 @@ impl Pipeline {
             }
         }
 
-        let (_repo, graph, closures, _report) = build_include_graph(&self.repo.root)?;
-        let report = graph.generate_report();
+        let graph = build_dependency_graph(&self.repo.root, &self.registry)?;
+        let closures = graph.compute_closures();
+        let cycle_policies = cycle_policy_by_file(&self.registry, &self.discovery);
+        let report = graph.generate_report_with_cycle_policies(&|file_id| {
+            *cycle_policies
+                .get(&file_id)
+                .unwrap_or(&CyclePolicy::Reject)
+        });
         self.manager
             .save_include_artifacts(&graph, &closures, &report, &self.fps.include_graph)?;
         self.include_cache = Some((graph, closures));
@@ -316,7 +388,7 @@ impl Pipeline {
             return Ok(());
         }
 
-        if self.manager.stage_is_fresh("index", &self.fps.index) {
+        if self.manager.stage_is_fresh("index", &self.fps.index) && self.language_filter.is_none() {
             if let Ok(loaded) = self.manager.load_index_checked(&self.fps.index) {
                 self.index_cache = Some(loaded);
                 self.stats.record(STAGE_INDEX, StageReuse::Loaded);
@@ -324,10 +396,18 @@ impl Pipeline {
             }
         }
 
+        let indexed_build = self.indexed_build()?;
         let (index_result, stats, production_stats) = match self.workers {
             Some(workers) => {
-                let analyzer = ProductionAnalyzer::new(&self.repo, &self.discovery, &self.build)
-                    .with_workers(workers);
+                // M18.11: the production path always runs the registry-backed
+                // plugin backend and the plugin-driven shard prepass.
+                let analyzer =
+                    ProductionAnalyzer::new(&self.repo, &self.discovery, &indexed_build)
+                        .with_workers(workers)
+                        .with_backend(Arc::new(SharedPluginWorkerBackend::new(Arc::clone(
+                            &self.registry,
+                        ))))
+                        .with_registry(Arc::clone(&self.registry));
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()?;
@@ -338,15 +418,20 @@ impl Pipeline {
                 (analysis_result.index_result, reuse, Some(production))
             }
             None => {
-                let (index_result, stats) = self.rebuild_index_single_threaded()?;
+                let (index_result, stats) = self.rebuild_index_single_threaded(&indexed_build)?;
                 (index_result, stats, None)
             }
         };
 
         self.production_stats = production_stats;
 
-        self.manager
-            .save_index_artifacts(&index_result, &self.fps.index, Some(&stats))?;
+        // A `--lang` restriction is a filtered view, never the authoritative
+        // full-stage artifact; saving it under the full index fingerprint would
+        // poison every later full run, so only the unfiltered result persists.
+        if self.language_filter.is_none() {
+            self.manager
+                .save_index_artifacts(&index_result, &self.fps.index, Some(&stats))?;
+        }
         self.stats.reused_tus = stats.reused_tus;
         self.stats.reanalyzed_tus = stats.reanalyzed_tus;
         self.index_cache = Some(index_result);
@@ -354,11 +439,59 @@ impl Pipeline {
         Ok(())
     }
 
-    fn rebuild_index_single_threaded(&mut self) -> Result<(IndexResult, IncrementalStats)> {
+    /// The build result the index stage analyzes: full, or restricted to the
+    /// `--lang` language (plan M18.3). Contexts are kept intact either way —
+    /// closures resolve per TU context exactly as in a full run.
+    ///
+    /// A filtered run re-shapes through the filter's plugin shaper (D15):
+    /// construction-time discovery ran the registry's marker-based selection
+    /// (D22), which may recognize none of the filtered language's build
+    /// markers at all (a repo shaped by another language's shaper yields
+    /// zero units), so retention alone could never surface units of the
+    /// filtered language.
+    /// The unfiltered path returns the construction-time result unchanged —
+    /// `select_unit_shaper`'s `None` branch is that same marker-based call,
+    /// so `compute_inputs`' discovery and every derived fingerprint are
+    /// exactly what the unfiltered run analyzes.
+    fn indexed_build(&mut self) -> Result<BuildDiscoveryResult> {
+        let mut build = match self.language_filter {
+            None => self.build.clone(),
+            Some(_) => {
+                let reshaped = BuildDiscoverer::new(&self.repo.root)
+                    .with_repo_discovery(&self.discovery)
+                    .with_unit_shaper(select_unit_shaper(
+                        &self.registry,
+                        self.language_filter,
+                        &self.repo.root,
+                    ))
+                    .discover()?;
+                // The shard store context must see the contexts the shaping
+                // named, exactly as construction-time shaping provided them
+                // (context content is part of every TU cache fingerprint).
+                self.store_ctx =
+                    TuStoreContext::new(&self.discovery, reshaped.contexts.clone());
+                reshaped
+            }
+        };
+        if let Some(language) = self.language_filter {
+            // M24 Part A: the `--lang` filter arrives as the closed file-kind
+            // label, while detection answers in the open identity, so the
+            // comparison goes through the one direction that exists.
+            let selected = LanguageId::from(language);
+            build
+                .translation_units
+                .retain(|tu| self.registry.detect_language(&tu.source_path).as_ref() == Some(&selected));
+        }
+        Ok(build)
+    }
+
+    fn rebuild_index_single_threaded(
+        &mut self,
+        build: &BuildDiscoveryResult,
+    ) -> Result<(IndexResult, IncrementalStats)> {
         let store_dir = shard_dir(&self.repo.root);
         let store_ctx = self.store_ctx.clone();
         let repo_root = self.repo.root.clone();
-        let translation_units = self.build.translation_units.clone();
         let mut progress = self.progress.take();
         let mut notify = |event: &ProgressEvent| {
             if let Some(cb) = progress.as_mut() {
@@ -370,29 +503,22 @@ impl Pipeline {
         let mut reanalyzed = 0usize;
         let mut analyses = Vec::new();
 
-        let total = translation_units.len();
-        for (i, tu) in translation_units.iter().enumerate() {
+        let total = build.translation_units.len();
+        for (i, tu) in build.translation_units.iter().enumerate() {
             notify(&ProgressEvent::TuIndex { done: i, total });
 
-            let closure = compute_tu_closure(tu, &repo_root, &store_ctx, CURRENT_ANALYSIS_VERSION)?;
-            let analysis = match load_shard(&store_dir, tu.file_id) {
-                Some(shard) if shard.fingerprint == closure.fingerprint.combined_hash => {
-                    reused += 1;
-                    shard.analysis
-                }
-                _ => {
-                    reanalyzed += 1;
-                    let analysis = analyze_closure(tu, &closure);
-                    save_shard(
-                        &store_dir,
-                        &ShardCheckpoint {
-                            fingerprint: closure.fingerprint.combined_hash.clone(),
-                            analysis: analysis.clone(),
-                        },
-                    )?;
-                    analysis
-                }
-            };
+            let (analysis, was_reused) = index_unit_with_plugin(
+                tu,
+                &repo_root,
+                &store_ctx,
+                &store_dir,
+                plugin_for_path(&self.registry, &tu.source_path)?,
+            )?;
+            if was_reused {
+                reused += 1;
+            } else {
+                reanalyzed += 1;
+            }
             analyses.push(analysis);
         }
         notify(&ProgressEvent::TuIndex { done: total, total });
@@ -569,7 +695,16 @@ impl Pipeline {
             symbol_metrics,
             file_metrics,
         };
-        self.manager.save_load_artifacts(&report, &self.fps.load)?;
+        // M22 D25: the load report itself carries no language data, so the
+        // stage feeds the manifest from discovery records; an all-default
+        // repository still writes byte-identical pre-M22 manifest bytes.
+        let stage_languages: Vec<SourceLanguage> =
+            self.discovery.files.iter().map(|f| f.language).collect();
+        self.manager.save_load_artifacts_with_languages(
+            &report,
+            &self.fps.load,
+            &stage_languages,
+        )?;
         self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
         self.load_cache = Some(Arc::new(report));
         self.stats.record(STAGE_LOAD, StageReuse::Rebuilt);
@@ -641,6 +776,120 @@ impl Pipeline {
     }
 }
 
+/// Unit shaper for the index stage's unit shaping (D15 + D22): with an
+/// explicit `--lang` filter the shaper comes from that language's plugin — a
+/// plugin that provides no shaper honestly stays `None`, leaving build
+/// discovery neutral instead of guessing another language's defaults;
+/// without a filter the registry's marker-based selection against the
+/// repository root applies (the same call `compute_inputs` made at
+/// construction). Registry lookups only — no language-identity branching
+/// (R3).
+fn select_unit_shaper<'a>(
+    registry: &'a LanguageRegistry,
+    language_filter: Option<SourceLanguage>,
+    repo_root: &Path,
+) -> Option<&'a dyn UnitShaper> {
+    match language_filter {
+        Some(language) => registry
+            .plugin_for_id(LanguageId::from(language))
+            .and_then(|plugin| plugin.shaper()),
+        None => registry.unit_shaper_for_repo(repo_root),
+    }
+}
+
+/// Per-file cycle stance for the include-graph report (plan M20 D11, IV-5):
+/// each discovery record's `language` is resolved through the registry
+/// (`plugin_for_id` — R3-legal registry lookup, no `match LanguageId`), and
+/// files no registered plugin claims fall back to `Reject`, which keeps the
+/// C++ report byte-identical to the pre-M20 `generate_report()` output.
+fn cycle_policy_by_file(
+    registry: &LanguageRegistry,
+    discovery: &RepositoryDiscoveryResult,
+) -> HashMap<FileId, CyclePolicy> {
+    discovery
+        .files
+        .iter()
+        .map(|record| {
+            let policy = registry
+                .plugin_for_id(LanguageId::from(record.language))
+                .map(|plugin| plugin.modeling().cycle_policy)
+                .unwrap_or(CyclePolicy::Reject);
+            (record.id, policy)
+        })
+        .collect()
+}
+
+/// Plugin that owns `path`'s language (plan §3.3 fact 3): the registry
+/// detection is the dispatch key, and an unclaimed path is reported as
+/// "unhandled language" rather than silently parsed with some other plugin.
+fn plugin_for_path<'a>(
+    registry: &'a LanguageRegistry,
+    path: &Path,
+) -> Result<&'a dyn LanguagePlugin> {
+    let language = registry.detect_language(path).ok_or_else(|| {
+        anyhow!(
+            "unhandled language for {} (no registered plugin claims it)",
+            path.display()
+        )
+    })?;
+    registry
+        .plugin_for_id(language.clone())
+        .ok_or_else(|| anyhow!("language plugin not registered: {language:?}"))
+}
+
+/// Shard-backed analysis of one unit through the plugin resolver/analyzer
+/// (plan M18.3, the only path since M18.11). `compute_tu_closure_plugin`
+/// reproduces the canonical closure file order byte-for-byte (locked by the
+/// vendored oracles in `m18_cpp_plugin_parity_test`), so shard envelopes and
+/// merged analyses are identical to the pre-M11 hardcoded-C++ path.
+fn index_unit_with_plugin(
+    tu: &TranslationUnit,
+    repo_root: &Path,
+    store_ctx: &SharedTuStoreContext,
+    store_dir: &Path,
+    plugin: &dyn LanguagePlugin,
+) -> Result<(TuAnalysis, bool)> {
+    let closure = compute_tu_closure_plugin(
+        tu,
+        repo_root,
+        store_ctx,
+        CURRENT_ANALYSIS_VERSION,
+        plugin.resolver(),
+        // M18.10 fingerprint identity: `LanguageId` IS `SourceLanguage`
+        // (plan §3.2), and for C++ these two values equal the constants the
+        // pre-M11 walk hardcoded — keeping shard envelopes byte-identical.
+        plugin.id(),
+        &plugin.analysis_fingerprint(),
+    )?;
+    sharded_analysis(tu, &closure, store_dir, || {
+        analyze_closure_with(tu, &closure, plugin.analyzer())
+    })
+}
+
+/// Shared shard envelope contract of both unit paths: reuse the checkpoint
+/// when the closure fingerprint still matches, else analyze and re-stamp.
+fn sharded_analysis(
+    tu: &TranslationUnit,
+    closure: &TuClosure,
+    store_dir: &Path,
+    analyze: impl FnOnce() -> TuAnalysis,
+) -> Result<(TuAnalysis, bool)> {
+    if let Some(shard) = load_shard(store_dir, tu.file_id) {
+        if shard.fingerprint == closure.fingerprint.combined_hash {
+            return Ok((shard.analysis, true));
+        }
+    }
+    let analysis = analyze();
+    save_shard(
+        store_dir,
+        &ShardCheckpoint {
+            fingerprint: closure.fingerprint.combined_hash.clone(),
+            analysis: analysis.clone(),
+        },
+    )?;
+    Ok((analysis, false))
+}
+
 /// Parallel, order-preserving symbol metric pass for `ensure_load`. The
 /// BTreeMap `.values()` view is materialized into a `Vec` first (b-tree
 /// value iterators are not rayon parallel iterators); rayon's
@@ -702,6 +951,9 @@ fn collect_file_metrics(
         .collect()
 }
 
+// The full cold/warm pipeline suite moved to `crates/pipeline/tests/
+// pipeline_test.rs` (M23 T3, D-M23-10): its fixtures embed C++ compile-command
+// and directive text, so they live outside the guard walk scope. Tests that
+// need the private collection internals stay in `internal_tests.rs`.
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
-mod pipeline_tests;
+mod internal_tests;

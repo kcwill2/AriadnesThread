@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use ariadne_cli;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
-use ariadne_transform::{ExtractionResult, GeneratedHeader};
+use ariadne_transform::{ExtractionResult, GeneratedUnit};
 use ariadne_validate::{
     ApplyOutcome, FileSnapshot, TierResult, TierValidator, TransactionApplier, ValidationStatus,
     ValidationTier,
@@ -96,13 +96,16 @@ fn test_m10_rollback_identity() {
     let repo = Repository::locate(&repo_path).unwrap();
     let artifacts = ArtifactManager::prepare_for_repo(&repo).unwrap();
 
-    // Inject deliberately broken extraction
-    let mut extraction = ariadne_transform::HeaderExtractor::new(
+    // Inject deliberately broken extraction. M23 T1 (D-M23-3): the engine now
+    // reads each extraction's source file and asks the plugin for verbatim
+    // bodies — production shape; the rollback characterization is body-agnostic.
+    let source_reader = ariadne_cli::repository_source_reader(&repo).unwrap();
+    let mut extraction = ariadne_transform::IsolationEngine::new(
         &ariadne_cli::get_or_build_reduced_model(&repo_path)
             .unwrap()
             .1,
     )
-    .extract(plan);
+    .extract(plan, &source_reader, &ariadne_lang_cpp::CppSourceExtractor);
     extraction.errors.push("Fake error".to_string()); // Make tier 1 fail
 
     let migration = ariadne_transform::MigrationPreview {
@@ -111,8 +114,14 @@ fn test_m10_rollback_identity() {
     };
 
     let hash_before = hash_dir(&repo_path);
-    let (snapshot, new_paths) =
-        TransactionApplier::apply(&repo.root, &extraction, &migration).unwrap();
+    let (snapshot, new_paths) = TransactionApplier::apply_with(
+        &repo.root,
+        &extraction,
+        &migration,
+        &ariadne_lang_cpp::CppDependencyRewriter,
+        &ariadne_lang_cpp::CppSourceExtractor,
+    )
+    .unwrap();
     let t1 = TierValidator::validate_structural(&extraction);
 
     let outcome = ApplyOutcome::RolledBack {

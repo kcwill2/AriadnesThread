@@ -294,7 +294,8 @@ fn run_assembly(
     let ((_graph_report, cycles), report_cycles_ms) =
         timed(|| (graph.generate_report(), graph.detect_cycles()));
     let (_elements, include_elements_ms) = timed(|| {
-        ariadne_ui::build_include_elements(&graph, &closures, &cycles)
+        let no_decoration = std::collections::HashMap::new();
+        ariadne_ui::build_include_elements(&graph, &closures, &cycles, &no_decoration, &no_decoration)
     });
     // ui.rs:247-248 — two cheap serial maps, timed together.
     let (justification_maps_ms, path_to_id) = {
@@ -314,6 +315,10 @@ fn run_assembly(
             reduced,
             &pipeline.discovery.files,
             &tu_ids,
+            &ariadne_lang_cpp::cpp_aggregation_filter,
+            &ariadne_lang_cpp::cpp_target_path_for,
+            None,
+            ariadne_lang::CyclePolicy::Reject,
             ariadne_cluster::planner::screening_facts_from_metrics(
                 &graph,
                 &load_report.file_metrics,

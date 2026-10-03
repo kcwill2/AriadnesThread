@@ -4,41 +4,14 @@ use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Classification of an included header file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum IncludeKind {
-    /// Local header found via relative search or local `-I` directory.
-    Local,
-    /// System header found via `<...>` or system include paths.
-    System,
-    /// External third-party library header.
-    External,
-}
-
-/// Source location of an `#include` directive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct SourceLocation {
-    pub line: u32,
-    pub column: u32,
-}
-
-impl SourceLocation {
-    pub fn new(line: u32, column: u32) -> Self {
-        Self { line, column }
-    }
-}
-
-/// Directed include edge representing `#include` from source to destination.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct IncludeEdge {
-    pub source: FileId,
-    pub destination: Option<FileId>,
-    pub context_name: String,
-    pub source_location: SourceLocation,
-    pub kind: IncludeKind,
-    pub raw_path: String,
-    pub resolved_path: Option<PathBuf>,
-}
+// `IncludeKind`, `SourceLocation`, and `IncludeEdge` are the include-graph
+// artifact DTOs. They live in `ariadne-lang-api` (the shared artifact
+// vocabulary) since M18.1 because the `ariadne-lang-cpp` resolver produces
+// them and plugin crates may not depend on this one. The re-export keeps
+// every existing path (`ariadne_graph::IncludeEdge`, ...) and the serde/
+// bincode shapes unchanged.
+pub use ariadne_lang_api::identity::LanguageId;
+pub use ariadne_lang_api::types::{IncludeEdge, IncludeKind, SourceLocation};
 
 /// Transitive include closure for a specific file or translation unit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +54,20 @@ pub struct IncludeReport {
     pub external_headers_count: usize,
     pub unresolved_includes_count: usize,
     pub cycle_count: usize,
+    /// Cycles whose every member file tolerates cycles per its language's
+    /// `CyclePolicy` (M20 D11). Only ever non-zero through
+    /// `generate_report_with_cycle_policies`; skipped when 0 so every
+    /// pre-M20 artifact (all C++ paths) keeps a byte-identical `report.json`.
+    #[serde(default, skip_serializing_if = "informational_cycles_absent")]
+    pub informational_cycle_count: usize,
     pub top_headers_by_closure: Vec<(FileId, PathBuf, usize)>,
+}
+
+/// Serde skip predicate for `IncludeReport::informational_cycle_count`: the
+/// key is absent from serialized reports exactly when no cycle is
+/// informational (the shape every artifact had before M20).
+fn informational_cycles_absent(count: &usize) -> bool {
+    *count == 0
 }
 
 #[cfg(test)]
@@ -99,26 +85,5 @@ mod tests {
         assert_eq!(closure.direct_includes, vec![f1, f2]);
         assert_eq!(closure.transitive_includes, vec![f1, f2]);
         assert_eq!(closure.closure_size, 2);
-    }
-
-    #[test]
-    fn test_include_edge_serialization() {
-        let edge = IncludeEdge {
-            source: FileId(10),
-            destination: Some(FileId(20)),
-            context_name: "Debug|x64".to_string(),
-            source_location: SourceLocation::new(4, 1),
-            kind: IncludeKind::Local,
-            raw_path: "thing_types.h".to_string(),
-            resolved_path: Some(PathBuf::from("include/thing_types.h")),
-        };
-
-        let json = serde_json::to_string(&edge).unwrap();
-        let decoded: IncludeEdge = serde_json::from_str(&json).unwrap();
-        assert_eq!(edge, decoded);
-
-        let bin = bincode::serialize(&edge).unwrap();
-        let decoded_bin: IncludeEdge = bincode::deserialize(&bin).unwrap();
-        assert_eq!(edge, decoded_bin);
     }
 }

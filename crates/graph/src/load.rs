@@ -1,6 +1,7 @@
 use crate::{IncludeClosure, IncludeGraph, ReducedSemanticModel};
 use anyhow::{anyhow, Result};
 use ariadne_index::types::SymbolId;
+use ariadne_lang_api::modeling::DependencyVocabulary;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -15,21 +16,12 @@ fn path_basename(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
-/// E-I9 (plan 1790521470000): needs-sets carry includable headers only —
-/// `.h`/`.hpp`/`.hxx`, case-sensitive, mirroring the ui node-kind detection
-/// in `dto.rs`. `.ipp`/`.inl` template-impl files are deliberately OUT for
-/// now: whether they belong in the includable set is a future question, not
-/// today's. Paths without a final component (e.g. `..`, empty) are never
-/// includable.
-pub fn is_includable_header(path: &Path) -> bool {
-    match path.file_name() {
-        Some(name) => {
-            let name = name.to_string_lossy();
-            name.ends_with(".h") || name.ends_with(".hpp") || name.ends_with(".hxx")
-        }
-        None => false,
-    }
-}
+/// E-I9 (plan 1790521470000): needs-sets carry includable headers only. The
+/// suffix predicate itself lives in `ariadne-repo::types` (plan §6.3 rule R2
+/// keeps header-suffix taxonomy out of the core pipeline crates); this
+/// re-export keeps `ariadne_graph::is_includable_header` (ui dto.rs, load
+/// justification) as the stable consumer path.
+pub use ariadne_repo::is_includable_header;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributingSource {
@@ -61,12 +53,23 @@ pub struct LoadMetric {
 
 impl LoadMetric {
     pub fn format_summary(&self) -> String {
+        self.render_summary("Include")
+    }
+
+    /// D26 (plan:425): identical rendering with the directive label supplied
+    /// by a plugin's `DependencyVocabulary` — the other labels have no
+    /// language vocabulary and stay byte-identical.
+    pub fn format_summary_with(&self, vocabulary: &DependencyVocabulary) -> String {
+        self.render_summary(&vocabulary.directive_label)
+    }
+
+    fn render_summary(&self, directive_label: &str) -> String {
         let mut out = String::new();
         out.push_str(&self.target_name);
         out.push_str("\n\nSemantic load:\n");
         out.push_str(&format!("    {} symbols\n\n", self.semantic_load));
 
-        out.push_str("Include load:\n");
+        out.push_str(&format!("{directive_label} load:\n"));
         out.push_str(&format!("    {} symbols\n\n", self.include_load));
 
         out.push_str("Collateral load:\n");
@@ -662,3 +665,9 @@ mod perf;
 #[cfg(test)]
 #[path = "load_memo_tests.rs"]
 mod memo_perf;
+
+/// D26 vocabulary suite: locks `format_summary_with` against the unchanged
+/// default summary rendering (plan M22, plan:425).
+#[cfg(test)]
+#[path = "load_vocabulary_tests.rs"]
+mod vocabulary;

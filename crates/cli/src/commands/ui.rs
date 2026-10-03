@@ -1,15 +1,15 @@
+use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{LoadMilestone, Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
-use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
-use crate::commands::ui_payload::{
-    build_extraction_proposals, build_file_collateral, build_path_to_id,
-};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+mod node_maps;
 
 pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
@@ -308,9 +308,18 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let load_report = pipeline.get_or_build_load()?;
     let report = include_graph.generate_report();
     let cycles = include_graph.detect_cycles();
-    let include_elements = ariadne_ui::build_include_elements(&include_graph, &closures, &cycles);
-    let path_to_id = build_path_to_id(&include_graph);
-    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
+let node_maps = node_maps::build(
+        &include_graph,
+        &pipeline.discovery.files,
+        &crate::registry::default_registry(),
+    );
+    let include_elements = ariadne_ui::build_include_elements(
+        &include_graph,
+        &closures,
+        &cycles,
+        &node_maps.languages,
+        &node_maps.unit_kinds,
+    );
     // A1: planner candidates are screened from the stage's load metrics and
     // reuse the stage closures, before the memo below takes them.
     // Milestones follow the CALL ORDER, not the cost order: the planner
@@ -341,6 +350,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         JUSTIFYING_SYMBOLS_PERCENT,
         "Justifying symbols...",
     );
+    let path_to_id = node_maps::build_path_to_id(&include_graph);
+    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
     let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
         &include_graph,
@@ -358,7 +369,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
             .to_string_lossy()
             .into_owned(),
         include_graph: include_elements,
-        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model),
+        symbol_graph: ariadne_ui::build_symbol_elements(&reduced_model, &node_maps.paths),
         call_graph: ariadne_ui::build_call_elements(&call_graph),
         stats: ariadne_ui::SummaryStats {
             total_files: include_graph.file_paths.len(),
@@ -383,6 +394,30 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     })
 }
 
+/// Map each target file (by numeric FileId) to the symbol counts contributed
+/// by its collateral sources, keeping only files with non-zero contributors.
+fn build_file_collateral(
+    path_to_id: &HashMap<PathBuf, u64>,
+    file_metrics: &[ariadne_graph::LoadMetric],
+) -> HashMap<String, HashMap<String, usize>> {
+    let mut file_collateral: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    for metric in file_metrics {
+        let Some(path) = metric.target_file.as_ref().and_then(|p| path_to_id.get(p)) else {
+            continue;
+        };
+        let mut collat = HashMap::new();
+        for src in &metric.collateral_sources {
+            if src.symbol_count > 0 {
+                collat.insert(src.file_id.0.to_string(), src.symbol_count);
+            }
+        }
+        if !collat.is_empty() {
+            file_collateral.insert(path.to_string(), collat);
+        }
+    }
+    file_collateral
+}
+
 fn translation_unit_file_ids(
     build: &ariadne_build::BuildDiscoveryResult,
 ) -> Vec<ariadne_repo::FileId> {
@@ -391,6 +426,110 @@ fn translation_unit_file_ids(
         .iter()
         .map(|tu| tu.file_id)
         .collect()
+}
+
+/// Conservative extraction proposals for the payload (I8): runs the same
+/// planner as `tool optimize` and applies the identical Conservative filter
+/// as `plan_safe_extractions`; display-only, no behavior coupling. Candidate
+/// screening consumes the stage's load metrics and closures rather than
+/// re-running the load analysis cold (plan load-tail A1), so plan output is
+/// byte-equal to the CLI's `plan_extractions` — locked on real C++ fixtures by
+/// `tests/integration/tests/m00_facts_path_parity_test.rs`.
+fn build_extraction_proposals(
+    include_graph: &ariadne_graph::IncludeGraph,
+    reduced_model: &ariadne_graph::ReducedSemanticModel,
+    discovery_files: &[ariadne_repo::FileRecord],
+    tu_file_ids: &[ariadne_repo::FileId],
+    file_metrics: &[ariadne_graph::LoadMetric],
+    closures: &HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    let planner = ariadne_cluster::planner::OptimizationPlanner::with_screening_facts(
+        include_graph,
+        reduced_model,
+        discovery_files,
+        tu_file_ids,
+        &ariadne_lang_cpp::cpp_aggregation_filter,
+        &ariadne_lang_cpp::cpp_target_path_for,
+        None,
+        ariadne_lang::CyclePolicy::Reject,
+        ariadne_cluster::planner::screening_facts_from_metrics(include_graph, file_metrics),
+        closures,
+    );
+    conservative_proposals(planner.plan())
+}
+
+/// Pure filter/sort/cap stage (I6: `(delta desc, plan_id asc)`; I3: top 12),
+/// kept separate from the planner so the ordering contract is testable
+/// without planner machinery.
+fn conservative_proposals(
+    plans: Vec<ariadne_cluster::plan::OptimizationPlan>,
+) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    let mut ranked: Vec<_> = plans
+        .into_iter()
+        .filter(|p| {
+            matches!(p.risk, ariadne_cluster::plan::RiskLevel::Conservative)
+                && p.collateral_load_before != p.collateral_load_after
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        proposal_delta(b)
+            .cmp(&proposal_delta(a))
+            .then(a.id.0.cmp(&b.id.0))
+    });
+    ranked
+        .into_iter()
+        .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX)
+        .map(|p| extraction_proposal_dto(&p))
+        .collect()
+}
+
+fn proposal_delta(plan: &ariadne_cluster::plan::OptimizationPlan) -> usize {
+    plan.collateral_load_before
+        .saturating_sub(plan.collateral_load_after)
+}
+
+fn extraction_proposal_dto(
+    plan: &ariadne_cluster::plan::OptimizationPlan,
+) -> ariadne_ui::ExtractionProposalDto {
+    let total_symbols = plan.proposed_extractions.len();
+    let mut extractions: Vec<&ariadne_cluster::plan::ProposedExtraction> =
+        plan.proposed_extractions.iter().collect();
+    extractions.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
+    let symbol_names: Vec<String> = extractions
+        .into_iter()
+        .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX_NAMES)
+        .map(|e| e.symbol_name.clone())
+        .collect();
+    let mut required_headers: Vec<String> = plan
+        .optimization_frontier
+        .iter()
+        .filter(|p| *p != &plan.target_file)
+        .map(|p| proposal_basename(p))
+        .collect();
+    required_headers.sort();
+    required_headers.dedup();
+    required_headers.truncate(ariadne_ui::EXTRACTION_PROPOSAL_MAX_HEADERS);
+    ariadne_ui::ExtractionProposalDto {
+        plan_id: plan.id.0.clone(),
+        target_file: proposal_basename(&plan.target_file),
+        target_file_id: plan.target_file_id.0.to_string(),
+        problem: plan.problem.clone(),
+        collateral_load_before: plan.collateral_load_before,
+        collateral_load_after: plan.collateral_load_after,
+        symbol_names,
+        total_symbols,
+        required_headers,
+        consumer_tu_count: plan.validation_required_tus.len(),
+        risk: plan.risk.to_string(),
+    }
+}
+
+/// Basename with the graph crate's whole-path fallback for component-less
+/// paths (mirrors dto.rs `path_basename`).
+fn proposal_basename(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 /// Swap a freshly built snapshot into live UI state. The stale payload keeps
@@ -606,346 +745,10 @@ pub async fn run_ui(
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn test_ui_is_artifact_first() {
-        let ui_code = include_str!("ui.rs");
-        assert!(ui_code.contains("Pipeline::new"));
-        assert!(ui_code.contains("ensure_include_graph"));
-        assert!(ui_code.contains("get_or_build_callgraph"));
-        assert!(ui_code.contains("get_or_build_load"));
-        assert!(ui_code.contains("spawn_watcher"));
-
-        let index_code = include_str!("index.rs");
-        assert!(index_code.contains("ProgressEvent::TuIndex"));
-        assert!(index_code.contains("print_progress"));
-
-        // Artifact-first must survive the payload-builder split (plan A5):
-        // the builder file never constructs its own Pipeline/LoadAnalyzer —
-        // it only receives stage output — and it carries the A1 boot wiring.
-        let payload_code = include_str!("ui_payload.rs");
-        assert!(
-            !payload_code.contains("Pipeline::new"),
-            "ui_payload must not construct a Pipeline; only build_ui_payload does"
-        );
-        assert!(
-            !payload_code.contains("LoadAnalyzer::new"),
-            "ui_payload must not run its own load analysis; boot hands it the stage metrics"
-        );
-        assert!(
-            payload_code.contains("with_screening_facts"),
-            "ui_payload must carry the A1 screening-facts planner wiring"
-        );
-    }
-}
+mod tests;
 
 #[cfg(test)]
-mod progress_contract_tests {
-    use super::{
-        collateral_file_percent, stage_end_percent, stage_progress_callback, stage_report,
-        stage_start_percent, step_percent, tu_index_percent, ARTIFACTS_PHASE,
-        ARTIFACTS_SAVED_PERCENT, CALL_GRAPH_PHASE, COLLATERAL_FILE_SPAN_END, COLLATERAL_PHASE,
-        JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT, PAYLOAD_ASSEMBLED_PERCENT,
-        PLANNING_EXTRACTIONS_PERCENT, ProgressFn, ProgressReport, REDUCTION_PHASE, STAGES_PER_RUN,
-        SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
-    };
-    use ariadne_pipeline::{LoadMilestone, ProgressEvent};
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+mod progress_contract_tests;
 
-    const POINTS_PER_STAGE: usize = 100 / STAGES_PER_RUN;
-
-    /// The ordered static milestones exactly as `build_ui_payload` emits them,
-    /// built from the same constants and helpers the real code path calls.
-    /// A4: stage 5's milestone set is {80 start, 81 "Symbols analyzed",
-    /// [81,82] file-event span, 85 artifacts-saved / "Collateral mapped" /
-    /// "Planning extractions", 86 "Justifying symbols...", 99 "Symbols
-    /// justified", 100 payload finalization}, all within [80, 100].
-    fn emitted_milestones() -> Vec<(usize, &'static str)> {
-        vec![
-            (stage_start_percent(1), ARTIFACTS_PHASE),
-            (stage_end_percent(1), ARTIFACTS_PHASE),
-            (stage_start_percent(2), TU_INDEX_PHASE),
-            (stage_end_percent(2), TU_INDEX_PHASE),
-            (stage_start_percent(3), REDUCTION_PHASE),
-            (stage_end_percent(3), REDUCTION_PHASE),
-            (stage_start_percent(4), CALL_GRAPH_PHASE),
-            (stage_end_percent(4), CALL_GRAPH_PHASE),
-            (stage_start_percent(5), COLLATERAL_PHASE),
-            (SYMBOLS_ANALYZED_PERCENT, COLLATERAL_PHASE),
-            (ARTIFACTS_SAVED_PERCENT, COLLATERAL_PHASE),
-            (PLANNING_EXTRACTIONS_PERCENT, COLLATERAL_PHASE),
-            (JUSTIFYING_SYMBOLS_PERCENT, COLLATERAL_PHASE),
-            (JUSTIFICATION_COMPLETE_PERCENT, COLLATERAL_PHASE),
-            (100, COLLATERAL_PHASE),
-        ]
-    }
-
-    fn stage_number_of(phase: &str) -> usize {
-        phase
-            .as_bytes()
-            .get(1)
-            .and_then(|byte| (*byte as char).to_digit(10))
-            .unwrap_or_else(|| panic!("milestone phase must carry a [k/5] label: {phase:?}"))
-            as usize
-    }
-
-    #[test]
-    fn test_stage_milestones_match_step_labels() {
-        let milestones = emitted_milestones();
-        for pair in milestones.windows(2) {
-            assert!(
-                pair[0].0 <= pair[1].0,
-                "percent must be monotonic, got {} before {}",
-                pair[0].0,
-                pair[1].0
-            );
-        }
-        for (percent, phase) in &milestones {
-            let stage = stage_number_of(phase);
-            let lower = (stage - 1) * POINTS_PER_STAGE;
-            let upper = stage * POINTS_PER_STAGE;
-            assert!(
-                (lower..=upper).contains(percent),
-                "milestone {phase} at {percent}% escapes its [{lower}, {upper}] span"
-            );
-        }
-        // The contract table must not be fiction: the payload-assembly
-        // milestone that finalizes step 5 at 100% must really be emitted.
-        // Built via format! so this test's own source cannot match itself.
-        let assembled_needle = format!("Payload {}", "assembled");
-        assert!(
-            include_str!("ui.rs").contains(assembled_needle.as_str()),
-            "step 5 must finalize with a 100% payload-assembly milestone"
-        );
-    }
-
-    #[test]
-    fn test_step_percent_maps_stage_span_onto_zero_hundred() {
-        assert_eq!(step_percent(1, 0), 0);
-        assert_eq!(step_percent(1, 10), 50);
-        assert_eq!(step_percent(1, 20), 100);
-        assert_eq!(step_percent(2, 20), 0, "stage start is step start");
-        assert_eq!(step_percent(2, 30), 50, "stage midpoint is 50% of the step");
-        assert_eq!(step_percent(2, 40), 100, "stage end is step end");
-        assert_eq!(step_percent(5, 80), 0);
-        assert_eq!(step_percent(5, 90), 50);
-        assert_eq!(step_percent(5, 100), 100);
-        assert_eq!(step_percent(2, 5), 0, "clamped below own span");
-        assert_eq!(step_percent(2, 95), 100, "clamped above own span");
-        assert_eq!(step_percent(5, 120), 100, "clamped past 100");
-    }
-
-    #[test]
-    fn test_tu_index_events_stay_in_stage_two_span() {
-        assert_eq!(tu_index_percent(0, 0), 20, "empty TU set must sit at stage start");
-        assert_eq!(tu_index_percent(0, 7), 20);
-        assert_eq!(tu_index_percent(7, 7), 40);
-        let mut previous = tu_index_percent(0, 9);
-        for done in 1..=9 {
-            let percent = tu_index_percent(done, 9);
-            assert!((20..=40).contains(&percent), "{done}/9 mapped to {percent}%");
-            assert!(percent >= previous, "percent regressed at {done}/9");
-            previous = percent;
-        }
-    }
-
-    #[test]
-    fn test_collateral_events_stay_in_stage_five_span() {
-        assert_eq!(
-            collateral_file_percent(0, 0),
-            81,
-            "empty collateral set must sit at the file-loop floor"
-        );
-        assert_eq!(collateral_file_percent(0, 7), 81);
-        assert_eq!(collateral_file_percent(7, 7), COLLATERAL_FILE_SPAN_END);
-        let mut previous = collateral_file_percent(0, 9);
-        for done in 1..=9 {
-            let percent = collateral_file_percent(done, 9);
-            assert!(
-                (SYMBOLS_ANALYZED_PERCENT..=COLLATERAL_FILE_SPAN_END).contains(&percent),
-                "{done}/9 mapped to {percent}%"
-            );
-            assert!(percent >= previous, "percent regressed at {done}/9");
-            previous = percent;
-        }
-    }
-
-    /// A4: replay the exact stage-5 emission order of `run_pipeline_stages`
-    /// and `stage_progress_callback` and `build_ui_payload` (static
-    /// milestones through the same `stage_report` helper, pipeline events
-    /// through the real callback mapping) and pin the produced report
-    /// sequence: percent monotonic non-decreasing, every report inside
-    /// [80, 100], and exactly one 100% frame — the terminal "Payload
-    /// assembled" (progress.rs finalizes only a step-5 100% frame, so this
-    /// is the contract that keeps the finalize at the true end of the
-    /// build).
-    #[test]
-    fn test_stage_five_milestone_sequence_is_monotonic_and_contained() {
-        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink = collected.clone();
-        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
-        let mut event_cb = stage_progress_callback(progress.clone());
-
-        progress(stage_report(5, stage_start_percent(5), COLLATERAL_PHASE, "Load analysis"));
-        event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
-            symbols: 21,
-        }));
-        for done in 0..=4 {
-            event_cb(&ProgressEvent::CollateralFile { done, total: 4 });
-        }
-        event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
-        progress(stage_report(
-            5,
-            ARTIFACTS_SAVED_PERCENT,
-            COLLATERAL_PHASE,
-            "Collateral mapped",
-        ));
-        progress(stage_report(
-            5,
-            PLANNING_EXTRACTIONS_PERCENT,
-            COLLATERAL_PHASE,
-            "Planning extractions",
-        ));
-        progress(stage_report(
-            5,
-            JUSTIFYING_SYMBOLS_PERCENT,
-            COLLATERAL_PHASE,
-            "Justifying symbols...",
-        ));
-        progress(stage_report(
-            5,
-            JUSTIFICATION_COMPLETE_PERCENT,
-            COLLATERAL_PHASE,
-            "Symbols justified",
-        ));
-        progress(stage_report(
-            5,
-            PAYLOAD_ASSEMBLED_PERCENT,
-            COLLATERAL_PHASE,
-            "Payload assembled",
-        ));
-
-        let reports = collected.lock().unwrap();
-        let sequence: Vec<(usize, &str)> = reports
-            .iter()
-            .map(|report| (report.percent, report.message.as_str()))
-            .collect();
-        assert_eq!(
-            sequence,
-            vec![
-                (80, "Load analysis"),
-                (81, "21 symbols analyzed"),
-                (81, "0/4 files"),
-                (81, "1/4 files"),
-                (81, "2/4 files"),
-                (81, "3/4 files"),
-                (82, "4/4 files"),
-                (85, "Load artifacts saved"),
-                (85, "Collateral mapped"),
-                (85, "Planning extractions"),
-                (86, "Justifying symbols..."),
-                (99, "Symbols justified"),
-                (100, "Payload assembled"),
-            ],
-            "stage-5 emission order must be the calibrated milestone sequence"
-        );
-        for pair in reports.windows(2) {
-            assert!(
-                pair[0].percent <= pair[1].percent,
-                "percent regressed: {} -> {}",
-                pair[0].percent,
-                pair[1].percent
-            );
-        }
-        for report in reports.iter() {
-            assert_eq!(report.stage, 5, "every stage-5 report stays on step 5");
-            assert!(
-                (80..=100).contains(&report.percent),
-                "{}% escapes the stage-5 span",
-                report.percent
-            );
-        }
-        let terminals = reports.iter().filter(|r| r.percent == 100).count();
-        assert_eq!(
-            terminals, 1,
-            "only the terminal 'Payload assembled' may show 100%"
-        );
-        assert_eq!(reports.last().unwrap().message, "Payload assembled");
-    }
-
-    /// A4 minor: the replay above proves the helper mapping is right, but a
-    /// future edit could still reorder the real `stage5_report` calls in
-    /// `build_ui_payload` and the replay would keep passing. Pin the real
-    /// call order in the SOURCE TEXT: inside the production section of
-    /// ui.rs (everything before the first test attribute), the byte offset
-    /// of "Planning extractions" must be strictly before "Justifying
-    /// symbols", and both strictly before the guarded
-    /// `build_file_justification_with_memo(` call. Reordering the planner
-    /// behind the memo — misrepresenting the boot bar — fails here loudly.
-    #[test]
-    fn test_planning_milestone_precedes_justifying_in_source() {
-        let ui_code = include_str!("ui.rs");
-        let production_end = ui_code
-            .find("#[cfg(test)]")
-            .expect("ui.rs must have a test module to cut the production section at");
-        let production = &ui_code[..production_end];
-        // The production cut already excludes this test's own literals.
-        let planning_at = production
-            .find("Planning extractions")
-            .expect("planning milestone label must be emitted in production code");
-        let justifying_at = production
-            .find("Justifying symbols")
-            .expect("justifying milestone label must be emitted in production code");
-        // Needle carries the open paren: the doc comments naming the memo
-        // function never match, only the real call site does.
-        let justification_call_at = production
-            .find("build_file_justification_with_memo(")
-            .expect("the guarded justification call must exist in production code");
-        assert!(
-            planning_at < justifying_at,
-            "\"Planning extractions\" (byte {planning_at}) must precede \"Justifying symbols\" (byte {justifying_at}) in ui.rs source — the planner really runs before the memo"
-        );
-        assert!(
-            planning_at < justification_call_at,
-            "\"Planning extractions\" (byte {planning_at}) must precede the justification call (byte {justification_call_at})"
-        );
-        assert!(
-            justifying_at < justification_call_at,
-            "\"Justifying symbols\" (byte {justifying_at}) must immediately precede the call it guards (byte {justification_call_at})"
-        );
-    }
-
-    #[test]
-    fn test_phase_label_stable_within_stage() {
-        let mut phase_by_stage: HashMap<usize, &str> = HashMap::new();
-        for (_, phase) in emitted_milestones() {
-            let stage = stage_number_of(phase);
-            if let Some(previous) = phase_by_stage.insert(stage, phase) {
-                assert_eq!(
-                    previous, phase,
-                    "stage {stage} milestones disagree: {previous:?} vs {phase:?}"
-                );
-            }
-        }
-        // Plan A5: the phase-label scan must cover both files of the
-        // split, so a `[k/5]` literal can never hide in the payload
-        // builders and escape label-stability checking.
-        let ui_code =
-            format!("{}{}", include_str!("ui.rs"), include_str!("ui_payload.rs"));
-        for stage in 1..=STAGES_PER_RUN {
-            let prefix = format!("[{stage}/5]");
-            let tail = &phase_by_stage[&stage][prefix.len()..];
-            let mut haystack = ui_code.as_str();
-            while let Some(index) = haystack.find(&prefix) {
-                let rest = &haystack[index + prefix.len()..];
-                assert!(
-                    rest.starts_with(tail),
-                    "stage {stage} emits an inconsistent phase label near: {:?}",
-                    &rest[..rest.len().min(32)]
-                );
-                haystack = rest;
-            }
-        }
-    }
-}
+#[cfg(test)]
+mod builder_tests;

@@ -26,6 +26,7 @@ fn setup_chain_fixture() -> (IncludeGraph, ReducedSemanticModel) {
             kind: IncludeKind::Local,
             raw_path: name.to_string(),
             resolved_path: Some(PathBuf::from(name)),
+            language: crate::types::LanguageId::cpp(),
         });
     };
     include(&mut ig, FileId(1), FileId(2), "Helper.h");
@@ -38,6 +39,9 @@ fn setup_chain_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -51,6 +55,7 @@ fn setup_chain_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -108,6 +113,9 @@ fn setup_seed_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -121,6 +129,7 @@ fn setup_seed_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -269,6 +278,7 @@ pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
             kind: IncludeKind::Local,
             raw_path: name.to_string(),
             resolved_path: Some(PathBuf::from(name)),
+            language: crate::types::LanguageId::cpp(),
         });
     };
     include(&mut ig, FileId(1), FileId(2), "Helper.h");
@@ -284,6 +294,9 @@ pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -297,6 +310,7 @@ pub fn setup_concurrency_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -510,9 +524,7 @@ fn test_union_of_single_seed_closures_equals_direct_multi_seed() {
                     .get_semantic_closure_of_symbols(&model, std::slice::from_ref(seed)),
             );
         }
-        let via_warm = warm
-            .memo()
-            .get_semantic_closure_of_symbols(&model, seeds);
+        let via_warm = warm.memo().get_semantic_closure_of_symbols(&model, seeds);
 
         assert_eq!(
             direct, union,
@@ -794,7 +806,8 @@ fn test_analyze_file_load_by_id_matches_path_variant_on_all_fixtures() {
                 .analyze_file_load_by_id(file_id)
                 .unwrap_or_else(|_| panic!("analyze_file_load_by_id({file_id:?}) failed"));
             assert_eq!(
-                by_id, by_path,
+                by_id,
+                by_path,
                 "by-id metric must equal the path metric for {}",
                 path.display()
             );
@@ -858,12 +871,11 @@ fn test_partition_symbols_equals_legacy_split_including_order() {
     for (ig, model) in [setup_chain_fixture(), setup_concurrency_fixture()] {
         let analyzer = LoadAnalyzer::new(&ig, &model);
         for (file_id, seeds) in &model.file_symbols {
-            let physical = analyzer
-                .memo
-                .expand_physical_symbols(&ig, &model, &HashSet::from([*file_id]));
-            let closure = analyzer
-                .memo
-                .get_semantic_closure_of_symbols(&model, seeds);
+            let physical =
+                analyzer
+                    .memo
+                    .expand_physical_symbols(&ig, &model, &HashSet::from([*file_id]));
+            let closure = analyzer.memo.get_semantic_closure_of_symbols(&model, seeds);
             assert_eq!(
                 partition_symbols(&physical, &closure),
                 legacy_symbol_split(&physical, &closure),
@@ -871,9 +883,10 @@ fn test_partition_symbols_equals_legacy_split_including_order() {
             );
         }
         // Edge cases: nothing semantic, nothing physical.
-        let physical = analyzer
-            .memo
-            .expand_physical_symbols(&ig, &model, &HashSet::from([FileId(1)]));
+        let physical =
+            analyzer
+                .memo
+                .expand_physical_symbols(&ig, &model, &HashSet::from([FileId(1)]));
         assert_eq!(
             partition_symbols(&physical, &HashSet::new()),
             legacy_symbol_split(&physical, &HashSet::new()),
@@ -925,9 +938,18 @@ fn test_compute_load_warm_matches_cold_on_concurrency_fixture() {
         .map(|n| fresh.analyze_symbol_load(n).expect("fresh symbol load"))
         .collect();
 
-    assert_eq!(warm_files, cold_files, "warmed file metrics must equal cold ones");
-    assert_eq!(warm_symbols, cold_symbols, "warmed symbol metrics must equal cold ones");
-    assert_eq!(warm_files, fresh_files, "warmed file metrics must equal fresh analyzers'");
+    assert_eq!(
+        warm_files, cold_files,
+        "warmed file metrics must equal cold ones"
+    );
+    assert_eq!(
+        warm_symbols, cold_symbols,
+        "warmed symbol metrics must equal cold ones"
+    );
+    assert_eq!(
+        warm_files, fresh_files,
+        "warmed file metrics must equal fresh analyzers'"
+    );
     assert_eq!(
         warm_symbols, fresh_symbols,
         "warmed symbol metrics must equal fresh analyzers'"

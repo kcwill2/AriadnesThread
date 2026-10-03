@@ -25,6 +25,7 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
             kind: IncludeKind::Local,
             raw_path: name.to_string(),
             resolved_path: Some(PathBuf::from(name)),
+            language: crate::types::LanguageId::cpp(),
         });
     };
     include(&mut ig, FileId(1), FileId(2), "Helper.h");
@@ -37,6 +38,9 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -50,6 +54,7 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -301,6 +306,9 @@ fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -314,6 +322,7 @@ fn setup_required_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -350,6 +359,9 @@ fn setup_tiebreak_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -363,6 +375,7 @@ fn setup_tiebreak_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -504,6 +517,9 @@ fn setup_ei9_fixture() -> (IncludeGraph, ReducedSemanticModel) {
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let add_sym = |model: &mut ReducedSemanticModel, name: &str, file: FileId| {
@@ -517,6 +533,7 @@ fn setup_ei9_fixture() -> (IncludeGraph, ReducedSemanticModel) {
                 defining_file: Some(file),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         id
@@ -595,38 +612,6 @@ fn test_required_headers_seed_exclusion_still_applies_alongside_header_filter() 
     assert!(rows.iter().all(|(id, _, _)| *id != FileId(4)));
 }
 
-#[test]
-fn test_is_includable_header_predicate() {
-    let cases: Vec<(&str, bool)> = vec![
-        ("a.h", true),
-        ("a.hpp", true),
-        ("a.hxx", true),
-        ("inc/util.h", true),
-        // Final component ends in .h, so this IS a header regardless of the
-        // embedded .cpp: e.g. a hand-written header living beside worker.cpp.
-        ("x.cpp.h", true),
-        // Decision, documented here: a file literally named ".h" is treated
-        // as a header — the predicate is ends_with on the file name (same
-        // rule as the dto.rs node-kind check), and ".h" satisfies it.
-        (".h", true),
-        ("a.cc", false),
-        ("a.cpp", false),
-        ("a.c", false),
-        // Template-impl files are deliberately OUT for now — future question.
-        ("a.ipp", false),
-        ("a.inl", false),
-        // Case-sensitive, matching dto.rs kind detection.
-        ("a.H", false),
-        ("a.txt", false),
-        // No final component at all: not includable.
-        ("..", false),
-        ("", false),
-    ];
-    for (name, expected) in cases {
-        assert_eq!(
-            is_includable_header(Path::new(name)),
-            expected,
-            "is_includable_header({name:?})"
-        );
-    }
-}
+// The `is_includable_header` decision-table test moved to
+// `ariadne-repo::types` alongside the relocated predicate (plan §6.3 R2:
+// header-suffix taxonomy lives in the repo taxonomy crate).

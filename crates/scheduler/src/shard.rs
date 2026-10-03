@@ -85,6 +85,7 @@ impl ShardedReducer {
                     defining_file: None,
                     declarations: Vec::new(),
                     definition: None,
+                    declaring_files: Vec::new(),
                 });
 
             for decl in sym.declarations {
@@ -215,6 +216,9 @@ impl ShardedReducer {
             edges: final_edges,
             tu_usage,
             file_symbols,
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         }
     }
 }
@@ -260,6 +264,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: alpha,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: shared.clone(),
@@ -268,6 +273,8 @@ mod reduce_characterization {
                     owning_file: hdr,
                     declarations: vec![DeclId::new("ch_decl_3"), DeclId::new("ch_decl_1")],
                     definition: Some(DeclId::new("ch_def_shared_first")),
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: alpha_sym.clone(),
@@ -276,6 +283,8 @@ mod reduce_characterization {
                     owning_file: hdr,
                     declarations: vec![DeclId::new("ch_decl_a1")],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: beta_sym.clone(),
@@ -284,6 +293,8 @@ mod reduce_characterization {
                     owning_file: gamma,
                     declarations: vec![],
                     definition: Some(DeclId::new("ch_def_beta")),
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -305,6 +316,8 @@ mod reduce_characterization {
             ],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         }
     }
 
@@ -319,6 +332,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: beta,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 // Second record for the shared symbol: Class kind and a different
                 // definition arrive AFTER the Function record from tu alpha.
@@ -329,6 +343,8 @@ mod reduce_characterization {
                     owning_file: hdr,
                     declarations: vec![DeclId::new("ch_decl_1"), DeclId::new("ch_decl_2")],
                     definition: Some(DeclId::new("ch_def_shared_second")),
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: gamma_sym.clone(),
@@ -337,6 +353,8 @@ mod reduce_characterization {
                     owning_file: beta,
                     declarations: vec![DeclId::new("ch_decl_g1")],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -367,6 +385,8 @@ mod reduce_characterization {
                 is_write: false,
             }],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         }
     }
 
@@ -377,6 +397,7 @@ mod reduce_characterization {
         TuAnalysis {
             tu_file_id: gamma,
             context_name: "char".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![],
             declarations: vec![],
             edges: vec![SemanticEdge {
@@ -388,6 +409,8 @@ mod reduce_characterization {
             }],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         }
     }
 
@@ -413,6 +436,7 @@ mod reduce_characterization {
                 defining_file: None,
                 declarations: vec![DeclId::new("ch_decl_a1")],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         symbols.insert(
@@ -424,6 +448,7 @@ mod reduce_characterization {
                 defining_file: Some(gamma),
                 declarations: vec![],
                 definition: Some(DeclId::new("ch_def_beta")),
+                declaring_files: vec![],
             },
         );
         symbols.insert(
@@ -435,6 +460,7 @@ mod reduce_characterization {
                 defining_file: None,
                 declarations: vec![DeclId::new("ch_decl_g1")],
                 definition: None,
+                declaring_files: vec![],
             },
         );
         // First-wins merge: Function kind/name/definition from the first TU record,
@@ -452,6 +478,7 @@ mod reduce_characterization {
                     DeclId::new("ch_decl_3"),
                 ],
                 definition: Some(DeclId::new("ch_def_shared_first")),
+                declaring_files: vec![],
             },
         );
         symbols
@@ -517,6 +544,9 @@ mod reduce_characterization {
             ],
             tu_usage: char_expected_tu_usage(),
             file_symbols,
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         }
     }
 
@@ -569,6 +599,8 @@ mod tests {
             owning_file: f1.clone(),
             declarations: vec![DeclId("decl_a".into())],
             definition: Some(DeclId("def_a".into())),
+
+            modifiers: Vec::new(),
         };
 
         let sym2 = SymbolRecord {
@@ -578,6 +610,8 @@ mod tests {
             owning_file: f2.clone(),
             declarations: vec![DeclId("decl_b".into())],
             definition: Some(DeclId("def_b".into())),
+
+            modifiers: Vec::new(),
         };
 
         let edge = SemanticEdge {
@@ -591,21 +625,27 @@ mod tests {
         let tu1 = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "default".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![sym1.clone()],
             declarations: vec![],
             edges: vec![edge.clone()],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
             tu_file_id: f2.clone(),
             context_name: "default".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![sym2.clone()],
             declarations: vec![],
             edges: vec![],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let analyses = vec![tu1, tu2];

@@ -4,7 +4,7 @@ use ariadne_build::{BuildDiscoveryResult, CompilationContext, CompileCommand, Tr
 use ariadne_repo::FileId;
 use tempfile::tempdir;
 
-const FP: &str = "test-fingerprint";
+pub(super) const FP: &str = "test-fingerprint";
 
 #[test]
 fn test_artifact_manager_creation() {
@@ -95,6 +95,7 @@ fn test_save_build_context_artifacts() {
         source_path: root.join("src/main.cpp"),
         context_name: "Debug|x64".into(),
         compile_command: cmd,
+        language: Default::default(),
     };
 
     let build_result = BuildDiscoveryResult {
@@ -229,6 +230,48 @@ fn test_fingerprintless_manifest_is_stale() {
 }
 
 #[test]
+fn stale_analysis_epoch_is_rejected_before_blob_read() {
+    // §7 risk row + §9 M18.10: `symbols.bin` is bincode, so a v1-era blob must
+    // NEVER reach the new struct — the manifest epoch gate must fire first.
+    // Scope honesty: constructing a byte-authentic v1 `symbols.bin` requires
+    // the pre-M18.9 `ReducedSymbolRecord` layout (changed by the parallel M18.9
+    // task), so this test plants an intentionally undecodable blob and locks
+    // the ORDER of the checks: a stale epoch yields a StaleArtifact (rebuild
+    // trigger), never a bincode/serde error.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let repo = Repository::locate(root).unwrap();
+    let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+
+    let index_result = ariadne_index::IndexResult::new(repo.root.clone(), vec![]);
+    let reduced = ariadne_graph::ReducedSemanticModel::reduce(&index_result);
+    mgr.save_reduced_artifacts(&reduced, FP).unwrap();
+
+    let reduced_dir = mgr.artifact_root.join("reduced");
+    fs::write(reduced_dir.join("symbols.bin"), b"definitely-not-v1-bincode").unwrap();
+    let manifest_path = reduced_dir.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["analysis_version"] = serde_json::Value::String("1.0.0".to_string());
+    fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+    let err = mgr.load_reduced_checked(FP).unwrap_err();
+    assert!(
+        is_stale(&err),
+        "stale epoch must report StaleArtifact (rebuild trigger): {err}"
+    );
+    assert!(
+        err.to_string().contains("analysis version mismatch"),
+        "error must name the epoch gate: {err}"
+    );
+    assert!(
+        !err.to_string().contains("eserialize"),
+        "blob must never be deserialized once the epoch is stale: {err}"
+    );
+    assert!(!mgr.stage_is_fresh("reduced", FP));
+}
+
+#[test]
 fn test_save_and_load_load_artifacts() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -300,38 +343,9 @@ fn test_save_and_load_plan_artifacts() {
     assert_eq!(loaded[0].collateral_load_after, 58);
 }
 
-#[test]
-fn test_save_extraction_artifacts() {
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-    let repo = Repository::locate(root).unwrap();
-    let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
-
-    let sym1 = ariadne_transform::ExtractedSymbol {
-        name: "MyClass".to_string(),
-        kind: ariadne_index::types::SymbolKind::Class,
-        forward_declarable: true,
-        body: "// body1".to_string(),
-    };
-    let header1 = ariadne_transform::GeneratedHeader {
-        filename: std::path::PathBuf::from("h1.h"),
-        pragma_once: true,
-        symbols: vec![sym1],
-        required_includes: vec![],
-    };
-
-    let result = ariadne_transform::ExtractionResult {
-        plan_id: "PLAN-1".to_string(),
-        headers: vec![header1],
-        errors: vec![],
-    };
-
-    let output_dir = mgr.artifact_root.join("generated");
-    mgr.save_extraction_artifacts(&result, &output_dir).unwrap();
-
-    assert!(output_dir.join("manifest.json").exists());
-    assert!(output_dir.join("headers").join("h1.h").exists());
-}
+// test_save_extraction_artifacts (real C++ plugin extractor) moved verbatim
+// to `crates/report/tests/extraction_artifacts_test.rs` (M23 T3, D-M23-10):
+// it names the C++ plugin and lives outside the guard walk scope.
 
 #[test]
 fn test_save_migration_artifacts() {
@@ -579,7 +593,10 @@ fn test_save_load_callgraph_artifacts() {
 
 const LOCK_REPORT_JSON_HASH: u64 = 0x70c9_1d07_9946_f7d9;
 const LOCK_REPORT_BIN_HASH: u64 = 0x7a12_1e91_0cbf_2e00;
-const LOCK_MANIFEST_JSON_HASH: u64 = 0x8555_8c5e_b51e_12b1;
+// Resynced for the M18.10 cache-epoch bump ("1.0.0" → "2.0.0"): the load
+// manifest embeds `analysis_version`, so its bytes legitimately shift while
+// the report json/bin locks stay pinned (they carry no version).
+const LOCK_MANIFEST_JSON_HASH: u64 = 0xddc3_f9ee_566b_5ea6;
 
 fn fnv1a64_hash(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -606,7 +623,7 @@ fn fixture_contributing_source(
     }
 }
 
-fn fixture_load_report() -> LoadReport {
+pub(super) fn fixture_load_report() -> LoadReport {
     let alpha_source =
         fixture_contributing_source("include/alpha.h", "Alpha::", &["value", "helper", "state"]);
     let beta_source = fixture_contributing_source("include/beta.hpp", "Beta::", &["edge"]);
@@ -677,7 +694,7 @@ fn load_artifact_hashes(load_dir: &Path) -> (u64, u64, u64) {
     )
 }
 
-fn manager_in_fresh_tempdir(dir: &tempfile::TempDir) -> ArtifactManager {
+pub(super) fn manager_in_fresh_tempdir(dir: &tempfile::TempDir) -> ArtifactManager {
     let repo = Repository::locate(dir.path()).unwrap();
     ArtifactManager::prepare_for_repo(&repo).unwrap()
 }
@@ -740,4 +757,83 @@ fn load_artifact_bytes_independent_of_threading() {
         )
     });
     assert_eq!(first, multi, "4-thread rayon pool must match direct call");
+}
+
+fn channel_model(root: &std::path::Path) -> ariadne_graph::ReducedSemanticModel {
+    use ariadne_index::types::SymbolId;
+    let mut model = ariadne_graph::ReducedSemanticModel::reduce(&ariadne_index::IndexResult::new(
+        root.to_path_buf(),
+        vec![],
+    ));
+    model.extends_edges = vec![(
+        SymbolId::new("p.Circle"),
+        SymbolId::new("p.Shape"),
+    )];
+    model.sealed_symbols = vec![SymbolId::new("p.Shape")];
+    model
+}
+
+#[test]
+fn reduced_extends_channel_round_trips_and_old_dirs_load_empty() {
+    let dir = tempdir().unwrap();
+    let mgr = manager_in_fresh_tempdir(&dir);
+    let model = channel_model(dir.path());
+    let reduced_dir = mgr.save_reduced_artifacts(&model, FP).unwrap();
+
+    let loaded = mgr.load_reduced_artifacts().unwrap();
+    assert_eq!(
+        loaded.extends_edges, model.extends_edges,
+        "D-M23-8: the typed extends channel round-trips through the new side file"
+    );
+    assert_eq!(
+        loaded.sealed_symbols, model.sealed_symbols,
+        "D-M23-8: the sealed side channel round-trips (symbols.bin layout stays frozen)"
+    );
+
+    // Drift guard (ruling guard 2): a pre-change artifact directory carries
+    // neither side file; loading it must yield EMPTY channels, never garbage.
+    for side in ["extends-edges.bin", "sealed-symbols.bin"] {
+        let path = reduced_dir.join(side);
+        if path.exists() {
+            fs::remove_file(&path).unwrap();
+        }
+    }
+    let legacy = mgr.load_reduced_artifacts().unwrap();
+    assert!(
+        legacy.extends_edges.is_empty() && legacy.sealed_symbols.is_empty(),
+        "file-absent means empty channel: old four-blob dirs load unchanged"
+    );
+    assert_eq!(
+        legacy.symbols, loaded.symbols,
+        "the four frozen blobs deserialized identically with and without the side files"
+    );
+}
+
+#[test]
+fn reduced_four_blob_bytes_independent_of_extends_channel() {
+    // Drift guard (ruling guards 1+2): filling the channel must not move a
+    // single byte of symbols.bin / edges.bin / tu-usage.bin / file-symbols.bin.
+    let plain_dir = tempdir().unwrap();
+    let plain_mgr = manager_in_fresh_tempdir(&plain_dir);
+    let plain_model = ariadne_graph::ReducedSemanticModel::reduce(&ariadne_index::IndexResult::new(
+        plain_dir.path().to_path_buf(),
+        vec![],
+    ));
+    let plain_files = plain_mgr
+        .save_reduced_artifacts(&plain_model, FP)
+        .unwrap();
+
+    let channel_dir = tempdir().unwrap();
+    let channel_mgr = manager_in_fresh_tempdir(&channel_dir);
+    let channel_files = channel_mgr
+        .save_reduced_artifacts(&channel_model(channel_dir.path()), FP)
+        .unwrap();
+
+    for blob in ["symbols.bin", "edges.bin", "tu-usage.bin", "file-symbols.bin"] {
+        assert_eq!(
+            fs::read(plain_files.join(blob)).unwrap(),
+            fs::read(channel_files.join(blob)).unwrap(),
+            "{blob} bytes must not depend on the channel (epoch 2.0.0 stays honest)"
+        );
+    }
 }

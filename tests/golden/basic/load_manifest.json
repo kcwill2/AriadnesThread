@@ -1,0 +1,8 @@
+{
+  "analysis_version": "<ANALYSIS_VERSION>",
+  "input_fingerprint": "<INPUT_FINGERPRINT>",
+  "repository_root": "<ROOT>",
+  "total_analyzed_files": 5,
+  "total_analyzed_symbols": 7,
+  "total_collateral_load": 25
+}

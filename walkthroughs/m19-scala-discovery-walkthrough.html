@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: M19 Scala Plugin - Discovery + Build Context</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            white-space: pre;
+        }
+        .before {
+            border-left: 4px solid #f44336;
+        }
+        .after {
+            border-left: 4px solid #4caf50;
+        }
+        .key { color: #569cd6; }
+        .str { color: #ce9178; }
+        .cm { color: #6a9955; }
+        .label { font-weight: 600; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: -6px; }
+        .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+        .pill.green { background: #e8f5e9; color: #2e7d32; }
+        .pill.red { background: #ffebee; color: #c62828; }
+        .pill.blue { background: #e3f2fd; color: #1565c0; }
+        .cols { display: flex; gap: 20px; }
+        .cols > div { flex: 1; min-width: 0; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+        th { background: #f0f0f0; }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active">
+    <h1>M19 - Scala Plugin: Discovery + Build Context</h1>
+    <p style="font-size: 18px; color: #555;">AriadnesThread goes polyglot: the first non-C++ language plugin, wired end-to-end through discovery and build context - offline, byte-safe, and with zero drift on the C++ goldens.</p>
+    <p>
+        <span class="pill green">M19.1 + M19.2 · d0c6499</span>
+        <span class="pill green">M19.3 + D9 · e029e71</span>
+        <span class="pill blue">specs 9ac69e4 · notes 33b0d58</span>
+    </p>
+    <p style="color: #888;">2026-10-01 · branch <code>multi-language-support</code> · IDD/RGB-TDD · both reviewer gates APPROVED</p>
+</div>
+
+<!-- Slide 2: Overview -->
+<div class="slide">
+    <h1>Overview</h1>
+    <h2>What was implemented</h2>
+    <ul>
+        <li><b>New crate <code>crates/lang-scala</code></b> - <code>ScalaPlugin</code> (identity, modeling, capabilities, shaper hook), <code>ScalaDetector</code>, <code>ScalaUnitShaper</code>, and milestone-documented stubs for the not-yet-arrived stages.</li>
+        <li><b>D9 registry consolidation</b> - one shared builder in <code>ariadne-pipeline</code> replaces the duplicated cli/pipeline enumeration; the CLI delegates.</li>
+        <li><b>One-word repo discovery fix</b> - <code>.scala</code> files are now actually recorded by <code>Repository::discover</code>.</li>
+        <li><b>Capability-gated CLI stage backends</b> - the hidden blast radius of "just register a second plugin" fixed the plan's own way.</li>
+        <li><b><code>tests/fixtures/scala-basic</code> + <code>m19_scala_discovery_test.rs</code></b> (5 tests) locking the whole boundary.</li>
+    </ul>
+    <h2>Why it was needed</h2>
+    <p>M17 built the plugin seam and M18 moved C++ behind it. M19 is the proof that a second language can arrive through <b>registration alone</b> (plan rule R1) - and it is the first milestone where Scala code actually runs.</p>
+    <h2>Hard boundary honored</h2>
+    <p>Discovery + build context <b>only</b>. No import resolver (M20), no parser/analyzer (M21). No Scala toolchain was ever invoked (<code>scalac</code> appears only as a string literal) - assumption A3 offline holds.</p>
+    <h2>The numbers</h2>
+    <table>
+        <tr><th>Gate</th><th>Result</th></tr>
+        <tr><td><code>cargo test --workspace</code></td><td><b>715 passed / 0 failed / 3 ignored</b> (baseline 679, +36)</td></tr>
+        <tr><td>m17 plugin seam (architecture guards)</td><td>5/5</td></tr>
+        <tr><td>m00 golden baseline</td><td>2/2 - <b>zero golden drift</b></td></tr>
+        <tr><td>m18 C++ plugin parity</td><td>22/22 byte-identical</td></tr>
+        <tr><td>m19 new suite</td><td>5/5</td></tr>
+        <tr><td>hygiene_check.py</td><td>exit 0</td></tr>
+    </table>
+</div>
+
+<!-- Slide 3: ScalaPlugin -->
+<div class="slide">
+    <h1>The plugin: what Scala *is* to the pipeline</h1>
+    <p><code>crates/lang-scala/src/plugin.rs</code> - the modeling row of plan §3.4 and the capability row of plan:381, made code. Capabilities are not decoration: they are the gating mechanism the whole pipeline routes on (see slide 7).</p>
+    <div class="label">crates/lang-scala/src/plugin.rs - after (new file)</div>
+    <div class="code-block after"><span class="key">fn</span> modeling(&amp;<span class="key">self</span>) -&gt; LanguageModeling {
+    LanguageModeling {
+        language: LanguageId::Scala,
+        unit: UnitKind::SourceFile,                    <span class="cm">// one .scala file = one unit</span>
+        aggregation: AggregationKind::PackageObject,   <span class="cm">// a package object, not a header</span>
+        guard: GuardKind::None,                        <span class="cm">// JVM+packages dedupe; no #pragma once</span>
+        symbol_placement: SymbolPlacement::SingleFile, <span class="cm">// declaring file == defining file</span>
+        aggregation_reexports: false,
+        cycle_policy: CyclePolicy::TolerateWithinPackage, <span class="cm">// mutual recursion is legal Scala</span>
+        external_path_markers: vec![<span class="str">"lib"</span>, <span class="str">"target"</span>, <span class="str">".ivy2"</span>, <span class="str">".cache"</span>], <span class="cm">// enforced in M20</span>
+    }
+}
+
+<span class="cm">/// Plan:381 literal - a `planning: true` slip is a review blocker</span>
+<span class="key">fn</span> capabilities(&amp;<span class="key">self</span>) -&gt; LanguageCapabilities {
+    LanguageCapabilities {
+        discovery: <span class="key">true</span>, dependency_graph: <span class="key">true</span>, semantic_index: <span class="key">true</span>, load_metric: <span class="key">true</span>,
+        planning: <span class="key">false</span>, extraction: <span class="key">false</span>, rewriting: <span class="key">false</span>, validation: <span class="key">false</span>,
+        requires_toolchain: <span class="key">false</span>, <span class="cm">// A3: works offline, no scalac</span>
+    }
+}</div>
+    <p><b>Why <code>dependency_graph: true</code> already, when the resolver is M20?</b> The capability says the stage is <i>addressable</i> for this language; the machinery arrives on schedule. The <code>false</code> flags on the extraction side are load-bearing today - they are what keep C++ as the sole text backend (slide 7).</p>
+    <p>The test <code>capabilities_match_the_plan_381_literal</code> is a <b>full-struct <code>assert_eq!</code></b> against an independent literal - and it caught exactly the slip it was written for in an aborted implementer session.</p>
+</div>
+
+<!-- Slide 4: ScalaDetector -->
+<div class="slide">
+    <h1>ScalaDetector: ordering is the whole game</h1>
+    <p><code>crates/lang-scala/src/detector.rs</code> - mirrors <code>FileKind::from_path</code>'s case-insensitivity. The subtle rule: <b>basename rules run BEFORE extension rules</b>, because <code>build.sc</code> (an Mill build definition) shares the <code>.sc</code> extension with Ammonite scripts.</p>
+    <div class="label">crates/lang-scala/src/detector.rs - new</div>
+    <div class="code-block after"><span class="key">fn</span> detect(&amp;<span class="key">self</span>, path: &amp;Path) -&gt; SourceFileKind {
+    <span class="key">if</span> is_build_definition(path) {          <span class="cm">// FIRST: build.sbt | build.sc | pom.xml</span>
+        <span class="key">return</span> SourceFileKind::BuildDefinition; <span class="cm">//        | project/build.properties</span>
+    }
+    <span class="key">match</span> path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) <span class="key">if</span> ext.eq_ignore_ascii_case(<span class="str">"scala"</span>) =&gt; SourceFileKind::Source,
+        Some(ext) <span class="key">if</span> ext.eq_ignore_ascii_case(<span class="str">"sc"</span>)   =&gt; SourceFileKind::Script,
+        _ =&gt; SourceFileKind::Other,           <span class="cm">// .java, .kt, .cpp stay Other</span>
+    }
+}</div>
+    <p>A <code>build.sc</code> detected <i>after</i> the extension rule would silently become a "script" and vanish from build-marker logic - pinned by a dedicated test case, plus 11 more detector cases (<code>.SCALA</code> case-insensitivity, <code>sub/build.properties</code> NOT a build file, etc.).</p>
+</div>
+
+<!-- Slide 5: ScalaUnitShaper -->
+<div class="slide">
+    <h1>ScalaUnitShaper: the sbt layout, as plugin knowledge</h1>
+    <p><code>crates/lang-scala/src/shaper.rs</code>. C++ asks the build system what its translation units are; Scala's build system (sbt) says "src/main/scala, per module". That convention now lives <b>in the plugin</b>, never in <code>ariadne-build</code> (plan rule R2).</p>
+    <div class="label">crates/lang-scala/src/shaper.rs - new (essence)</div>
+    <div class="code-block after"><span class="key">fn</span> build_markers(&amp;<span class="key">self</span>) -&gt; Vec&lt;&amp;<span class="key">'static</span> str&gt; {
+    vec![<span class="str">"build.sbt"</span>, <span class="str">"build.sc"</span>, <span class="str">"pom.xml"</span>]      <span class="cm">// plan:383 verbatim</span>
+}
+<span class="key">fn</span> default_compiler(&amp;<span class="key">self</span>) -&gt; &amp;<span class="key">str</span> { <span class="str">"scalac"</span> }  <span class="cm">// never invoked here (A3)</span>
+
+<span class="key">fn</span> shape_units(&amp;<span class="key">self</span>, repo_root: &amp;Path, files: &amp;[FileRecord]) -&gt; Vec&lt;UnitDescriptor&gt; {
+    files.iter()
+        .filter(|record| is_scala_main_source(record))  <span class="cm">// kind == ScalaSource AND</span>
+                                                       <span class="cm">// src/main/scala present AND</span>
+                                                       <span class="cm">// src/test/scala NEVER (the tag)</span>
+        .map(|record| descriptor_for(record,
+            sbt_context_name(file_dir, repo_root)))    <span class="cm">// nearest *.sbt ancestor dir names</span>
+        .collect()                                     <span class="cm">// the context; repo root =&gt; "root"</span>
+}</div>
+    <div class="cols">
+        <div>
+            <div class="label">UnitDescriptor per main file</div>
+            <div class="code-block">language: Scala, unit_kind: SourceFile,
+context_name: <span class="str">"root"</span> <span class="cm">/* or module dir name */</span>,
+build_spec/defines/include_dirs: <span class="cm">empty</span>
+<span class="cm">// sbt invocation text is M23 toolchain work;</span>
+<span class="cm">// CompilationContext.compiler comes from</span>
+<span class="cm">// default_compiler() via build's plumbing.</span></div>
+        </div>
+        <div>
+            <div class="label">Why "root" instead of the directory name?</div>
+            <div class="code-block"><span class="cm">// Test runs copy the fixture into a tempdir;</span>
+<span class="cm">// sbt's root project is named after its dir -</span>
+<span class="cm">// but the tempdir name is machine-specific.</span>
+<span class="cm">// "root" keeps assertions deterministic and</span>
+<span class="cm">// matches sbt's own root-project convention.</span></div>
+        </div>
+    </div>
+    <p><code>build_spec</code> stays empty deliberately: kickoff must not invent a compiler command line it cannot validate offline.</p>
+</div>
+
+<!-- Slide 6: D9 -->
+<div class="slide">
+    <h1>D9: one registry, direction forced by the cycle rule</h1>
+    <p>Before M19, <b>two sites</b> enumerated plugins independently (<code>cli::registry</code> and <code>pipeline</code>) - register Scala in one, and registry-aware pipeline paths silently miss it. The kickoff mandated a shared helper; the dependency graph picked the direction: cli depends on pipeline, never the reverse.</p>
+    <div class="cols">
+        <div>
+            <div class="label">Before - duplicated enumeration</div>
+            <div class="code-block before"><span class="cm">// crates/cli/src/registry.rs</span>
+<span class="key">pub fn</span> default_registry() -&gt; LanguageRegistry {
+    LanguageRegistry::new()
+        .register(Box::new(CppPlugin::new()))
+}
+<span class="cm">// crates/pipeline/src/lib.rs  (copy #2!)</span>
+<span class="key">pub fn</span> default_registry() -&gt; Arc&lt;LanguageRegistry&gt; {
+    Arc::new(LanguageRegistry::new()
+        .register(Box::new(CppPlugin::new())))
+}</div>
+        </div>
+        <div>
+            <div class="label">After - single site, both delegate</div>
+            <div class="code-block after"><span class="cm">// crates/pipeline/src/lib.rs  (THE site)</span>
+<span class="key">pub fn</span> build_default_registry() -&gt; LanguageRegistry {
+    LanguageRegistry::new()
+        .register(Box::new(CppPlugin::new()))     <span class="cm">// C++ FIRST:</span>
+        .register(Box::new(ScalaPlugin::new()))   <span class="cm">// order = contract</span>
+}
+<span class="cm">// crates/cli/src/registry.rs</span>
+<span class="key">pub fn</span> default_registry() -&gt; LanguageRegistry {
+    ariadne_pipeline::build_default_registry()
+}</div>
+        </div>
+    </div>
+    <p><b>Why order is a contract:</b> <code>unit_shaper_for()</code> and <code>plugin_for()</code> are first-wins. C++ registering first means existing C++ repos resolve to <code>CppUnitShaper</code>/<code>CppPlugin</code> exactly as before - the m00 goldens (2/2) and m1 discovery/measure witnesses prove it stayed byte-identical.</p>
+    <p><b>Drift lock:</b> <code>registries_enumerate_identical_languages</code> (cli unit test) + <code>d9_registries_identical</code> (m19 cross-crate test) assert both registries agree on the language vec <i>and</i> the selected shaper's build markers.</p>
+</div>
+
+<!-- Slide 7: sole_plugin blast radius -->
+<div class="slide">
+    <h1>The kickoff's blind spot, fixed by the plan's own mechanism</h1>
+    <p>Adding a second plugin makes <code>registry.sole_plugin()</code> return <code>None</code>. Six CLI call sites (transform extractor/rewriters/validator ×2, optimize, incremental analyze) route through it and would have <b>broken m10/m12/m14/m20</b> the moment Scala registered. The seams documented themselves as transitional ("per-language split lands with M19") - M19 landed the split.</p>
+    <div class="cols">
+        <div>
+            <div class="label">Before (would break with 2 plugins)</div>
+            <div class="code-block before"><span class="cm">// crates/cli/src/commands/transform.rs</span>
+<span class="key">let</span> registry = crate::registry::default_registry();
+<span class="key">let</span> text_extractor = registry
+    .sole_plugin()                       <span class="cm">// None when 2 plugins!</span>
+    .map(|plugin| plugin.extractor())
+    .ok_or_else(|| anyhow!(
+        <span class="str">"no language plugin registered"</span>))?;</div>
+        </div>
+        <div>
+            <div class="label">After - capability-gated backend</div>
+            <div class="code-block after"><span class="key">let</span> registry = crate::registry::default_registry();
+<span class="key">let</span> text_extractor =
+    crate::registry::capability_backend(&amp;registry,
+        |caps| caps.extraction)          <span class="cm">// exactly-one claimant</span>
+    .map(|plugin| plugin.extractor())
+    .ok_or_else(|| anyhow!(
+        <span class="str">"no language plugin registered"</span>))?;</div>
+        </div>
+    </div>
+    <p><code>capability_backend</code> resolves a stage to the one plugin whose <b>plan:381 capability field</b> enables it. Scala's <code>extraction/rewriting/validation: false</code> keep C++ the sole claimant - byte-identically for every C++ repo. No <code>match LanguageId</code> anywhere in handlers (rule R3); handlers stay plugin-type-free.</p>
+    <p>For incremental analysis, <code>incremental_backend</code> dispatches on the <b>distinct <code>tu.language</code> set</b>: one language → that plugin; an unregistered language → <i>"unhandled language"</i> error, <b>never a C++ default</b> (plan §3.3 fact 3); mixed → explicit "lands with the language-scoped cache (M21)"; zero units → old sole-plugin fallback. <code>sole_plugin()</code> is now fallback-only - retirement candidate at M21.</p>
+    <p><span class="pill green">m10 5/5</span> <span class="pill green">m12 5/5</span> <span class="pill green">m14 3/3</span> <span class="pill green">m20-suite 6/6</span> <span class="pill green">m1/m2 byte-identical</span> - the blast-radius witness gate.</p>
+</div>
+
+<!-- Slide 8: repo one-word fix -->
+<div class="slide">
+    <h1>One word, and <code>.scala</code> became discoverable</h1>
+    <p>Plan:387 claimed "crates/repo needs no functional change". False: the discovery traversal's record filter <code>is_source_or_header()</code> is C++-era vocabulary - <code>ScalaSource</code> records were <b>impossible</b>. The fix generalizes to repo's own neutral predicate (architect ruling, §3.1-justified, carried in the commit body):</p>
+    <div class="cols">
+        <div>
+            <div class="label">Before - .scala never became a record</div>
+            <div class="code-block before"><span class="cm">// crates/repo/src/discovery.rs:53</span>
+<span class="key">let</span> kind = FileKind::from_path(&amp;path);
+<span class="key">if</span> kind.is_source_or_header() {   <span class="cm">// Header|Source only -</span>
+    files.push(FileRecord { ... }) <span class="cm">// ScalaSource excluded!</span>
+}</div>
+        </div>
+        <div>
+            <div class="label">After</div>
+            <div class="code-block after"><span class="cm">// crates/repo/src/discovery.rs:56</span>
+<span class="key">let</span> kind = FileKind::from_path(&amp;path);
+<span class="key">if</span> kind.is_analyzable() {  <span class="cm">// Header|Source|ScalaSource -</span>
+    files.push(FileRecord { ... }) <span class="cm">// .sc/build files still out,</span>
+}                                   <span class="cm">// exactly plan:387's intent</span></div>
+        </div>
+    </div>
+    <p>C++ discovery is unchanged because the C++ fixtures contain no Scala files (m00/m1/m2/m18 witnesses). <code>is_source_or_header</code> now has zero callers - kept as pub API, retirement candidate. A co-located unit test locks the new set: <code>a.cpp, b.h, c.scala</code> recorded; <code>d.sc</code>, <code>build.sbt</code> not.</p>
+</div>
+
+<!-- Slide 9: fixture + m19 suite -->
+<div class="slide">
+    <h1>The fixture, and the suite that locks the boundary</h1>
+    <div class="cols">
+        <div>
+            <div class="label">tests/fixtures/scala-basic (M19 acceptance layout)</div>
+            <div class="code-block">build.sbt
+project/build.properties
+lib/legacy.jar                          <span class="cm">// external boundary</span>
+src/main/scala/com/example/
+    Main.scala
+    models/{User,Order,all}.scala       <span class="cm">// all.scala = package object</span>
+    services/OrderService.scala         <span class="cm">// imports models.{Order, User}</span>
+src/test/scala/com/example/
+    OrderServiceSpec.scala              <span class="cm">// test root: recorded, never a unit</span>
+<span class="cm">// target/** not committable (gitignored) - the suite</span>
+<span class="cm">// injects target/scala-2.13/classes/Generated.scala</span>
+<span class="cm">// into its temp copy at run time instead.</span></div>
+        </div>
+        <div>
+            <div class="label">m19_scala_discovery_test.rs (5/5)</div>
+            <ul>
+                <li><b>discover_lists_scala_sources</b> - records == exactly the six <code>.scala</code> files, all <code>ScalaSource</code>/<code>Scala</code>; build files never recorded.</li>
+                <li><b>external_frozen_boundary_lock</b> - zero records under <code>target/</code> or <code>lib/</code>; <code>classify_ownership_and_policy(target-path) == (Generated, Frozen)</code>; <code>"lib"</code>/<code>"target"</code> ∈ modeling markers (the M20 enforcement point).</li>
+                <li><b>shaper_yields_scalac_units</b> - exactly 1 context <code>{ "root", "scalac", Scala }</code>, exactly 5 main-root units, <b>no compile_commands path entered</b> (no C++ diagnostics).</li>
+                <li><b>plugin_contract_in_default_registry</b> - <code>[Cpp, Scala]</code>, capabilities literal, registration-order lock (<code>unit_shaper_for()</code> == C++ markers).</li>
+                <li><b>d9_registries_identical</b> - cross-crate registry agreement.</li>
+            </ul>
+        </div>
+    </div>
+    <p><b>Honest boundary note</b> (recorded in the kickoff execution notes): the kickoff's wording "lib/ + target/ → ThirdParty/Generated via existing policy.rs" does not match shipped code - policy.rs has no <code>lib</code> rule and traversal <i>skips</i> <code>target/</code> entirely. The suite locks what actually happens, and Scala's <code>lib/</code> boundary is enforced where the plan puts it: the resolver's <code>external_path_markers</code> in M20. policy.rs deliberately untouched (R1/R2).</p>
+</div>
+
+<!-- Slide 10: Testing -->
+<div class="slide">
+    <h1>Testing &amp; how to run it</h1>
+    <table>
+        <tr><th>Layer</th><th>What landed</th><th>Run it with</th></tr>
+        <tr><td>Crate unit tests</td><td>21 in <code>ariadne-lang-scala</code> (detector 12 cases incl. build.sc ordering; shaper 8 incl. submodule context + test-root exclusion; plugin: all 8 modeling fields + full-struct capabilities)</td><td><code>cargo test -p ariadne-lang-scala</code></td></tr>
+        <tr><td>CLI unit tests</td><td>registration order, D9 identical-registries, capability backends ×3, incremental dispatch/unhandled/mixed/zero-unit</td><td><code>cargo test -p ariadne-cli</code></td></tr>
+        <tr><td>Repo unit test</td><td>analyzable filter records <code>.scala</code>, excludes <code>.sc</code>/build files</td><td><code>cargo test -p ariadne-repo</code></td></tr>
+        <tr><td>Integration</td><td><code>m19_scala_discovery_test.rs</code> (5 tests, temp-copy isolated)</td><td><code>cargo test -p ariadne-integration-tests --test m19_scala_discovery_test</code></td></tr>
+        <tr><td>Regression witnesses</td><td>m17 5/5 · m00 2/2 · m18 22/22 · m10/m12/m14/m20/m1/m2 green · m19 5/5</td><td><code>cargo test --workspace</code> (715/0/3)</td></tr>
+        <tr><td>Hygiene</td><td>fn &lt; 100 lines, file &lt; 1000, meaningful names</td><td><code>python tools/hygiene_check.py</code></td></tr>
+    </table>
+    <p>Every behavior was Red first: captured failing-assertion output per step (e.g. <code>left: [Cpp]</code> vs <code>right: [Cpp, Scala]</code>, the <code>planning: true</code> slip caught by the full-struct literal test) before any implementation went green. Frozen files - m18 parity + captures, <code>tests/golden/**</code>, basic/expensive fixtures - show zero diff.</p>
+</div>
+
+<!-- Slide 11: Impact -->
+<div class="slide">
+    <h1>Impact &amp; migration</h1>
+    <h2>What this changes</h2>
+    <ul>
+        <li>A Scala repo is now <b>discoverable and shapeable</b>: <code>Repository::discover</code> records its sources; <code>ScalaUnitShaper</code> yields sbt-module units with <code>CompilationContext { "root"/module, "scalac", Scala }</code>.</li>
+        <li>Registry consumers must tolerate a <b>two-plugin default registry</b> (it is now the normal case, not the single-plugin special case).</li>
+    </ul>
+    <h2>Breaking changes</h2>
+    <p><b>None.</b> All serde changes additive (no variant renames, <code>IncludeKind::Import</code> not yet touched); goldens byte-identical; C++ resolution order unchanged by the registration-order contract. <code>--lang scala</code> now passes the registration gate (previously an explicit "not registered" error).</p>
+    <h2>Migration / follow-up notes</h2>
+    <ul>
+        <li><code>LanguageRegistry::sole_plugin()</code>: fallback-only; retire when M21's language-scoped cache lands.</li>
+        <li><code>FileKind::is_source_or_header()</code>: zero callers; retirement candidate.</li>
+        <li>Automatic marker-based shaper selection for mixed repos remains the deferred M18.5 gap - M19 selects the Scala shaper explicitly.</li>
+        <li>The deliberate <code>models ↔ services</code> cycle is an M20 fixture edit, to be landed as content edits (m19 pins the exact six-file record set).</li>
+    </ul>
+    <h2>Next step</h2>
+    <p><b>M20 - Scala dependency graph</b> (import parsing → <code>IncludeKind::Import</code> edges, <code>TolerateWithinPackage</code>, <code>external_path_markers</code> enforcement) - kicked off in its own fresh session.</p>
+</div>
+
+<!-- Slide 12: Summary -->
+<div class="slide">
+    <h1>Summary</h1>
+    <ul>
+        <li><b>M19.1/2</b> (<code>d0c6499</code>): <code>ariadne-lang-scala</code> - plugin identity, §3.4 modeling, plan:381 capabilities pinned by full-struct test, detector with basename-before-extension ordering, shaper encoding the sbt layout offline.</li>
+        <li><b>M19.3 + D9</b> (<code>e029e71</code>): single shared registry builder (order-as-contract), capability-gated CLI stage backends that neutralized the sole_plugin blast radius, the one-word discovery fix, scala-basic fixture, m19 lock suite.</li>
+        <li><b>Governance</b>: two bounded implementer handoffs, each Red→Green→committed with captured evidence; two independent reviewer APPROVALS re-running the suites themselves; a dead session replaced fresh from a disk-state inventory; kickoff-wording deviation documented, not papered over.</li>
+        <li><b>Gate</b>: workspace 715/0/3, goldens unmoved, m18 parity byte-identical, hygiene exit 0.</li>
+    </ul>
+    <p style="font-size: 18px; color: #555;">First foreign language, zero C++ drift. M20 builds the edges.</p>
+    <p style="color: #888;">Questions? - docs: <code>plans/m19-scala-discovery-kickoff.md</code> §Execution notes · <code>tasks/m19-ta-handoff.md</code> / <code>tasks/m19-tb-handoff.md</code></p>
+</div>
+
+<div class="navigation">
+    <button onclick="prevSlide()">Previous</button>
+    <span id="slideNumber">1 / 12</span>
+    <button onclick="nextSlide()">Next</button>
+</div>
+
+<script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+
+    function showSlide(n) {
+        slides.forEach(slide => slide.classList.remove('active'));
+        slides[n].classList.add('active');
+        document.getElementById('slideNumber').textContent =
+            `${n + 1} / ${slides.length}`;
+    }
+
+    function nextSlide() {
+        currentSlide = (currentSlide + 1) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+        currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    showSlide(0);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+        if (e.key === 'ArrowLeft') prevSlide();
+    });
+</script>
+</body>
+</html>

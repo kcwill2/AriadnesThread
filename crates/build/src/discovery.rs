@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use ariadne_repo::{FileId, RepositoryDiscoveryResult};
+use ariadne_lang::{UnitDescriptor, UnitShaper};
+use ariadne_repo::{FileId, RepositoryDiscoveryResult, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -21,9 +22,16 @@ pub struct ClangCompileCommandEntry {
 }
 
 /// Discovers compilation contexts and translation units for a repository.
+///
+/// Language knowledge enters only through the optional [`UnitShaper`]
+/// (plan M18.4): with a shaper injected and no compilation database present,
+/// units come from `shape_units()`; without one, discovery that finds no
+/// `compile_commands.json` yields an empty result instead of a language
+/// default.
 pub struct BuildDiscoverer<'a> {
     pub repo_root: &'a Path,
     pub repo_discovery: Option<&'a RepositoryDiscoveryResult>,
+    pub unit_shaper: Option<&'a dyn UnitShaper>,
 }
 
 impl<'a> BuildDiscoverer<'a> {
@@ -31,11 +39,26 @@ impl<'a> BuildDiscoverer<'a> {
         Self {
             repo_root,
             repo_discovery: None,
+            unit_shaper: None,
         }
     }
 
     pub fn with_repo_discovery(mut self, discovery: &'a RepositoryDiscoveryResult) -> Self {
         self.repo_discovery = Some(discovery);
+        self
+    }
+
+    /// Inject the language-specific [`UnitShaper`] that turns discovered
+    /// source files into translation units and derives context names
+    /// (plan M18.4). This is the ONLY channel through which language knowledge
+    /// (unit extensions, the synthetic compile invocation, the default-context
+    /// naming) enters build discovery; the crate itself carries no C++/Scala
+    /// vocabulary. Pass the registry's `unit_shaper_for()` (or, during the M18
+    /// transition, the plugin crate's default shaper). With `None` and no
+    /// `compile_commands.json`, discovery honestly yields no units instead of
+    /// silently guessing a language default.
+    pub fn with_unit_shaper(mut self, shaper: Option<&'a dyn UnitShaper>) -> Self {
+        self.unit_shaper = shaper;
         self
     }
 
@@ -58,8 +81,24 @@ impl<'a> BuildDiscoverer<'a> {
             }
         }
 
-        // 2. Fallback: Default infer discovery
-        self.infer_default_discovery(&canonical_root)
+        // 2. Fallback: shape units through the injected language shaper.
+        if let Some(shaper) = self.unit_shaper {
+            return self.discover_through_shaper(shaper, &canonical_root);
+        }
+
+        // 3. No compilation database and no shaper: stay neutral (M18.4 —
+        // the old infer_default_discovery C++ default lives in
+        // lang-cpp::CppUnitShaper now and must be injected by the caller).
+        eprintln!(
+            "warning: no compile_commands.json found under {:?} and no unit shaper \
+             injected; producing no build contexts or translation units",
+            canonical_root
+        );
+        Ok(BuildDiscoveryResult {
+            repo_root: canonical_root,
+            contexts: Vec::new(),
+            translation_units: Vec::new(),
+        })
     }
 
     fn parse_compile_commands_json(
@@ -80,7 +119,10 @@ impl<'a> BuildDiscoverer<'a> {
             let (compiler, defines, inc_dirs, sys_inc_dirs, forced_incs, lang_std, arch, raw_flags) =
                 parse_args(&entry.command, &entry.arguments);
 
-            let context_name = infer_context_name(&defines);
+            let context_name = match self.unit_shaper {
+                Some(shaper) => shaper.context_name_for_defines(&defines),
+                None => infer_context_name(&defines),
+            };
 
             let ctx = contexts_map
                 .entry(context_name.clone())
@@ -105,20 +147,7 @@ impl<'a> BuildDiscoverer<'a> {
                 entry.directory.join(&entry.file)
             };
 
-            let rel_path = if entry.file.is_relative() {
-                entry.file.clone()
-            } else if let Ok(stripped) = source_path.strip_prefix(root) {
-                stripped.to_path_buf()
-            } else {
-                let norm_source = source_path.to_string_lossy().replace('\\', "/");
-                let norm_root = root.to_string_lossy().replace('\\', "/");
-                let clean_root = norm_root.trim_start_matches("//?/");
-                if let Some(stripped) = norm_source.strip_prefix(clean_root) {
-                    PathBuf::from(stripped.trim_start_matches('/'))
-                } else {
-                    source_path.clone()
-                }
-            };
+            let rel_path = relative_path_for_source(&entry.file, &source_path, root);
 
             let norm_rel_str = rel_path.to_string_lossy().replace('\\', "/");
             let file_id = FileId::from_relative_path(&norm_rel_str);
@@ -140,11 +169,15 @@ impl<'a> BuildDiscoverer<'a> {
                 output: entry.output,
             };
 
+            // compile_commands.json is a C/C++-specific artifact; a non-C++
+            // unit arriving here indicates plugin wiring lost (audit M18,
+            // item 3) — shaper injection for this path is an M19+ item
             translation_units.push(TranslationUnit {
                 file_id,
                 source_path,
                 context_name,
                 compile_command: compile_cmd,
+                language: SourceLanguage::Cpp,
             });
         }
 
@@ -160,57 +193,84 @@ impl<'a> BuildDiscoverer<'a> {
         Ok(result)
     }
 
-    fn infer_default_discovery(&self, root: &Path) -> Result<BuildDiscoveryResult> {
-        let mut default_ctx = CompilationContext::new("Default|x64", "cl.exe");
-        default_ctx.defines.push("NDEBUG".into());
+    /// Synthesizes the discovery result from a shaper's unit descriptors:
+    /// one [`TranslationUnit`] per descriptor plus a [`CompilationContext`]
+    /// per distinct context name, assembled purely from the shaper's
+    /// `defines` / `include_dirs` / `build_spec` ingredients — this crate
+    /// keeps no language literals of its own (plan M18.4).
+    fn discover_through_shaper(
+        &self,
+        shaper: &dyn UnitShaper,
+        root: &Path,
+    ) -> Result<BuildDiscoveryResult> {
+        let empty_files: Vec<ariadne_repo::FileRecord> = Vec::new();
+        let files = self.repo_discovery.map_or(&empty_files, |d| &d.files);
+        let records_by_id: HashMap<FileId, &ariadne_repo::FileRecord> =
+            files.iter().map(|f| (f.id, f)).collect();
 
-        let include_dir = root.join("include");
-        if include_dir.exists() {
-            default_ctx.include_dirs.push(include_dir);
-        }
-
+        let mut contexts_map: HashMap<String, CompilationContext> = HashMap::new();
         let mut translation_units = Vec::new();
 
-        if let Some(disc) = self.repo_discovery {
-            for f in &disc.files {
-                let is_cpp_source = f.path.extension().map_or(false, |ext| {
-                    ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c"
-                });
-
-                if is_cpp_source {
-                    let cmd_args = vec![
-                        "cl.exe".to_string(),
-                        "/c".to_string(),
-                        f.canonical_path.to_string_lossy().to_string(),
-                    ];
-
-                    let compile_cmd = CompileCommand {
-                        directory: root.to_path_buf(),
-                        file: f.canonical_path.clone(),
-                        command: Some(cmd_args.join(" ")),
-                        arguments: cmd_args,
-                        context_name: "Default|x64".into(),
-                        output: None,
-                    };
-
-                    translation_units.push(TranslationUnit {
-                        file_id: f.id.clone(),
-                        source_path: f.canonical_path.clone(),
-                        context_name: "Default|x64".into(),
-                        compile_command: compile_cmd,
-                    });
-                }
-            }
+        for descriptor in shaper.shape_units(root, files) {
+            let Some(record) = records_by_id.get(&descriptor.file_id) else {
+                continue;
+            };
+            let unit =
+                Self::unit_from_descriptor(&descriptor, record, root, &mut contexts_map, shaper);
+            translation_units.push(unit);
         }
 
         let mut result = BuildDiscoveryResult {
             repo_root: root.to_path_buf(),
-            contexts: vec![default_ctx],
+            contexts: contexts_map.into_values().collect(),
             translation_units,
         };
 
         result.normalize();
         Ok(result)
+    }
+
+    fn unit_from_descriptor(
+        descriptor: &UnitDescriptor,
+        record: &ariadne_repo::FileRecord,
+        root: &Path,
+        contexts_map: &mut HashMap<String, CompilationContext>,
+        shaper: &dyn UnitShaper,
+    ) -> TranslationUnit {
+        let ctx = contexts_map
+            .entry(descriptor.context_name.clone())
+            .or_insert_with(|| {
+                let mut ctx =
+                    CompilationContext::new(&descriptor.context_name, shaper.default_compiler());
+                // M24 Part A (ADAPT-8): the unit's language label is the
+                // FILE-KIND label from the discovered record, not the shaper's
+                // plugin identity. `CompilationContext.language` stays
+                // `SourceLanguage` on purpose: it is a golden artifact field
+                // AND a bincode input to the TU cache `context_hash`, so its
+                // type and bytes must not move. `TranslationUnit.language` is
+                // the same file-kind label for the same reason -- dispatch
+                // authority is the registry, not this field (D-A5).
+                ctx.language = record.language;
+                ctx
+            });
+        ctx.defines.extend(descriptor.defines.iter().cloned());
+        ctx.include_dirs
+            .extend(descriptor.include_dirs.iter().cloned());
+
+        TranslationUnit {
+            file_id: descriptor.file_id,
+            source_path: record.canonical_path.clone(),
+            context_name: descriptor.context_name.clone(),
+            compile_command: CompileCommand {
+                directory: root.to_path_buf(),
+                file: record.canonical_path.clone(),
+                command: Some(descriptor.build_spec.join(" ")),
+                arguments: descriptor.build_spec.clone(),
+                context_name: descriptor.context_name.clone(),
+                output: None,
+            },
+            language: record.language,
+        }
     }
 }
 
@@ -218,6 +278,30 @@ pub fn discover_build_contexts(repo_root: &Path) -> Result<BuildDiscoveryResult>
     BuildDiscoverer::new(repo_root).discover()
 }
 
+/// Repo-relative path of a compilation-database source, mirroring the
+/// verbatim strip / normalized-slash fallback chain of the original parser.
+fn relative_path_for_source(entry_file: &Path, source_path: &Path, root: &Path) -> PathBuf {
+    if entry_file.is_relative() {
+        return entry_file.to_path_buf();
+    }
+    if let Ok(stripped) = source_path.strip_prefix(root) {
+        return stripped.to_path_buf();
+    }
+    let norm_source = source_path.to_string_lossy().replace('\\', "/");
+    let norm_root = root.to_string_lossy().replace('\\', "/");
+    let clean_root = norm_root.trim_start_matches("//?/");
+    if let Some(stripped) = norm_source.strip_prefix(clean_root) {
+        PathBuf::from(stripped.trim_start_matches('/'))
+    } else {
+        source_path.to_path_buf()
+    }
+}
+
+/// Context naming for the shaper-less `compile_commands.json` path: the
+/// m2/characterization suites lock these names without a shaper, so the
+/// neutral plumbing keeps a default. Callers with a language plugin should
+/// inject one — `UnitShaper::context_name_for_defines` then drives naming
+/// and this default is not consulted.
 fn infer_context_name(defines: &[String]) -> String {
     if defines.iter().any(|d| d == "DEBUG" || d == "_DEBUG") {
         "Debug|x64".to_string()
@@ -555,21 +639,101 @@ mod tests {
                 content_hash: "dummy".to_string(),
                 ownership: ariadne_repo::FileOwnership::Repository,
                 optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                language: ariadne_repo::SourceLanguage::Cpp,
             }],
             ownership_summary: Default::default(),
             policy_summary: Default::default(),
         };
 
-        let discoverer = BuildDiscoverer::new(root).with_repo_discovery(&disc);
+        // M18.4: the Default|x64 shaping is lang-cpp knowledge; the caller
+        // injects the C++ shaper to keep today's behaviour.
+        let shaper = ariadne_lang_cpp::cpp_default_shaper();
+        let discoverer = BuildDiscoverer::new(root)
+            .with_repo_discovery(&disc)
+            .with_unit_shaper(Some(shaper));
         let result = discoverer.discover().unwrap();
 
         assert_eq!(result.contexts.len(), 1);
         let ctx = &result.contexts[0];
         assert_eq!(ctx.name, "Default|x64");
+        assert_eq!(ctx.compiler, "cl.exe");
         assert!(ctx.defines.contains(&"NDEBUG".to_string()));
+        assert_eq!(ctx.language, ariadne_repo::SourceLanguage::Cpp);
 
         assert_eq!(result.translation_units.len(), 1);
-        assert_eq!(result.translation_units[0].source_path, file_path);
+        let tu = &result.translation_units[0];
+        assert_eq!(tu.source_path, file_path);
+        assert_eq!(tu.language, ariadne_repo::SourceLanguage::Cpp);
+        assert_eq!(
+            tu.compile_command.arguments,
+            vec![
+                "cl.exe".to_string(),
+                "/c".to_string(),
+                file_path.to_string_lossy().to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_no_shaper_without_compile_commands_yields_no_contexts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.cpp"), "int main(){}").unwrap();
+
+        let disc = RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files: vec![ariadne_repo::FileRecord {
+                id: ariadne_repo::FileId::from_relative_path("src/main.cpp"),
+                path: std::path::PathBuf::from("src/main.cpp"),
+                canonical_path: root.join("src/main.cpp"),
+                kind: ariadne_repo::FileKind::Source,
+                size: 0,
+                content_hash: "dummy".to_string(),
+                ownership: ariadne_repo::FileOwnership::Repository,
+                optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                language: ariadne_repo::SourceLanguage::Cpp,
+            }],
+            ownership_summary: Default::default(),
+            policy_summary: Default::default(),
+        };
+
+        // Without a shaper the fallback is gone: no C++ default, no contexts,
+        // no units (M18.4 — callers opt into a language explicitly).
+        let result = BuildDiscoverer::new(root)
+            .with_repo_discovery(&disc)
+            .discover()
+            .unwrap();
+        assert!(result.contexts.is_empty());
+        assert!(result.translation_units.is_empty());
+        assert_eq!(
+            result.repo_root,
+            root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+        );
+    }
+
+    #[test]
+    fn shaper_drives_context_naming_on_compile_commands_path() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        let json_content = r#"[
+            {
+                "directory": "C:/src/project",
+                "arguments": ["cl.exe", "/D", "NDEBUG", "src/thing.cpp"],
+                "file": "src/thing.cpp"
+            }
+        ]"#;
+        std::fs::write(root.join("compile_commands.json"), json_content).unwrap();
+
+        let result = BuildDiscoverer::new(root)
+            .with_unit_shaper(Some(ariadne_lang_cpp::cpp_default_shaper()))
+            .discover()
+            .unwrap();
+
+        assert_eq!(result.contexts.len(), 1);
+        assert_eq!(result.contexts[0].name, "Release|x64");
+        assert_eq!(result.translation_units[0].language, SourceLanguage::Cpp);
     }
 }
 

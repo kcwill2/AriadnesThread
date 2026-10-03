@@ -19,7 +19,16 @@ bincode.workspace = true
 ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-index = { path = "../index" }
+ariadne-lang-api = { path = "../lang-api" }
+# M18.5: registry trait types for `build_dependency_graph` (plugin selection
+# goes through these traits only — no language names in graph code).
+ariadne-lang = { path = "../lang" }
 
 [dev-dependencies]
 tempfile.workspace = true
 rayon.workspace = true
+# D22 witness only: the real plugin crates register (in production order) so
+# `build_dependency_graph` can auto-select a shaper on the Scala fixture.
+# Dev-only edge: neither plugin crate depends on graph (m17 guard).
+ariadne-lang-cpp = { path = "../lang-cpp" }
+ariadne-lang-scala = { path = "../lang-scala" }

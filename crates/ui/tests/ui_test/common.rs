@@ -16,6 +16,8 @@ pub fn empty_reduced_model() -> ReducedSemanticModel {
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 
@@ -68,6 +70,7 @@ pub fn page_content() -> String {
         ariadne_ui::FILE_VIEW_JS,
         ariadne_ui::HOTSPOTS_JS,
         ariadne_ui::MAIN_JS,
+        ariadne_ui::PROVENANCE_JS,
     ] {
         page.push_str(asset);
     }
@@ -99,12 +102,19 @@ pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
     };
     graph.edges.push(edge(1, 2));
     graph.edges.push(edge(2, 3));
 
     let mut payload = empty_export_payload();
-    payload.include_graph = build_include_elements(&graph, &HashMap::new(), &[]);
+    payload.include_graph = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     (graph, payload)
 }
 

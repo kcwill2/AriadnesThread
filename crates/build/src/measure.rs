@@ -311,6 +311,7 @@ mod tests {
                     context_name: "Debug".to_string(),
                     output: None,
                 },
+                language: Default::default(),
             },
             TranslationUnit {
                 file_id: FileId(2),
@@ -324,6 +325,7 @@ mod tests {
                     context_name: "Debug".to_string(),
                     output: None,
                 },
+                language: Default::default(),
             },
         ];
 

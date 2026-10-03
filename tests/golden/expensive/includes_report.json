@@ -1,0 +1,31 @@
+{
+  "cycle_count": 0,
+  "external_headers_count": 0,
+  "local_headers_count": 4,
+  "system_headers_count": 4,
+  "top_headers_by_closure": [
+    [
+      "include/heavy.h",
+      0,
+      2171065965022647111
+    ],
+    [
+      "include/thing.h",
+      1,
+      5780424644969596122
+    ],
+    [
+      "src/consumer1.cpp",
+      15350901620175634748,
+      2
+    ],
+    [
+      "src/consumer2.cpp",
+      10757945787003264251,
+      2
+    ]
+  ],
+  "total_edges": 8,
+  "unique_headers": 2,
+  "unresolved_includes_count": 4
+}

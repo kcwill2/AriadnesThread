@@ -96,12 +96,14 @@ use std::path::{Path, PathBuf};
 
 use ariadne_build::{BuildDiscoveryResult, BuildMeasurer};
 use ariadne_cluster::plan::{OptimizationPlan, RiskLevel};
-use ariadne_cluster::planner::{OptimizationPlanner, is_header_file};
+use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadAnalyzer, ReducedSemanticModel};
+use ariadne_lang::CyclePolicy;
+use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
-use ariadne_transform::{ExtractionResult, GeneratedHeader, HeaderExtractor, IncludeRewriter};
-use ariadne_validate::{TierValidator, TransactionApplier, ValidationStatus};
+use ariadne_transform::{ExtractionResult, GeneratedUnit, IncludeRewriter, IsolationEngine};
+use ariadne_validate::{TierValidator, TransactionApplier};
 
 pub struct EndToEndOptimizer {
     pub repo_path: PathBuf,
@@ -115,7 +117,11 @@ impl EndToEndOptimizer {
     }
 
     pub fn optimize_repository(&self) -> Result<OptimizationReport> {
-        let mut pipeline = Pipeline::new(&self.repo_path, Some(4))?;
+        // M18.3: production path routes the index stage through the plugin
+        // registry (byte-identical for C++); the worker pool backend is
+        // registry-dispatching.
+        let registry = std::sync::Arc::new(crate::registry::default_registry());
+        let mut pipeline = Pipeline::with_registry(&self.repo_path, Some(4), registry)?;
         let repo = pipeline.repo.clone();
         let repo_discovery = pipeline.discovery.clone();
         let build_discovery = pipeline.build.clone();
@@ -152,7 +158,7 @@ impl EndToEndOptimizer {
         let mut build_passed = true;
 
         for plan in &safe_plans {
-            let outcome = apply_safe_plan(&repo, &model, &build_discovery, plan)?;
+            let outcome = apply_safe_plan(&repo, &repo_discovery, &model, &build_discovery, plan)?;
             affected_consumer_files_set.extend(outcome.affected_source_paths);
             validation_total_tus += outcome.consumer_tus;
             if outcome.validation_passed {
@@ -238,7 +244,7 @@ fn analyze_collateral_opportunities(
 
     let mut collateral_opportunities: Vec<CollateralOpportunity> = header_collateral_map
         .into_iter()
-        .filter(|(header_name, _)| is_header_file(std::path::Path::new(header_name)))
+        .filter(|(header_name, _)| cpp_aggregation_filter(std::path::Path::new(header_name)))
         .map(|(header_name, collateral_symbols)| CollateralOpportunity {
             header_name,
             collateral_symbols,
@@ -263,7 +269,16 @@ fn plan_safe_extractions(
         .iter()
         .map(|tu| tu.file_id)
         .collect();
-    let planner = OptimizationPlanner::new(graph, model, &repo_discovery.files, &tu_file_ids);
+    let planner = OptimizationPlanner::new(
+        graph,
+        model,
+        &repo_discovery.files,
+        &tu_file_ids,
+        &cpp_aggregation_filter,
+        &cpp_target_path_for,
+        None,
+        CyclePolicy::Reject,
+    );
     planner
         .plan()
         .into_iter()
@@ -273,87 +288,124 @@ fn plan_safe_extractions(
 
 fn relocate_extraction_to_generated(
     extraction: &ExtractionResult,
-) -> (BTreeMap<String, PathBuf>, Vec<GeneratedHeader>) {
+) -> (BTreeMap<String, PathBuf>, Vec<GeneratedUnit>) {
     let mut symbol_name_to_header = BTreeMap::new();
-    let mut generated_headers = Vec::new();
-    for header in &extraction.headers {
-        let hpath = PathBuf::from("generated").join(&header.filename);
-        let mut new_header = header.clone();
-        new_header.filename = hpath.clone();
-        new_header.required_includes = header
-            .required_includes
+    let mut generated_units = Vec::new();
+    for unit in &extraction.headers {
+        let upath = PathBuf::from("generated").join(&unit.path);
+        let mut new_unit = unit.clone();
+        new_unit.path = upath.clone();
+        new_unit.required_deps = unit
+            .required_deps
             .iter()
             .map(|p| PathBuf::from("generated").join(p))
             .collect();
-        generated_headers.push(new_header);
-        for sym in &header.symbols {
-            symbol_name_to_header.insert(sym.name.clone(), hpath.clone());
+        generated_units.push(new_unit);
+        for sym in &unit.symbols {
+            symbol_name_to_header.insert(sym.name.clone(), upath.clone());
         }
     }
-    (symbol_name_to_header, generated_headers)
+    (symbol_name_to_header, generated_units)
 }
 
 fn find_including_translation_units(
-    repo: &Repository,
+    registry: &ariadne_lang::LanguageRegistry,
+    repo_discovery: &RepositoryDiscoveryResult,
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
-) -> Vec<(PathBuf, Vec<PathBuf>, Vec<String>)> {
-    let target_include = plan
-        .target_file
-        .file_name()
-        .and_then(|n: &std::ffi::OsStr| n.to_str())
-        .unwrap_or("");
+) -> anyhow::Result<Vec<(PathBuf, Vec<PathBuf>, Vec<String>)>> {
+    // D-M23-7 iii (T7 S2): language-routed consumer discovery — the C++
+    // plugin reproduces this function's former raw substring scan exactly
+    // (set-equal consumers, I1); see commands/transform.rs
+    // `plan_target_consumers` for the shared rule. T8b: the probe strings
+    // come from the plan backend's dependency-space hook (C++: the bare
+    // file name — the same string as before).
+    let targets = crate::commands::transform::plan_consumer_discovery_targets(registry, plan)?;
     let all_symbol_names: Vec<String> = plan
         .proposed_extractions
         .iter()
         .map(|e| e.symbol_name.clone())
         .collect();
 
-    let mut consumers = Vec::new();
-    for tu in &build_discovery.translation_units {
-        let abs_path = repo.root.join(&tu.source_path);
-        if let Ok(content) = fs::read_to_string(&abs_path) {
-            if content.contains(&format!("#include \"{}\"", target_include))
-                || content.contains(&format!("#include <{}>", target_include))
-            {
-                consumers.push((
-                    tu.source_path.clone(),
-                    vec![plan.target_file.clone()],
-                    all_symbol_names.clone(),
-                ));
-            }
-        }
-    }
-    consumers
+    Ok(crate::commands::transform::plan_target_consumers(
+        registry,
+        &crate::registry::catalog_languages(registry, repo_discovery),
+        &build_discovery.translation_units,
+        &repo_discovery.root,
+        &targets,
+        &plan.target_file,
+        &all_symbol_names,
+    ))
 }
 
 fn apply_safe_plan(
     repo: &Repository,
+    repo_discovery: &RepositoryDiscoveryResult,
     model: &ReducedSemanticModel,
     build_discovery: &BuildDiscoveryResult,
     plan: &OptimizationPlan,
 ) -> Result<SafePlanOutcome> {
-    // Header extraction
-    let extractor = HeaderExtractor::new(model);
-    let extraction = extractor.extract(plan);
+    // Header extraction (M23 T1/T7, D-M23-3 + D-M23-7 ii: source-file text
+    // from the catalog, verbatim bodies located by the PLAN-LANGUAGE
+    // extraction backend; unreadable files keep the engine's placeholder
+    // fallback per I4).
+    let extractor = IsolationEngine::new(model);
+    let source_reader = crate::commands::transform::repository_source_reader(repo)?;
+    let plugin_registry = crate::registry::default_registry();
+    let text_extractor = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.extraction,
+        "extraction",
+    )?
+    .extractor();
+    let extraction = extractor.extract(plan, &source_reader, text_extractor);
 
     let (symbol_name_to_header, generated_headers) = relocate_extraction_to_generated(&extraction);
 
-    let consumers = find_including_translation_units(repo, build_discovery, plan);
+    let consumers =
+        find_including_translation_units(&plugin_registry, repo_discovery, build_discovery, plan)?;
 
     let rewriter = IncludeRewriter::new(symbol_name_to_header, generated_headers);
     let migration = rewriter.build_preview(plan.id.to_string(), &consumers);
 
-    let (snapshot, new_paths) = TransactionApplier::apply(&repo.root, &extraction, &migration)?;
+    // M23 T7 (D-M23-7 ii): directive text (guard block + include replacement)
+    // is owned by the plan-language rewriting backend; validate orchestrates
+    // the rest.
+    let text_rewriter = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.rewriting,
+        "rewriting",
+    )?
+    .rewriter();
+    let (snapshot, new_paths) = TransactionApplier::apply_with(
+        &repo.root,
+        &extraction,
+        &migration,
+        text_rewriter,
+        text_extractor,
+    )?;
 
+    // M18.10: the tier-3 skip decision uses the injected plugin validator's
+    // toolchain status; M23 T7 (D-M23-7 ii) routes it to the plan's language.
+    let compiler_validator = crate::registry::plan_backend(
+        &plugin_registry,
+        &plan.target_file,
+        |caps| caps.validation,
+        "validation",
+    )?
+    .validator();
     let t1 = TierValidator::validate_structural(&extraction);
     let header_output_dir = repo.root.join("generated");
     let t2 = TierValidator::validate_generated_headers(&extraction, &header_output_dir);
-    let t3 = TierValidator::validate_affected_tus(&migration, &header_output_dir);
+    let t3 = TierValidator::validate_affected_tus(
+        &migration,
+        &header_output_dir,
+        Some(compiler_validator),
+    );
 
-    let validation_passed = t1.status == ValidationStatus::Pass
-        && t2.status == ValidationStatus::Pass
-        && t3.status == ValidationStatus::Pass;
+    let validation_passed = !t1.status.is_fail() && !t2.status.is_fail() && !t3.status.is_fail();
 
     if !validation_passed {
         TransactionApplier::rollback(&snapshot, &new_paths)?;
@@ -408,6 +460,7 @@ pub fn run_end_to_end_optimize(repo_path: &Path) -> Result<OptimizationReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_repo::FileId;
 
     #[test]
     fn test_format_m14_output() {
@@ -457,23 +510,9 @@ mod tests {
         assert!(formatted.contains("Residual collateral load:\n    8241 symbols"));
     }
 
-    #[test]
-    fn test_collateral_opportunities_skip_symbols_without_defining_file() {
-        // Regression lock for 161f028: analyze_symbol_load legitimately errors
-        // for symbols with defining_file: None; the scan must skip them and
-        // keep aggregating the rest instead of panicking on unwrap.
-        use ariadne_graph::{IncludeEdge, IncludeKind, ReducedSymbolRecord, SourceLocation};
-        use ariadne_index::types::{SymbolId, SymbolKind};
-        use ariadne_repo::{
-            FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,
-            RepositoryDiscoveryResult,
-        };
-
-        let mut graph = IncludeGraph::new();
-        graph.register_file(FileId(1), PathBuf::from("Thing.h"));
-        graph.register_file(FileId(2), PathBuf::from("graphics.h"));
-        graph.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
-        let link = |source: FileId, destination: FileId, raw_path: &str| IncludeEdge {
+    fn test_include_edge(source: FileId, destination: FileId, raw_path: &str) -> ariadne_graph::IncludeEdge {
+        use ariadne_graph::{IncludeEdge, IncludeKind, SourceLocation};
+        IncludeEdge {
             source,
             destination: Some(destination),
             context_name: String::new(),
@@ -481,9 +520,40 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: raw_path.to_string(),
             resolved_path: Some(PathBuf::from(raw_path)),
-        };
-        graph.add_edge(link(FileId(1), FileId(2), "graphics.h"));
-        graph.add_edge(link(FileId(2), FileId(3), "HugeThirdParty.h"));
+            language: ariadne_graph::LanguageId::Cpp,
+        }
+    }
+
+    fn discovery_file_record(id: FileId, name: &str) -> ariadne_repo::FileRecord {
+        use ariadne_repo::{FileKind, FileOwnership, FileRecord, OptimizationPolicy};
+        FileRecord {
+            id,
+            path: PathBuf::from(name),
+            canonical_path: PathBuf::from(name),
+            kind: FileKind::Header,
+            size: 1,
+            content_hash: String::new(),
+            ownership: FileOwnership::Repository,
+            optimization_policy: OptimizationPolicy::Optimizable,
+            language: ariadne_repo::SourceLanguage::Cpp,
+        }
+    }
+
+    #[test]
+    fn test_collateral_opportunities_skip_symbols_without_defining_file() {
+        // Regression lock for 161f028: analyze_symbol_load legitimately errors
+        // for symbols with defining_file: None; the scan must skip them and
+        // keep aggregating the rest instead of panicking on unwrap.
+        use ariadne_graph::ReducedSymbolRecord;
+        use ariadne_index::types::{SymbolId, SymbolKind};
+        use ariadne_repo::RepositoryDiscoveryResult;
+
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(1), PathBuf::from("Thing.h"));
+        graph.register_file(FileId(2), PathBuf::from("graphics.h"));
+        graph.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
+        graph.add_edge(test_include_edge(FileId(1), FileId(2), "graphics.h"));
+        graph.add_edge(test_include_edge(FileId(2), FileId(3), "HugeThirdParty.h"));
 
         let mut model = ReducedSemanticModel {
             repo_root: PathBuf::from("/"),
@@ -491,6 +561,9 @@ mod tests {
             edges: vec![],
             tu_usage: BTreeMap::new(),
             file_symbols: BTreeMap::new(),
+
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         };
         let add_symbol = |model: &mut ReducedSemanticModel,
                           name: &str,
@@ -506,6 +579,7 @@ mod tests {
                     defining_file,
                     declarations: vec![],
                     definition: None,
+                    declaring_files: vec![],
                 },
             );
             if let Some(file) = defining_file {
@@ -518,22 +592,12 @@ mod tests {
         add_symbol(&mut model, "HugeThing", SymbolKind::Class, Some(FileId(3)));
         add_symbol(&mut model, "Thing", SymbolKind::Class, Some(FileId(1)));
 
-        let file_record = |id: FileId, name: &str| FileRecord {
-            id,
-            path: PathBuf::from(name),
-            canonical_path: PathBuf::from(name),
-            kind: FileKind::Header,
-            size: 1,
-            content_hash: String::new(),
-            ownership: FileOwnership::Repository,
-            optimization_policy: OptimizationPolicy::Optimizable,
-        };
         let repo_discovery = RepositoryDiscoveryResult {
             root: PathBuf::from("/"),
             files: vec![
-                file_record(FileId(1), "Thing.h"),
-                file_record(FileId(2), "graphics.h"),
-                file_record(FileId(3), "HugeThirdParty.h"),
+                discovery_file_record(FileId(1), "Thing.h"),
+                discovery_file_record(FileId(2), "graphics.h"),
+                discovery_file_record(FileId(3), "HugeThirdParty.h"),
             ],
             ownership_summary: HashMap::new(),
             policy_summary: HashMap::new(),

@@ -1,7 +1,7 @@
 # Multi-Language Architecture — Implementation Plan
 
-Status: **DRAFT for approval** (no source changed yet)
-Date: 2026-09-24 · Refined 2026-09-29 round 1 (symbol-isolation + placement modeling, §0.1, D6/D7) · **Re-reviewed 2026-09-29 round 2** (re-baselined to current tree, milestones renumbered **M22–M29** — `m17…m21` suites already exist; `ariadne-pipeline` + `scheduler/tu_store` added as the real orchestration seam; D8/D9/D10) · Baseline: current working tree
+Status: **EXECUTED -- closed through M23** (2026-10-03). Plan approved and executed M17-M23; M24 remains parked, not scheduled (see "Deferred, specified but not executed here" in section 5, and "Sequencing after M23" in section 9). Final gate at M23 closure: `cargo test --workspace` = 1088 pass / 0 fail / 3 ignored, verified at `f9bcf69`. Milestone records and the landing ledger for M15-M23 live in `Plan.md` Part II.
+Date: 2026-09-24 · Refined 2026-09-29 (symbol-isolation + placement modeling, §0.1/D6/D7) · Baseline: `664e014` + uncommitted WIP · `cargo check --workspace --all-targets` = green (warnings only) | Executed M17-M23 between 2026-09-30 and 2026-10-03 | Amended 2026-10-03 (plan-repair T5): this Status line, the section 2 non-goals note, the section 5 Deferred bullets (M23 recorded closed; M24 reclassified as parked, on its real trigger conditions), and the section 9 todo list (M23 block added; D.1-D.4 checked). The `664e014` baseline named above is the pre-execution one and is retained as this plan's original provenance, not as the current HEAD.
 
 ---
 
@@ -75,11 +75,13 @@ Verified in the working tree (each row is a real call site, not a guess):
 
 **Non-goals (this plan):** Scala transforms (M28), dynamic plugin loading (M29), a third language *plugin* (Java/Rust/TypeScript/Python are seeded as **vocabulary only**, D8 — no plugins), UI redesign, changes to existing milestone semantics (M0–M21).
 
+Annotation (2026-10-03): M23 was excluded from *this plan's execution window* but was subsequently executed as its own gated milestone and closed on 2026-10-03; M24 remains excluded and is parked pending the evidence named in "Sequencing after M23".
+
 **Success criteria (machine-checkable)**
 - `cargo test --workspace` green at the end of **every** milestone.
-- Byte-identical C++ artifacts: golden snapshot of `artifacts/**.json` for `tests/fixtures/basic` and `tests/fixtures/expensive` is unchanged across M22–M23 (except additive fields listed in §3.5).
-- "Minimal change rule" test `m22_plugin_seam_test.rs::new_language_touches_only_plugin_crate` (§6.4).
-- `Select-String -Path crates/{index,graph,cluster,transform,validate,report}/src/*.rs -Pattern 'clang|\.h"|include'` returns **0** production matches after M23.
+- Byte-identical C++ artifacts: golden snapshot of `artifacts/**.json` for `tests/fixtures/basic` and `tests/fixtures/expensive` is unchanged across M17–M18 (except additive fields listed in §3.5).
+- "Minimal change rule" enforced by the M17 guard tests `m17_plugin_seam_test.rs::core_crates_do_not_name_languages` + `::plugin_crates_do_not_depend_on_core_pipeline` (§6.3).
+- Non-comment production code in `crates/{index,graph,cluster,transform,validate,report}/src` contains **0** matches for `clang` / `g++` / `#include` / `".h"` after M18 (locked by `core_crates_do_not_name_languages`; D5-frozen identifiers like `include_load` are exempt by design).
 
 ---
 
@@ -391,7 +393,9 @@ Acceptance: workspace compiles; M22 tests pass; the 21 pre-existing suites are *
 
 ### M23 — C++ becomes a plugin (behaviour-preserving)
 
-**Objective:** delete coupling rows #3–#10 **and #7b** of §1 by dispatching through the registry, with the C++ implementation *relocated* into `ariadne-lang-cpp`.
+> EXECUTION NOTES (M18.1–M18.2, reviewer-APPROVED): (a) `IncludeKind`/`SourceLocation`/`IncludeEdge` moved to `lang-api` (plugin crates may not depend on `graph`; serde/bincode shapes unchanged, graph re-exports original paths — rename deferred to a D5 milestone); (b) `ClangWorkerBackend` stays in `scheduler/worker.rs` until M18.11 — relocation needs `lang-cpp→scheduler` as a *normal* dep while `index→lang-cpp` shim exists (hard cargo cycle); unblocked when shims drop; (c) `lang-cpp` normal-deps `ariadne-build` (not in §4 table; acyclic, guard passes).
+
+**Objective:** delete coupling rows #3–#10 of §1 by dispatching through the registry, with the C++ implementation *relocated* into `ariadne-lang-cpp`.
 
 Relocations (code move, not rewrite):
 
@@ -447,6 +451,8 @@ Acceptance (`tests/integration/tests/m24_scala_discovery_test.rs`): `ariadne dis
 
 Acceptance (`m25_scala_dependency_graph_test.rs`): `ariadne graph` emits `OrderService.scala → models/Order.scala` and `→ models/User.scala` with `kind:"Import"`; `import scala.collection.mutable._` becomes an `External` entry; the fixture's deliberate `models ↔ services` cycle does not fail the run (whereas C++ `m3` still asserts cycle reporting).
 
+> EXECUTION NOTES (M20, reviewer-APPROVED 2026-10-01 at `75abb8e`, final gate 767/0/3, goldens zero drift, see `plans/m20-scala-graph-kickoff.md`): (a) per user decision D3 the cycle *substrate* rework (SCC groups, iterative Tarjan) is NOT in M20 — it is standalone M23.5 post-merge (`.kilo/plans/1790821308681-cycle-substrate-scc-m23_5.md` on main); "planner honours CyclePolicy" was discharged on the **report side** (`generate_report_with_cycle_policies`, informational iff all members non-`Reject`, field skip-when-zero → byte-identical C++ `report.json`), `planner.rs` doc-only; (b) kind seam is a neutral trait default `DependencyResolver::directive_edge_kind() -> Option<IncludeKind>` (C++ None, Scala `Some(Import)`), `IncludeKind::Import` bincode index 3 pinned; `ResolveOutcome::External` got its own builder path (kind External, no on-disk probe; C++ never returns External — proven); (c) `plan:396`'s `modeling.rs` external markers were already shipped in M19 (`plugin.rs`); M20 added the *consumer* — single-sourced `EXTERNAL_PATH_MARKERS` in `lang-scala/boundary.rs` enforced by the resolver; (d) fixture cycle added content-only (`Order.scala` imports services + real use; `OrderService.scala` gains `scala.collection.mutable._` + `ArrayBuffer` use) — m19 6-record lock green unedited; (e) graph seeding stays C++-shaper-first; the Scala suite injects `ScalaUnitShaper` via new `build_dependency_graph_with_unit_shaper` (D14) — marker-based shaper auto-selection still deferred (M22 revisit).
+
 
 ### M26 — Scala semantic index (offline, deterministic)
 
@@ -460,7 +466,9 @@ Acceptance (`m25_scala_dependency_graph_test.rs`): `ariadne graph` emits `OrderS
 
 Acceptance (`m26_scala_semantic_index_test.rs`): index contains `com.example.services.OrderService` with edges to `com.example.models.Order` and `User`; cold run analyses every unit, second run reports 100 % hit-rate, editing `models/Order.scala` reanalyzes only import-dependents; C++ cache entries are **not** invalidated by the Scala fingerprint (language-scoped keys).
 
-### M27 — Scala analysis outputs: aggregation, load metric, reports, Graph UI
+> EXECUTION NOTES (M21, all four reviewer gates APPROVED 2026-10-01 at `acbb1a9`, final gate 842/0/3, goldens zero drift, see `plans/m21-scala-index-kickoff.md`): (a) most of the table above was already discharged by M18.10/M20 infrastructure (per-unit plugin dispatch, `compute_tu_closure_plugin` = own-file+imports closure, language+plugin-fingerprint cache digest, epoch 2.0.0) — M21 shipped the parser, the analyzer, the `--lang` shaper seam, and the suite; `scheduler/{worker,incremental}` and `cache.rs` stayed untouched. (b) **D15 deviation ACCEPTED at Gate-C:** the planned `with_unit_shaper` seam inside the build stage is impossible in the builder API (filter set after construction) and wrong for fingerprints (filtered contexts would poison `fps.index`); selection landed on the index stage (`indexed_build` re-discovers through the filter-selected shaper + store-ctx refresh; `None` path provably unchanged — m00 byte-identical). (c) D16 rulings: unresolvable non-parent names produce nothing (no refs/edges); "same-package sibling" resolution is **in-file only** — the offline per-file parser cannot see cross-file siblings (documented limitation; plan:413 coverage rides the grouped-import edge); companion `$` suffix only for objects with a class-ish in-file partner; edge src/dst files mirror the lang-cpp convention (both = analyzed TU). (d) fingerprint bumped `"scala-1"`→`"scala-parser-1"` with the C++ value untouched (note: the C++ fingerprint is `"cpp-analyzer-1"`, `"v1"` is only the trait default — kickoff shorthand corrected); warm-reuse witness = counting analyzer at zero invocations + shard-envelope byte identity + exact reanalyzed/reused *sets* after an Order.scala edit {Order, OrderService} vs {Main, User, all}. (e) Deferred, still open: unfiltered Scala shaping (marker auto-selection, M22), mixed-language `incremental_backend` error, m17 R2 guard does not cover `crates/pipeline` sources (neutrality is review-enforced), cross-file same-package edge resolution (needs a symbol-table-feeding later stage), catalog-index + backslash-query test + `first_path_segment` `.`-trim (re-timed M22/M23).
+
+### M22 — Scala analysis outputs: aggregation, load metric, reports, Graph UI
 
 | File | Change |
 |---|---|
@@ -480,7 +488,16 @@ Acceptance (`m27_scala_load_analysis_test.rs`): `ariadne load --symbol com.examp
   - **Scala:** `ScalaSourceExtractor: SourceExtractor` (package clause + minimal imports + real bodies), `ScalaDependencyRewriter: DependencyRewriter` (import-line replacement preserving every other byte — `TransactionApplier::apply` calls `rewrite()` instead of `content.replace("#include …")`), planner target `{symbol}.scala` in the source package dir (`target_path_for`, §3.4), `ClusteringConstraints` enforcement (companion object ↔ class, `sealed trait` ↔ subtypes stay together), tiers 1–2 ported, tier 3 = `Skipped` without a Scala toolchain.
   - `SymbolPlacement` selects the isolation unit per language at plan time (§3.4 "Isolation unit" row): C++ isolates the declaration site (header), Scala isolates the whole top-level symbol.
   - Highest-risk milestone; approve separately.
-- **M29 — out-of-process plugin host** (`libloading` / WASM). Worth it only when a plugin is built by another team; the trait boundary here is the precondition, nothing more.
+  - **COMPLETED 2026-10-03.** Executed as a gated milestone under `plans/m23-symbol-isolation-kickoff.md`, closed at `36b182a`; final gate `cargo test --workspace` = 1088 pass / 0 fail / 3 ignored at `f9bcf69`, with both Gate-G3 lanes APPROVED (G3a shared-engine + core lane, G3b Scala + wiring lane). Two things it deliberately did **not** do, which is exactly why its follow-up backlog exists: (1) real compiler invocation was **not** wired, for either language (amendment D-M23-12, after Gate-G1 reviewer finding F3 that extracted units are not self-contained -- include-closure computation at extraction time is a workstream of its own, and wiring the invocation would turn deterministic offline green into guaranteed red wherever a compiler exists); (2) a `source_file` provenance refinement (member defining file rather than the candidate) was ruled **incomplete, not incorrect** by both lanes and deferred, because planner rework churns the C++ plan goldens. The decisions D-M23-1..D-M23-13, the per-slice landing ledger, the Gate-G3 findings, and the follow-up backlog are recorded in the kickoff file; they are deliberately not restated here.
+- **M24 — out-of-process plugin host** (`libloading` / WASM). **Reclassified 2026-10-03: parked, not scheduled.** No milestone, no plan file, no owner. The original wording -- "worth it only when a plugin is built by another team" -- used a proxy for the three conditions that would actually justify a runtime-loaded host; none of the three holds in this repository:
+
+  | Condition | Status in this repository |
+  | --- | --- |
+  | The plugin needs a heavyweight third-party dependency that must not be taken in-process (binary size, compile time, licensing) | Not present. `ariadne-lang-scala` has no third-party runtime dependency; its parser is hand-written by design (assumption A3). |
+  | Fault isolation -- a plugin crash must not kill an analysis run | Not present. Analysis is in-process and statically linked, so there is no fault boundary -- though it is not single-threaded: the load stage runs under rayon and the scheduler under tokio. |
+  | Independent release cadence -- a plugin ships without relinking the main binary | Not present. Both plugins are built and released with this repository. |
+
+  The cost is why this is a decision rather than a chore: a runtime-loaded plugin escapes the compile-time dependency graph, so review rule R1's `plugin_crates_do_not_depend_on_core_pipeline` check -- which reads the plugin `Cargo.toml` manifests -- can no longer police it. A dylib or WASM host therefore **weakens the machine-checkable boundary** this plan spent M17-M18 building, and would need its own ADR plus an explicit answer to how that guard is preserved; see `docs/adr/0001-language-plugin-boundary.md` ("Machine-checkable enforcement" and its known-exception section). Re-decide M24 only once the third-language evidence named in "Sequencing after M23" exists -- until then it stays parked.
 
 
 ## 6. Test strategy
@@ -602,53 +619,79 @@ Get-Command clang, clang++, clang-worker -ErrorAction SilentlyContinue   # expec
 
 ## 9. Implementation order (todo list)
 
-**M22 — API seam**
-- [ ] M22.0 Capture golden artifacts for `tests/fixtures/basic` + `tests/fixtures/expensive` (`m00_golden_baseline_test.rs`, `tests/golden/`)
-- [ ] M22.1 Create `crates/lang-api`; move the 11 value types out of `crates/index/src/types.rs` (`IndexResult` stays); `index` re-exports them
-- [ ] M22.2 Add `identity.rs` (`SourceLanguage` alias + `language_of_file_kind`), `modeling.rs`, `capability.rs`, `unit.rs`, `catalog.rs` (+ `DependentIndex`) + unit tests; additive `repo` edits (`SourceLanguage` derives `PartialOrd, Ord, Default`, `FileRecord.language`) and the **D8 seed** (`FileKind`/`SourceLanguage` × Java/Rust/TypeScript/Python + `from_extension`/`from_file_kind` arms, classification-only)
-- [ ] M22.3 Flip `crates/lang/Cargo.toml` from `ariadne-index` to `ariadne-lang-api`; add `unit.rs` (`UnitShaper`)
-- [ ] M22.4 Extend `LanguagePlugin` (`id`, `modeling`, `capabilities`, `analysis_fingerprint`, `shaper`) + registry lookups (`plugin_for_id`, `languages`, `detect_language`, `shapers`) + tests
-- [ ] M22.5 Add `DependencyResolver::resolve_target` + `dependents_of` defaults, `FileCatalog`, `ResolveOutcome`, `CompilerValidator::toolchain_status`, `ToolchainStatus`
-- [ ] M22.6 `m22_plugin_seam_test.rs` incl. architecture guards → `cargo test --workspace` green, golden diff empty
+**M17 — API seam**
+- [x] M17.0 Capture golden artifacts for `tests/fixtures/basic` + `tests/fixtures/expensive` (`m00_golden_baseline_test.rs`, `tests/golden/`)
+- [x] M17.1 Create `crates/lang-api`; move the 11 value types out of `crates/index/src/types.rs` (`IndexResult` stays); `index` re-exports them
+- [x] M17.2 Add `identity.rs` (`SourceLanguage` alias + `language_of_file_kind`), `modeling.rs`, `capability.rs`, `unit.rs`, `catalog.rs` + unit tests; additive `repo` edits (`SourceLanguage` derives `PartialOrd, Ord, Default`, `FileRecord.language`)
+- [x] M17.3 Flip `crates/lang/Cargo.toml` from `ariadne-index` to `ariadne-lang-api`; add `unit.rs` (`UnitShaper`)
+- [x] M17.4 Extend `LanguagePlugin` (`id`, `modeling`, `capabilities`, `analysis_fingerprint`, `shaper`) + registry lookups (`plugin_for_id`, `languages`, `detect_language`) + tests
+- [x] M17.5 Add `DependencyResolver::resolve_target`, `FileCatalog`, `ResolveOutcome`, `CompilerValidator::toolchain_status`, `ToolchainStatus`
+- [x] M17.6 `m17_plugin_seam_test.rs` incl. architecture guards → `cargo test --workspace` green, golden diff empty
 
-**M23 — C++ becomes a plugin**
-- [ ] M23.1 Create `crates/lang-cpp`; move `crates/graph/src/resolver.rs` (`parse_include_directives`, `IncludeResolver`) → `directive_parser.rs` / `resolver.rs` (`CppDependencyResolver`, `CppUnitShaper`); `#[deprecated]` shims in `graph`
-- [ ] M23.2 Move `CppSemanticAnalyzer` (tokenizer + `ParserCtx`) from `crates/index/src/analyzer.rs` → `lang-cpp/src/analyzer.rs` with the `lang::SemanticAnalyzer` adapter impl; `index` re-exports; move `ClangWorkerBackend` out of `crates/scheduler/src/worker.rs`
-- [ ] M23.3 `crates/cli/src/registry.rs::default_registry()`; thread the registry into `Pipeline::new` (thin `cli` wrappers unchanged otherwise) + `--lang` flag
-- [ ] M23.4 Inject shapers (plural, D10) into `BuildDiscoverer` with first-wins + `Diagnostic::AmbiguousUnit` merge; move the `"cl.exe"` / `cpp|cc|cxx|c` / `Default|x64` literals from `infer_default_discovery` into `lang-cpp::CppUnitShaper`
-- [ ] M23.5 Make the graph BFS generic over `&dyn DependencyResolver` (`build_import_graph(repo, registry)`, `build_include_graph`→`#[deprecated]` delegate); neutral `map_aggregation_consumers`
-- [ ] M23.5b Dispatch `scheduler/tu_store.rs` (`compute_tu_closure`/`analyze_closure`) + `pipeline` stage functions through the registry per unit language; keep C++ fingerprints/merged-analysis byte-identical
-- [ ] M23.5c D9 identifier rename (§3.5.1): `IncludeGraph`→`ImportGraph`, `Include{Edge,Kind}`→`Import{Edge,Kind}`, `STAGE_INCLUDE_GRAPH`→`STAGE_IMPORT_GRAPH` (value `"include-graph"` frozen); `#[deprecated]` aliases
-- [ ] M23.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
-- [ ] M23.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
-- [ ] M23.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies
-- [ ] M23.9 `reduced.rs` provenance fix (§3.6.1): `DeclId→FileId` map from `tu.declarations`, true `defining_file` (fallback `owning_file`), add `declaring_files`; epoch bump invalidates the bincode `symbols.bin`
-- [ ] M23.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
-- [ ] M23.11 `m23_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + `tu_store`/pipeline closure parity + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance + pipeline stage manifest unchanged); remove the `#[deprecated]` shims; un-ignore `core_crates_do_not_name_languages`; workspace green
+**M18 — C++ becomes a plugin**
+- [x] M18.1 Create `crates/lang-cpp`; move `crates/graph/src/resolver.rs` (`parse_include_directives`, `IncludeResolver`) → `directive_parser.rs` / `resolver.rs` (`CppDependencyResolver`, `CppUnitShaper`); `#[deprecated]` shims in `graph`
+- [x] M18.2 Move `CppSemanticAnalyzer` (tokenizer + `ParserCtx`) from `crates/index/src/analyzer.rs` → `lang-cpp/src/analyzer.rs` with the `lang::SemanticAnalyzer` adapter impl; `index` re-exports; move `ClangWorkerBackend` out of `crates/scheduler/src/worker.rs`
+- [x] M18.3 `crates/cli/src/registry.rs::default_registry()` + registry-aware `handle_index_with_registry` / `build_dependency_graph` variants + `--lang` flag
+- [x] M18.4 Inject `UnitShaper` into `BuildDiscoverer`; move the `"cl.exe"` / `cpp|cc|cxx|c` / `Default|x64` literals from `infer_default_discovery` into `lang-cpp::CppUnitShaper`
+- [x] M18.5 Make `build_include_graph`'s BFS generic over `&dyn DependencyResolver` (`build_dependency_graph(repo, registry)`); neutral alias `map_aggregation_consumers` in `graph.rs` — MUST reconcile documented divergences from M18.2 review: legacy closure includes ThirdParty headers while plugin walk drops `ResolveOutcome::External`; `PluginWorkerBackend` context path must not run hardcoded-C++ `analyze_tu_full` for non-C++ languages; angle style/include-dir fallback unmodeled in `ResolveOutcome`
+- [x] M18.6 `OptimizationPlanner` gains `aggregation_filter`, `target_path_for`, `constraints`, `cycle_policy` with C++-identical defaults
+- [x] M18.7 Planner: path template from plugin, `ClusteringConstraints` merge of overlapping SCCs, `CyclePolicy` handling on top of `crate::scc`
+- [x] M18.8 Neutral isolation engine (§3.6): `GeneratedHeader`→`GeneratedUnit`, drop `forward_declarable`, engine delegates new-file text to `lang-cpp::CppSourceExtractor` and consumer-redirect/diff text to `CppDependencyRewriter`; `ConsumerRewrite`/`MigrationPreview` serde names frozen (D5); byte-parity incl. placeholder bodies
+- [x] M18.9 `reduced.rs` provenance fix (§3.6.1): `DeclId→FileId` map from `tu.declarations`, true `defining_file` (fallback `owning_file`), add `declaring_files`; epoch bump invalidates the bincode `symbols.bin`
+- [x] M18.10 `validate`: add `ValidationStatus::Skipped(String)` + `format_output`; `CompilerValidator::toolchain_status()`; `TuCacheFingerprint` (`language`, `plugin_fingerprint`) + `CURRENT_ANALYSIS_VERSION` `"1.0.0"` → `"2.0.0"`
+- [x] M18.11 `m18_cpp_plugin_parity_test.rs` (resolver + `PluginWorkerBackend` + isolation-engine byte-parity + `MigrationPreview` parity + reduced-model provenance); remove the `#[deprecated]` shims; architecture guard passes; workspace green
 
-**M24–M27 — Scala analysis slice**
-- [ ] M24.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
-- [ ] M24.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
-- [ ] M24.3 Register in `cli/src/registry.rs`; add `tests/fixtures/scala-basic/**`; `m24_scala_discovery_test.rs`
-- [ ] M25.1 `ScalaImportResolver` (`resolve_edges` + `resolve_target`) + unit tests
-- [ ] M25.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m25_scala_dependency_graph_test.rs`
-- [ ] M26.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
-- [ ] M26.2 `ScalaAnalyzer` wired through the registry (M23's `PluginWorkerBackend` + `tu_store`/pipeline per-unit dispatch already handle a Scala repo end-to-end); language-scoped cache key; `m26_scala_semantic_index_test.rs`
-- [ ] M27.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
-- [ ] M27.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
-- [ ] M27.3 `m27_scala_load_analysis_test.rs`; golden re-check; workspace green
+> EXECUTION NOTES (M18.11, reviewer-APPROVED 2026-09-30 at 3b06e54): (a) the permanent suite's body-only worker oracle shares `CppSemanticAnalyzer::analyze_source` with the subject, so it locks dispatch/shape only — analyzer-semantics locking lives in the m00 goldens; (b) `core_crates_do_not_name_languages` has two admitted gaps: core-crate *test* code imports plugin type names (`CppDependencyRewriter`/`CppSourceExtractor`) and `"c++20"` literals pass the 4-token FORBIDDEN list — widening tokens (`Cpp`/`lang_cpp`/`c++`) or moving byte-fixture tests out of core src is an M23 item; the `concat!` literal scrub is byte-identical in assertion semantics and judged acceptable; (c) `pipeline::default_registry()` duplicates the `cli::registry::default_registry()` enumeration — keep in sync at M19 or share one helper; (d) relocation edge is `lang-cpp → scheduler` (verified `cargo tree -e normal`: no scheduler→lang-cpp normal edge); validate's 3-arg `apply` shim intentionally survives until M23.
+
+> EXECUTION NOTES (M18.3/M18.5, recorded post-audit 2026-10-01): divergence fixes from the M18.2 review live in code — (i) External-drop closed by feeding the compilation context's include dirs into `ResolutionContext.search_paths` + `on_disk_include_fallback` (`scheduler/tu_store.rs` `edge_destinations`, mirrored by the `graph` BFS incl. catalog-ownership ThirdParty→External classification); (ii) worker dispatch plugin-only (`analyze_tu_full_with_plugin`; empty registry reports unhandled, never defaults to C++); (iii) `DirectiveStyle` + shared `first_ondisk_include_candidate` reproduce legacy candidate order. Post-completion audit (2026-10-01): C++-is-a-plugin intent confirmed, zero behavioral regressions; accepted file-placement drifts — `CppUnitShaper` lives in `lang-cpp/src/shaper.rs` and the analyzer family spans `analyzer.rs`/`parser.rs`/`tokenizer.rs` (symbols/crate placement unchanged); the shaper-less compile_commands path in `build` retains `cl.exe`/`x64`/`language: Cpp` residues per §4 with plugin injection logged as an M19+ item.
+
+**M19–M22 — Scala analysis slice**
+- [x] M19.1 `crates/lang-scala` + `ScalaPlugin` (modeling, capabilities) + workspace members
+- [x] M19.2 `ScalaDetector`, `ScalaUnitShaper` + unit tests
+- [x] M19.3 Register in `cli/src/registry.rs`; add `tests/fixtures/scala-basic/**`; `m19_scala_discovery_test.rs`
+- [x] M20.1 `ScalaImportResolver` (`resolve_edges` + `resolve_target`) + unit tests
+- [x] M20.2 `IncludeKind::Import`; cycle policy in `graph.rs` + `planner.rs`; `m20_scala_dependency_graph_test.rs`
+- [x] M21.1 `ScalaSourceParser` (package, decls, extends/with, references) + unit tests
+- [x] M21.2 `ScalaAnalyzer` + `handle_index_with_registry` + `PluginWorkerBackend` language dispatch; language-scoped cache key; `m21_scala_semantic_index_test.rs`
+- [x] M22.1 Package-object `aggregation_filter` for Scala in `planner.rs`; capability-gated `PlanRejection`
+- [x] M22.2 `language` in report manifests; `crates/cli/src/commands/analyze.rs` wording; `crates/ui` dto `language` / `unit_kind` on file nodes and `defining_file` / `declaring_files` (declared-vs-defined) on symbol nodes
+- [x] M22.3 `m22_scala_load_analysis_test.rs`; golden re-check; workspace green
+
+**M23 -- Symbol isolation, shared engine (C++ + Scala)**
+- [x] M23.1 (kickoff T1) C++ verbatim symbol bodies into the neutral engine: `locate_symbol_bodies`, `source_file` wired through planner `propose_batch` / `assemble_plan`, engine content provider at the `transform.rs` / `optimize.rs` call sites, placeholder fallback retained for no-content units (D-M23-1/2/3)
+- [x] M23.2 (kickoff T1, golden refresh -- split out here because it is the only M23 slice that changes golden bytes) Deliberate golden refresh, deliberately separated from the byte-identical M18 lock: `zz_capture_isolation` recapture of `isolation_output_parity.rs` BASIC/EXPENSIVE plan locks; m00 goldens refreshed only where additive `source_file` appears; `preview_json` / `diff_text` locks byte-identical
+- [x] M23.3 (kickoff T2) Single generated-unit emitter + shim removal (D-M23-4): applier delegates to the extractor, shared `render_unit` helper, `TransitionalDefaultRewriter` and the `#[allow(deprecated)]` annotations deleted
+- [x] M23.4 (kickoff T3) Guard hardening (D-M23-10, closing M18.11 execution note (b)): every `ariadne_lang_cpp::*` reference moved out of core `src/`, `crates/pipeline` added to the guard walk scope, `FORBIDDEN` widened to `Cpp` / `lang_cpp` / `ariadne-lang-cpp`, `c++20`-style language-standard literals recorded as an explicit carve-out
+- [x] M23.5 (kickoff T4) `ScalaToolchainValidator` replaces `StubValidator`: PATH-stripped probe reports `Missing`, tier-3 `Skipped` asserted through `TierValidator`, `validate_compile` never runs without a toolchain. Real compiler invocation deliberately NOT wired (D-M23-12)
+- [x] M23.6 (kickoff T5) `ScalaSourceExtractor`: package clause + verbatim top-level region + referenced-imports-only import block (`unit_namespace`, text-locating span entry point); import plumbing is producer-side module paths, not engine unit-deps (D-M23-13)
+- [x] M23.7 (kickoff T6) `ScalaDependencyRewriter`: import-line rewrite preserving every other byte, wildcard-aggregate narrowing, `remove_top_level_symbols` real implementation, `render_diff` in the C++ diff grammar's shape
+- [x] M23.8 (kickoff T7) Wiring: capability flip + per-language registry / planner / backend dispatch (D-M23-6/7), `colocated_groups_with_edges` sealed-trait pairing fed by the planner extends-edge merge (D-M23-8), additive `modifiers` on `SymbolRecord`; T7b added the defining-file filter, the collapsed self-target guard, and move-removal inside the snapshot/rollback transaction
+- [x] M23.9 (kickoff T8) Acceptance suite `m23_symbol_isolation_test.rs` on the new `scala-isolation` fixture (end-to-end discover->build->graph->index->reduce->load->plan->preview->apply: verbatim bodies, move-removal, rollback dir-hash identity, untouched-file byte preservation, tiers `[Pass, Pass, Skipped]`), `m22` plan-rejection expectation refresh, closeout (Gate G3)
+
+> EXECUTION NOTES (M23, recorded 2026-10-03 at closure `36b182a`): M23 was executed under `plans/m23-symbol-isolation-kickoff.md`, not under this plan's section 5 task list, so this block is derived from that kickoff. **Where the kickoff and this plan conflict, the kickoff is authoritative** -- D-M23-12 supersedes the Deferred-M23 tier-3 "real compile" row above (probe-backed honesty instead), and D-M23-13 supersedes the original T5 "minimal imports from the source file" phrasing. Slice names are the kickoff's own T1..T8 task names, cross-checked against the `feat(m23.7)` / `feat(m23.8)` commit subjects.
 
 **Docs**
-- [ ] D.1 Append M22–M27 to `Plan.md` using its Proves / Does-not-prove format
-- [ ] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + §3.6 isolation contract + rules R1–R3
-- [ ] D.3 "Adding a language in 5 steps" page (new crate → implement traits → register → fixture → tests)
-- [ ] D.4 `docs/adr/0002-symbol-placement-and-isolation.md` — C++ `SplitDeclaration` vs single-file placement; why isolation (symbol → own file) is the language-neutral primitive (D6/D7 rationale)
+- [x] D.1 Append M15-M23 to `Plan.md` using its Proves / Does-not-prove format -- scope corrected 2026-10-03 from "M17-M22": M15 and M16 were equally absent from `Plan.md`, so appending only M17+ would have opened a fresh numbering gap; landed: `bc6efa0` (the M15-M23 records), `a232957` (remediation: drops the M16 record's false `tools/clang-worker` absence claim and nests the Part II sub-headings)
+- [x] D.2 `docs/adr/0001-language-plugin-boundary.md` = §3.4 mapping table + §3.6 isolation contract + rules R1–R3 -- landed: `f6a995f` (ADR-0001), `a17fcb3` (adds the known CLI planning-hook exception: a live R3 gap plus the guard walk-scope hole behind it)
+- [x] D.3 `docs/adding-a-language.md` ("Adding a language to Ariadnes") page (new crate → implement traits → register → fixture → tests) -- landed: `dfb1425` (`docs/adding-a-language.md`)
+- [x] D.4 `docs/adr/0002-symbol-placement-and-isolation.md` — C++ `SplitDeclaration` vs single-file placement; why isolation (symbol → own file) is the language-neutral primitive (D6/D7 rationale) -- landed: `017d51f` (ADR-0002)
 
 **Sequencing note:** M22 is mostly mechanical; **M23 is by far the largest block** (transform neutralization, provenance fix, `tu_store`/`pipeline` dispatch, multi-shaper merge, and the D9 rename all land there — split it into 2–3 PRs: relocations first, dispatch second, rename last so each stays reviewable); M24–M25 are small; M26's parser is the second-largest item; M27 is medium. Each milestone should ship as its own reviewable PR set.
+
+### Sequencing after M23
+
+*Recorded at M23 closure, 2026-10-03.*
+
+1. **Plan repair first.** The project plan had no record of M15-M23 -- `Plan.md` stopped at M14 -- so there was no single source of truth for milestone state, and neither the ADRs nor the "adding a language" guide existed. That gap is closed: see `Plan.md` Part II, `docs/adr/0001-language-plugin-boundary.md`, `docs/adr/0002-symbol-placement-and-isolation.md`, and `docs/adding-a-language.md`.
+2. **Next milestone: prove the mechanism, do not extend it.** Review rule R1 promises that a new language touches no core crate, but it has never been falsifiable -- both existing plugins were added in this repository by the team that wrote the core crates, and the C++ "plugin" was produced by extracting core code rather than authored independently. The next milestone therefore adds a small third language as an independent plugin crate, to test that promise honestly. It is deliberately left **unnumbered**: it has no plan file yet, and assigning it an ID here would recreate the very incoherence this repair just closed.
+3. **That third language will hit three CLI files -- five dispatch sites (two in `plan.rs`, two in `optimize.rs`, one in `ui.rs`) -- immediately, and closing them is outstanding work.** The plan's headline promise -- "1 new crate + 1 registry entry + fixtures/tests, 0 edits to the core crates" -- is incomplete as stated. `crates/cli/src/commands/plan.rs` (`planning_hooks`: two boxed closures that `match` `SourceLanguage` and call the C++ and Scala hook pairs by name) needs one new arm per language; that `match` sits outside `lang-api` and `cli/src/registry.rs`, so it is a live review-rule R3 exception, recorded rather than closed in the known-exception section of `docs/adr/0001-language-plugin-boundary.md`; the `GUARD_CORE_CRATES` walk in `tests/integration/tests/m17_plugin_seam_test.rs` lists seven core crates and not `crates/cli`, so `core_crates_do_not_name_languages` structurally cannot see that file; and `crates/cli/src/optimize.rs` plus `crates/cli/src/commands/ui.rs` name plugin crates with no `match` at all -- not R3 violations, but still places a new language must be taught about. Settling that exception policy (ADR coverage, guard walk scope, or both) belongs to that milestone, not to this repair.
+4. **M24 stays parked until that evidence exists.** The third-language milestone is what makes the M24 decision decidable: if a new plugin needs weight the binary cannot carry, or if the guard cannot hold, the triggers in section 5 fire with evidence rather than speculation. Re-decide M24 after it lands.
 
 ---
 
 *No source files were modified while producing this plan.*
+
+*(Clarification added 2026-10-03: that sentence describes the original authoring of this plan, and it was true then. The plan has since been executed -- M17-M23 -- and those milestones changed source. This file is now a dated reconciliation of the plan against what actually landed; the planning-tense prose above is retained unchanged as the historical record.)*
 
 
 

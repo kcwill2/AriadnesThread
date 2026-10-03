@@ -1,0 +1,17 @@
+{
+  "analysis_version": "<ANALYSIS_VERSION>",
+  "input_fingerprint": "<INPUT_FINGERPRINT>",
+  "ownership_summary": {
+    "Generated": 0,
+    "Repository": 5,
+    "ThirdParty": 0,
+    "Toolchain": 0
+  },
+  "policy_summary": {
+    "Contract": 0,
+    "Frozen": 0,
+    "Optimizable": 5
+  },
+  "repository_root": "<ROOT>",
+  "total_files": 5
+}

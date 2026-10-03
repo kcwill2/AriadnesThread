@@ -18,6 +18,7 @@ fn sym(id: &str, file: u64) -> ReducedSymbolRecord {
         defining_file: Some(FileId(file)),
         declarations: vec![],
         definition: None,
+        declaring_files: vec![],
     }
 }
 
@@ -38,6 +39,8 @@ fn model_with(symbols: Vec<ReducedSymbolRecord>, edges: Vec<(&str, &str)>) -> Re
             .collect(),
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     }
 }
 
@@ -101,7 +104,9 @@ fn metric_with(
     }
 }
 
-fn empty_payload(file_justification: HashMap<String, HashMap<String, ariadne_ui::JustificationEntry>>) -> GraphExportPayload {
+fn empty_payload(
+    file_justification: HashMap<String, HashMap<String, ariadne_ui::JustificationEntry>>,
+) -> GraphExportPayload {
     GraphExportPayload {
         repo_name: "fixture-repo".to_string(),
         include_graph: vec![],
@@ -127,12 +132,7 @@ fn basic_fixture() -> (
     HashMap<PathBuf, u64>,
     Vec<LoadMetric>,
 ) {
-    let graph = graph_with_paths(&[
-        (1, "graph.h"),
-        (2, "jobserver.h"),
-        (5, "a.h"),
-        (6, "b.h"),
-    ]);
+    let graph = graph_with_paths(&[(1, "graph.h"), (2, "jobserver.h"), (5, "a.h"), (6, "b.h")]);
     let model = model_with(
         vec![
             sym("X", 2),
@@ -238,7 +238,9 @@ fn test_top_16_contributors_kept_by_combined_count() {
         "the single lowest combined count (84) is the one dropped"
     );
     assert_eq!(
-        root.get("25").expect("85 must survive at the boundary").justified_count,
+        root.get("25")
+            .expect("85 must survive at the boundary")
+            .justified_count,
         85
     );
     for (key, entry) in root {
@@ -341,7 +343,14 @@ fn test_payload_round_trip_carries_justification_entries() {
     let serialized = serde_json::to_string(&payload).unwrap();
     assert!(serialized.contains("file_justification"));
 
-    payload.file_justification.get_mut("1").unwrap().get_mut("2").unwrap().required_headers.push("z.h".to_string());
+    payload
+        .file_justification
+        .get_mut("1")
+        .unwrap()
+        .get_mut("2")
+        .unwrap()
+        .required_headers
+        .push("z.h".to_string());
     let back: GraphExportPayload = serde_json::from_str(&serialized).unwrap();
     let round = back.file_justification.get("1").unwrap().get("2").unwrap();
     assert_eq!(round.required_headers, vec!["a.h", "b.h"]);
@@ -359,6 +368,7 @@ fn include_edge(from: u64, to: u64) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
     }
 }
 
@@ -416,7 +426,11 @@ fn impact_fixture() -> (
     model.file_symbols = vec![
         (
             FileId(2),
-            vec![SymbolId::new("FatA"), SymbolId::new("FatB"), SymbolId::new("ColA")],
+            vec![
+                SymbolId::new("FatA"),
+                SymbolId::new("FatB"),
+                SymbolId::new("ColA"),
+            ],
         ),
         (FileId(3), vec![SymbolId::new("BaseT")]),
         (FileId(4), vec![SymbolId::new("Csym")]),
@@ -519,7 +533,11 @@ fn test_impact_capped_to_eight_entries_per_root_by_rank() {
         .filter(|(_, e)| e.impact.is_some())
         .map(|(k, _)| k)
         .collect();
-    assert_eq!(with_impact.len(), 8, "exactly 8 entries per root carry impact");
+    assert_eq!(
+        with_impact.len(),
+        8,
+        "exactly 8 entries per root carry impact"
+    );
     for i in 10..=17 {
         assert!(
             root.get(&i.to_string()).unwrap().impact.is_some(),
@@ -556,12 +574,7 @@ fn test_impact_dropped_sample_caps_at_eight_with_truncation_flag() {
     }
     // F9/F8 have no semantic edges: R = {} and the whole child set drops.
     let model = model_with(
-        vec![
-            sym("F9", 2),
-            sym("C9", 2),
-            sym("F8", 3),
-            sym("C8", 3),
-        ],
+        vec![sym("F9", 2), sym("C9", 2), sym("F8", 3), sym("C8", 3)],
         vec![],
     );
     let metrics = vec![metric_with(
@@ -578,23 +591,39 @@ fn test_impact_dropped_sample_caps_at_eight_with_truncation_flag() {
     let out = build_file_justification(&metrics, &graph, &model, &path_to_id(&graph));
     let root = out.get("1").unwrap();
 
-    let nine = root.get("2").unwrap().impact.as_ref().expect("9-drop impact");
+    let nine = root
+        .get("2")
+        .unwrap()
+        .impact
+        .as_ref()
+        .expect("9-drop impact");
     assert_eq!(nine.dropped_from_root_count, 9);
     assert_eq!(
         nine.dropped_sample,
         vec!["d0.h", "d1.h", "d2.h", "d3.h", "d4.h", "d5.h", "d6.h", "d7.h"]
     );
-    assert!(nine.dropped_sample_truncated, "9 > 8 marks the sample truncated");
+    assert!(
+        nine.dropped_sample_truncated,
+        "9 > 8 marks the sample truncated"
+    );
     assert_eq!(nine.root_closure_before, 19);
     assert_eq!(nine.root_closure_after, 10);
 
-    let eight = root.get("3").unwrap().impact.as_ref().expect("8-drop impact");
+    let eight = root
+        .get("3")
+        .unwrap()
+        .impact
+        .as_ref()
+        .expect("8-drop impact");
     assert_eq!(eight.dropped_from_root_count, 8);
     assert_eq!(
         eight.dropped_sample,
         vec!["e0.h", "e1.h", "e2.h", "e3.h", "e4.h", "e5.h", "e6.h", "e7.h"]
     );
-    assert!(!eight.dropped_sample_truncated, "exactly 8 must not truncate");
+    assert!(
+        !eight.dropped_sample_truncated,
+        "exactly 8 must not truncate"
+    );
 }
 
 #[test]
@@ -691,7 +720,10 @@ fn test_payload_rows_are_header_files_only() {
     let out = build_file_justification(&metrics, &graph, &model, &ids);
     let root = out.get("1").expect("root present");
 
-    assert!(root.contains_key("2"), "justified+collateral header survives");
+    assert!(
+        root.contains_key("2"),
+        "justified+collateral header survives"
+    );
     assert!(
         root.contains_key("7"),
         "collateral-only header must survive: it IS the unnecessary-include signal"
@@ -711,8 +743,7 @@ fn test_payload_rows_are_header_files_only() {
 fn test_detail_rows_are_header_files_only_and_totals_exclude_dropped() {
     let (graph, model, _ids, metrics) = mixed_path_fixture();
     let analyzer = ariadne_graph::LoadAnalyzer::new(&graph, &model);
-    let detail =
-        build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
+    let detail = build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
 
     assert_eq!(
         detail
@@ -759,8 +790,7 @@ fn test_collateral_only_header_row_survives_zero_justified_on_both_builders() {
     assert_eq!(only_col.collateral_symbols, vec!["OC1", "OC2"]);
 
     let analyzer = ariadne_graph::LoadAnalyzer::new(&graph, &model);
-    let detail =
-        build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
+    let detail = build_file_justification_detail("1", FileId(1), &metrics[0], &analyzer, &model);
     let row = detail
         .entries
         .iter()

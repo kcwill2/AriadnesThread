@@ -595,10 +595,16 @@ fn path_basename(path: &std::path::Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
+/// File nodes plus include edges. D27: `file_languages`/`file_unit_kinds`
+/// (numeric FileId → display string) are injected by the cli payload builder
+/// from discovery records and plugin modeling; a missing entry OMITS the
+/// `language`/`unit_kind` key (locked contract, no fabricated default).
 pub fn build_include_elements(
     graph: &ariadne_graph::IncludeGraph,
     closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
     cycles: &[Vec<ariadne_repo::FileId>],
+    file_languages: &std::collections::HashMap<u64, String>,
+    file_unit_kinds: &std::collections::HashMap<u64, String>,
 ) -> Vec<CytoscapeElement> {
     let mut elements = Vec::new();
     let mut cycle_nodes = std::collections::HashSet::new();
@@ -649,17 +655,24 @@ pub fn build_include_elements(
         let in_degree = in_degrees.get(file_id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(file_id).copied().unwrap_or(0);
 
+        let mut data = serde_json::json!({
+            "id": file_id.0.to_string(),
+            "label": fname,
+            "path": path_str,
+            "kind": kind,
+            "closure": closure_size,
+            "is_cycle": is_cycle,
+            "in_degree": in_degree,
+            "out_degree": out_degree,
+        });
+        if let Some(language) = file_languages.get(&file_id.0) {
+            data["language"] = serde_json::Value::String(language.clone());
+        }
+        if let Some(unit_kind) = file_unit_kinds.get(&file_id.0) {
+            data["unit_kind"] = serde_json::Value::String(unit_kind.clone());
+        }
         elements.push(CytoscapeElement {
-            data: serde_json::json!({
-                "id": file_id.0.to_string(),
-                "label": fname,
-                "path": path_str,
-                "kind": kind,
-                "closure": closure_size,
-                "is_cycle": is_cycle,
-                "in_degree": in_degree,
-                "out_degree": out_degree,
-            }),
+            data,
             classes: if is_cycle { Some("cycle".into()) } else { None },
         });
     }
@@ -682,7 +695,33 @@ pub fn build_include_elements(
     elements
 }
 
-pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec<CytoscapeElement> {
+/// Resolves declaring-file ids to the injected path strings, order-preserving,
+/// duplicates collapsed after resolution; unresolvable ids drop out (D27).
+fn resolve_declaring_paths(
+    ids: &[ariadne_repo::FileId],
+    file_paths: &std::collections::HashMap<u64, String>,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut paths = Vec::new();
+    for id in ids {
+        if let Some(path) = file_paths.get(&id.0) {
+            if seen.insert(path.clone()) {
+                paths.push(path.clone());
+            }
+        }
+    }
+    paths
+}
+
+/// Symbol nodes plus symbol edges. D27 defect fix (§3.6.1): `defining_file`
+/// and `path` carry the RESOLVED repo-relative path from the cli-injected
+/// `file_paths` map (was the numeric FileId string), `path` falls back to the
+/// empty string the source-drawer JS guard expects; `declaring_files` is the
+/// additive declared-in path set. Unresolvable ids ⇒ null/empty, never panic.
+pub fn build_symbol_elements(
+    model: &ariadne_graph::ReducedSemanticModel,
+    file_paths: &std::collections::HashMap<u64, String>,
+) -> Vec<CytoscapeElement> {
     let mut elements = Vec::new();
     let mut in_degrees = std::collections::HashMap::new();
     let mut out_degrees = std::collections::HashMap::new();
@@ -704,17 +743,19 @@ pub fn build_symbol_elements(model: &ariadne_graph::ReducedSemanticModel) -> Vec
         let kind_str = format!("{:?}", sym.kind).to_uppercase();
         let in_degree = in_degrees.get(&sym.id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(&sym.id).copied().unwrap_or(0);
-        let path_str = sym
+        let defining_path = sym
             .defining_file
-            .map(|f| f.0.to_string())
-            .unwrap_or_default();
+            .and_then(|f| file_paths.get(&f.0))
+            .cloned();
+        let declaring_paths = resolve_declaring_paths(&sym.declaring_files, file_paths);
         elements.push(CytoscapeElement {
             data: serde_json::json!({
                 "id": sym.id.0.clone(),
                 "label": sym.name.clone(),
                 "kind": kind_str,
-                "defining_file": sym.defining_file.map(|f| f.0.to_string()),
-                "path": path_str,
+                "defining_file": defining_path.clone(),
+                "declaring_files": declaring_paths,
+                "path": defining_path.unwrap_or_default(),
                 "declarations_count": sym.declarations.len(),
                 "in_degree": in_degree,
                 "out_degree": out_degree,

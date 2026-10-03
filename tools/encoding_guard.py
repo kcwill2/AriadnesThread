@@ -33,7 +33,7 @@ MOJIBAKE_SIGNATURES = (
 
 # Documentation paths legitimately quote corruption signatures (specs, plans)
 # and are therefore exempt. Entries are forward-slash path prefixes.
-ALLOW_LIST_PREFIXES = (".kilo/plans/", "plans/")
+ALLOW_LIST_PREFIXES = (".kilo/plans/", "plans/", "tasks/")
 
 # Path segments whose subtrees are third-party vendored content: not authored
 # here, may carry any bytes, and out of the corruption policy's reach.

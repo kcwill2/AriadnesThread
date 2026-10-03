@@ -13,3 +13,13 @@ bincode.workspace = true
 tempfile.workspace = true
 ariadne-transform = { path = "../transform" }
 ariadne-cluster = { path = "../cluster" }
+# M18.8b: apply_with takes the neutral DependencyRewriter hook.
+ariadne-lang = { path = "../lang" }
+
+[dev-dependencies]
+# Byte-parity locks run apply_with against the C++ plugin's directive text;
+# production code stays plugin-free (same pattern as ariadne-transform).
+ariadne-lang-cpp = { path = "../lang-cpp" }
+# T7b move-removal locks build ExtractedSymbol values (SymbolKind) in a
+# neutral fake-rewriter transaction test.
+ariadne-index = { path = "../index" }

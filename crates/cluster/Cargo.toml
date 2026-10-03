@@ -12,3 +12,11 @@ ariadne-repo = { path = "../repo" }
 ariadne-index = { path = "../index" }
 ariadne-graph = { path = "../graph" }
 rayon = { workspace = true }
+ariadne-lang = { path = "../lang" }
+
+[dev-dependencies]
+# Test-only edge so the characterization suite can prove the relocated C++
+# planner naming (aggregation filter + `*_extracted.h` template) reproduces
+# the locked plan output byte-for-byte. Production code must never depend on
+# plugin crates (plan §6.3 rule R1); this dev edge may close the loop.
+ariadne-lang-cpp = { path = "../lang-cpp" }

@@ -12,9 +12,53 @@ pub struct ReducedSymbolRecord {
     pub id: SymbolId,
     pub name: String,
     pub kind: SymbolKind,
+    /// File hosting the accepted definition declaration (plan §3.6.1). Falls
+    /// back to the legacy `SymbolRecord::owning_file` ONLY when the defining
+    /// (symbol, decl) pair is absent from its TU's declaration registry,
+    /// carries only the `FileId(0)` sentinel (`FileLocation::default()`)
+    /// location, or resolves ambiguously to multiple files (cross-file
+    /// `decl_<counter>` id collisions).
     pub defining_file: Option<FileId>,
     pub declarations: Vec<DeclId>,
     pub definition: Option<DeclId>,
+    /// Files hosting ANY merged declaration with a usable location (plan
+    /// §3.6.1), deduplicated and sorted.
+    pub declaring_files: Vec<FileId>,
+}
+
+/// TU-scoped registry: files hosting each (symbol, decl) pair declared in
+/// the TU analysis; sentinel `FileId(0)` locations are filtered at build.
+type DeclLocations<'a> = BTreeMap<(&'a SymbolId, &'a DeclId), Vec<FileId>>;
+
+/// Files hosting the given (symbol, decl) pair in this TU's declaration
+/// registry; sentinel `FileId(0)` locations are filtered at registry build.
+fn decl_files_for<'x, 'i>(
+    symbol_id: &'i SymbolId,
+    decl: &'i DeclId,
+    decl_locations: &'x DeclLocations<'i>,
+) -> &'x [FileId] {
+    decl_locations
+        .get(&(symbol_id, decl))
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+/// Provenance rule (plan §3.6.1): the defining file is the file of the
+/// definition declaration's own location. `owning_file` is the documented
+/// fallback (M18.9) when the (symbol, decl) pair is unknown to the TU's
+/// declaration registry, carries only the `FileId(0)` sentinel location, or
+/// resolves ambiguously (the parser's per-file `decl_<counter>` ids collide
+/// across files, so a pair can map to several files after TU merge).
+fn defining_file_for<'i>(
+    symbol_id: &'i SymbolId,
+    def: &'i DeclId,
+    decl_locations: &DeclLocations<'i>,
+    owning_file: FileId,
+) -> FileId {
+    match decl_files_for(symbol_id, def, decl_locations) {
+        [single] => *single,
+        _ => owning_file,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,13 +80,25 @@ pub struct FileSymbols {
     pub symbols: Vec<SymbolId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ReducedSemanticModel {
     pub repo_root: PathBuf,
     pub symbols: BTreeMap<SymbolId, ReducedSymbolRecord>,
     pub edges: Vec<ReducedSemanticEdge>,
     pub tu_usage: BTreeMap<SymbolId, Vec<FileId>>,
     pub file_symbols: BTreeMap<FileId, Vec<SymbolId>>,
+    /// Deduplicated sorted supertype channel folded from the per-TU typed
+    /// `TuAnalysis::extends_edges` (plan M23, D-M23-8): persisted separately
+    /// from the four frozen blobs (`extends-edges.bin`), so their bincode
+    /// layouts and the epoch stay untouched. C++ folds none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extends_edges: Vec<(SymbolId, SymbolId)>,
+    /// Symbols whose analysis records carried the `sealed` modifier
+    /// (plan M23, D-M23-8). A side channel for the same reason as
+    /// `extends_edges`: the `symbols.bin` layout is frozen, so
+    /// `ReducedSymbolRecord` cannot grow `modifiers`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sealed_symbols: Vec<SymbolId>,
 }
 
 impl ReducedSemanticModel {
@@ -52,9 +108,28 @@ impl ReducedSemanticModel {
         let mut tu_usage: BTreeMap<SymbolId, BTreeSet<FileId>> = BTreeMap::new();
         let mut file_symbols: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
         let mut raw_edges: BTreeMap<(SymbolId, SymbolId), DependencyKind> = BTreeMap::new();
+        let mut extends: BTreeSet<(SymbolId, SymbolId)> = BTreeSet::new();
+        let mut sealed: BTreeSet<SymbolId> = BTreeSet::new();
 
         for tu in &index_result.tu_analyses {
             let tu_file = tu.tu_file_id;
+
+            // DeclIds are per-file parser counters (`decl_<counter>`) that
+            // collide across files once analyses are merged into one
+            // TuAnalysis, so locations are keyed by (symbol, decl) and
+            // multiple files per pair are kept for the ambiguous case.
+            let mut decl_locations: BTreeMap<(&SymbolId, &DeclId), Vec<FileId>> = BTreeMap::new();
+            for decl in &tu.declarations {
+                if decl.location.file_id.0 == 0 {
+                    continue;
+                }
+                let files = decl_locations
+                    .entry((&decl.symbol_id, &decl.id))
+                    .or_default();
+                if !files.contains(&decl.location.file_id) {
+                    files.push(decl.location.file_id);
+                }
+            }
 
             Self::merge_tu_symbols(
                 &mut symbols,
@@ -62,9 +137,19 @@ impl ReducedSemanticModel {
                 &mut file_symbols,
                 tu_file,
                 &tu.symbols,
+                &decl_locations,
             );
 
             Self::merge_tu_edges(&mut tu_usage, &mut raw_edges, tu_file, &tu.edges);
+
+            // D-M23-8 typed side channels: fold extends pairs and sealed
+            // modifiers (C++ analyses contribute nothing to either).
+            extends.extend(tu.extends_edges.iter().cloned());
+            for sym in &tu.symbols {
+                if sym.modifiers.iter().any(|modifier| modifier == "sealed") {
+                    sealed.insert(sym.id.clone());
+                }
+            }
 
             // References
             for ref_item in &tu.references {
@@ -104,16 +189,19 @@ impl ReducedSemanticModel {
             edges,
             tu_usage: tu_usage_vec,
             file_symbols: file_symbols_vec,
+            extends_edges: extends.into_iter().collect(),
+            sealed_symbols: sealed.into_iter().collect(),
         }
     }
 
     /// Symbols
-    fn merge_tu_symbols(
+    fn merge_tu_symbols<'i>(
         symbols: &mut BTreeMap<SymbolId, ReducedSymbolRecord>,
         tu_usage: &mut BTreeMap<SymbolId, BTreeSet<FileId>>,
         file_symbols: &mut BTreeMap<FileId, BTreeSet<SymbolId>>,
         tu_file: FileId,
-        records: &[SymbolRecord],
+        records: &'i [SymbolRecord],
+        decl_locations: &DeclLocations<'i>,
     ) {
         for sym in records {
             let entry = symbols
@@ -125,27 +213,44 @@ impl ReducedSemanticModel {
                     defining_file: None,
                     declarations: Vec::new(),
                     definition: None,
+                    declaring_files: Vec::new(),
                 });
 
             for decl in &sym.declarations {
                 if !entry.declarations.contains(decl) {
                     entry.declarations.push(decl.clone());
                 }
+                for file in decl_files_for(&sym.id, decl, decl_locations) {
+                    if !entry.declaring_files.contains(file) {
+                        entry.declaring_files.push(*file);
+                    }
+                }
             }
             // Sort to maintain determinism
             entry.declarations.sort();
+            entry.declaring_files.sort();
 
             if let Some(def) = &sym.definition {
                 if entry.definition.is_none() {
                     entry.definition = Some(def.clone());
-                    entry.defining_file = Some(sym.owning_file); // Owning file is the defining file usually
+                    entry.defining_file = Some(defining_file_for(
+                        &sym.id,
+                        def,
+                        decl_locations,
+                        sym.owning_file,
+                    ));
                 } else if entry.kind != SymbolKind::Class
                     && entry.kind != SymbolKind::Struct
                     && (sym.kind == SymbolKind::Class || sym.kind == SymbolKind::Struct)
                 {
                     // Class/Struct definitions take precedence over function definitions (like constructors)
                     entry.definition = Some(def.clone());
-                    entry.defining_file = Some(sym.owning_file);
+                    entry.defining_file = Some(defining_file_for(
+                        &sym.id,
+                        def,
+                        decl_locations,
+                        sym.owning_file,
+                    ));
                     entry.kind = sym.kind;
                 }
             }
@@ -212,7 +317,7 @@ impl ReducedSemanticModel {
 mod tests {
     use super::*;
     use ariadne_index::types::{
-        FileLocation, SemanticEdge, SymbolRecord, SymbolReference, TuAnalysis,
+        FileLocation, SemanticEdge, SymbolDecl, SymbolRecord, SymbolReference, TuAnalysis,
     };
 
     fn create_dummy_index() -> IndexResult {
@@ -230,6 +335,7 @@ mod tests {
         let tu1 = TuAnalysis {
             tu_file_id: f1.clone(),
             context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![
                 SymbolRecord {
                     id: sym_a.clone(),
@@ -238,6 +344,8 @@ mod tests {
                     owning_file: f3.clone(),
                     declarations: vec![decl_a1.clone()],
                     definition: None,
+
+                    modifiers: Vec::new(),
                 },
                 SymbolRecord {
                     id: sym_c.clone(),
@@ -246,6 +354,8 @@ mod tests {
                     owning_file: f1.clone(),
                     declarations: vec![],
                     definition: Some(DeclId::new("decl_c")),
+
+                    modifiers: Vec::new(),
                 },
             ],
             declarations: vec![],
@@ -258,11 +368,14 @@ mod tests {
             }],
             references: vec![],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
             tu_file_id: f2.clone(),
             context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
             symbols: vec![SymbolRecord {
                 id: sym_a.clone(),
                 name: "A".into(),
@@ -270,6 +383,8 @@ mod tests {
                 owning_file: f3.clone(),
                 declarations: vec![decl_a2.clone()],
                 definition: Some(decl_a2.clone()),
+
+                modifiers: Vec::new(),
             }],
             declarations: vec![],
             edges: vec![SemanticEdge {
@@ -290,6 +405,8 @@ mod tests {
                 is_write: false,
             }],
             call_sites: vec![],
+
+            extends_edges: Vec::new(),
         };
 
         IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2])
@@ -355,6 +472,303 @@ mod tests {
         let reduced2 = ReducedSemanticModel::reduce(&index);
         assert_eq!(reduced1, reduced2);
     }
+
+    fn symbol_decl(
+        id: &str,
+        symbol: &str,
+        file_id: FileId,
+        line: usize,
+        is_definition: bool,
+    ) -> SymbolDecl {
+        SymbolDecl {
+            id: DeclId::new(id),
+            symbol_id: SymbolId::new(symbol),
+            location: FileLocation {
+                file_id,
+                line,
+                column: 1,
+            },
+            is_definition,
+        }
+    }
+
+    #[test]
+    fn test_defining_file_from_definition_decl_location() {
+        let analyzed = FileId::from_relative_path("src/a.cpp");
+        let header = FileId::from_relative_path("headers/x.h");
+        let decl_def = DeclId::new("decl_7");
+
+        let tu = TuAnalysis {
+            tu_file_id: analyzed,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("X"),
+                name: "X".into(),
+                kind: SymbolKind::Function,
+                owning_file: analyzed,
+                declarations: vec![decl_def.clone()],
+                definition: Some(decl_def.clone()),
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![symbol_decl("decl_7", "X", header, 3, true)],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        let x = reduced.symbols.get(&SymbolId::new("X")).unwrap();
+        assert_eq!(
+            x.defining_file,
+            Some(header),
+            "defining_file must be the definition declaration's file, not the owning file"
+        );
+    }
+
+    #[test]
+    fn test_defining_file_falls_back_to_owning_file_for_unusable_decl_location() {
+        let analyzed = FileId::from_relative_path("src/a.cpp");
+        let unknown_def = DeclId::new("decl_missing");
+        let sentinel_def = DeclId::new("decl_sentinel");
+
+        let tu = TuAnalysis {
+            tu_file_id: analyzed,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![
+                SymbolRecord {
+                    id: SymbolId::new("Unknown"),
+                    name: "Unknown".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: analyzed,
+                    declarations: vec![unknown_def.clone()],
+                    definition: Some(unknown_def.clone()),
+
+                    modifiers: Vec::new(),
+                },
+                SymbolRecord {
+                    id: SymbolId::new("Sentinel"),
+                    name: "Sentinel".into(),
+                    kind: SymbolKind::Function,
+                    owning_file: analyzed,
+                    declarations: vec![sentinel_def.clone()],
+                    definition: Some(sentinel_def.clone()),
+
+                    modifiers: Vec::new(),
+                },
+            ],
+            declarations: vec![symbol_decl("decl_sentinel", "Sentinel", FileId(0), 0, true)],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        let unknown = reduced.symbols.get(&SymbolId::new("Unknown")).unwrap();
+        assert_eq!(
+            unknown.defining_file,
+            Some(analyzed),
+            "definition decl absent from the TU declaration registry must fall back to owning_file"
+        );
+        let sentinel = reduced.symbols.get(&SymbolId::new("Sentinel")).unwrap();
+        assert_eq!(
+            sentinel.defining_file,
+            Some(analyzed),
+            "definition decl located at the FileId(0) sentinel must fall back to owning_file"
+        );
+    }
+
+    #[test]
+    fn test_defining_file_falls_back_to_owning_file_for_ambiguous_decl_id() {
+        let analyzed = FileId::from_relative_path("src/a.cpp");
+        let host_one = FileId::from_relative_path("host_one.h");
+        let host_two = FileId::from_relative_path("host_two.h");
+
+        let tu = TuAnalysis {
+            tu_file_id: analyzed,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("Dup"),
+                name: "Dup".into(),
+                kind: SymbolKind::Class,
+                owning_file: analyzed,
+                declarations: vec![DeclId::new("decl_1")],
+                definition: Some(DeclId::new("decl_1")),
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![
+                symbol_decl("decl_1", "Dup", host_one, 1, true),
+                symbol_decl("decl_1", "Dup", host_two, 2, true),
+            ],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        let dup = reduced.symbols.get(&SymbolId::new("Dup")).unwrap();
+        assert_eq!(
+            dup.defining_file,
+            Some(analyzed),
+            "a (symbol, decl) pair resolving to multiple files must fall back to owning_file"
+        );
+        assert_eq!(
+            dup.declaring_files,
+            {
+                let mut files = vec![host_one, host_two];
+                files.sort();
+                files
+            },
+            "ambiguous pairs must still contribute every hosting file to declaring_files"
+        );
+    }
+
+    #[test]
+    fn test_class_upgrade_repoints_defining_file_to_class_decl_file() {
+        let impl_file = FileId::from_relative_path("src/impl.cpp");
+        let stale_file = FileId::from_relative_path("src/stale.cpp");
+        let header = FileId::from_relative_path("include/thing.h");
+
+        let tu_fn = TuAnalysis {
+            tu_file_id: impl_file,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("Thing"),
+                name: "Thing".into(),
+                kind: SymbolKind::Function,
+                owning_file: impl_file,
+                declarations: vec![DeclId::new("decl_fn")],
+                definition: Some(DeclId::new("decl_fn")),
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![symbol_decl("decl_fn", "Thing", impl_file, 5, true)],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let tu_class = TuAnalysis {
+            tu_file_id: stale_file,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("Thing"),
+                name: "Thing".into(),
+                kind: SymbolKind::Class,
+                owning_file: stale_file,
+                declarations: vec![DeclId::new("decl_class")],
+                definition: Some(DeclId::new("decl_class")),
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![symbol_decl("decl_class", "Thing", header, 2, true)],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(PathBuf::from("/test"), vec![tu_fn, tu_class]);
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        let thing = reduced.symbols.get(&SymbolId::new("Thing")).unwrap();
+        assert_eq!(thing.kind, SymbolKind::Class);
+        assert_eq!(thing.definition, Some(DeclId::new("decl_class")));
+        assert_eq!(
+            thing.defining_file,
+            Some(header),
+            "Class-over-function upgrade must re-point defining_file to the class definition decl's file"
+        );
+    }
+
+    #[test]
+    fn test_declaring_files_deduped_and_sorted_across_tus() {
+        let a = FileId::from_relative_path("zeta.h");
+        let b = FileId::from_relative_path("alpha.h");
+
+        let tu1 = TuAnalysis {
+            tu_file_id: a,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("S"),
+                name: "S".into(),
+                kind: SymbolKind::Class,
+                owning_file: a,
+                declarations: vec![DeclId::new("decl_1")],
+                definition: None,
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![symbol_decl("decl_1", "S", a, 1, false)],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let tu2 = TuAnalysis {
+            tu_file_id: b,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: SymbolId::new("S"),
+                name: "S".into(),
+                kind: SymbolKind::Class,
+                owning_file: b,
+                declarations: vec![DeclId::new("decl_1"), DeclId::new("decl_2")],
+                definition: None,
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![
+                symbol_decl("decl_1", "S", b, 9, false),
+                symbol_decl("decl_2", "S", b, 10, false),
+            ],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2]);
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        let s = reduced.symbols.get(&SymbolId::new("S")).unwrap();
+        assert_eq!(
+            s.declaring_files,
+            vec![b, a],
+            "declaring_files must be deduplicated and sorted across TUs"
+        );
+    }
+
+    // The fixture-based `defining_file`-vs-legacy projection lock moved to
+    // the permanent M18.11 suite (`m18_cpp_plugin_parity::provenance_lock`),
+    // which drives the real analyzer through `ariadne-lang-cpp` — graph must
+    // not depend on a language plugin even in tests (plan §6.3 R1 spirit).
 
     #[test]
     fn test_query_helpers() {

@@ -8,7 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::{write_atomic, write_json_atomic, ArtifactManager};
-use crate::manifests::{CallGraphManifest, IncludeManifest, ReducedManifest};
+use crate::manifests::{
+    collect_stage_languages, CallGraphManifest, IncludeManifest, ReducedManifest,
+};
 
 impl ArtifactManager {
     /// Saves edges.bin, closures.bin, report.json, and manifest.json into artifacts/includes/
@@ -57,6 +59,12 @@ impl ArtifactManager {
             cycle_count: report.cycle_count,
             input_fingerprint: input_fingerprint.to_string(),
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
+            languages: collect_stage_languages(
+                graph
+                    .edges
+                    .iter()
+                    .map(|edge| edge.language.clone()),
+            ),
         };
         write_json_atomic(&includes_artifact_dir.join("manifest.json"), &manifest)?;
 
@@ -137,7 +145,22 @@ impl ArtifactManager {
             .context("Failed to serialize file symbols to binary")?;
         write_atomic(&file_symbols_path, &file_symbols_bin)?;
 
-        // 5. manifest.json
+        // 5./6. D-M23-8 typed side channels (plan M23 T7): persisted as NEW
+        // files so the four frozen bincode blobs above keep byte-stable
+        // layouts at the frozen epoch 2.0.0. Load treats a missing side file
+        // as an empty channel (pre-M23 artifact dirs stay readable).
+        write_atomic(
+            &reduced_artifact_dir.join("extends-edges.bin"),
+            &bincode::serialize(&model.extends_edges)
+                .context("Failed to serialize extends edges to binary")?,
+        )?;
+        write_atomic(
+            &reduced_artifact_dir.join("sealed-symbols.bin"),
+            &bincode::serialize(&model.sealed_symbols)
+                .context("Failed to serialize sealed symbols to binary")?,
+        )?;
+
+        // 7. manifest.json
         let manifest = ReducedManifest {
             repository_root: model.repo_root.clone(),
             total_symbols: model.symbols.len(),
@@ -185,12 +208,30 @@ impl ArtifactManager {
         let file_symbols = bincode::deserialize(&file_symbols_bin)
             .context("Failed to deserialize file symbols")?;
 
+        // D-M23-8 side channels: absent side file => empty channel, so a
+        // pre-M23 artifact directory loads with the same four blobs and no
+        // channel, never mis-read into shifted bytes.
+        let extends_bytes = read_optional_bin(&reduced_artifact_dir, "extends-edges.bin")?;
+        let extends_edges = match extends_bytes {
+            Some(bytes) => bincode::deserialize(&bytes)
+                .context("Failed to deserialize extends edges")?,
+            None => Vec::new(),
+        };
+        let sealed_bytes = read_optional_bin(&reduced_artifact_dir, "sealed-symbols.bin")?;
+        let sealed_symbols = match sealed_bytes {
+            Some(bytes) => bincode::deserialize(&bytes)
+                .context("Failed to deserialize sealed symbols")?,
+            None => Vec::new(),
+        };
+
         Ok(ariadne_graph::ReducedSemanticModel {
             repo_root: manifest.repository_root,
             symbols,
             edges,
             tu_usage,
             file_symbols,
+            extends_edges,
+            sealed_symbols,
         })
     }
 
@@ -247,5 +288,19 @@ impl ArtifactManager {
     ) -> Result<ariadne_graph::CallGraph> {
         self.check_manifest("callgraph", input_fingerprint)?;
         self.load_callgraph_artifacts()
+    }
+}
+
+/// Reads one D-M23-8 side-channel blob (extends/sealed): absent means the
+/// channel was never persisted (pre-M23 directory) and callers keep the
+/// empty default. The four frozen blobs keep their required-file semantics.
+fn read_optional_bin(dir: &std::path::Path, name: &str) -> Result<Option<Vec<u8>>> {
+    let path = dir.join(name);
+    match fs::read(&path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error)
+            .map(Some)
+            .with_context(|| format!("Failed to read {name} at {path:?}")),
     }
 }

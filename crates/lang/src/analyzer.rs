@@ -1,6 +1,6 @@
 //! Semantic analysis trait for language plugins.
 
-use ariadne_index::TuAnalysis;
+use ariadne_lang_api::types::TuAnalysis;
 use ariadne_repo::FileId;
 
 /// Analyses source text and returns a language-agnostic [`TuAnalysis`].

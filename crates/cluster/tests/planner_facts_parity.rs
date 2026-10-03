@@ -14,12 +14,15 @@ use ariadne_cluster::planner::{
     screening_facts_from_metrics, HeaderScreeningFacts, OptimizationPlanner,
 };
 use ariadne_graph::reduced::{ReducedSemanticEdge, ReducedSymbolRecord};
-use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
+use ariadne_graph::types::{IncludeEdge, IncludeKind, LanguageId, SourceLocation};
 use ariadne_graph::{
     IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric, ReducedSemanticModel,
 };
 use ariadne_index::types::{DependencyKind, SymbolId, SymbolKind};
-use ariadne_repo::{FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy};
+use ariadne_lang::CyclePolicy;
+use ariadne_repo::{
+    FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, SourceLanguage,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -75,6 +78,7 @@ impl ParityFixture {
             content_hash: String::new(),
             ownership: FileOwnership::Repository,
             optimization_policy: policy,
+            language: SourceLanguage::Cpp,
         });
     }
 
@@ -93,6 +97,7 @@ impl ParityFixture {
             kind: IncludeKind::Local,
             raw_path: raw_path.clone(),
             resolved_path: Some(PathBuf::from(raw_path)),
+            language: LanguageId::Cpp,
         });
     }
 
@@ -112,6 +117,7 @@ impl ParityFixture {
                     defining_file: Some(file),
                     declarations: vec![],
                     definition: None,
+                    declaring_files: Vec::new(),
                 },
             );
         }
@@ -158,6 +164,8 @@ impl ParityFixture {
             edges: self.edges.clone(),
             tu_usage: BTreeMap::new(),
             file_symbols: self.file_symbols.clone(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         }
     }
 }
@@ -308,6 +316,12 @@ fn plans_from_precomputed_facts_match_cold() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
     )
     .plan();
 
@@ -319,6 +333,12 @@ fn plans_from_precomputed_facts_match_cold() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
         facts,
         &closures,
     )
@@ -349,6 +369,12 @@ fn headers_without_symbols_are_non_candidates_on_both_paths() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
     )
     .plan();
     let file_metrics = stage_file_metrics(&fixture.graph, &model);
@@ -369,6 +395,12 @@ fn headers_without_symbols_are_non_candidates_on_both_paths() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
         facts,
         &closures,
     )
@@ -396,6 +428,12 @@ fn unregistered_metric_targets_are_never_candidates() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
     )
     .plan();
 
@@ -426,6 +464,12 @@ fn unregistered_metric_targets_are_never_candidates() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
         facts,
         &closures,
     )
@@ -447,6 +491,12 @@ fn unregistered_metric_targets_are_never_candidates() {
         &model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
         stray_facts,
         &closures,
     )
@@ -550,6 +600,12 @@ fn stress_planner<'a>(
         model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
     )
 }
 
@@ -565,6 +621,12 @@ fn facts_planner<'a>(
         model,
         &fixture.records,
         &fixture.tu_file_ids,
+        &(|path: &std::path::Path| path.extension().is_some_and(|ext| ext == "h")),
+        &(|path: &std::path::Path, symbol: &str| {
+            path.with_file_name(format!("{}_extracted.h", symbol))
+        }),
+        None,
+        CyclePolicy::Reject,
         facts,
         closures,
     )

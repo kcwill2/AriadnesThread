@@ -22,6 +22,8 @@ async fn test_server_traversal_routes() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {
@@ -103,11 +105,14 @@ fn given_mock_search_graphs() -> (IncludeGraph, CallGraph, ReducedSemanticModel)
                 defining_file: Some(file1),
                 declarations: vec![],
                 definition: None,
+                declaring_files: vec![],
             },
         )]),
         edges: vec![],
         tu_usage: std::collections::BTreeMap::new(),
         file_symbols: std::collections::BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     (include_graph, call_graph, reduced_model)
@@ -128,14 +133,24 @@ async fn assert_search_query_matches(app: axum::Router, uri: &str, query_kind: &
 async fn test_search_advanced_queries_and_dto_paths() {
     let (include_graph, call_graph, reduced_model) = given_mock_search_graphs();
 
-    let include_elements =
-        build_include_elements(&include_graph, &std::collections::HashMap::new(), &[]);
+    let include_elements = build_include_elements(
+        &include_graph,
+        &std::collections::HashMap::new(),
+        &[],
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+    );
     let call_elements = build_call_elements(&call_graph);
-    let sym_elements = build_symbol_elements(&reduced_model);
+    // D27: symbol paths resolve through the injected id→path map. The old
+    // `"path" == "1"` lock pinned the numeric-FileId defect (§3.6.1 fix).
+    let sym_paths: std::collections::HashMap<u64, String> = [(1u64, "include/test1.h".to_string())]
+        .into_iter()
+        .collect();
+    let sym_elements = build_symbol_elements(&reduced_model, &sym_paths);
 
     // Check DTO `path` field
     assert_eq!(call_elements[0].data["path"], "1:10"); // DTO populates path as file_id:line
-    assert_eq!(sym_elements[0].data["path"], "1");
+    assert_eq!(sym_elements[0].data["path"], "include/test1.h"); // D27 resolved path
 
     let state = Arc::new(UiState::new_loaded(
         std::path::PathBuf::from("."),
@@ -182,6 +197,8 @@ async fn test_server_collateral_endpoint() {
             edges: vec![],
             tu_usage: std::collections::BTreeMap::new(),
             file_symbols: std::collections::BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
         },
         CallGraph::default(),
         GraphExportPayload {
@@ -473,6 +490,7 @@ async fn test_graph_entrypoints_reports_empty_cycles_even_for_cyclic_graph() {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
     });
     let call_graph = CallGraph::default();
     let app = build_router(common::ready_state(

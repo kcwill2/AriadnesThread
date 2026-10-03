@@ -72,6 +72,9 @@ name = "ariadne-build"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "bincode",
  "serde",
@@ -88,6 +91,9 @@ dependencies = [
  "ariadne-cluster",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
+ "ariadne-lang-scala",
  "ariadne-pipeline",
  "ariadne-repo",
  "ariadne-report",
@@ -114,6 +120,8 @@ dependencies = [
  "anyhow",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "rayon",
  "serde",
@@ -127,6 +135,10 @@ dependencies = [
  "anyhow",
  "ariadne-build",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-lang-cpp",
+ "ariadne-lang-scala",
  "ariadne-repo",
  "bincode",
  "rayon",
@@ -141,6 +153,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-build",
+ "ariadne-lang-api",
  "ariadne-repo",
  "bincode",
  "serde",
@@ -158,6 +171,10 @@ dependencies = [
  "ariadne-cluster",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-lang-cpp",
+ "ariadne-lang-scala",
  "ariadne-pipeline",
  "ariadne-repo",
  "ariadne-report",
@@ -178,9 +195,44 @@ name = "ariadne-lang"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ariadne-index",
+ "ariadne-lang-api",
  "ariadne-repo",
  "serde",
+ "tempfile",
+]
+
+[[package]]
+name = "ariadne-lang-api"
+version = "0.1.0"
+dependencies = [
+ "ariadne-repo",
+ "bincode",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ariadne-lang-cpp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ariadne-build",
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-repo",
+ "ariadne-scheduler",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ariadne-lang-scala"
+version = "0.1.0"
+dependencies = [
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-repo",
+ "tempfile",
 ]
 
 [[package]]
@@ -191,6 +243,9 @@ dependencies = [
  "ariadne-build",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
+ "ariadne-lang-scala",
  "ariadne-repo",
  "ariadne-report",
  "ariadne-scheduler",
@@ -221,6 +276,8 @@ dependencies = [
  "ariadne-cluster",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "ariadne-transform",
  "ariadne-validate",
@@ -239,6 +296,8 @@ dependencies = [
  "ariadne-build",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "ariadne-report",
  "serde",
@@ -255,6 +314,8 @@ dependencies = [
  "ariadne-cluster",
  "ariadne-graph",
  "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "bincode",
  "serde",
@@ -289,6 +350,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-cluster",
+ "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
  "ariadne-transform",
  "bincode",
  "serde",
@@ -439,6 +503,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne-index",
+ "ariadne-lang-cpp",
  "ariadne-repo",
  "clap",
  "serde",

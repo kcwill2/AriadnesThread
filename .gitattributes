@@ -1,3 +1,7 @@
 # Pin byte-exact test fixtures to LF on checkout so core.autocrlf=true
 # clones compare equal against the committed (normalized LF) blobs.
 crates/ui/tests/fixtures/*.json text eol=lf
+# Same rationale for the byte-locked golden artifacts: the comparison is
+# against `serde_json::to_string_pretty` output, which is LF-only, so a CRLF
+# checkout makes every line differ by its terminator.
+tests/golden/**/*.json text eol=lf

@@ -9,7 +9,11 @@ pub fn measure_build_performance(repo_path: &PathBuf) -> Result<ariadne_build::B
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
     let repo_discovery = repository.discover().ok();
-    let mut build_discoverer = BuildDiscoverer::new(&repository.root);
+    // D22: registry unit-shaper selection by build markers at the repo root
+    // (first-wins fallback preserved).
+    let registry = crate::registry::default_registry();
+    let mut build_discoverer = BuildDiscoverer::new(&repository.root)
+        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root));
     if let Some(ref disc) = repo_discovery {
         build_discoverer = build_discoverer.with_repo_discovery(disc);
     }

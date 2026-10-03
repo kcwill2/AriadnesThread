@@ -14,6 +14,12 @@ ariadne-build = { path = "../build" }
 ariadne-index = { path = "../index" }
 ariadne-graph = { path = "../graph" }
 ariadne-report = { path = "../report" }
+ariadne-lang = { path = "../lang" }
 
 [dev-dependencies]
 tempfile.workspace = true
+# The canonical closure/merge tests run the C++ plugin through the registry
+# seam (production code stays plugin-free). The dev edge back into lang-cpp
+# is allowed by cargo (test-only), and lang-cpp's normal `scheduler` dep
+# (M18.11 ClangWorkerBackend relocation) never sees this crate's test build.
+ariadne-lang-cpp = { path = "../lang-cpp" }

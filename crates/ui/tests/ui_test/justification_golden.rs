@@ -7,8 +7,8 @@
 //! HashMap iteration order can never leak into the fixture.
 
 use ariadne_graph::{
-    ContributingSource, IncludeEdge, IncludeGraph, IncludeKind, LoadMetric, ReducedSemanticEdge,
-    ReducedSemanticModel, ReducedSymbolRecord, SourceLocation,
+    ContributingSource, IncludeEdge, IncludeGraph, IncludeKind, LanguageId, LoadMetric,
+    ReducedSemanticEdge, ReducedSemanticModel, ReducedSymbolRecord, SourceLocation,
 };
 use ariadne_index::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_repo::FileId;
@@ -40,6 +40,7 @@ fn sym(id: &str, file: u64) -> ReducedSymbolRecord {
         defining_file: Some(FileId(file)),
         declarations: vec![],
         definition: None,
+        declaring_files: vec![],
     }
 }
 
@@ -52,6 +53,7 @@ fn include_edge(from: u64, to: u64) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: LanguageId::Cpp,
     }
 }
 
@@ -160,6 +162,8 @@ fn build_fixture_model() -> ReducedSemanticModel {
         edges: Vec::new(),
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
     for index in 0..HEADER_COUNT {
         let (t0, t1) = fanout(index);

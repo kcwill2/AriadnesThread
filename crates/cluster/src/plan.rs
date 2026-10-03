@@ -1,4 +1,5 @@
 use ariadne_index::types::SymbolId;
+use ariadne_lang::LanguageId;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -35,6 +36,12 @@ pub struct ProposedExtraction {
     pub symbol_name: String,
     pub symbol_id: SymbolId,
     pub target_header: PathBuf,
+    /// Aggregation file the batch member was found in (plan M23, D-M23-3).
+    /// Additive provenance: the isolation engine reads this file's text and
+    /// asks the language plugin to locate the symbol's verbatim body.
+    /// `#[serde(default)]` keeps older plan artifacts loadable (I6).
+    #[serde(default)]
+    pub source_file: Option<FileId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +146,11 @@ pub enum RejectionReason {
     ContractViolation(PathBuf),
     NonMovableDeclaration(String),
     UnresolvedSemanticDependency(String),
+    /// The repository contains a language whose plugin reports
+    /// `capabilities().planning == false` (plan M22, D23): the language
+    /// arrives as neutral `LanguageId` data supplied by the caller, so the
+    /// engine stays language-neutral (rule R2).
+    PlanningUnsupported(LanguageId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -166,11 +178,13 @@ mod tests {
                     symbol_name: "ThingOptions".to_string(),
                     symbol_id: SymbolId::new("sym_10"),
                     target_header: PathBuf::from("thing_types.h"),
+                    source_file: None,
                 },
                 ProposedExtraction {
                     symbol_name: "ThingBuilder".to_string(),
                     symbol_id: SymbolId::new("sym_11"),
                     target_header: PathBuf::from("thing_builder.h"),
+                    source_file: None,
                 },
             ],
             optimization_frontier: vec![PathBuf::from("graphics.h")],
@@ -206,5 +220,54 @@ Validation required:
     23 translation units";
 
         assert_eq!(detail.trim(), expected.trim());
+    }
+
+    #[test]
+    fn planning_unsupported_reason_round_trips_as_language_data() {
+        let reason = RejectionReason::PlanningUnsupported(LanguageId::Other);
+        let json = serde_json::to_string(&reason).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RejectionReason>(&json).unwrap(),
+            reason
+        );
+    }
+
+    #[test]
+    fn source_file_field_is_additive_for_pre_m23_plan_json() {
+        // I6: pre-M23 plan artifacts (no `source_file` key) still load.
+        let legacy = r#"{"symbol_name":"A","symbol_id":"A","target_header":"a.h"}"#;
+        let parsed: ProposedExtraction = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.source_file, None);
+    }
+
+    #[test]
+    fn pre_existing_rejection_reasons_serialize_unchanged() {
+        // The additive variant must not disturb the serialization of the
+        // pre-existing ones (variant names and field order).
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::CycleCreation("x".to_string())).unwrap(),
+            r#"{"CycleCreation":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::FrozenFile(PathBuf::from("f.h"))).unwrap(),
+            r#"{"FrozenFile":"f.h"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::ContractViolation(PathBuf::from("c.h")))
+                .unwrap(),
+            r#"{"ContractViolation":"c.h"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::NonMovableDeclaration("y".to_string()))
+                .unwrap(),
+            r#"{"NonMovableDeclaration":"y"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RejectionReason::UnresolvedSemanticDependency(
+                "sym_7".to_string()
+            ))
+            .unwrap(),
+            r#"{"UnresolvedSemanticDependency":"sym_7"}"#
+        );
     }
 }

@@ -7,7 +7,7 @@
 //! the cross-process gate itself is the three-way SHA256 smoke on
 //! `ariadne ui --export`.
 
-use ariadne_graph::{IncludeEdge, IncludeGraph, IncludeKind, SourceLocation};
+use ariadne_graph::{IncludeEdge, IncludeGraph, IncludeKind, LanguageId, SourceLocation};
 use ariadne_repo::FileId;
 use ariadne_ui::{
     build_include_elements, GraphExportPayload, JustificationEntry, SummaryStats,
@@ -23,6 +23,7 @@ fn include_edge(source: u64, destination: u64) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
+        language: LanguageId::Cpp,
     }
 }
 
@@ -84,7 +85,13 @@ fn node_ids(elements: &[ariadne_ui::CytoscapeElement]) -> Vec<&str> {
 #[test]
 fn include_nodes_emit_in_canonical_path_then_file_id_order() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements(&graph, &HashMap::new(), &[]);
+    let elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         node_ids(&elements),
         vec!["5", "11", "2", "9", "1", "7", "3", "8", "4", "6"],
@@ -95,7 +102,13 @@ fn include_nodes_emit_in_canonical_path_then_file_id_order() {
 #[test]
 fn include_edges_keep_source_vec_order_behind_sorted_nodes() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements(&graph, &HashMap::new(), &[]);
+    let elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         emitted_ids(&elements),
         vec![

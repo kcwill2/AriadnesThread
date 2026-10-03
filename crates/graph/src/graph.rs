@@ -1,6 +1,8 @@
 //! Physical file include graph structure, closure calculation, cycle detection, and visualization.
 
 use crate::types::{IncludeClosure, IncludeEdge, IncludeKind, IncludeReport};
+// M20 D11 (R2-legal): only the policy enum is named here — never a language.
+use ariadne_lang_api::modeling::CyclePolicy;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -182,8 +184,15 @@ impl IncludeGraph {
         closures
     }
 
-    /// Maps each header file to the set of translation units (sources) that include it directly or transitively.
-    pub fn map_header_consuming_tus(&self, tu_file_ids: &[FileId]) -> HashMap<FileId, Vec<FileId>> {
+    /// Maps each aggregation unit (today's C++ header, plan §3.4) to the set
+    /// of units that include it directly or transitively — the neutral
+    /// aggregation-consumer query (plan M18.5) that package/module-based
+    /// languages reuse unchanged; zero logic change from the transitional
+    /// header-named alias.
+    pub fn map_aggregation_consumers(
+        &self,
+        tu_file_ids: &[FileId],
+    ) -> HashMap<FileId, Vec<FileId>> {
         let closures = self.compute_closures();
         self.map_header_consuming_tus_with_closures(tu_file_ids, &closures)
     }
@@ -277,8 +286,31 @@ impl IncludeGraph {
         current_path.pop();
     }
 
-    /// Generates an aggregated summary report of the include graph.
+    /// Generates an aggregated summary report of the include graph, treating
+    /// every file's cycle stance as `Reject` (IV-4): `informational_cycle_count`
+    /// is 0 and skipped by serde, so the artifact shape is unchanged for all
+    /// existing callers.
     pub fn generate_report(&self) -> IncludeReport {
+        self.generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Reject)
+    }
+
+    /// A cycle is informational iff **every** member file's policy is
+    /// non-`Reject` (M20 D11, IV-3); a mixed-member cycle is blocking.
+    fn cycle_is_informational(cycle: &[FileId], policy_of: &dyn Fn(FileId) -> CyclePolicy) -> bool {
+        cycle
+            .iter()
+            .all(|&file_id| !matches!(policy_of(file_id), CyclePolicy::Reject))
+    }
+
+    /// Generates the summary report classifying cycles against the injected
+    /// per-file cycle policies (M20 D11). `cycle_count` still counts every
+    /// detected cycle (IV-2, m3 lock); `informational_cycle_count` counts the
+    /// cycles where all members tolerate. No language is named here (R2) —
+    /// the stance arrives purely through `policy_of`.
+    pub fn generate_report_with_cycle_policies(
+        &self,
+        policy_of: &dyn Fn(FileId) -> CyclePolicy,
+    ) -> IncludeReport {
         let closures = self.compute_closures();
         let mut unique_headers = HashSet::new();
         let mut local_count = 0;
@@ -297,6 +329,12 @@ impl IncludeGraph {
                 IncludeKind::Local => local_count += 1,
                 IncludeKind::System => system_count += 1,
                 IncludeKind::External => external_count += 1,
+                // IV-2 (plan M20 D10): the directive kind is tallied apart
+                // from the C++-facing counters above, never folded into one
+                // (their numbers stay byte-identical). Exposing a counter for
+                // this kind is an additive `IncludeReport` edit owned by the
+                // milestone task that touches that DTO.
+                IncludeKind::Import => {}
             }
         }
 
@@ -315,6 +353,12 @@ impl IncludeGraph {
         closure_sizes.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
         let top_headers = closure_sizes.into_iter().take(10).collect();
 
+        let detected_cycles = self.detect_cycles();
+        let informational_cycle_count = detected_cycles
+            .iter()
+            .filter(|cycle| Self::cycle_is_informational(cycle, policy_of))
+            .count();
+
         IncludeReport {
             total_edges: self.edges.len(),
             unique_headers: unique_headers.len(),
@@ -322,7 +366,8 @@ impl IncludeGraph {
             system_headers_count: system_count,
             external_headers_count: external_count,
             unresolved_includes_count: unresolved_count,
-            cycle_count: self.detect_cycles().len(),
+            cycle_count: detected_cycles.len(),
+            informational_cycle_count,
             top_headers_by_closure: top_headers,
         }
     }
@@ -385,7 +430,7 @@ impl IncludeGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SourceLocation;
+    use crate::types::{LanguageId, SourceLocation};
 
     #[test]
     fn test_include_graph_closure_and_explain() {
@@ -410,6 +455,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "thing.h".into(),
             resolved_path: Some(PathBuf::from("include/thing.h")),
+            language: LanguageId::cpp(),
         });
 
         // thing.h -> thing_types.h
@@ -421,6 +467,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "thing_types.h".into(),
             resolved_path: Some(PathBuf::from("include/thing_types.h")),
+            language: LanguageId::cpp(),
         });
 
         // thing.h -> heavy.h
@@ -432,6 +479,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "heavy.h".into(),
             resolved_path: Some(PathBuf::from("include/heavy.h")),
+            language: LanguageId::cpp(),
         });
 
         let closures = graph.compute_closures();
@@ -468,6 +516,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "b.h".into(),
             resolved_path: Some(PathBuf::from("b.h")),
+            language: LanguageId::cpp(),
         });
 
         // b.h -> a.h
@@ -479,6 +528,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "a.h".into(),
             resolved_path: Some(PathBuf::from("a.h")),
+            language: LanguageId::cpp(),
         });
 
         let cycles = graph.detect_cycles();
@@ -486,6 +536,162 @@ mod tests {
             !cycles.is_empty(),
             "Cycle must be detected between a.h and b.h"
         );
+    }
+
+    fn edge(
+        source: FileId,
+        destination: FileId,
+        kind: IncludeKind,
+        language: LanguageId,
+    ) -> IncludeEdge {
+        IncludeEdge {
+            source,
+            destination: Some(destination),
+            context_name: "Default".into(),
+            source_location: SourceLocation::new(1, 1),
+            kind,
+            raw_path: "target".into(),
+            resolved_path: None,
+            language,
+        }
+    }
+
+    fn one_edge_each_kind() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        let cpp = LanguageId::cpp();
+        for (idx, kind) in [
+            IncludeKind::Local,
+            IncludeKind::System,
+            IncludeKind::External,
+            IncludeKind::Import,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let source = FileId(idx as u64);
+            let destination = FileId(100 + idx as u64);
+            graph.register_file(source, PathBuf::from(format!("src/unit{idx}")));
+            graph.register_file(destination, PathBuf::from(format!("src/dep{idx}")));
+            graph.add_edge(edge(source, destination, kind, cpp.clone()));
+        }
+        graph
+    }
+
+    #[test]
+    fn report_counts_cpp_only_edge_set_currently() {
+        // Baseline lock: with only the pre-M20 kinds the report counters are
+        // exactly today's numbers (m00 proves the same end-to-end).
+        let mut graph = IncludeGraph::new();
+        let cpp = LanguageId::cpp();
+        graph.register_file(FileId(1), PathBuf::from("src/a"));
+        graph.register_file(FileId(2), PathBuf::from("src/b"));
+        graph.register_file(FileId(3), PathBuf::from("src/c"));
+        graph.register_file(FileId(4), PathBuf::from("src/d"));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(1), FileId(3), IncludeKind::System, cpp.clone()));
+        graph.add_edge(edge(FileId(1), FileId(4), IncludeKind::External, cpp.clone()));
+
+        let report = graph.generate_report();
+        assert_eq!(report.local_headers_count, 1);
+        assert_eq!(report.system_headers_count, 1);
+        assert_eq!(report.external_headers_count, 1);
+        assert_eq!(report.unresolved_includes_count, 0);
+        assert_eq!(report.total_edges, 3);
+    }
+
+    fn mutual_cycle_graph() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        let cpp = LanguageId::cpp();
+        graph.register_file(FileId(1), PathBuf::from("a.h"));
+        graph.register_file(FileId(2), PathBuf::from("b.h"));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(2), FileId(1), IncludeKind::Local, cpp.clone()));
+        graph
+    }
+
+    #[test]
+    fn cycle_with_all_members_tolerating_is_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::TolerateWithinPackage);
+        assert_eq!(report.cycle_count, 1, "IV-2: cycle_count keeps counting all cycles");
+        assert_eq!(report.informational_cycle_count, 1);
+    }
+
+    #[test]
+    fn cycle_with_one_rejecting_member_is_not_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph().generate_report_with_cycle_policies(&|file_id| {
+            if file_id == FileId(1) {
+                CyclePolicy::Reject
+            } else {
+                CyclePolicy::TolerateWithinPackage
+            }
+        });
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 0);
+    }
+
+    #[test]
+    fn plain_tolerate_also_counts_as_informational() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Tolerate);
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 1);
+    }
+
+    #[test]
+    fn default_report_never_classifies_cycles_as_informational() {
+        let report = mutual_cycle_graph().generate_report();
+        assert_eq!(report.cycle_count, 1);
+        assert_eq!(report.informational_cycle_count, 0);
+    }
+
+    #[test]
+    fn informational_cycle_count_key_is_skipped_from_json_when_zero() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let default_json =
+            serde_json::to_string(&mutual_cycle_graph().generate_report()).unwrap();
+        assert!(
+            !default_json.contains("informational_cycle_count"),
+            "zero-informational report must serialize byte-identically to today's shape: {default_json}"
+        );
+        let tolerated = mutual_cycle_graph()
+            .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Tolerate);
+        let tolerated_json = serde_json::to_string(&tolerated).unwrap();
+        assert!(
+            tolerated_json.contains("\"informational_cycle_count\":1"),
+            "non-zero informational count must surface: {tolerated_json}"
+        );
+    }
+
+    #[test]
+    fn all_reject_policy_json_is_byte_identical_to_default_report() {
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let default_json =
+            serde_json::to_string(&mutual_cycle_graph().generate_report()).unwrap();
+        let all_reject_json = serde_json::to_string(
+            &mutual_cycle_graph()
+                .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Reject),
+        )
+        .unwrap();
+        assert_eq!(default_json, all_reject_json);
+    }
+
+    #[test]
+    fn report_keeps_import_edges_out_of_cpp_facing_kind_counters() {
+        // IV-2: an Import-kind edge is tallied apart from the C++-facing
+        // Local/System/External counters — adding it moves none of them;
+        // the edge is still fully accounted as an edge with a destination.
+        let report = one_edge_each_kind().generate_report();
+        assert_eq!(report.local_headers_count, 1);
+        assert_eq!(report.system_headers_count, 1);
+        assert_eq!(report.external_headers_count, 1);
+        assert_eq!(report.unresolved_includes_count, 0,
+            "a resolved Import edge must not land in the unresolved tally");
+        assert_eq!(report.total_edges, 4);
+        assert_eq!(report.unique_headers, 4);
     }
 }
 

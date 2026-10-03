@@ -37,6 +37,7 @@ fn include(from: FileId, to: FileId, name: &str) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: name.to_string(),
         resolved_path: Some(PathBuf::from(name)),
+        language: crate::types::LanguageId::cpp(),
     }
 }
 
@@ -51,6 +52,7 @@ fn add_sym(model: &mut ReducedSemanticModel, name: &str, file: FileId) -> Symbol
             defining_file: Some(file),
             declarations: vec![],
             definition: None,
+            declaring_files: vec![],
         },
     );
     id
@@ -95,6 +97,9 @@ pub(super) fn setup_impact_fixture(
         edges: vec![],
         tu_usage: BTreeMap::new(),
         file_symbols: BTreeMap::new(),
+
+        extends_edges: Vec::new(),
+        sealed_symbols: Vec::new(),
     };
 
     let fat_a = add_sym(&mut model, "FatA", FAT);

@@ -1,0 +1,27 @@
+[package]
+name = "ariadne-lang-cpp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Plugin crate (plan §3.1): depends inward only. Deliberately NOT depended on:
+# ariadne-graph / ariadne-cluster / ariadne-transform / ariadne-validate
+# (enforced by the m17 architecture guard). The Include-graph DTOs the
+# resolver speaks live in ariadne-lang-api.
+# M18.11 note (b): `ClangWorkerBackend` relocated from scheduler to here;
+# `scheduler` is a normal dep because the backend implements
+# `scheduler::WorkerBackend` over `scheduler::TuTask` (reviewer-approved in
+# the M18.1–M18.2 execution note). Acyclic: scheduler no longer reaches
+# lang-cpp (the index/graph shim deps were removed in the same milestone).
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-build = { path = "../build" }
+ariadne-lang-api = { path = "../lang-api" }
+ariadne-lang = { path = "../lang" }
+ariadne-scheduler = { path = "../scheduler" }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
