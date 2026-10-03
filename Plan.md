@@ -1679,39 +1679,40 @@ gate verdicts live in `plans/m19..m23-*-kickoff.md`.
 
 ## M15 -- Graph UI
 
-## Objective
+### Objective
 
 A browser-based graph interface over an analyzed repository exists, so the
 include, symbol, and call graphs can be inspected without reading JSON
 artifacts.
 
-## Capabilities
+### Capabilities
 
 - Serves `/api/graph/include`, `/api/graph/symbol`, and `/api/graph/call`, plus
-  `/api/status`, `/api/source`, `/api/justification`, and `/api/export`.
+  `/api/status`.
 - Exports the whole view as a single standalone HTML file that embeds the graph
   payload as `window.__ARIADNE_DATA__`.
-- Re-checks the repository on an interval so a running session follows edits.
+- Reports startup through `/api/status`: the suite waits for `progress.state` to
+  reach `ready` and checks that `last_refresh` is set.
 
-## CLI
+### CLI
 
 `tool ui <repo> [--port 7742] [--no-open] [--export <path>] [--watch-interval 2] [--no-watch]`
 
-## Artifacts
+### Artifacts
 
-- The `--export` HTML file is the only new artifact shape this milestone adds.
+- The `--export` HTML file: a standalone document carrying the graph payload.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m15_graph_ui_test.rs` covers both the standalone
   export and the running HTTP server against `tests/fixtures/basic`.
 
-## Proves
+### Proves
 
 - A repository can be inspected graphically end to end, and the server answers
   without browser automation.
 
-## Does not prove
+### Does not prove
 
 - The suite asserts payload size and the embedded marker, not the rendered
   graph, so visual correctness is not locked.
@@ -1724,12 +1725,12 @@ Landed: 1ae948f (implements the graphical interface for symbol, include, and cal
 
 ## M16 -- Clang worker and graph traversal
 
-## Objective
+### Objective
 
 C++ translation units can be analysed by an out-of-process worker when one is
 available, and the graph UI gains interactive traversal and pathfinding.
 
-## Capabilities
+### Capabilities
 
 - `ClangWorkerBackend` spawns `tools/clang-worker` with the unit's `-D`/`-I`
   flags and degrades to the in-process C++ path when the worker, its response,
@@ -1738,15 +1739,15 @@ available, and the graph UI gains interactive traversal and pathfinding.
   filtering, a degree stepper, node capping, and dependency-tree isolation.
 - Pathfinding, entry-point, and search endpoints over the same graphs.
 
-## CLI
+### CLI
 
 `tool ui <repo>` -- traversal is a capability of the existing surface, not a new command.
 
-## Artifacts
+### Artifacts
 
 - `crates/lang-cpp/src/backend.rs` holds the relocated `ClangWorkerBackend`.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m16_clang_worker_test.rs` locks graceful degradation
   and still-valid `TuAnalysis` output from a `WorkerPool`.
@@ -1755,15 +1756,17 @@ available, and the graph UI gains interactive traversal and pathfinding.
 - `crates/ui/tests/ui_test/static_html.rs` carries the crate-local traversal
   element locks.
 
-## Proves
+### Proves
 
 - A missing worker never turns into an error; the pool still yields analyses.
 - Traversal and pathfinding answer on a real fixture over HTTP.
 
-## Does not prove
+### Does not prove
 
-- `tools/clang-worker` is absent from this tree, so every in-repo run drives the
-  fallback path. The sidecar protocol itself is not covered by a test.
+- `tools/clang-worker` ships in the tree and the backend knows how to find it,
+  but with no C++ toolchain on PATH the real sidecar IPC path is never
+  exercised: a test-only seam suppresses it, so the suite drives the in-process
+  fallback instead.
 - Worker coverage is C++-only; no plugin other than C++ has a worker backend.
 - Traversal is exercised on `tests/fixtures/basic` only, not at production scale.
 
@@ -1773,12 +1776,12 @@ Landed: a42ab52 (implements interactive graph traversal and pathfinding); the wo
 
 ## M17 -- Language API seam
 
-## Objective
+### Objective
 
 The plugin vocabulary exists and is wired, while C++ still runs exactly its
 previous code paths.
 
-## Capabilities
+### Capabilities
 
 - New `ariadne-lang-api` crate: the value types moved verbatim out of
   `crates/index/src/types.rs`, plus modeling, capability, catalog, and unit
@@ -1790,28 +1793,28 @@ previous code paths.
   `CompilerValidator::toolchain_status`, and `UnitShaper` complete the seam.
 - The `lang -> index` dependency is gone; `index` re-exports the moved types.
 
-## CLI
+### CLI
 
 not user-visible
 
-## Artifacts
+### Artifacts
 
 - `TuAnalysis` gains a `#[serde(default)] language` field and `SymbolKind` gains
   `Trait`/`Object`/`Module`, so pre-existing artifacts still decode as C++.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m17_plugin_seam_test.rs`, including the architecture
   guards that core crates name no language and plugin crates avoid the pipeline.
 
-## Proves
+### Proves
 
 - The seam is real and the guards hold: neutral vocabulary is available and
   unused by core crates.
 - C++ behaviour is unchanged: the golden capture taken as M17.0 is byte-identical
   afterwards.
 
-## Does not prove
+### Does not prove
 
 - The spec's assumption A2 (no `libloading`, no WASM host) means there is no
   dynamic plugin loading. Plugins are linked at compile time only, which is why
@@ -1824,12 +1827,12 @@ Landed: 57cc995 (moves index value types into ariadne-lang-api, adds the neutral
 
 ## M18 -- C++ becomes a plugin
 
-## Objective
+### Objective
 
 The C++ implementation is relocated into `ariadne-lang-cpp` and every core stage
 dispatches through the registry instead of naming C++.
 
-## Capabilities
+### Capabilities
 
 - New `ariadne-lang-cpp` crate holding `CppDependencyResolver`,
   `CppSemanticAnalyzer`, `CppUnitShaper`, `CppSourceExtractor`,
@@ -1841,35 +1844,36 @@ dispatches through the registry instead of naming C++.
 - `ValidationStatus::Skipped`, a language plus plugin-fingerprint cache key, and
   the analysis epoch move `1.0.0` to `2.0.0`.
 
-## CLI
+### CLI
 
 `tool analyze index <repo> --lang cpp|scala|other`
 
-## Artifacts
+### Artifacts
 
 - The reduced model's `defining_file` becomes the defining declaration's file and
   gains `declaring_files`; the epoch bump invalidates `symbols.bin`.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m18_cpp_plugin_parity_test.rs`
 
-## Proves
+### Proves
 
 - C++ behaviour is preserved on both fixtures: resolver output, worker dispatch,
   isolation-engine bytes, `MigrationPreview` JSON and diff text, and
   reduced-model values all match the pre-M18 output.
 
-## Does not prove
+### Does not prove
 
 - The isolation engine still emits `// Symbol: <name> (<kind>)` placeholder
   bodies, byte-locked on purpose. Real declaration text lands in M23.
 - The neutrality guard had two admitted gaps at M18.11: core-crate test code
   still named plugin types, and `c++20` literals passed the forbidden-token list.
   M23 closes both.
-- The shaper-less `compile_commands` path in `build` still carries `cl.exe`,
-  `x64`, and `language: Cpp` literals.
-- `pipeline::default_registry()` duplicated `cli::registry::default_registry()`.
+- The `compile_commands` argument parser in `build` still falls back to the
+  `cl.exe` literal when no compiler token precedes the flags.
+- M18.11 found `pipeline` and `cli` each enumerating plugins. The CLI now
+  delegates to the single pipeline composition root.
 
 Landed: e8422ef (relocates the C++ engine into ariadne-lang-cpp); reviewer approval recorded in df57491 over 3b06e54.
 
@@ -1877,12 +1881,12 @@ Landed: e8422ef (relocates the C++ engine into ariadne-lang-cpp); reviewer appro
 
 ## M19 -- Scala plugin: discovery and build context
 
-## Objective
+### Objective
 
 A Scala repository is discovered, classified by ownership, and shaped into
 analysis units with no Scala toolchain present.
 
-## Capabilities
+### Capabilities
 
 - New `ariadne-lang-scala` crate with `ScalaPlugin`, `ScalaDetector`, and
   `ScalaUnitShaper`.
@@ -1891,31 +1895,32 @@ analysis units with no Scala toolchain present.
 - Registering the plugin in `default_registry()` is the only pipeline edit needed
   to add the language.
 
-## CLI
+### CLI
 
 `tool analyze discover <repo>`
 
-## Artifacts
+### Artifacts
 
 - `tests/fixtures/scala-basic/**` is the new fixture. It ships `lib/legacy.jar`
   so the frozen external boundary is exercised by a committed file.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m19_scala_discovery_test.rs`
 
-## Proves
+### Proves
 
 - Discovery lists the `.scala` files, shaping yields one unit per
   `src/main/scala` file with `compiler: "scalac"` and `language: Scala`, and no
   C++ diagnostics are produced.
 
-## Does not prove
+### Does not prove
 
-- No Scala dependency graph, semantic index, or plan exists yet; those capability
-  flags are still `false`.
+- Planning, extraction, rewriting, and validation stayed flagged `false`; the
+  Scala dependency graph, semantic index, and analysis outputs are M20 to M22.
 - `scalac` is a string literal only. Nothing is executed (offline assumption A3).
-- The fixture's six-record lock was later edited by M20 and M21.
+- The fixture's six-record discovery lock was deliberately left unedited by M20
+  and M21.
 
 Landed: d0c6499 (creates crates/lang-scala with ScalaPlugin, ScalaDetector, and ScalaUnitShaper); gate notes at 715/0/3 in plans/m19-scala-discovery-kickoff.md.
 
@@ -1923,12 +1928,12 @@ Landed: d0c6499 (creates crates/lang-scala with ScalaPlugin, ScalaDetector, and 
 
 ## M20 -- Scala dependency graph: imports become edges
 
-## Objective
+### Objective
 
 Scala `package` and `import` directives become typed dependency edges in the
 existing graph.
 
-## Capabilities
+### Capabilities
 
 - `ScalaImportResolver` parses the `package` clause, `import a.b.C`, grouped
   imports, wildcards, and Scala 3 `export`, mapping targets through `FileCatalog`.
@@ -1936,26 +1941,26 @@ existing graph.
 - `CyclePolicy::TolerateWithinPackage` reports an intra-package cycle as
   informational instead of a blocking defect.
 
-## CLI
+### CLI
 
 `tool analyze includes <repo>`
 
-## Artifacts
+### Artifacts
 
 - `tests/fixtures/scala-basic` gains a deliberate `models` <-> `services` cycle.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m20_scala_dependency_graph_test.rs`
 
-## Proves
+### Proves
 
 - The graph emits `OrderService.scala` to `models/Order.scala` and
   `models/User.scala` with `kind: "Import"`, `import scala.collection.mutable._`
   becomes `External`, and the C++ cycle suite still asserts real cycle
   reporting.
 
-## Does not prove
+### Does not prove
 
 - The cycle substrate rework (SCC groups, iterative Tarjan) was deliberately
   deferred out of M20 into a standalone follow-up.
@@ -1969,41 +1974,42 @@ Landed: 77bd0a7 (execution notes recording completion); reviewer gates APPROVED 
 
 ## M21 -- Scala semantic index (offline, deterministic)
 
-## Objective
+### Objective
 
 A deterministic offline Scala parser produces a language-scoped semantic index
 with working warm reuse.
 
-## Capabilities
+### Capabilities
 
 - `ScalaSourceParser` extracts packages, top-level declarations, `extends` and
   `with` edges, references, and call sites using a hand-written scanner, with no
   new dependency.
-- `ScalaAnalyzer` is dispatched per unit and reports the fingerprint
-  `scala-parser-1`.
+- `ScalaAnalyzer` is dispatched per unit. M21 set the plugin fingerprint to
+  `scala-parser-1`; M23 bumped it to `scala-parser-2`.
 - The index stage selects the plugin's unit shaper when a language filter is
   given, so a Scala repository is indexed through the Scala path only.
 
-## CLI
+### CLI
 
 `tool analyze index <repo> --lang scala`
 
-## Artifacts
+### Artifacts
 
-- The cache fingerprint gains `language` plus `plugin_fingerprint`, so C++ and
-  Scala cache entries are scoped separately.
+- No artifact schema change: `cache.rs` was untouched. The only cache action was
+  the Scala plugin fingerprint bump, which is what invalidates cached Scala
+  shards when the parser changes.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m21_scala_semantic_index_test.rs`
 
-## Proves
+### Proves
 
 - The cold run analyses every unit, the second run reports a full hit rate,
   editing `models/Order.scala` reanalyzes exactly {Order, OrderService}, and C++
   cache entries are not invalidated by the Scala fingerprint.
 
-## Does not prove
+### Does not prove
 
 - Same-package sibling resolution is in-file only. The offline per-file parser
   cannot see cross-file siblings, so the semantic graph is shallower than a real
@@ -2017,12 +2023,12 @@ Landed: 33e9950 (interactive walkthrough and closeout notes); four reviewer gate
 
 ## M22 -- Scala analysis outputs
 
-## Objective
+### Objective
 
 Load analysis, explanation, planning, reports, and the Graph UI speak Scala as
 well as C++.
 
-## Capabilities
+### Capabilities
 
 - A Scala aggregation unit is a file declaring a top-level `package object`; a
   package without one gets no aggregation and no invented header.
@@ -2033,27 +2039,27 @@ well as C++.
 - The Graph UI distinguishes C++ from Scala file nodes and renders
   `defining_file` plus `declaring_files` on symbol nodes.
 
-## CLI
+### CLI
 
 `tool load --symbol <symbol> <repo>`, `tool explain load <repo>`, `tool plan <repo>`
 
-## Artifacts
+### Artifacts
 
-- The load, plan, and report manifests gain skip-when-empty `languages` fields,
-  so C++ output stays byte-identical.
+- The repository, build-context, includes, and load manifests gain
+  skip-when-empty `languages` fields, so C++ output stays byte-identical.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m22_scala_load_analysis_test.rs`
 
-## Proves
+### Proves
 
 - `tool load --symbol com.example.services.OrderService` reports non-zero
   collateral load attributed to `models/all.scala`, `explain` renders the import
   chain, `plan` prints the capability-gated rejection, and the C++ report and UI
   goldens are unchanged.
 
-## Does not prove
+### Does not prove
 
 - Scala `planning` was still `false`, so production never ran the Scala planner.
   The wiring was proven by unit tests and the planner-injection lane only.
@@ -2068,12 +2074,12 @@ Landed: 76f619c (M22 closeout); Gate-C ACCEPTED at 09530af with the final gate 9
 
 ## M23 -- Symbol isolation made real for C++ and Scala
 
-## Objective
+### Objective
 
 The isolation primitive produces real code for both languages: verbatim symbol
 bodies through one plugin extractor, and a rollback-capable move for Scala.
 
-## Capabilities
+### Capabilities
 
 - `locate_symbol_bodies` supplies verbatim declaration text to the extractor, and
   `SourceExtractor::extract` becomes the single body emitter for both the engine
@@ -2087,20 +2093,20 @@ bodies through one plugin extractor, and a rollback-capable move for Scala.
   `DependencyRewriter` and `SourceExtractor` hooks whose C++ defaults are
   byte-identical.
 
-## CLI
+### CLI
 
 `tool transform extract <repo> --plan <id>`, `tool transform migrate`, `tool transform apply`
 
-## Artifacts
+### Artifacts
 
 - New fixture `tests/fixtures/scala-isolation`; `ProposedExtraction` gains a
   `#[serde(default)] source_file`.
 
-## Tests
+### Tests
 
 - `tests/integration/tests/m23_symbol_isolation_test.rs`
 
-## Proves
+### Proves
 
 - Generated C++ extracted files now carry real declaration text. A Scala symbol
   moves to its own `{symbol}.scala`, the source region is gone, and a whole-tree
@@ -2108,7 +2114,7 @@ bodies through one plugin extractor, and a rollback-capable move for Scala.
   byte-identical, and the `m00` goldens differ only by additive `source_file`
   lines.
 
-## Does not prove
+### Does not prove
 
 - Real compiler invocation was deliberately NOT wired (amendment D-M23-12, after
   reviewer finding F3: extracted headers are not self-contained). Tier 3 stays
