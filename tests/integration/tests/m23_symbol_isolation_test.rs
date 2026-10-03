@@ -799,7 +799,7 @@ fn transaction_rollback_restores_the_whole_fixture_tree() -> Result<()> {
         .collect();
     let consumers = plan_target_consumers(
         &registry,
-        &catalog_languages(&pipeline.discovery),
+        &catalog_languages(&registry, &pipeline.discovery),
         &pipeline.build.translation_units,
         &repo.root,
         &targets,

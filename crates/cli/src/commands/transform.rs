@@ -274,7 +274,7 @@ pub fn plan_consumer_discovery_targets(
 /// lift).
 pub fn plan_target_consumers(
     registry: &ariadne_lang::LanguageRegistry,
-    catalog: &std::collections::BTreeMap<FileId, ariadne_repo::SourceLanguage>,
+    catalog: &std::collections::BTreeMap<FileId, ariadne_lang::LanguageId>,
     translation_units: &[ariadne_build::TranslationUnit],
     repo_root: &std::path::Path,
     targets: &[String],
@@ -329,7 +329,7 @@ fn find_plan_consumers(
 
     Ok(plan_target_consumers(
         &registry,
-        &crate::registry::catalog_languages(&repo_discovery),
+        &crate::registry::catalog_languages(&registry, &repo_discovery),
         &build_result.translation_units,
         &repository.root,
         &targets,

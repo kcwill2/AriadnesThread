@@ -141,19 +141,32 @@ fn distinct_unit_languages(
     distinct
 }
 
-/// Catalog lookup over the discovered files: `FileId` → its
-/// [`SourceLanguage`](ariadne_repo::SourceLanguage) (plan M23, D-M23-7).
-/// The CLI's language-routed dispatch resolves plugins through this map —
-/// consumer discovery (T7 S2) and the per-language plan/backend routing
-/// (T7 S3) share it; files absent from the catalog have no language and
-/// are never dispatched (no C++ default, per §3.3 fact 3's discipline).
+/// Catalog lookup over the discovered files: `FileId` → the language
+/// identity a registered plugin claims for it (plan M23 D-M23-7; M24 Part A,
+/// D-A5).
+///
+/// **The registry is the dispatch authority, not `FileRecord.language`.**
+/// This used to copy the record's `language` label, which made the dispatch
+/// decision twice and let the closed file-kind label win: a file the
+/// discovery pass labelled `Other` had no plugin even when a registered
+/// detector claimed its extension. `FileRecord.language` remains an artifact
+/// label for reporting only.
+///
+/// Files no registered plugin claims are ABSENT from the catalog rather than
+/// mapped to a wrong plugin, so consumers keep their honest
+/// "unhandled language" error and never a C++ default (D-A5, §3.3 fact 3).
 pub fn catalog_languages(
+    registry: &LanguageRegistry,
     discovery: &ariadne_repo::RepositoryDiscoveryResult,
-) -> std::collections::BTreeMap<ariadne_repo::FileId, SourceLanguage> {
+) -> std::collections::BTreeMap<ariadne_repo::FileId, LanguageId> {
     discovery
         .files
         .iter()
-        .map(|record| (record.id, record.language))
+        .filter_map(|record| {
+            registry
+                .detect_language(&record.path)
+                .map(|language| (record.id, language))
+        })
         .collect()
 }
 
@@ -161,10 +174,10 @@ pub fn catalog_languages(
 /// file is not in the catalog or its language has no plugin (D-M23-7).
 pub fn plugin_for_catalog_file<'a>(
     registry: &'a LanguageRegistry,
-    catalog: &std::collections::BTreeMap<ariadne_repo::FileId, SourceLanguage>,
+    catalog: &std::collections::BTreeMap<ariadne_repo::FileId, LanguageId>,
     file_id: ariadne_repo::FileId,
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
-    registry.plugin_for_id(LanguageId::from(*catalog.get(&file_id)?))
+    registry.plugin_for_id(catalog.get(&file_id)?.clone())
 }
 
 #[cfg(test)]
@@ -411,13 +424,53 @@ mod tests {
     }
 
     #[test]
+    fn catalog_dispatch_is_registry_authoritative_not_the_record_language_label() {
+        // M24 Part A, D-A5 -- THE POINT OF THIS TASK. `FileRecord.language` is a
+        // file-kind LABEL; the registry is the dispatch authority. Before this
+        // task the catalog was built by copying `record.language` and dispatch
+        // went through `plugin_for_id(record.language)`, so a file the
+        // discovery pass labelled `Other` had NO plugin even when a registered
+        // detector claimed its extension -- the dispatch decision was made
+        // twice, and the closed label won.
+        let registry = default_registry();
+        // `.scala` IS a recognised FileKind, so give the record the *wrong*
+        // label on purpose: this is the shape any third language takes today,
+        // because no FileKind variant names it.
+        let mut discovery = discovery_of(&[("B.scala", SourceLanguage::Other)]);
+        let scala = ariadne_repo::FileId::from_relative_path("B.scala");
+
+        let catalog = catalog_languages(&registry, &discovery);
+
+        assert_eq!(
+            catalog.get(&scala),
+            Some(&LanguageId::Scala),
+            "the catalog resolves through detect_language, so the record's \\
+             Other label does not hide the claiming plugin"
+        );
+        assert_eq!(
+            plugin_for_catalog_file(&registry, &catalog, scala)
+                .expect("a file labelled Other still dispatches when a plugin claims it")
+                .id(),
+            LanguageId::Scala
+        );
+
+        // An unclaimed file is absent from the catalog rather than mapped to a
+        // wrong plugin.
+        discovery.files.push(discovery_of(&[("notes.md", SourceLanguage::Other)]).files.remove(0));
+        let missing = ariadne_repo::FileId::from_relative_path("notes.md");
+        let catalog = catalog_languages(&registry, &discovery);
+        assert!(catalog.get(&missing).is_none(), "no plugin claims it");
+        assert!(plugin_for_catalog_file(&registry, &catalog, missing).is_none());
+    }
+
+    #[test]
     fn catalog_helpers_route_plugin_per_file_language_never_cpp_default() {
         let registry = default_registry();
         let discovery = discovery_of(&[
             ("a.cpp", SourceLanguage::Cpp),
             ("B.scala", SourceLanguage::Scala),
         ]);
-        let catalog = catalog_languages(&discovery);
+        let catalog = catalog_languages(&registry, &discovery);
         assert_eq!(
             plugin_for_catalog_file(&registry, &catalog, ariadne_repo::FileId::from_relative_path("a.cpp"))
                 .expect("cpp file dispatches to the cpp plugin")

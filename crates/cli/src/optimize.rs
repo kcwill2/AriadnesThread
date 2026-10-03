@@ -329,7 +329,7 @@ fn find_including_translation_units(
 
     Ok(crate::commands::transform::plan_target_consumers(
         registry,
-        &crate::registry::catalog_languages(repo_discovery),
+        &crate::registry::catalog_languages(registry, repo_discovery),
         &build_discovery.translation_units,
         &repo_discovery.root,
         &targets,

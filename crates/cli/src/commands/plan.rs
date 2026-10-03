@@ -101,7 +101,7 @@ fn planning_hooks(
 /// (G2b advisory 5: duplicate top-level names are not excluded).
 struct LanguageRoutingConstraints<'a> {
     registry: &'a ariadne_lang::LanguageRegistry,
-    language_of_file: &'a BTreeMap<ariadne_repo::FileId, ariadne_repo::SourceLanguage>,
+    language_of_file: &'a BTreeMap<ariadne_repo::FileId, ariadne_lang::LanguageId>,
 }
 
 impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> {
@@ -119,7 +119,7 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
                 .filter(|record| {
                     self.language_of_file
                         .get(&record.owning_file)
-                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                        .is_some_and(|label| *label == language)
                 })
                 .cloned()
                 .collect();
@@ -155,7 +155,7 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
                 .filter(|record| {
                     self.language_of_file
                         .get(&record.owning_file)
-                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                        .is_some_and(|label| *label == language)
                 })
                 .cloned()
                 .collect();
@@ -193,7 +193,7 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
                 .filter(|record| {
                     self.language_of_file
                         .get(&record.owning_file)
-                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                        .is_some_and(|label| *label == language)
                 })
                 .cloned()
                 .collect();
@@ -227,7 +227,7 @@ pub fn plan_extractions(
         pipeline.repo.root.clone(),
         language_of_path(&pipeline.discovery.files),
     );
-    let catalog = crate::registry::catalog_languages(&pipeline.discovery);
+    let catalog = crate::registry::catalog_languages(&registry, &pipeline.discovery);
     let constraints = LanguageRoutingConstraints {
         registry: &registry,
         language_of_file: &catalog,
@@ -336,9 +336,9 @@ mod tests {
         let registry = crate::registry::default_registry();
         let scala_file = FileId::from_relative_path("src/main/scala/p/Legacy.scala");
         let cpp_file = FileId::from_relative_path("include/all.h");
-        let mut catalog: BTreeMap<FileId, SourceLanguage> = BTreeMap::new();
-        catalog.insert(scala_file, SourceLanguage::Scala);
-        catalog.insert(cpp_file, SourceLanguage::Cpp);
+        let mut catalog: BTreeMap<FileId, ariadne_lang::LanguageId> = BTreeMap::new();
+        catalog.insert(scala_file, ariadne_lang::LanguageId::Scala);
+        catalog.insert(cpp_file, ariadne_lang::LanguageId::Cpp);
         let dispatcher = LanguageRoutingConstraints {
             registry: &registry,
             language_of_file: &catalog,
