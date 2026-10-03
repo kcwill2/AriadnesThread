@@ -266,7 +266,7 @@
         const res = await fetch(`/api/graph/path?graph_type=${currentTab}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
         if (res.ok) {
           const path = await res.json();
-          resultDiv.innerHTML = path.join(' &rarr; ');
+          resultDiv.innerHTML = path.map(n => `<span class="path-node">${n}</span>`).join('<span class="path-sep">&rarr;</span>');
           if (path.length > 0) {
             selectNode(path[0]);
           }

@@ -4,13 +4,13 @@ This project uses the Intent-Driven Development (IDD) workflow with strict Red-G
 
 ## How the Workflow Works
 
-The workflow activates automatically when you ask for development work (implement, add, build, create, fix features). It uses skill orchestration to coordinate specialized agents:
+The workflow activates automatically when you ask for development work (implement, add, build, create, fix features). It uses skill orchestration to coordinate specialized agents (D1 Hybrid Topology):
 
-1. **Architect/Orchestrator** - Clarifies intent, creates specifications, breaks down tasks
-2. **Implementer** - Follows strict TDD (Red-Green-Refactor) with code hygiene enforcement
-3. **Tool-runner** - Executes tests, builds, and linters
-4. **Reviewer** - Enforces code hygiene and quality standards
-5. **Walkthrough Guide** - Generates interactive HTML documentation
+1. **Architect/Orchestrator** (primary) - Clarifies intent, creates specifications, breaks down tasks, delegates to subagents
+2. **Implementer** (project subagent) - Follows strict TDD (Red-Green-Refactor) with code hygiene enforcement; routes tools through distilling entry points
+3. **Reviewer** (project subagent) - Adjudicates handoffs via `review-gate` skill; enforces code hygiene and quality standards
+4. **Tool-caller** (project subagent, optional) - One-shot bulk command absorber; returns digest-shaped output only
+5. **Walkthrough Guide** (project subagent) - Generates interactive HTML documentation
 
 ## Automatic Activation
 
@@ -31,6 +31,7 @@ This project enforces strict code hygiene:
 - **Files < 1000 lines** - All files must be under 1000 lines
 - **Meaningful names** - All variables, functions, and types must have descriptive names
 - **Single responsibility** - Each function must do one thing well
+- **Source lines < 2000 chars** - Never park a paragraph on one line: agent Read/grep silently truncate at 2000 chars, hiding content from every workflow participant. Wrap whitespace-collapsing prose (HTML/Markdown body) sentence-per-line; where newlines are significant (`<pre>`, string literals), split into concatenated parts instead
 
 Violations will cause code review to fail. See `~/.config/devin/skills/idd-workflow/CODE_HYGIENE.md` for detailed guidelines.
 
@@ -51,6 +52,7 @@ For simple tasks (single-file changes, trivial fixes, configuration updates), th
 ## Project-Specific Context
 
 ### Project Structure
+
 This is a Rust workspace for C++ dependency analysis:
 - `crates/` - Rust crates (cli, lang, repo, build, scheduler, index, graph, cluster, transform, validate, report, pipeline, ui)
 - `tools/` - Supporting tools (clang-worker)
@@ -60,6 +62,7 @@ This is a Rust workspace for C++ dependency analysis:
 - `Spec.md` - Technical specification
 
 ### Testing
+
 - Use `cargo test` to run tests
 - Canonical reporting: `python tools/testrun.py [scoped cargo test args]` prints one line `N passed / M failed / K ignored / S suites` (exit 2 = parse drift; use `--baseline` for milestone gates)
 - Agents run tests via `python tools/testrun.py --distill [scoped args]` (bounded digest + full capture at `target/testrun-capture.txt`, path printed in the digest); raw mode remains for humans
@@ -69,11 +72,13 @@ This is a Rust workspace for C++ dependency analysis:
 - Integration tests are in `tests/integration/`
 
 ### Build
+
 - Use `cargo build` to build the project
 - Use `cargo build --release` for release builds
 - Load-perf regression check (local gate): `python tools/bench_compare.py` (median-of-3 stage-5 tail vs per-machine baseline)
 
 ### Process Tooling (deterministic rituals; reference, don't re-author)
+
 - `python tools/checkpoint_guard.py status` — ground truth at session start (incl. worktree census); `resume --spec tasks/<handoff>.md --scope … --cmd …` — fresh-session bootstrap after a dead implementer (skill `resume-checkpoint`)
 - `python tools/encoding_guard.py --staged` before committing; `--all` in CI (mojibake/non-UTF-8 gate)
 - `python tools/commit_scoped.py --scope <glob> … -m <msg>` — scoped commits in shared worktrees (never `git add .`)
@@ -82,10 +87,23 @@ This is a Rust workspace for C++ dependency analysis:
 - `python tools/testrun.py` — canonical test summary line (quote verbatim in reports)
 - `python tools/distill.py -- <cmd>` - distilling wrapper for build/clippy/generic commands (digest + `target/distill-capture.txt`, never raw output in agent context)
 - Standing contract: `docs/specs/tool-output-distillation.md` - entry points, digest shapes, prohibitions, evidence rules
-- Skills (`.kilo/skills/`): `handoff-spec` (author handoffs), `review-gate` (adjudicate handoffs; its commit-vs-touch-set check enforces scope), `milestone-lifecycle` (kickoff/closeout; ledger is source of truth), `resume-checkpoint`, `walkthrough-commit`
+- Skills (`.kilo/skills/`): `handoff-spec` (author handoffs), `review-gate` (adjudicate handoffs; its commit-vs-touch-set check enforces scope), `milestone-lifecycle` (kickout/closeout; ledger is source of truth), `resume-checkpoint`, `walkthrough-commit`
 - Milestone state: `tasks/milestone_ledger.md` is the source of truth; kilo-memory mirrors it in the same commit
 
+### Handoff Sizing Rule (Planning Law)
+
+A handoff unit MUST fit within these bounds:
+- **Scope**: ≤ 1 Cargo crate OR ≤ 1 top-level module directory under `crates/`/`tools/`/`tests/`
+- **Gate commands**: ≤ ~10 scoped gate commands (distilling entry point invocations)
+- **Expected produced lines**: ≤ ~1200 lines of implementation+test diff output
+- **Larger work splits** into multiple handoffs
+
+Workspace-wide final gates (`--baseline` run, full `unittest discover`, `ui_smoke`, `bench_compare`) run ONLY in a fresh session or the orchestrator's bounded own run. Sizing axis = gate count × output volume.
+
+This rule is also reflected in the `handoff-spec` skill template (gates section).
+
 ### Documentation
+
 - Project intent is documented in `Intent.md`
 - Technical specification is in `Spec.md`
 - Implementation plan is in `Plan.md`
@@ -95,7 +113,8 @@ This is a Rust workspace for C++ dependency analysis:
 The workflow integrates with existing project documentation:
 
 - **Intent documents**: Created/updated in `Intent.md` or `docs/specs/<feature>.md`
-- **Planning documents**: Created in `tasks/plan.md` and `tasks/todo.md`
+- **Handoff documents**: Created in `tasks/<task>-handoff.md` via `handoff-spec` skill
+- **Journals**: Created in `tasks/<task>-journal.md` by implementer
 - **Walkthroughs**: Generated in `walkthroughs/<feature>-walkthrough.html`
 
 ## Existing Skills
@@ -112,14 +131,10 @@ You can also invoke skills directly:
 
 - `/idd-workflow` - Start the full IDD workflow
 - `/implementer-rgb-tdd` - TDD implementation
-- `/tool-runner` - Execute tools
+- `/tool-runner` - Execute tools (distilling entry points)
 - `/reviewer-hygiene` - Code review with hygiene enforcement
 - `/walkthrough-guide` - Generate walkthrough
 - `/quick-solo` - Quick implementation for simple tasks
-
-## Custom Modes
-
-The project has custom modes in `.roomodes` (architect, implementer, reviewer, tool-caller), but the skill-based workflow is the primary approach. The custom modes may be simplified or removed in favor of the skill orchestration.
 
 ## Getting Help
 
