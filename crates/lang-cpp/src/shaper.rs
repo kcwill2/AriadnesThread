@@ -105,6 +105,7 @@ fn descriptor_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ariadne_lang::LanguageId;
     use ariadne_repo::{FileId, FileKind, FileOwnership, OptimizationPolicy, SourceLanguage};
 
     fn record(root: &Path, rel: &str) -> FileRecord {
@@ -159,7 +160,7 @@ mod tests {
         assert_eq!(units.len(), parity.len(), "headers are not units");
         for (unit, (rel, _)) in units.iter().zip(parity.iter()) {
             assert_eq!(unit.context_name, "Default|x64");
-            assert_eq!(unit.language, SourceLanguage::Cpp);
+            assert_eq!(unit.language, LanguageId::Cpp);
             assert_eq!(unit.unit_kind, UnitKind::TranslationUnit);
             assert_eq!(unit.file_id, FileId::from_relative_path(rel));
             assert_eq!(

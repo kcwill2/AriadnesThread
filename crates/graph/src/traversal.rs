@@ -473,7 +473,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "b.h".into(),
             resolved_path: None,
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: crate::types::LanguageId::cpp(),
         });
 
         graph.add_edge(IncludeEdge {
@@ -484,7 +484,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "c.h".into(),
             resolved_path: None,
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: crate::types::LanguageId::cpp(),
         });
 
         let hood = graph.traverse_neighborhood(f2, 1, TraversalDirection::Both);

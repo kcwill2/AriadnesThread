@@ -242,7 +242,15 @@ impl<'a> BuildDiscoverer<'a> {
             .or_insert_with(|| {
                 let mut ctx =
                     CompilationContext::new(&descriptor.context_name, shaper.default_compiler());
-                ctx.language = descriptor.language;
+                // M24 Part A (ADAPT-8): the unit's language label is the
+                // FILE-KIND label from the discovered record, not the shaper's
+                // plugin identity. `CompilationContext.language` stays
+                // `SourceLanguage` on purpose: it is a golden artifact field
+                // AND a bincode input to the TU cache `context_hash`, so its
+                // type and bytes must not move. `TranslationUnit.language` is
+                // the same file-kind label for the same reason -- dispatch
+                // authority is the registry, not this field (D-A5).
+                ctx.language = record.language;
                 ctx
             });
         ctx.defines.extend(descriptor.defines.iter().cloned());
@@ -261,7 +269,7 @@ impl<'a> BuildDiscoverer<'a> {
                 context_name: descriptor.context_name.clone(),
                 output: None,
             },
-            language: descriptor.language,
+            language: record.language,
         }
     }
 }

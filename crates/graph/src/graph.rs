@@ -417,7 +417,7 @@ impl IncludeGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SourceLocation;
+    use crate::types::{LanguageId, SourceLocation};
 
     #[test]
     fn test_include_graph_closure_and_explain() {
@@ -442,7 +442,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "thing.h".into(),
             resolved_path: Some(PathBuf::from("include/thing.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: LanguageId::cpp(),
         });
 
         // thing.h -> thing_types.h
@@ -454,7 +454,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "thing_types.h".into(),
             resolved_path: Some(PathBuf::from("include/thing_types.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: LanguageId::cpp(),
         });
 
         // thing.h -> heavy.h
@@ -466,7 +466,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "heavy.h".into(),
             resolved_path: Some(PathBuf::from("include/heavy.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: LanguageId::cpp(),
         });
 
         let closures = graph.compute_closures();
@@ -503,7 +503,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "b.h".into(),
             resolved_path: Some(PathBuf::from("b.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: LanguageId::cpp(),
         });
 
         // b.h -> a.h
@@ -515,7 +515,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "a.h".into(),
             resolved_path: Some(PathBuf::from("a.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: LanguageId::cpp(),
         });
 
         let cycles = graph.detect_cycles();
@@ -529,7 +529,7 @@ mod tests {
         source: FileId,
         destination: FileId,
         kind: IncludeKind,
-        language: ariadne_repo::SourceLanguage,
+        language: LanguageId,
     ) -> IncludeEdge {
         IncludeEdge {
             source,
@@ -545,7 +545,7 @@ mod tests {
 
     fn one_edge_each_kind() -> IncludeGraph {
         let mut graph = IncludeGraph::new();
-        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        let cpp = LanguageId::cpp();
         for (idx, kind) in [
             IncludeKind::Local,
             IncludeKind::System,
@@ -559,7 +559,7 @@ mod tests {
             let destination = FileId(100 + idx as u64);
             graph.register_file(source, PathBuf::from(format!("src/unit{idx}")));
             graph.register_file(destination, PathBuf::from(format!("src/dep{idx}")));
-            graph.add_edge(edge(source, destination, kind, cpp));
+            graph.add_edge(edge(source, destination, kind, cpp.clone()));
         }
         graph
     }
@@ -569,14 +569,14 @@ mod tests {
         // Baseline lock: with only the pre-M20 kinds the report counters are
         // exactly today's numbers (m00 proves the same end-to-end).
         let mut graph = IncludeGraph::new();
-        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        let cpp = LanguageId::cpp();
         graph.register_file(FileId(1), PathBuf::from("src/a"));
         graph.register_file(FileId(2), PathBuf::from("src/b"));
         graph.register_file(FileId(3), PathBuf::from("src/c"));
         graph.register_file(FileId(4), PathBuf::from("src/d"));
-        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp));
-        graph.add_edge(edge(FileId(1), FileId(3), IncludeKind::System, cpp));
-        graph.add_edge(edge(FileId(1), FileId(4), IncludeKind::External, cpp));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(1), FileId(3), IncludeKind::System, cpp.clone()));
+        graph.add_edge(edge(FileId(1), FileId(4), IncludeKind::External, cpp.clone()));
 
         let report = graph.generate_report();
         assert_eq!(report.local_headers_count, 1);
@@ -588,11 +588,11 @@ mod tests {
 
     fn mutual_cycle_graph() -> IncludeGraph {
         let mut graph = IncludeGraph::new();
-        let cpp = ariadne_repo::SourceLanguage::Cpp;
+        let cpp = LanguageId::cpp();
         graph.register_file(FileId(1), PathBuf::from("a.h"));
         graph.register_file(FileId(2), PathBuf::from("b.h"));
-        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp));
-        graph.add_edge(edge(FileId(2), FileId(1), IncludeKind::Local, cpp));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(2), FileId(1), IncludeKind::Local, cpp.clone()));
         graph
     }
 

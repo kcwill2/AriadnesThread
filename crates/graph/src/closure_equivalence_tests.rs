@@ -14,7 +14,7 @@
 //! the characterization shapes (single-hop, unregistered edge-only ids).
 
 use super::IncludeGraph;
-use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
+use crate::types::{IncludeEdge, IncludeKind, LanguageId, SourceLocation};
 use ariadne_repo::FileId;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ fn edge(source: u64, destination: Option<u64>) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: format!("f{source}.h"),
         resolved_path: None,
-        language: ariadne_repo::SourceLanguage::Cpp,
+        language: LanguageId::cpp(),
     }
 }
 

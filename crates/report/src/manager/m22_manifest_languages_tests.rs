@@ -5,6 +5,7 @@ use super::tests::{fixture_load_report, manager_in_fresh_tempdir, FP};
 use super::ArtifactManager;
 use crate::manifests::RepositoryManifest;
 use ariadne_build::{BuildDiscoveryResult, CompilationContext, CompileCommand, TranslationUnit};
+use ariadne_lang::LanguageId;
 use ariadne_repo::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, Repository,
     RepositoryDiscoveryResult, SourceLanguage,
@@ -77,7 +78,7 @@ fn m22_manifest_serde_shape_lock_key_serialized_when_present() {
         policy_summary: HashMap::new(),
         input_fingerprint: "fp".to_string(),
         analysis_version: "v".to_string(),
-        languages: vec![SourceLanguage::Scala],
+        languages: vec![LanguageId::Scala],
     };
     let json = serde_json::to_string(&manifest).unwrap();
     assert!(
@@ -212,7 +213,7 @@ fn m22_build_context_manifest_skips_languages_when_all_default() {
 fn fixture_include_edge(
     source: &str,
     destination: &str,
-    language: SourceLanguage,
+    language: LanguageId,
 ) -> ariadne_graph::IncludeEdge {
     ariadne_graph::IncludeEdge {
         source: FileId::from_relative_path(source),
@@ -239,17 +240,17 @@ fn m22_include_manifest_collects_deduped_non_default_languages() {
     graph.add_edge(fixture_include_edge(
         "a.cc",
         "b.hh",
-        SourceLanguage::Cpp,
+        LanguageId::cpp(),
     ));
     graph.add_edge(fixture_include_edge(
         "s.scala",
         "o.scala",
-        SourceLanguage::Scala,
+        LanguageId::Scala,
     ));
     graph.add_edge(fixture_include_edge(
         "o.scala",
         "s.scala",
-        SourceLanguage::Scala,
+        LanguageId::Scala,
     ));
     let closures = graph.compute_closures();
     let report = graph.generate_report();
@@ -277,7 +278,7 @@ fn m22_include_manifest_skips_languages_when_all_default() {
     graph.add_edge(fixture_include_edge(
         "a.cc",
         "b.hh",
-        SourceLanguage::Cpp,
+        LanguageId::cpp(),
     ));
     let closures = graph.compute_closures();
     let report = graph.generate_report();

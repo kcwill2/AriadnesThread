@@ -368,7 +368,7 @@ fn include_edge(from: u64, to: u64) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
-        language: ariadne_repo::SourceLanguage::Cpp,
+        language: ariadne_graph::LanguageId::Cpp,
     }
 }
 

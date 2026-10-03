@@ -59,7 +59,12 @@ impl ArtifactManager {
             cycle_count: report.cycle_count,
             input_fingerprint: input_fingerprint.to_string(),
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
-            languages: collect_stage_languages(graph.edges.iter().map(|e| e.language)),
+            languages: collect_stage_languages(
+                graph
+                    .edges
+                    .iter()
+                    .map(|edge| edge.language.clone()),
+            ),
         };
         write_json_atomic(&includes_artifact_dir.join("manifest.json"), &manifest)?;
 

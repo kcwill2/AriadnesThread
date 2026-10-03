@@ -139,7 +139,7 @@ fn plugin_for_tu<'a>(
         )
     })?;
     registry
-        .plugin_for_id(language)
+        .plugin_for_id(language.clone())
         .ok_or_else(|| anyhow::anyhow!("language plugin not registered: {language:?}"))
 }
 

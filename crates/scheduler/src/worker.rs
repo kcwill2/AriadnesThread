@@ -84,7 +84,7 @@ impl WorkerBackend for PluginWorkerBackend<'_> {
             .ok_or_else(|| anyhow::anyhow!("unhandled language for {:?}", task.tu.source_path))?;
         let plugin = self
             .registry
-            .plugin_for_id(language)
+            .plugin_for_id(language.clone())
             .ok_or_else(|| anyhow::anyhow!("no plugin registered for language {language:?}"))?;
         if let Some(ctx) = &task.context {
             // Canonical closure merge through the unit's own plugin — the

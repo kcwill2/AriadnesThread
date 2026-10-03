@@ -37,7 +37,7 @@ fn include(from: FileId, to: FileId, name: &str) -> IncludeEdge {
         kind: IncludeKind::Local,
         raw_path: name.to_string(),
         resolved_path: Some(PathBuf::from(name)),
-        language: ariadne_repo::SourceLanguage::Cpp,
+        language: crate::types::LanguageId::cpp(),
     }
 }
 

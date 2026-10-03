@@ -343,7 +343,7 @@ fn plugin_driven_closure(
         &store_ctx,
         CURRENT_ANALYSIS_VERSION,
         &resolver,
-        SourceLanguage::Cpp,
+        SourceLanguage::Cpp.into(),
         CPP_ANALYSIS_FINGERPRINT,
     )?;
     Ok(closure

@@ -125,7 +125,7 @@ impl<'a> OptimizationPlanner<'a> {
             .iter()
             .map(|gap| PlanRejection {
                 target_file: gap.sample_path.clone(),
-                reason: RejectionReason::PlanningUnsupported(gap.language),
+                reason: RejectionReason::PlanningUnsupported(gap.language.clone()),
                 explanation: format!(
                     "Planning is not supported for {:?}: the registered plugin disables the planning stage, so no extraction plans are proposed for {:?} files such as {}.",
                     gap.language,
@@ -609,7 +609,7 @@ mod planning_gap_tests {
                 kind: IncludeKind::Local,
                 raw_path: "col.agg".to_string(),
                 resolved_path: Some(PathBuf::from("col.agg")),
-                language: SourceLanguage::Other,
+                language: LanguageId::Other,
             });
             fixture.records.push(Self::record(
                 FileId(1),
@@ -675,7 +675,11 @@ mod planning_gap_tests {
         let rejection = &rejections[0];
         assert!(matches!(
             rejection.reason,
-            RejectionReason::PlanningUnsupported(LanguageId::Other)
+            // M24 Part A: `LanguageId` wraps a `Cow`, so it is not
+            // structural-match and cannot appear as a constant pattern; the
+            // equality guard states the same thing.
+            RejectionReason::PlanningUnsupported(ref language)
+                if *language == LanguageId::Other
         ));
         assert_eq!(
             rejection.target_file,

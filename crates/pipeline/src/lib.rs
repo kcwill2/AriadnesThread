@@ -24,7 +24,7 @@ use ariadne_graph::{
 use ariadne_index::{
     IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
 };
-use ariadne_lang::{CyclePolicy, LanguagePlugin, LanguageRegistry, UnitShaper};
+use ariadne_lang::{CyclePolicy, LanguageId, LanguagePlugin, LanguageRegistry, UnitShaper};
 use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
 use ariadne_scheduler::{
@@ -439,9 +439,13 @@ impl Pipeline {
             }
         };
         if let Some(language) = self.language_filter {
-            build.translation_units.retain(|tu| {
-                self.registry.detect_language(&tu.source_path) == Some(language)
-            });
+            // M24 Part A: the `--lang` filter arrives as the closed file-kind
+            // label, while detection answers in the open identity, so the
+            // comparison goes through the one direction that exists.
+            let selected = LanguageId::from(language);
+            build
+                .translation_units
+                .retain(|tu| self.registry.detect_language(&tu.source_path).as_ref() == Some(&selected));
         }
         Ok(build)
     }
@@ -734,7 +738,7 @@ fn select_unit_shaper<'a>(
 ) -> Option<&'a dyn UnitShaper> {
     match language_filter {
         Some(language) => registry
-            .plugin_for_id(language)
+            .plugin_for_id(LanguageId::from(language))
             .and_then(|plugin| plugin.shaper()),
         None => registry.unit_shaper_for_repo(repo_root),
     }
@@ -754,7 +758,7 @@ fn cycle_policy_by_file(
         .iter()
         .map(|record| {
             let policy = registry
-                .plugin_for_id(record.language)
+                .plugin_for_id(LanguageId::from(record.language))
                 .map(|plugin| plugin.modeling().cycle_policy)
                 .unwrap_or(CyclePolicy::Reject);
             (record.id, policy)
@@ -776,7 +780,7 @@ fn plugin_for_path<'a>(
         )
     })?;
     registry
-        .plugin_for_id(language)
+        .plugin_for_id(language.clone())
         .ok_or_else(|| anyhow!("language plugin not registered: {language:?}"))
 }
 

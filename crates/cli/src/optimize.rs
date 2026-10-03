@@ -520,7 +520,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: raw_path.to_string(),
             resolved_path: Some(PathBuf::from(raw_path)),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: ariadne_graph::LanguageId::Cpp,
         }
     }
 

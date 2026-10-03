@@ -112,7 +112,7 @@ fn graph_emits_import_edges_for_order_service() -> Result<()> {
             "the named directive resolves to a repository file"
         );
         assert_eq!(edge.kind, IncludeKind::Import, "plan:398 edge kind");
-        assert_eq!(edge.language, SourceLanguage::Scala);
+        assert_eq!(edge.language, SourceLanguage::Scala.into());
     }
     Ok(())
 }
@@ -142,7 +142,7 @@ fn wildcard_package_import_is_external() -> Result<()> {
         matching[0].destination, None,
         "External is an honest boundary marker: never a destination"
     );
-    assert_eq!(matching[0].language, SourceLanguage::Scala);
+    assert_eq!(matching[0].language, SourceLanguage::Scala.into());
     Ok(())
 }
 

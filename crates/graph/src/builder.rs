@@ -7,10 +7,10 @@ use crate::IncludeGraph;
 use crate::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_build::BuildDiscoverer;
 use ariadne_lang::{
-    first_ondisk_include_candidate, DirectiveStyle, FileCatalog, LanguageRegistry, RawDepEdge,
-    ResolutionContext, ResolveOutcome, UnitShaper,
+    first_ondisk_include_candidate, DirectiveStyle, FileCatalog, LanguageId, LanguageRegistry,
+    RawDepEdge, ResolutionContext, ResolveOutcome, UnitShaper,
 };
-use ariadne_repo::{FileId, FileOwnership, Repository, SourceLanguage};
+use ariadne_repo::{FileId, FileOwnership, Repository};
 
 /// Registry-driven dependency graph (plan M18.5): the BFS walks each file's
 /// directives through the [`ariadne_lang::DependencyResolver`] of the plugin
@@ -100,7 +100,7 @@ fn dependency_graph(
         let Some(plugin_id) = registry.detect_language(&rel_path) else {
             continue;
         };
-        let Some(plugin) = registry.plugin_for_id(plugin_id) else {
+        let Some(plugin) = registry.plugin_for_id(plugin_id.clone()) else {
             continue;
         };
 
@@ -118,7 +118,7 @@ fn dependency_graph(
 
         for raw in raw_edges {
             let outcome = plugin.resolver().resolve_target(&raw, &catalog, &resolution);
-            for edge in edge_from_outcome(&raw, outcome, &catalog, &resolution, &repository.root, plugin_id, context_name, directive_kind) {
+            for edge in edge_from_outcome(&raw, outcome, &catalog, &resolution, &repository.root, plugin_id.clone(), context_name, directive_kind) {
                 if let Some(dest_id) = edge.destination {
                     if !scanned_files.contains(&dest_id) {
                         if let Some(dest_path) = graph.file_paths.get(&dest_id).cloned() {
@@ -176,7 +176,7 @@ fn edge_from_outcome(
     catalog: &FileCatalog,
     resolution: &ResolutionContext<'_>,
     repo_root: &Path,
-    language: SourceLanguage,
+    language: LanguageId,
     context_name: &str,
     directive_kind: Option<IncludeKind>,
 ) -> Vec<IncludeEdge> {
@@ -186,7 +186,7 @@ fn edge_from_outcome(
         }
         ResolveOutcome::Wildcard(ids) => ids
             .into_iter()
-            .map(|id| resolved_edge(raw, catalog, id, language, context_name, directive_kind))
+            .map(|id| resolved_edge(raw, catalog, id, language.clone(), context_name, directive_kind))
             .collect(),
         ResolveOutcome::External => vec![include_edge(
             raw,
@@ -225,7 +225,7 @@ fn resolved_edge(
     raw: &RawDepEdge,
     catalog: &FileCatalog,
     id: FileId,
-    language: SourceLanguage,
+    language: LanguageId,
     context_name: &str,
     directive_kind: Option<IncludeKind>,
 ) -> IncludeEdge {
@@ -285,7 +285,7 @@ fn ownership_kind(ownership: FileOwnership) -> IncludeKind {
 
 fn include_edge(
     raw: &RawDepEdge,
-    language: SourceLanguage,
+    language: LanguageId,
     context_name: &str,
     destination: Option<FileId>,
     kind: IncludeKind,
@@ -483,12 +483,12 @@ mod builder_seam_tests {
         fn validator(&self) -> &dyn CompilerValidator {
             &SeamValidator
         }
-        fn id(&self) -> ariadne_lang::LanguageId {
-            SourceLanguage::Cpp
+fn id(&self) -> ariadne_lang::LanguageId {
+            ariadne_lang::LanguageId::cpp()
         }
         fn modeling(&self) -> LanguageModeling {
             LanguageModeling {
-                language: SourceLanguage::Cpp,
+                language: ariadne_lang::LanguageId::cpp(),
                 unit: UnitKind::TranslationUnit,
                 aggregation: AggregationKind::None,
                 guard: GuardKind::None,
@@ -537,7 +537,7 @@ mod builder_seam_tests {
                 .filter(|record| record.path.to_string_lossy().replace('\\', "/") == ENTRY_REL)
                 .map(|record| UnitDescriptor {
                     file_id: record.id,
-                    language: SourceLanguage::Cpp,
+                    language: ariadne_lang::LanguageId::cpp(),
                     unit_kind: UnitKind::TranslationUnit,
                     context_name: "Stub".to_string(),
                     aggregation_target: None,

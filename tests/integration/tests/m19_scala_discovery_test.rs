@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use ariadne_build::BuildDiscoverer;
-use ariadne_lang::{LanguageCapabilities, LanguagePlugin};
+use ariadne_lang::{LanguageCapabilities, LanguageId, LanguagePlugin};
 use ariadne_lang_scala::{ScalaPlugin, ScalaUnitShaper};
 use ariadne_repo::{
     classify_ownership_and_policy, FileId, FileKind, FileOwnership, OptimizationPolicy, Repository,
@@ -214,11 +214,11 @@ fn plugin_contract_in_default_registry() {
     let registry = ariadne_cli::registry::default_registry();
     assert_eq!(
         registry.languages(),
-        vec![SourceLanguage::Cpp, SourceLanguage::Scala]
+        vec![LanguageId::Cpp, LanguageId::Scala]
     );
 
     let scala = registry
-        .plugin_for_id(SourceLanguage::Scala)
+        .plugin_for_id(LanguageId::Scala)
         .expect("Scala registered in the CLI default registry (D9)");
     assert_eq!(
         scala.capabilities(),
@@ -243,11 +243,11 @@ fn plugin_contract_in_default_registry() {
 
     assert_eq!(
         registry.detect_language(Path::new("src/main/scala/com/example/Main.scala")),
-        Some(SourceLanguage::Scala)
+        Some(LanguageId::Scala)
     );
     assert_eq!(
         registry.detect_language(Path::new("src/main.cpp")),
-        Some(SourceLanguage::Cpp)
+        Some(LanguageId::Cpp)
     );
 
     assert_eq!(

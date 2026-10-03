@@ -462,7 +462,7 @@ fn scala_fingerprint_moves_only_the_scala_digest() -> Result<()> {
     let file_id = FileId::from_relative_path(ORDER_SERVICE_REL);
     let headers: Vec<(FileId, String)> = vec![];
 
-    let digest = |language: SourceLanguage, plugin_fingerprint: &str| {
+    let digest = |language: LanguageId, plugin_fingerprint: &str| {
         TuCacheFingerprint::compute(
             CURRENT_ANALYSIS_VERSION,
             &context,
@@ -475,18 +475,18 @@ fn scala_fingerprint_moves_only_the_scala_digest() -> Result<()> {
         )
     };
 
-    let cpp = digest(SourceLanguage::Cpp, "cpp-analyzer-1");
+    let cpp = digest(LanguageId::Cpp, "cpp-analyzer-1");
     // M23 evolution (D-M23-8, same-commit authority as the plugin bump): the
     // live Scala fingerprint literal moved "scala-parser-1" -> "scala-parser-2"
     // because Scala sources now persist modifiers + the typed extends channel.
-    let scala = digest(SourceLanguage::Scala, "scala-parser-2");
+    let scala = digest(LanguageId::Scala, "scala-parser-2");
     assert_ne!(
         cpp.combined_hash, scala.combined_hash,
         "plan:413: one store cannot poison entries across languages"
     );
 
-    let scala_other = digest(SourceLanguage::Scala, "scala-other");
-    let cpp_again = digest(SourceLanguage::Cpp, "cpp-analyzer-1");
+    let scala_other = digest(LanguageId::Scala, "scala-other");
+    let cpp_again = digest(LanguageId::Cpp, "cpp-analyzer-1");
     assert_ne!(
         scala.combined_hash, scala_other.combined_hash,
         "a Scala fingerprint bump must move the Scala digest"
@@ -513,11 +513,11 @@ fn order_service_analysis_is_deterministic_offline() -> Result<()> {
     let service_path = Path::new(ORDER_SERVICE_REL);
     assert_eq!(
         registry.detect_language(service_path),
-        Some(SourceLanguage::Scala),
+        Some(LanguageId::Scala),
         "the CLI registry claims the .scala path"
     );
     let plugin = registry
-        .plugin_for_id(SourceLanguage::Scala)
+        .plugin_for_id(LanguageId::Scala)
         .expect("the Scala plugin is registered");
 
     let source = fs::read_to_string(fixture_path(FIXTURE).join(ORDER_SERVICE_REL))?;

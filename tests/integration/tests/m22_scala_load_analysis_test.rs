@@ -90,7 +90,7 @@ fn normalized_rel(path: &Path) -> String {
 fn scala_vocabulary() -> DependencyVocabulary {
     let registry = default_registry();
     let plugin = registry
-        .plugin_for_id(SourceLanguage::Scala)
+        .plugin_for_id(SourceLanguage::Scala.into())
         .expect("Scala plugin is registered");
     plugin.modeling().dependency_vocabulary
 }
@@ -98,7 +98,7 @@ fn scala_vocabulary() -> DependencyVocabulary {
 fn scala_caveat() -> String {
     let registry = default_registry();
     registry
-        .plugin_for_id(SourceLanguage::Scala)
+        .plugin_for_id(SourceLanguage::Scala.into())
         .expect("Scala plugin is registered")
         .modeling()
         .analysis_caveat
@@ -277,7 +277,7 @@ fn plan_evolved_from_capability_rejection_to_planned_nothing() -> Result<()> {
         .discovery
         .files
         .iter()
-        .any(|record| match registry.plugin_for_id(record.language) {
+        .any(|record| match registry.plugin_for_id(record.language.into()) {
             Some(plugin) => !plugin.capabilities().planning,
             None => false,
         });

@@ -8,8 +8,8 @@
 use ariadne_graph::{
     build_dependency_graph, build_dependency_graph_with_unit_shaper, IncludeGraph, IncludeKind,
 };
-use ariadne_lang::LanguageRegistry;
-use ariadne_repo::{FileId, SourceLanguage};
+use ariadne_lang::{LanguageId, LanguageRegistry};
+use ariadne_repo::FileId;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -67,7 +67,7 @@ fn unfiltered_graph_on_an_sbt_repo_auto_selects_the_scala_shaper() {
         edge.source == service
             && edge.destination == Some(order)
             && edge.kind == IncludeKind::Import
-            && edge.language == SourceLanguage::Scala
+            && edge.language == LanguageId::Scala
     });
     assert!(
         named_import,

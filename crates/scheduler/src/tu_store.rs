@@ -354,7 +354,7 @@ pub fn compute_tu_closure_plugin(
     ctx: &TuStoreContext,
     analysis_version: &str,
     resolver: &dyn DependencyResolver,
-    language: SourceLanguage,
+    language: ariadne_lang::LanguageId,
     plugin_fingerprint: &str,
 ) -> Result<TuClosure> {
     let context = context_for_tu(tu, ctx);
@@ -557,7 +557,7 @@ mod tests {
                 "source-hash",
                 &[],
                 None,
-                ariadne_repo::SourceLanguage::Scala,
+                ariadne_lang::LanguageId::Scala,
                 fp,
             )
         };

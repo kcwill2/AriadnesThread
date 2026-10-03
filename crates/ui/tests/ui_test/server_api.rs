@@ -365,7 +365,7 @@ fn justification_state() -> Arc<UiState> {
         kind: ariadne_graph::IncludeKind::Local,
         raw_path: String::new(),
         resolved_path: None,
-        language: ariadne_repo::SourceLanguage::Cpp,
+        language: ariadne_graph::LanguageId::Cpp,
     };
     graph.edges.push(include_edge(1, 2));
     graph.edges.push(include_edge(1, 3));

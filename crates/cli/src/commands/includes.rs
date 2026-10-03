@@ -156,7 +156,7 @@ mod tests {
     fn vocabulary_for(language: ariadne_repo::SourceLanguage) -> DependencyVocabulary {
         let registry = crate::registry::default_registry();
         registry
-            .plugin_for_id(language)
+            .plugin_for_id(ariadne_lang::LanguageId::from(language))
             .expect("plugin registered")
             .modeling()
             .dependency_vocabulary

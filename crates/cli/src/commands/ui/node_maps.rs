@@ -59,7 +59,7 @@ pub fn unit_kind_map(
             .entry(file.language)
             .or_insert_with_key(|language| {
                 registry
-                    .plugin_for_id(*language)
+                    .plugin_for_id(ariadne_lang::LanguageId::from(*language))
                     .map(|plugin| format!("{:?}", plugin.modeling().unit))
             });
         if let Some(unit) = unit {

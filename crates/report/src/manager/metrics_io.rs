@@ -45,7 +45,7 @@ fn build_load_manifest(
         total_collateral_load,
         input_fingerprint: input_fingerprint.to_string(),
         analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
-        languages: collect_stage_languages(languages.iter().copied()),
+        languages: collect_stage_languages(languages.iter().map(ariadne_lang::LanguageId::from)),
     }
 }
 

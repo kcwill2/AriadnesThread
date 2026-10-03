@@ -8,7 +8,7 @@
 //! backends all route through what the builder enumerates (C++ first, then
 //! Scala; registration order is a contract).
 
-use ariadne_lang::LanguageRegistry;
+use ariadne_lang::{LanguageId, LanguageRegistry};
 use ariadne_repo::SourceLanguage;
 
 /// The default language registry - delegation to the shared D9 builder
@@ -25,7 +25,7 @@ pub fn ensure_language_registered(
     registry: &LanguageRegistry,
     language: SourceLanguage,
 ) -> anyhow::Result<()> {
-    if registry.plugin_for_id(language).is_none() {
+    if registry.plugin_for_id(LanguageId::from(language)).is_none() {
         anyhow::bail!("language plugin not registered: {language:?}");
     }
     Ok(())
@@ -62,7 +62,7 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
 /// construction (two plugins claim most stages).
 pub fn capability_backend_for_language<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
-    language: SourceLanguage,
+    language: LanguageId,
     capability: fn(&ariadne_lang::LanguageCapabilities) -> bool,
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
     let plugin = registry.plugin_for_id(language)?;
@@ -86,7 +86,7 @@ pub fn plan_backend<'a>(
             plan_target_file.display()
         )
     })?;
-    capability_backend_for_language(registry, language, capability).ok_or_else(|| {
+    capability_backend_for_language(registry, language.clone(), capability).ok_or_else(|| {
         anyhow::anyhow!(
             "the {language:?} plugin does not enable the {stage} capability for plan target {}",
             plan_target_file.display()
@@ -115,7 +115,9 @@ pub fn incremental_backend<'a>(
                 .into_iter()
                 .next()
                 .expect("one distinct language present");
-            registry.plugin_for_id(language).ok_or_else(|| {
+            registry
+            .plugin_for_id(LanguageId::from(language))
+            .ok_or_else(|| {
                 format!("unhandled language: no plugin is registered for {language:?} units")
             })
         }
@@ -162,7 +164,7 @@ pub fn plugin_for_catalog_file<'a>(
     catalog: &std::collections::BTreeMap<ariadne_repo::FileId, SourceLanguage>,
     file_id: ariadne_repo::FileId,
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
-    registry.plugin_for_id(*catalog.get(&file_id)?)
+    registry.plugin_for_id(LanguageId::from(*catalog.get(&file_id)?))
 }
 
 #[cfg(test)]
@@ -174,16 +176,16 @@ mod tests {
         let registry = default_registry();
         assert_eq!(
             registry.languages(),
-            vec![SourceLanguage::Cpp, SourceLanguage::Scala],
+            vec![LanguageId::Cpp, LanguageId::Scala],
             "registration ORDER is a contract: C++ first keeps unit_shaper_for()/\
              detect_language C++ precedence byte-identical (M19.3)"
         );
-        assert!(registry.plugin_for_id(SourceLanguage::Cpp).is_some());
-        assert!(registry.plugin_for_id(SourceLanguage::Scala).is_some());
+        assert!(registry.plugin_for_id(LanguageId::Cpp).is_some());
+        assert!(registry.plugin_for_id(LanguageId::Scala).is_some());
         assert!(registry.detect_language(std::path::Path::new("src/a.cpp")).is_some());
         assert_eq!(
             registry.detect_language(std::path::Path::new("src/Main.scala")),
-            Some(SourceLanguage::Scala)
+            Some(LanguageId::Scala)
         );
     }
 
@@ -250,10 +252,10 @@ mod tests {
     fn backend_resolves_to_owning_language(
         capability: &str,
         claim: fn(&ariadne_lang::LanguageCapabilities) -> bool,
-        language: SourceLanguage,
+        language: LanguageId,
     ) {
         let registry = default_registry();
-        let backend = capability_backend_for_language(&registry, language, claim)
+        let backend = capability_backend_for_language(&registry, language.clone(), claim)
             .unwrap_or_else(|| panic!("the {language:?} plugin must own its {capability} stage"));
         assert_eq!(
             backend.id(),
@@ -265,17 +267,17 @@ mod tests {
 
     #[test]
     fn capability_backend_resolves_extraction_to_cpp() {
-        backend_resolves_to_owning_language("extraction", |caps| caps.extraction, SourceLanguage::Cpp);
+        backend_resolves_to_owning_language("extraction", |caps| caps.extraction, LanguageId::Cpp);
     }
 
     #[test]
     fn capability_backend_resolves_rewriting_to_cpp() {
-        backend_resolves_to_owning_language("rewriting", |caps| caps.rewriting, SourceLanguage::Cpp);
+        backend_resolves_to_owning_language("rewriting", |caps| caps.rewriting, LanguageId::Cpp);
     }
 
     #[test]
     fn capability_backend_resolves_validation_to_cpp() {
-        backend_resolves_to_owning_language("validation", |caps| caps.validation, SourceLanguage::Cpp);
+        backend_resolves_to_owning_language("validation", |caps| caps.validation, LanguageId::Cpp);
     }
 
     #[test]
@@ -286,7 +288,7 @@ mod tests {
             ("validation", |caps| caps.validation),
             ("planning", |caps| caps.planning),
         ] {
-            backend_resolves_to_owning_language(stage, claim, SourceLanguage::Scala);
+            backend_resolves_to_owning_language(stage, claim, LanguageId::Scala);
         }
     }
 
@@ -294,13 +296,13 @@ mod tests {
     fn capability_backend_for_language_unregistered_language_is_none_never_cpp_default() {
         let registry = default_registry();
         assert!(
-            capability_backend_for_language(&registry, SourceLanguage::Other, |caps| caps.extraction)
+            capability_backend_for_language(&registry, LanguageId::Other, |caps| caps.extraction)
                 .is_none(),
             "an unclaimed language has NO backend — never a C++ fallback"
         );
         let empty = ariadne_lang::LanguageRegistry::new();
         assert!(
-            capability_backend_for_language(&empty, SourceLanguage::Cpp, |caps| caps.extraction)
+            capability_backend_for_language(&empty, LanguageId::Cpp, |caps| caps.extraction)
                 .is_none()
         );
     }
@@ -341,7 +343,7 @@ mod tests {
         let registry = default_registry();
         let build = build_of(&[("a.cpp", SourceLanguage::Cpp)]);
         let plugin = incremental_backend(&registry, &build).expect("Cpp units dispatch to Cpp");
-        assert_eq!(plugin.id(), SourceLanguage::Cpp);
+        assert_eq!(plugin.id(), LanguageId::Cpp);
     }
 
     #[test]
@@ -420,13 +422,13 @@ mod tests {
             plugin_for_catalog_file(&registry, &catalog, ariadne_repo::FileId::from_relative_path("a.cpp"))
                 .expect("cpp file dispatches to the cpp plugin")
                 .id(),
-            SourceLanguage::Cpp
+            LanguageId::Cpp
         );
         assert_eq!(
             plugin_for_catalog_file(&registry, &catalog, ariadne_repo::FileId::from_relative_path("B.scala"))
                 .expect("scala file dispatches to the scala plugin")
                 .id(),
-            SourceLanguage::Scala
+            LanguageId::Scala
         );
         assert!(
             plugin_for_catalog_file(

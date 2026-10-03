@@ -20,17 +20,21 @@ fn planning_gaps(
 ) -> Vec<ariadne_cluster::planner::PlanningGap> {
     let mut gaps: Vec<ariadne_cluster::planner::PlanningGap> = Vec::new();
     for record in files {
-        let Some(plugin) = registry.plugin_for_id(record.language) else {
+        let Some(plugin) = registry.plugin_for_id(ariadne_lang::LanguageId::from(record.language))
+        else {
             continue;
         };
         if plugin.capabilities().planning {
             continue;
         }
-        if gaps.iter().any(|gap| gap.language == record.language) {
+        if gaps
+            .iter()
+            .any(|gap| gap.language == ariadne_lang::LanguageId::from(record.language))
+        {
             continue;
         }
         gaps.push(ariadne_cluster::planner::PlanningGap {
-            language: record.language,
+            language: ariadne_lang::LanguageId::from(record.language),
             sample_path: record.path.clone(),
         });
     }
@@ -107,12 +111,16 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
     ) -> Vec<Vec<ariadne_lang::SymbolId>> {
         let mut groups = Vec::new();
         for language in self.registry.languages() {
-            let Some(plugin) = self.registry.plugin_for_id(language) else {
+            let Some(plugin) = self.registry.plugin_for_id(language.clone()) else {
                 continue;
             };
             let subset: Vec<ariadne_lang::SymbolRecord> = symbols
                 .iter()
-                .filter(|record| self.language_of_file.get(&record.owning_file) == Some(&language))
+                .filter(|record| {
+                    self.language_of_file
+                        .get(&record.owning_file)
+                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                })
                 .cloned()
                 .collect();
             if !subset.is_empty() {
@@ -139,12 +147,16 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
         }
         let mut groups = Vec::new();
         for language in self.registry.languages() {
-            let Some(plugin) = self.registry.plugin_for_id(language) else {
+            let Some(plugin) = self.registry.plugin_for_id(language.clone()) else {
                 continue;
             };
             let subset: Vec<ariadne_lang::SymbolRecord> = symbols
                 .iter()
-                .filter(|record| self.language_of_file.get(&record.owning_file) == Some(&language))
+                .filter(|record| {
+                    self.language_of_file
+                        .get(&record.owning_file)
+                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                })
                 .cloned()
                 .collect();
             if subset.is_empty() {
@@ -173,12 +185,16 @@ impl<'a> ariadne_lang::ClusteringConstraints for LanguageRoutingConstraints<'a> 
     ) -> HashSet<ariadne_lang::SymbolId> {
         let mut frozen = HashSet::new();
         for language in self.registry.languages() {
-            let Some(plugin) = self.registry.plugin_for_id(language) else {
+            let Some(plugin) = self.registry.plugin_for_id(language.clone()) else {
                 continue;
             };
             let subset: Vec<ariadne_lang::SymbolRecord> = symbols
                 .iter()
-                .filter(|record| self.language_of_file.get(&record.owning_file) == Some(&language))
+                .filter(|record| {
+                    self.language_of_file
+                        .get(&record.owning_file)
+                        .is_some_and(|label| ariadne_lang::LanguageId::from(label) == language)
+                })
                 .cloned()
                 .collect();
             if !subset.is_empty() {
@@ -441,7 +457,7 @@ mod tests {
         );
         assert!(
             registry
-                .plugin_for_id(SourceLanguage::Scala)
+                .plugin_for_id(ariadne_lang::LanguageId::Scala)
                 .expect("scala registered")
                 .capabilities()
                 .planning,

@@ -87,7 +87,10 @@ fn restrict_and_validate_units(
     if let Some(language) = language {
         build
             .translation_units
-            .retain(|tu| registry.detect_language(&tu.source_path) == Some(language));
+            .retain(|tu| {
+                registry.detect_language(&tu.source_path)
+                    == Some(ariadne_lang::LanguageId::from(language))
+            });
     }
     for tu in &build.translation_units {
         if registry.detect_language(&tu.source_path).is_none() {
@@ -193,13 +196,13 @@ fn run_vocabulary(
     }
     let vocabulary = match distinct.as_slice() {
         [language] if *language != SourceLanguage::default() => registry
-            .plugin_for_id(*language)
+            .plugin_for_id(ariadne_lang::LanguageId::from(*language))
             .map(|plugin| plugin.modeling().dependency_vocabulary),
         _ => None,
     };
     let mut caveats: Vec<String> = Vec::new();
     for language in &distinct {
-        let Some(plugin) = registry.plugin_for_id(*language) else {
+        let Some(plugin) = registry.plugin_for_id(ariadne_lang::LanguageId::from(*language)) else {
             continue;
         };
         if let Some(caveat) = plugin.modeling().analysis_caveat {

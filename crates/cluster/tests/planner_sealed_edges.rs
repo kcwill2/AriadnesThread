@@ -11,6 +11,7 @@ use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::{SymbolId, SymbolKind};
 use ariadne_lang::{ClusteringConstraints, CyclePolicy, SymbolRecord};
+use ariadne_lang::LanguageId;
 use ariadne_repo::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, SourceLanguage,
 };
@@ -113,7 +114,7 @@ fn sealed_fixture(model: &mut ReducedSemanticModel) -> (IncludeGraph, Vec<FileRe
         kind: IncludeKind::Local,
         raw_path: "col.agg".to_string(),
         resolved_path: Some(PathBuf::from("col.agg")),
-        language: SourceLanguage::Other,
+        language: LanguageId::Other,
     });
     let records = vec![
         file_record(
@@ -129,7 +130,7 @@ fn sealed_fixture(model: &mut ReducedSemanticModel) -> (IncludeGraph, Vec<FileRe
             OptimizationPolicy::Frozen,
         ),
     ];
-    let mut define = |model: &mut ReducedSemanticModel, file: FileId, name: &str| {
+    let define = |model: &mut ReducedSemanticModel, file: FileId, name: &str| {
         let sym = SymbolId::new(name);
         model.symbols.insert(
             sym.clone(),

@@ -316,7 +316,7 @@ fn graph_edge_classification() -> Result<()> {
     let api = edge_from("src/main.cpp", "external_lib/api.h");
     assert_eq!(api.destination, Some(id_of("third_party/external_lib/api.h")));
     assert_eq!(api.kind, IncludeKind::External, "ThirdParty target → External edge");
-    assert_eq!(api.language, SourceLanguage::Cpp);
+    assert_eq!(api.language, SourceLanguage::Cpp.into());
 
     // Scanning continues THROUGH the External edge: its quoted child is an
     // edge too, also External by target ownership.
@@ -452,7 +452,7 @@ fn plugin_driven_closure(
         &store_ctx,
         CURRENT_ANALYSIS_VERSION,
         &resolver,
-        SourceLanguage::Cpp,
+        SourceLanguage::Cpp.into(),
         CPP_ANALYSIS_FINGERPRINT,
     )?;
     Ok(closure

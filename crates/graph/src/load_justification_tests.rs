@@ -25,7 +25,7 @@ fn setup_justification_fixture() -> (IncludeGraph, ReducedSemanticModel) {
             kind: IncludeKind::Local,
             raw_path: name.to_string(),
             resolved_path: Some(PathBuf::from(name)),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: crate::types::LanguageId::cpp(),
         });
     };
     include(&mut ig, FileId(1), FileId(2), "Helper.h");

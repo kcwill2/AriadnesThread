@@ -52,8 +52,9 @@ use ariadne_lang::{
     normalize_relative_path, DependencyResolver, DirectiveStyle, FileCatalog, RawDepEdge,
     ResolutionContext, ResolveOutcome,
 };
+use ariadne_lang_api::identity::LanguageId;
 use ariadne_lang_api::types::{IncludeEdge, IncludeKind, SourceLocation};
-use ariadne_repo::{FileId, FileOwnership, FileRecord, RepositoryDiscoveryResult, SourceLanguage};
+use ariadne_repo::{FileId, FileOwnership, FileRecord, RepositoryDiscoveryResult};
 use std::path::{Path, PathBuf};
 
 /// Normalizes a path by resolving `.` and `..` relative components without requiring existing files.
@@ -228,7 +229,7 @@ impl<'a> IncludeResolver<'a> {
             kind,
             raw_path: directive.raw_path.clone(),
             resolved_path,
-            language: SourceLanguage::Cpp,
+            language: LanguageId::Cpp,
         }
     }
 

@@ -340,7 +340,7 @@ fn unfiltered_pipeline_auto_shapes_the_sbt_repo_graph() {
     let scala_edges = graph
         .edges
         .iter()
-        .filter(|edge| edge.language == SourceLanguage::Scala)
+        .filter(|edge| edge.language == ariadne_lang::LanguageId::Scala)
         .count();
     assert!(
         scala_edges > 0,

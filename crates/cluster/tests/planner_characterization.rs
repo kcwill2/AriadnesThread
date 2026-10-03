@@ -106,7 +106,7 @@ impl PlannerFixture {
             kind: IncludeKind::Local,
             raw_path: raw_path.clone(),
             resolved_path: Some(PathBuf::from(raw_path)),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: ariadne_lang::LanguageId::Cpp,
         });
         self
     }

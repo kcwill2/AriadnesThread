@@ -403,7 +403,7 @@ fn wired_plan_proposes_scala_extraction() -> Result<()> {
         .discover()?
         .files
         .iter()
-        .any(|record| match registry.plugin_for_id(record.language) {
+        .any(|record| match registry.plugin_for_id(ariadne_lang::LanguageId::from(record.language)) {
             Some(plugin) => !plugin.capabilities().planning,
             None => false,
         });

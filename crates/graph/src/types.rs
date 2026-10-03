@@ -10,6 +10,7 @@ use std::path::PathBuf;
 // them and plugin crates may not depend on this one. The re-export keeps
 // every existing path (`ariadne_graph::IncludeEdge`, ...) and the serde/
 // bincode shapes unchanged.
+pub use ariadne_lang_api::identity::LanguageId;
 pub use ariadne_lang_api::types::{IncludeEdge, IncludeKind, SourceLocation};
 
 /// Transitive include closure for a specific file or translation unit.

@@ -111,7 +111,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "mid1.h".into(),
             resolved_path: Some(PathBuf::from("mid1.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: ariadne_lang::LanguageId::cpp(),
         });
         graph.add_edge(IncludeEdge {
             source: f_mid1,
@@ -121,7 +121,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "mid2.h".into(),
             resolved_path: Some(PathBuf::from("mid2.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: ariadne_lang::LanguageId::cpp(),
         });
         graph.add_edge(IncludeEdge {
             source: f_mid2,
@@ -131,7 +131,7 @@ mod tests {
             kind: IncludeKind::Local,
             raw_path: "col.h".into(),
             resolved_path: Some(PathBuf::from("col.h")),
-            language: ariadne_repo::SourceLanguage::Cpp,
+            language: ariadne_lang::LanguageId::cpp(),
         });
 
         let mut policies = HashMap::new();

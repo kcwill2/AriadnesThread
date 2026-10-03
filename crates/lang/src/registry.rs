@@ -385,11 +385,11 @@ mod tests {
             &self.validator
         }
         fn id(&self) -> LanguageId {
-            self.language
+            self.language.clone()
         }
         fn modeling(&self) -> LanguageModeling {
             LanguageModeling {
-                language: self.language,
+                language: self.language.clone(),
                 unit: UnitKind::SourceFile,
                 aggregation: AggregationKind::None,
                 guard: GuardKind::None,

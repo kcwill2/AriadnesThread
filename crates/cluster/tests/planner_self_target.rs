@@ -12,7 +12,7 @@ use ariadne_graph::reduced::{ReducedSemanticModel, ReducedSymbolRecord};
 use ariadne_graph::types::{IncludeEdge, IncludeKind, SourceLocation};
 use ariadne_graph::IncludeGraph;
 use ariadne_index::types::{SymbolId, SymbolKind};
-use ariadne_lang::CyclePolicy;
+use ariadne_lang::{CyclePolicy, LanguageId};
 use ariadne_repo::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, SourceLanguage,
 };
@@ -69,7 +69,7 @@ impl Fixture {
             kind: IncludeKind::Local,
             raw_path: raw_path.clone(),
             resolved_path: Some(PathBuf::from(raw_path)),
-            language: SourceLanguage::Other,
+            language: LanguageId::Other,
         });
         self
     }
