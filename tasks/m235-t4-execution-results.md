@@ -9,7 +9,7 @@ Journal (per-gate checkpoints + refusals): `tasks/m235-t4-journal.md`.
 | # | SHA | Scope | Content |
 |---|-----|-------|---------|
 | 1 | `b3f33a9` | `.gitattributes`, `crates/ui/tests/ui_test/export_order.rs` | F12 pin (+4), F13 rename (5/5 lines) |
-| 2 | (this landing) | `tasks/**` only | ledger F12/F13/milestone/strays rows, this file, journal, T3-E2 verdict + execution-results (previously untracked reviewer records), T4 handoff |
+| 2 | `6ec1a01` | `tasks/**` only | ledger F12/F13/milestone/strays rows, this file, journal, T3-E2 verdict + execution-results (previously untracked reviewer records), T4 handoff |
 
 The F12 fixture appears in NO commit (`git show --numstat` of commit 1 lists
 only the two scoped paths; fixture byte-equal to HEAD blob `501b19bd...`).

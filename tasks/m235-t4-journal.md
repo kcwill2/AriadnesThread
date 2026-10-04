@@ -141,9 +141,13 @@ closure = pin + one normalization + full-run proof. Fixture in no commit.
 
 ## Closing
 
+- Post-run `checkpoint_guard.py status`: HEAD `6ec1a01`, DIRTY (none),
+  UNTRACKED (none), this worktree dirty=0. Fixture clean. (Census note:
+  the `main` worktree reports dirty=10 -- foreign, out of scope, report-only.)
+
 - Commit 1 (config+code): `b3f33a9` -- paths `.gitattributes` (+4),
   `crates/ui/tests/ui_test/export_order.rs` (5/5). Fixture NOT in the commit.
-- Commit 2 (this record landing, `tasks/**`-only, no code): ledger rows for
+- Commit 2 (`6ec1a01`, this record landing, `tasks/**`-only, no code): ledger rows for
   F12 CLOSED / F13 CLOSED / milestone / strays-row discharge, the T4.1
   Phase-4 detail sub-block, this journal, `tasks/m235-t4-execution-results.md`,
   `tasks/m235-t4-handoff.md`, plus the previously-untracked reviewer records
