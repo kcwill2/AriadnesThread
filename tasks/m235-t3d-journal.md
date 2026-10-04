@@ -3,7 +3,8 @@
 **Unit:** M23.5 Phase 3 unit D (plan T3.1 report + policy seam, the D1-B delete).
 **Handoff:** `tasks/m235-t3d-handoff.md`. Base HEAD `6c0c2b6` (T3-C tip), branch
 `tarjan-s-scc`, worktree `.kilo/worktrees/tarjan-s-scc`.
-**Commits (recorded as they land):** (pending)
+**Commits:** `adb53a3` (seam port), `acea7f2` (atomic delete), `3e1efa6`
+(T3-C reviewer records), `ed5c467` + final-journal commit (this file).
 
 ## Preflight (step 0.1-0.4)
 
@@ -273,5 +274,10 @@ regression.
   report seam (IV-9, IV-11) - Half One (seam port + Reds + six-test port).
 - `acea7f2` refactor(graph)!: delete detect_cycles/dfs_cycle, repoint last
   callers (D1-B, IV-7, IV-10); FrameStep three-arm match (F5) - Half Two.
-- (this journal + the two orchestrator-declared T3-C reviewer records land in
-  the docs commit that follows; SHA recorded by the reviewer's diff.)
+- `3e1efa6` docs(tasks): land M23.5 T3-C reviewer records (verdict, execution
+  results) - the two orchestrator-declared reviewer records (+1142/+240, pure
+  additions).
+- `ed5c467` docs(tasks): M23.5 T3-D journal (+277) - this file, first
+  revision. The SHA record in this final paragraph is carried by a follow-up
+  scoped docs commit of the same scope (`tasks/m235-t3d-journal.md`) so the
+  journal ends self-consistent with all four earlier SHAs.
