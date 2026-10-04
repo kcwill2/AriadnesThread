@@ -177,3 +177,51 @@ and the shared emission tail:
   gate-6 form, executed after the scoped commits -> no output) and the
   after-state `python tools/checkpoint_guard.py status` follow this commit;
   the fixture after-state check is in Checkpoint 5.
+
+## Checkpoint 5 - after-state (completion)
+
+- COMMIT B SHA: `3c73cd3` "docs(tasks): land M23.5 phase 3 authorization
+  records and T2 verdict files" (HEAD per gate 7). COMMIT A SHA: `31513b9`.
+  The pending marker in Checkpoint 4 is hereby resolved by this row -- both
+  SHAs are self-attested in this journal per Phase 1 verdict finding 8.
+- Gate 6 literal `python tools/encoding_guard.py --staged` after the commits:
+  no output (index empty post-commit; the substantive pre-commit evidence is
+  the clean `--all` run in Checkpoint 3, D-E precedent).
+- Gate 7 `python tools/checkpoint_guard.py status` after-state: HEAD
+  `3c73cd3`, DIRTY FILES (none), UNTRACKED (none). FIXTURE AFTER-STATE: the
+  numstat dirty section does NOT list
+  `tests/fixtures/basic/artifacts/includes/report.json` -> clean, no
+  restoration was ever needed (BEFORE was clean too). The census row prints
+  `dirty=1` for this worktree: that is the F12 stat-cache phenomenon
+  (`git status --porcelain` flags the stat entry; content numstat is empty,
+  byte-equal to HEAD, path in NO commit). Recorded, not fixed: the
+  `.gitattributes` pin is a closeout item per ledger F12.
+- Invocation record (handoff "8 invocations -- the whole allowance" = the
+  8 listed gate commands, all run): gate 1 (twice: one own-typo compile
+  drift, then green), gate 2, gate 3, gate 4, gate 5, gate 6, gate 7,
+  gate 8 -> commit `31513b9`; plus TDD-mandated observations outside the
+  gate list (2 Red runs with `--test ui_test -- <exact-name>` filters) and
+  the sanctioned record commit `3c73cd3` + this journal commit. No gate was
+  skipped, no refusal was received at any point in this unit, nothing was
+  routed through `distill.py` to evade anything.
+- NOT run (reviewer's, per handoff sec8): `testrun.py --baseline` (broken,
+  F9), full-workspace run (expected `1174 passed / 0 failed / 4 ignored /
+  88 suites` = 1169+5, suites unchanged), `ui_smoke`, `bench_compare`, the
+  cross-process `--export` byte-stability half (test 4 locks only the
+  in-process form -- stated so no claim is over-read).
+- Out-of-scope observations (report-only, nothing touched):
+  `crates/cli/src/commands/ui.rs:316` still calls the path-based
+  `build_include_elements` and compiles unchanged across this boundary --
+  exactly the coexistence seam plan sec12 mandated for unit B; the
+  `adjacency()` doc-comment understatement (T2-A finding 4) and the
+  milestone-row staleness (T2-B finding 7, now closed by `3c73cd3`) stand
+  as previously recorded.
+- Deviations inventory (full, cross-referenced): (1) declared lib.rs +
+  cycle_groups_view.rs extension (sec6 branch, Checkpoint 0/4); (2) gate 8
+  commit scope carries the two extension files (same authorization); (3) R1
+  fired its FIRST assertion naming (1, 3) where handoff said "assertion
+  (2)"; (4) R2 reported `None` (get-API) where handoff said "Null" -- both
+  same missing-key semantics, Checkpoint 1; (5) `--staged` ordering vs
+  commit_scoped (D-E precedent, Checkpoint 3); (6) orchestrator-named
+  t2a-verdict/t2a-execution-results were already tracked since `08741b8` --
+  declared into scope as no-ops (Checkpoint 0). No undisclosed deviation.
