@@ -147,3 +147,10 @@ Every substantive gate (testrun --distill scoped, hygiene_check,
 encoding_guard --all, checkpoint_guard status, read-only git) succeeded on
 individual re-attempt. No gate in the T1 scope was left unexecuted for
 permission reasons.
+
+## G3 closure (closeout 2026-10-04, supersedes the NOT RUN entries above)
+
+- G3 `python tools/ui_smoke.py`: PASS in a fresh human session, verbatim
+  `boot+route checks clean (cold fixture, attempt 1, 0.1s)` +
+  `ui_smoke: PASS` - milestone CLOSED, G1-G7 all MET (see
+  `tasks/milestone_ledger.md`).
