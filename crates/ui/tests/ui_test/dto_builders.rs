@@ -1,8 +1,8 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_call_elements, build_include_elements, build_include_elements_from_groups,
-    build_symbol_elements, CytoscapeElement, GraphExportPayload, SummaryStats,
+    build_call_elements, build_include_elements_from_groups, build_symbol_elements,
+    CytoscapeElement, GraphExportPayload, SummaryStats,
 };
 use std::collections::HashMap;
 
@@ -10,12 +10,12 @@ use std::collections::HashMap;
 async fn test_dto_builders() {
     let include_graph = IncludeGraph::new();
     let closures = HashMap::new();
-    let cycles = vec![];
+    let cycle_groups = vec![];
 
-    let elements = build_include_elements(
+    let elements = build_include_elements_from_groups(
         &include_graph,
         &closures,
-        &cycles,
+        &cycle_groups,
         &HashMap::new(),
         &HashMap::new(),
     );

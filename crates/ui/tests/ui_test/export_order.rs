@@ -12,8 +12,8 @@ use ariadne_graph::{
 };
 use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_include_elements, build_include_elements_from_groups, GraphExportPayload,
-    JustificationEntry, SummaryStats,
+    build_include_elements_from_groups, GraphExportPayload, JustificationEntry,
+    SummaryStats,
 };
 use std::collections::HashMap;
 
@@ -88,7 +88,7 @@ fn node_ids(elements: &[ariadne_ui::CytoscapeElement]) -> Vec<&str> {
 #[test]
 fn include_nodes_emit_in_canonical_path_then_file_id_order() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements(
+    let elements = build_include_elements_from_groups(
         &graph,
         &HashMap::new(),
         &[],
@@ -105,7 +105,7 @@ fn include_nodes_emit_in_canonical_path_then_file_id_order() {
 #[test]
 fn include_edges_keep_source_vec_order_behind_sorted_nodes() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements(
+    let elements = build_include_elements_from_groups(
         &graph,
         &HashMap::new(),
         &[],
@@ -307,7 +307,7 @@ fn the_parity_comparison_detects_a_cycle_classification_difference() {
         vec![FileId(2), FileId(5), FileId(11)],
         "fixture sanity: the entangled group is exactly members 2, 5 and 11"
     );
-    let legacy_elements = build_include_elements(
+    let legacy_elements = build_include_elements_from_groups(
         &graph,
         &HashMap::new(),
         &[],
@@ -330,37 +330,77 @@ fn the_parity_comparison_detects_a_cycle_classification_difference() {
     );
 }
 
-/// Parity lock -- the companion item `tasks/m235-t3b-verdict.md` sec5.6 left
-/// open (ledger row "M23.5 companion parity test", expires at unit E): on a
-/// graph carrying NO cycle currency from either representation, the legacy
-/// path-based `build_include_elements` and the group-based
-/// `build_include_elements_from_groups` emit byte-identical elements. This is
-/// the evidence that unit E's deletion of the legacy builder is
-/// behaviour-preserving on acyclic graphs; after E the comparison cannot be
-/// written at all.
+/// The payload the surviving include-element builder emitted for the fixture
+/// below at `b0a91d2`, captured once and frozen deliberately. Assembled in
+/// chunks because a ~1.6 KB single literal would breach the 2000-character
+/// source-line rule and hide its own tail from every reader.
+const ACYCLIC_EMPTY_CURRENCY_PAYLOAD: &str = concat!(
+    "[{\"data\":{\"closure\":2,\"id\":\"5\",\"in_degree\":0,\"is_cycle\":false,\"kind\":\"",
+    "HEADER\",\"label\":\"alpha.h\",\"out_degree\":1,\"path\":\"alpha.h\"}},{\"data\":{\"",
+    "closure\":0,\"id\":\"11\",\"in_degree\":0,\"is_cycle\":false,\"kind\":\"HEADER\",\"",
+    "label\":\"alpha.h\",\"out_degree\":0,\"path\":\"alpha.h\"}},{\"data\":{\"closure\"",
+    ":0,\"id\":\"2\",\"in_degree\":1,\"is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"",
+    "bravo.h\",\"out_degree\":0,\"path\":\"bravo.h\"}},{\"data\":{\"closure\":0,\"id\":\"",
+    "9\",\"in_degree\":1,\"is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"charlie.h\",\"",
+    "out_degree\":0,\"path\":\"charlie.h\"}},{\"data\":{\"closure\":1,\"id\":\"1\",\"",
+    "in_degree\":0,\"is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"delta.h\",\"",
+    "language\":\"cpp\",\"out_degree\":1,\"path\":\"delta.h\",\"unit_kind\":\"",
+    "translation-unit\"}},{\"data\":{\"closure\":0,\"id\":\"7\",\"in_degree\":0,\"",
+    "is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"echo.h\",\"out_degree\":0,\"path\"",
+    ":\"echo.h\"}},{\"data\":{\"closure\":0,\"id\":\"3\",\"in_degree\":0,\"is_cycle\"",
+    ":false,\"kind\":\"SOURCE\",\"label\":\"foxtrot.cc\",\"language\":\"cpp\",\"",
+    "out_degree\":1,\"path\":\"foxtrot.cc\"}},{\"data\":{\"closure\":0,\"id\":\"8\",\"",
+    "in_degree\":0,\"is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"golf.h\",\"",
+    "out_degree\":0,\"path\":\"golf.h\"}},{\"data\":{\"closure\":0,\"id\":\"4\",\"",
+    "in_degree\":0,\"is_cycle\":false,\"kind\":\"HEADER\",\"label\":\"hotel.h\",\"",
+    "out_degree\":0,\"path\":\"hotel.h\"}},{\"data\":{\"closure\":0,\"id\":\"6\",\"",
+    "in_degree\":1,\"is_cycle\":false,\"kind\":\"SOURCE\",\"label\":\"india.cc\",\"",
+    "out_degree\":0,\"path\":\"india.cc\"}},{\"data\":{\"id\":\"5-2\",\"is_cycle\"",
+    ":false,\"kind\":\"Local\",\"source\":\"5\",\"target\":\"2\"}},{\"data\":{\"id\":\"",
+    "1-9\",\"is_cycle\":false,\"kind\":\"Local\",\"source\":\"1\",\"target\":\"9\"}},{\"",
+    "data\":{\"id\":\"3-6\",\"is_cycle\":false,\"kind\":\"Local\",\"source\":\"3\",\"",
+    "target\":\"6\"}}]",
+);
+
+/// Frozen-byte lock -- what remains of the unit T3-D2 parity lock after unit
+/// T3-E1 deleted the path-based builder. What it locks: on a graph carrying NO
+/// cycle currency, the ONE surviving builder
+/// `build_include_elements_from_groups` must emit exactly the recorded bytes.
 ///
-/// What this test does NOT lock: emission-order determinism. Both builders
-/// run in ONE process over the SAME graph, so any hash-iteration-order
-/// perturbation moves both sides equally and this comparison cannot see it
-/// (module doc at the top of this file). Determinism lives in
+/// Where the recorded bytes came from: they were captured from this builder's
+/// own output at `b0a91d2`, where the committed parity lock of unit T3-D2
+/// (`42bb44e`, this file's former
+/// `acyclic_include_elements_are_byte_identical_under_both_cycle_currencies`)
+/// asserted `grouped_json == legacy_json` on this exact input. So the frozen
+/// bytes are the agreed output of BOTH builders, and that committed lock --
+/// not the capture alone -- is what makes E1's deletion behaviour-preserving
+/// on this input.
+///
+/// What this test does NOT lock: emission-order determinism. The builder runs
+/// in ONE process over ONE graph, so any hash-iteration-order perturbation
+/// moves this expectation along with the payload and the comparison cannot see
+/// it (module doc at the top of this file). Determinism lives in
 /// `graph_api.rs:741-789` in-process and in the CLI two-process export lock
 /// `export_bytes_are_identical_across_two_separate_processes` in
-/// `crates/cli/tests/payload_tail_bench.rs`. P1 locks classification state on
-/// acyclic input, nothing more.
+/// `crates/cli/tests/payload_tail_bench.rs`.
+///
+/// The expectation is FROZEN deliberately: a diff here means emitted bytes
+/// changed, which a human re-approves -- never the implementer by editing the
+/// expectation to match the output.
 #[test]
-fn acyclic_include_elements_are_byte_identical_under_both_cycle_currencies() {
+fn acyclic_include_elements_match_the_frozen_acyclic_payload() {
     // Step 1 -- fixture sanity, machine-checked rather than taken on the
     // handoff's word.
     let graph = shuffled_file_graph();
     assert!(
         graph.detect_cycle_groups().is_empty(),
-        "the parity fixture must be acyclic, or &[] is not the currency unit E will delete"
+        "the frozen-payload fixture must be acyclic, or &[] is not the pinned currency"
     );
 
-    // Step 2 -- identical inputs on both calls. Every map is a NON-EMPTY
-    // strict subset of the fixture's ids, so the decorated nodes (closure
-    // size, D27 `language`/`unit_kind`) and the undecorated ones are BOTH
-    // inside the compared bytes.
+    // Step 2 -- the inputs the frozen bytes were recorded against. Every map
+    // is a NON-EMPTY strict subset of the fixture's ids, so the decorated
+    // nodes (closure size, D27 `language`/`unit_kind`) and the undecorated
+    // ones are BOTH inside the locked bytes.
     let mut closures = HashMap::new();
     closures.insert(
         FileId(5),
@@ -376,10 +416,10 @@ fn acyclic_include_elements_are_byte_identical_under_both_cycle_currencies() {
     let mut file_unit_kinds = HashMap::new();
     file_unit_kinds.insert(1, "translation-unit".to_string());
 
-    // Step 3 -- the two calls, empty cycle currency on both sides.
-    let legacy_elements =
-        build_include_elements(&graph, &closures, &[], &file_languages, &file_unit_kinds);
-    let grouped_elements = build_include_elements_from_groups(
+    // Step 3 -- EXACTLY ONE builder call, with empty cycle currency. Two calls
+    // of the surviving name on one input would assert a value equals itself;
+    // the single-invocation rule is this lock's anti-tautology invariant.
+    let elements = build_include_elements_from_groups(
         &graph,
         &closures,
         &[],
@@ -387,15 +427,14 @@ fn acyclic_include_elements_are_byte_identical_under_both_cycle_currencies() {
         &file_unit_kinds,
     );
 
-    // Step 4 -- non-vacuity BEFORE the byte lock: without this, "both sides
-    // are empty, therefore equal" would satisfy the comparison.
+    // Step 4 -- non-vacuity BEFORE the byte lock: without this, "the payload
+    // is empty, therefore equal" would satisfy the comparison.
     assert!(
-        !legacy_elements.is_empty() && !grouped_elements.is_empty(),
-        "both builders must emit elements; legacy emitted {}, grouped emitted {}",
-        legacy_elements.len(),
-        grouped_elements.len()
+        !elements.is_empty(),
+        "the surviving builder must emit elements; it emitted {}",
+        elements.len()
     );
-    let node_elements: Vec<&ariadne_ui::CytoscapeElement> = legacy_elements
+    let node_elements: Vec<&ariadne_ui::CytoscapeElement> = elements
         .iter()
         .filter(|element| {
             matches!(
@@ -426,21 +465,12 @@ fn acyclic_include_elements_are_byte_identical_under_both_cycle_currencies() {
     );
 
     // Step 5 -- the byte lock. `serde_json::Map` is a BTreeMap in this
-    // workspace, so serialized-string equality pins the emitted key/value
+    // workspace, so the serialized string pins the emitted key/value
     // sequence, which a structural `PartialEq` (key/value sets) would not.
-    let legacy_json = serde_json::to_string(&legacy_elements).expect("legacy serializes");
-    let grouped_json = serde_json::to_string(&grouped_elements).expect("grouped serializes");
+    let payload = serde_json::to_string(&elements).expect("elements serialize");
     assert_eq!(
-        grouped_json, legacy_json,
-        "parity: on acyclic input with empty cycle currency the group-based and \
-         legacy builders must emit byte-identical elements"
-    );
-
-    // Step 6 -- the structural lock too, so a mismatch reports a readable
-    // element-level diff and not only a string blob (precedent:
-    // graph_api.rs:786-789).
-    assert_eq!(
-        legacy_elements, grouped_elements,
-        "parity as structured elements, for a readable diff alongside the byte lock"
+        payload, ACYCLIC_EMPTY_CURRENCY_PAYLOAD,
+        "frozen payload: on acyclic input with empty cycle currency the surviving \
+         builder must emit the bytes recorded at b0a91d2"
     );
 }

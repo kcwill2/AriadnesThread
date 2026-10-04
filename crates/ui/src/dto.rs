@@ -596,34 +596,15 @@ fn path_basename(path: &std::path::Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
+/// File nodes plus include edges classified from `CycleGroup` membership
+/// (M23.5, plan sec1.3): the group-based sibling of
+/// `build_include_elements`, keeping the exact 5-argument D27 shape.
+///
 /// File nodes plus include edges. D27: `file_languages`/`file_unit_kinds`
 /// (numeric FileId → display string) are injected by the cli payload builder
 /// from discovery records and plugin modeling; a missing entry OMITS the
 /// `language`/`unit_kind` key (locked contract, no fabricated default).
 ///
-/// Legacy path-based entry point (pre-M23.5): cycles arrive as reported DFS
-/// paths. Behavior stays byte-compatible until `crates/cli` migrates in
-/// T3-B; retirement is T3-E. New callers must use
-/// `build_include_elements_from_groups` (IV-2/IV-3 group semantics).
-pub fn build_include_elements(
-    graph: &ariadne_graph::IncludeGraph,
-    closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
-    cycles: &[Vec<ariadne_repo::FileId>],
-    file_languages: &std::collections::HashMap<u64, String>,
-    file_unit_kinds: &std::collections::HashMap<u64, String>,
-) -> Vec<CytoscapeElement> {
-    emit_include_elements(
-        graph,
-        closures,
-        &cycle_groups_view::IncludeCycleClass::from_paths(cycles),
-        file_languages,
-        file_unit_kinds,
-    )
-}
-
-/// File nodes plus include edges classified from `CycleGroup` membership
-/// (M23.5, plan sec1.3): the group-based sibling of
-/// `build_include_elements`, keeping the exact 5-argument D27 shape.
 /// - a node carries class `cycle` iff it is in some group's `member_files`
 ///   (IV-2);
 /// - an edge carries `cycle` iff BOTH endpoints are in the SAME group

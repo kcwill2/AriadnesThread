@@ -1,8 +1,8 @@
 use crate::common;
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_ui::{
-    build_call_elements, build_include_elements, build_include_elements_from_groups,
-    build_router, build_symbol_elements, GraphExportPayload, SummaryStats, UiState,
+    build_call_elements, build_include_elements_from_groups, build_router,
+    build_symbol_elements, GraphExportPayload, SummaryStats, UiState,
 };
 use axum::{
     body::Body,
@@ -133,7 +133,7 @@ async fn assert_search_query_matches(app: axum::Router, uri: &str, query_kind: &
 async fn test_search_advanced_queries_and_dto_paths() {
     let (include_graph, call_graph, reduced_model) = given_mock_search_graphs();
 
-    let include_elements = build_include_elements(
+    let include_elements = build_include_elements_from_groups(
         &include_graph,
         &std::collections::HashMap::new(),
         &[],

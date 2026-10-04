@@ -1,6 +1,7 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_ui::{
-    build_call_elements, build_include_elements, GraphExportPayload, SummaryStats, UiState,
+    build_call_elements, build_include_elements_from_groups, GraphExportPayload,
+    SummaryStats, UiState,
 };
 use axum::{
     body::Body,
@@ -154,7 +155,7 @@ pub fn fixture_include_graph() -> (IncludeGraph, GraphExportPayload) {
     graph.edges.push(edge(2, 3));
 
     let mut payload = empty_export_payload();
-    payload.include_graph = build_include_elements(
+    payload.include_graph = build_include_elements_from_groups(
         &graph,
         &HashMap::new(),
         &[],

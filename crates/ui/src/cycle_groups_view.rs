@@ -1,12 +1,11 @@
 //! M23.5 T3-A -- cycle-classification views feeding the include-graph DTO.
 //!
-//! Two cycle currencies reach the payload layer: the legacy reported-path
-//! enumeration (`IncludeCycleClass::from_paths`, retired in T3-E) and the
-//! milestone's `CycleGroup` membership (`from_groups`, plan
-//! 1790821308681-cycle-substrate-scc-m23_5 sec1.3). Both entry points in
-//! `dto.rs` share ONE emission tail and differ only in which view they pass,
-//! so node/edge byte-shape (order, keys, classes) is identical outside the
-//! cycle semantics the two entry points exist to separate.
+//! One cycle currency reaches the payload layer since T3-E retired the legacy
+//! reported-path enumeration: the milestone's `CycleGroup` membership
+//! (`from_groups`, plan 1790821308681-cycle-substrate-scc-m23_5 sec1.3). The
+//! single entry point in `dto.rs` passes this view to the ONE shared emission
+//! tail, so node/edge byte-shape (order, keys, classes) is identical outside
+//! the cycle semantics the view exists to carry.
 
 use ariadne_graph::{CycleGroup, IncludeGraph};
 use ariadne_repo::FileId;
@@ -23,35 +22,6 @@ pub(crate) struct IncludeCycleClass {
 }
 
 impl IncludeCycleClass {
-    /// Legacy path-based classification (pre-M23.5, byte-compatible): every
-    /// consecutive step of a reported cycle path and the closing
-    /// `(last, first)` pair is a cyclic edge; every endpoint it names is a
-    /// cyclic node. Carries no group inspector data -- the two new keys stay
-    /// OMITTED for every node (D27 OMITS rule), keeping old-path payloads
-    /// byte-identical.
-    pub(crate) fn from_paths(cycles: &[Vec<FileId>]) -> Self {
-        let mut grouped_nodes = HashSet::new();
-        let mut cyclic_pairs = HashSet::new();
-        for cycle in cycles {
-            for step in cycle.windows(2) {
-                grouped_nodes.insert(step[0]);
-                grouped_nodes.insert(step[1]);
-                cyclic_pairs.insert((step[0], step[1]));
-            }
-            if let (Some(&first), Some(&last)) = (cycle.first(), cycle.last()) {
-                grouped_nodes.insert(first);
-                grouped_nodes.insert(last);
-                cyclic_pairs.insert((last, first));
-            }
-        }
-        Self {
-            grouped_nodes,
-            cyclic_pairs,
-            group_size_by_file: HashMap::new(),
-            witness_labels_by_file: HashMap::new(),
-        }
-    }
-
     /// Group-membership classification (IV-2 + IV-3): a node is cyclic iff it
     /// appears in some group's `member_files`; an edge `u -> v` is cyclic iff
     /// `u` and `v` sit in ONE AND THE SAME group -- tested as equality of the
