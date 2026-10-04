@@ -10,7 +10,8 @@
 use ariadne_graph::{IncludeEdge, IncludeGraph, IncludeKind, LanguageId, SourceLocation};
 use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_include_elements, GraphExportPayload, JustificationEntry, SummaryStats,
+    build_include_elements, build_include_elements_from_groups, GraphExportPayload,
+    JustificationEntry, SummaryStats,
 };
 use std::collections::HashMap;
 
@@ -116,6 +117,96 @@ fn include_edges_keep_source_vec_order_behind_sorted_nodes() {
         ],
         "nodes sort canonically, edges keep the deterministic graph.edges order"
     );
+}
+
+/// The shuffled insertion of `shuffled_file_graph` bent into a cycle:
+/// alpha.h(5) -> bravo.h(2) -> alpha.h(11) -> alpha.h(5) plus the chord
+/// alpha.h(5) -> alpha.h(11), and the acyclic tail foxtrot.cc(3) ->
+/// india.cc(6). The entangled group {2, 5, 11} sits on the duplicated path
+/// (ids 5/11), so classification touches the tie-break members directly.
+fn cyclic_shuffled_file_graph() -> IncludeGraph {
+    let mut graph = IncludeGraph::new();
+    for (id, path) in [
+        (1u64, "delta.h"),
+        (9, "charlie.h"),
+        (3, "foxtrot.cc"),
+        (11, "alpha.h"),
+        (7, "echo.h"),
+        (2, "bravo.h"),
+        (6, "india.cc"),
+        (5, "alpha.h"),
+        (4, "hotel.h"),
+        (8, "golf.h"),
+    ] {
+        graph
+            .file_paths
+            .insert(FileId(id), std::path::PathBuf::from(path));
+    }
+    for (source, destination) in [(5, 2), (2, 11), (11, 5), (5, 11), (3, 6)] {
+        graph.edges.push(include_edge(source, destination));
+    }
+    graph
+}
+
+#[test]
+fn grouped_nodes_keep_the_canonical_emission_order_and_edge_order() {
+    // M23.5 T3-A: group classification must not perturb the canonical
+    // emission contract the two tests above lock for acyclic graphs: nodes
+    // in (path asc, file_id asc) order, edges in graph.edges order, with the
+    // grouped members sitting ON the path-duplicate tie-break (ids 5/11).
+    let graph = cyclic_shuffled_file_graph();
+    let groups = graph.detect_cycle_groups();
+    assert_eq!(groups.len(), 1, "fixture must carry exactly one entangled group");
+    assert_eq!(
+        groups[0].member_files,
+        vec![FileId(2), FileId(5), FileId(11)],
+        "fixture sanity: the entangled group is exactly members 2, 5 and 11"
+    );
+    let elements = build_include_elements_from_groups(
+        &graph,
+        &HashMap::new(),
+        &groups,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    assert_eq!(
+        emitted_ids(&elements),
+        vec![
+            "5", "11", "2", "9", "1", "7", "3", "8", "4", "6", "5-2", "2-11", "11-5", "5-11",
+            "3-6",
+        ],
+        "grouped nodes keep canonical (path asc, file_id asc) order and edges keep graph.edges order"
+    );
+    for grouped_id in ["2", "5", "11"] {
+        let node = node_element_by_id(&elements, grouped_id);
+        assert_eq!(
+            node.classes,
+            Some("cycle".to_string()),
+            "grouped node {grouped_id} keeps its cycle class without disturbing emission order"
+        );
+    }
+    let chord = elements
+        .iter()
+        .find(|element| element.data["id"] == "5-11")
+        .expect("chord edge element 5-11");
+    assert_eq!(
+        chord.classes,
+        Some("cycle".to_string()),
+        "IV-3 chord coverage holds under shuffled insertion too"
+    );
+}
+
+fn node_element_by_id<'a>(
+    elements: &'a [ariadne_ui::CytoscapeElement],
+    id: &str,
+) -> &'a ariadne_ui::CytoscapeElement {
+    elements
+        .iter()
+        .find(|element| {
+            element.data["id"] == id
+                && matches!(element.data["kind"].as_str(), Some("HEADER") | Some("SOURCE"))
+        })
+        .unwrap_or_else(|| panic!("no node element with id {id}"))
 }
 
 fn entry_fixture() -> JustificationEntry {

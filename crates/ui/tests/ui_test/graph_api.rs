@@ -1,8 +1,8 @@
 use crate::common;
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_ui::{
-    build_call_elements, build_include_elements, build_router, build_symbol_elements,
-    GraphExportPayload, SummaryStats, UiState,
+    build_call_elements, build_include_elements, build_include_elements_from_groups,
+    build_router, build_symbol_elements, GraphExportPayload, SummaryStats, UiState,
 };
 use axum::{
     body::Body,
@@ -695,4 +695,96 @@ async fn test_graph_collateral_invalid_file_returns_200_zeros_even_while_loading
          returns a 200 zeroed payload even while the server is still loading"
     );
     assert_eq!(body["total_collateral"], 0);
+}
+
+// ---------------------------------------------------------------------------
+// M23.5 T3-A -- determinism of the group-based include-element builder.
+// ---------------------------------------------------------------------------
+
+fn stability_edge(source: u64, destination: u64) -> ariadne_graph::IncludeEdge {
+    ariadne_graph::IncludeEdge {
+        source: ariadne_repo::FileId(source),
+        destination: Some(ariadne_repo::FileId(destination)),
+        context_name: String::new(),
+        source_location: ariadne_graph::SourceLocation { line: 1, column: 1 },
+        kind: ariadne_graph::IncludeKind::Local,
+        raw_path: String::new(),
+        resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
+    }
+}
+
+/// Entangled fixture: a.h(1) -> b.h(2) -> c.h(3) -> a.h(1) with the chord
+/// a.h -> c.h, a second 2-cycle x.h(20) <-> y.h(21), and the acyclic tail
+/// b.h -> tail.cc(30). Two disjoint groups exercise per-group index and hash
+/// iteration inside the classification AND inside the producer.
+fn stability_cycle_graph() -> IncludeGraph {
+    let mut graph = IncludeGraph::new();
+    for (id, path) in [
+        (1u64, "a.h"),
+        (2, "b.h"),
+        (3, "c.h"),
+        (20, "x.h"),
+        (21, "y.h"),
+        (30, "tail.cc"),
+    ] {
+        graph
+            .file_paths
+            .insert(ariadne_repo::FileId(id), std::path::PathBuf::from(path));
+    }
+    for (source, destination) in [(1, 2), (2, 3), (3, 1), (1, 3), (20, 21), (21, 20), (2, 30)] {
+        graph.edges.push(stability_edge(source, destination));
+    }
+    graph
+}
+
+#[test]
+fn include_elements_export_is_stable_across_two_calls_with_cycle_fixtures() {
+    // IV-5 in-process half: every call rebuilds the producer's and the
+    // classification view's std HashMaps with a FRESH per-process seed, so
+    // two calls are two independent iteration orders; equality is therefore
+    // a real determinism lock, not a tautology. The cycle fixtures put the
+    // new cycle_witness ordering inside the compared payload. The
+    // cross-process half of byte-stability (two OS processes, `--export`)
+    // belongs to the reviewer acceptance pass, not to this unit (handoff
+    // sec5 test-5 note; tests/golden/** is out of scope here).
+    let graph = stability_cycle_graph();
+    let elements_first = build_include_elements_from_groups(
+        &graph,
+        &HashMap::new(),
+        &graph.detect_cycle_groups(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let elements_second = build_include_elements_from_groups(
+        &graph,
+        &HashMap::new(),
+        &graph.detect_cycle_groups(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    assert!(!elements_first.is_empty(), "fixture must emit elements");
+    let witnessed = elements_first
+        .iter()
+        .filter(|element| element.data.get("cycle_witness").is_some())
+        .count();
+    assert!(
+        witnessed >= 5,
+        "cycle fixtures must put cycle_witness on at least 5 node elements, got {witnessed}"
+    );
+    assert_eq!(
+        elements_first
+            .iter()
+            .map(|element| element.data["id"].as_str().expect("string id"))
+            .collect::<Vec<&str>>(),
+        elements_second
+            .iter()
+            .map(|element| element.data["id"].as_str().expect("string id"))
+            .collect::<Vec<&str>>(),
+        "the emitted id sequence must be identical across two builds"
+    );
+    assert_eq!(
+        elements_first, elements_second,
+        "every element's data map (cycle_witness order included) and classes must be identical across two builds"
+    );
 }

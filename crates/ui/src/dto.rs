@@ -1,3 +1,4 @@
+use crate::cycle_groups_view;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -599,6 +600,11 @@ fn path_basename(path: &std::path::Path) -> String {
 /// (numeric FileId → display string) are injected by the cli payload builder
 /// from discovery records and plugin modeling; a missing entry OMITS the
 /// `language`/`unit_kind` key (locked contract, no fabricated default).
+///
+/// Legacy path-based entry point (pre-M23.5): cycles arrive as reported DFS
+/// paths. Behavior stays byte-compatible until `crates/cli` migrates in
+/// T3-B; retirement is T3-E. New callers must use
+/// `build_include_elements_from_groups` (IV-2/IV-3 group semantics).
 pub fn build_include_elements(
     graph: &ariadne_graph::IncludeGraph,
     closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
@@ -606,21 +612,58 @@ pub fn build_include_elements(
     file_languages: &std::collections::HashMap<u64, String>,
     file_unit_kinds: &std::collections::HashMap<u64, String>,
 ) -> Vec<CytoscapeElement> {
+    emit_include_elements(
+        graph,
+        closures,
+        &cycle_groups_view::IncludeCycleClass::from_paths(cycles),
+        file_languages,
+        file_unit_kinds,
+    )
+}
+
+/// File nodes plus include edges classified from `CycleGroup` membership
+/// (M23.5, plan sec1.3): the group-based sibling of
+/// `build_include_elements`, keeping the exact 5-argument D27 shape.
+/// - a node carries class `cycle` iff it is in some group's `member_files`
+///   (IV-2);
+/// - an edge carries `cycle` iff BOTH endpoints are in the SAME group
+///   (IV-3): an intra-group chord the old DFS enumeration never walked as a
+///   back-edge can no longer render unstyled between two `cycle`-classed
+///   nodes.
+/// Grouped nodes additionally carry `"cycle_group_size"` (member count) and
+/// `"cycle_witness"` (the group's representative-cycle path labels in
+/// `representative_cycle` order, IV-5); both follow the D27 OMITS rule -- a
+/// node in no group gets NEITHER key, never `null` and never `0`.
+pub fn build_include_elements_from_groups(
+    graph: &ariadne_graph::IncludeGraph,
+    closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+    cycle_groups: &[ariadne_graph::CycleGroup],
+    file_languages: &std::collections::HashMap<u64, String>,
+    file_unit_kinds: &std::collections::HashMap<u64, String>,
+) -> Vec<CytoscapeElement> {
+    emit_include_elements(
+        graph,
+        closures,
+        &cycle_groups_view::IncludeCycleClass::from_groups(cycle_groups, graph),
+        file_languages,
+        file_unit_kinds,
+    )
+}
+
+/// Shared emission tail for both include-element entry points: exactly one
+/// node loop in canonical `(path asc, file_id asc)` order followed by one
+/// edge loop in `graph.edges` order. The only input differing between the
+/// entry points is the cycle-classification view; degree tallying, sorting,
+/// kind derivation, D27 decoration and the OMITS rule for the group keys are
+/// shared, so there is no duplicated emission loop (M23.5 T3-A).
+fn emit_include_elements(
+    graph: &ariadne_graph::IncludeGraph,
+    closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+    cycle_class: &cycle_groups_view::IncludeCycleClass,
+    file_languages: &std::collections::HashMap<u64, String>,
+    file_unit_kinds: &std::collections::HashMap<u64, String>,
+) -> Vec<CytoscapeElement> {
     let mut elements = Vec::new();
-    let mut cycle_nodes = std::collections::HashSet::new();
-    let mut cycle_edges = std::collections::HashSet::new();
-    for cycle in cycles {
-        for w in cycle.windows(2) {
-            cycle_nodes.insert(w[0]);
-            cycle_nodes.insert(w[1]);
-            cycle_edges.insert((w[0], w[1]));
-        }
-        if let (Some(&first), Some(&last)) = (cycle.first(), cycle.last()) {
-            cycle_nodes.insert(first);
-            cycle_nodes.insert(last);
-            cycle_edges.insert((last, first));
-        }
-    }
 
     let mut in_degrees = std::collections::HashMap::new();
     let mut out_degrees = std::collections::HashMap::new();
@@ -651,7 +694,7 @@ pub fn build_include_elements(
             "SOURCE"
         };
         let closure_size = closures.get(file_id).map(|c| c.closure_size).unwrap_or(0);
-        let is_cycle = cycle_nodes.contains(file_id);
+        let is_cycle = cycle_class.node_is_cycle(*file_id);
         let in_degree = in_degrees.get(file_id).copied().unwrap_or(0);
         let out_degree = out_degrees.get(file_id).copied().unwrap_or(0);
 
@@ -671,6 +714,12 @@ pub fn build_include_elements(
         if let Some(unit_kind) = file_unit_kinds.get(&file_id.0) {
             data["unit_kind"] = serde_json::Value::String(unit_kind.clone());
         }
+        if let Some(group_size) = cycle_class.group_size(*file_id) {
+            data["cycle_group_size"] = serde_json::json!(group_size);
+        }
+        if let Some(witness_labels) = cycle_class.witness_labels(*file_id) {
+            data["cycle_witness"] = serde_json::json!(witness_labels);
+        }
         elements.push(CytoscapeElement {
             data,
             classes: if is_cycle { Some("cycle".into()) } else { None },
@@ -679,7 +728,7 @@ pub fn build_include_elements(
 
     for edge in &graph.edges {
         if let Some(dest) = edge.destination {
-            let is_cycle = cycle_edges.contains(&(edge.source, dest));
+            let is_cycle = cycle_class.edge_is_cycle(edge.source, dest);
             elements.push(CytoscapeElement {
                 data: serde_json::json!({
                     "id": format!("{}-{}", edge.source.0, dest.0),

@@ -6,7 +6,7 @@
 use ariadne_graph::{IncludeGraph, ReducedSemanticModel, ReducedSymbolRecord};
 use ariadne_index::SymbolId;
 use ariadne_repo::FileId;
-use ariadne_ui::{build_include_elements, build_symbol_elements};
+use ariadne_ui::{build_include_elements, build_include_elements_from_groups, build_symbol_elements};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::common;
@@ -119,6 +119,19 @@ fn one_file_graph() -> IncludeGraph {
     graph
 }
 
+fn grouped_include_edge(source: u64, destination: u64) -> ariadne_graph::IncludeEdge {
+    ariadne_graph::IncludeEdge {
+        source: FileId(source),
+        destination: Some(FileId(destination)),
+        context_name: String::new(),
+        source_location: ariadne_graph::SourceLocation { line: 1, column: 1 },
+        kind: ariadne_graph::IncludeKind::Local,
+        raw_path: String::new(),
+        resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
+    }
+}
+
 #[test]
 fn d27_file_nodes_emit_language_and_unit_kind_from_injected_maps() {
     let languages: HashMap<u64, String> =
@@ -145,6 +158,53 @@ fn d27_file_node_decoration_is_omitted_when_map_entry_absent() {
     );
     assert!(elements[0].data.get("language").is_none());
     assert!(elements[0].data.get("unit_kind").is_none());
+
+    // M23.5 T3-A extension: the OMITS rule must survive the group-based entry
+    // point unchanged -- a node that IS in a cycle group still OMITS
+    // language/unit_kind when the D27 maps carry no entry for it, and carries
+    // cycle_group_size / cycle_witness precisely BECAUSE it is grouped.
+    let mut grouped_graph = one_file_graph();
+    grouped_graph
+        .file_paths
+        .insert(FileId(5), std::path::PathBuf::from("src/main/scala/Service.scala"));
+    grouped_graph.edges.push(grouped_include_edge(4, 5));
+    grouped_graph.edges.push(grouped_include_edge(5, 4));
+    let groups = grouped_graph.detect_cycle_groups();
+    assert_eq!(groups.len(), 1, "the two-file include pair is one entangled group");
+    let grouped_elements = build_include_elements_from_groups(
+        &grouped_graph,
+        &HashMap::new(),
+        &groups,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let grouped_node = grouped_elements
+        .iter()
+        .find(|element| element.data["id"] == "4")
+        .expect("node for Main.scala");
+    assert!(
+        grouped_node.data.get("language").is_none(),
+        "grouped node must still OMIT the absent language key, not fabricate a default"
+    );
+    assert!(
+        grouped_node.data.get("unit_kind").is_none(),
+        "grouped node must still OMIT the absent unit_kind key, not fabricate a default"
+    );
+    assert_eq!(
+        grouped_node.data["cycle_group_size"],
+        serde_json::json!(2),
+        "grouped node carries its group's member count"
+    );
+    assert!(
+        grouped_node.data["cycle_witness"].is_array(),
+        "grouped node carries the witness path-label array, actual data map: {}",
+        grouped_node.data
+    );
+    assert_eq!(
+        grouped_node.classes,
+        Some("cycle".to_string()),
+        "grouped node carries the cycle class"
+    );
 }
 
 // ---------------------------------------------------------------------------
