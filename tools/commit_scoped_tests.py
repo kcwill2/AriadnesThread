@@ -197,5 +197,57 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(2, code)
 
 
+class FailureDiagnosticTests(unittest.TestCase):
+    """A failure must name a cause, even when git reports it on stdout.
+
+    `git commit` exits 1 with an empty stderr for "nothing to commit", so a
+    stderr-only message renders as a bare "failed:" with nothing after it. That
+    was observed live during the five-role topology rollout, where the tool
+    printed `ERROR git commit --only failed: ` and gave no clue why.
+    """
+
+    def test_describe_failure_prefers_stderr(self):
+        message = commit_scoped.describe_failure(
+            ("commit", "--only"), 1, "nothing to commit", "fatal: bad object",
+        )
+        self.assertIn("fatal: bad object", message)
+        self.assertNotIn("nothing to commit", message)
+
+    def test_describe_failure_falls_back_to_stdout(self):
+        message = commit_scoped.describe_failure(
+            ("commit", "--only"), 1, "nothing to commit, working tree clean", "",
+        )
+        self.assertIn("nothing to commit, working tree clean", message)
+
+    def test_describe_failure_reports_exit_status_when_silent(self):
+        message = commit_scoped.describe_failure(("commit", "--only"), 128, "", "")
+        self.assertIn("exit 128", message)
+
+    def test_already_committed_content_names_the_cause(self):
+        """End-to-end: committing content already in HEAD must explain itself."""
+        root = make_repo()
+        seed_repo(root)
+        write_file(root, "README.md", "# changed once\n")
+        code, _, err = run_tool(
+            root, "--scope", "README.md",
+            "--lock-retry-delay", FAST_LOCK_DELAY, "-m", "first commit",
+        )
+        self.assertEqual(0, code, err)
+        head_before = git(root, "rev-parse", "HEAD")
+
+        code, _, err = run_tool(
+            root, "--scope", "README.md",
+            "--lock-retry-delay", FAST_LOCK_DELAY, "-m", "second commit",
+        )
+        self.assertEqual(2, code)
+        self.assertIn("failed:", err)
+        self.assertNotIn("failed: \n", err)
+        self.assertNotEqual(
+            "", err.strip().rsplit("failed:", 1)[-1].strip(),
+            "failure message must carry a cause after 'failed:'",
+        )
+        self.assertEqual(head_before, git(root, "rev-parse", "HEAD"))
+
+
 if __name__ == "__main__":
     unittest.main()

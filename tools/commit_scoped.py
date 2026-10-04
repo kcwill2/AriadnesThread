@@ -47,6 +47,19 @@ class GitLockContention(Exception):
     pass
 
 
+def describe_failure(arguments, status, stdout, stderr):
+    """Build a failure message that names a cause.
+
+    `git commit` reports some refusals on stdout, not stderr: "nothing to
+    commit, working tree clean" exits 1 with an empty stderr. Surfacing stderr
+    alone turns those into a bare "failed:" with nothing after it, which is the
+    one case an operator most needs explained. Fall back to stdout, then to the
+    exit status, so a failure is never silent.
+    """
+    detail = stderr.strip() or stdout.strip() or f"no output; exit {status}"
+    return f"git {' '.join(arguments[:2])} failed: {detail}"
+
+
 def run_git_with_lock_retry(root, delay, *arguments):
     last_stderr = ""
     for attempt in range(1, MAX_LOCK_ATTEMPTS + 1):
@@ -55,9 +68,7 @@ def run_git_with_lock_retry(root, delay, *arguments):
             return stdout
         last_stderr = stderr
         if LOCK_ERROR_NEEDLE not in stderr:
-            raise RuntimeError(
-                f"git {' '.join(arguments[:2])} failed: {stderr.strip()}"
-            )
+            raise RuntimeError(describe_failure(arguments, status, stdout, stderr))
         if attempt < MAX_LOCK_ATTEMPTS:
             time.sleep(delay)
     raise GitLockContention(
