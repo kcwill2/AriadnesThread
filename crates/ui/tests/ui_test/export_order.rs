@@ -7,7 +7,9 @@
 //! the cross-process gate itself is the three-way SHA256 smoke on
 //! `ariadne ui --export`.
 
-use ariadne_graph::{IncludeEdge, IncludeGraph, IncludeKind, LanguageId, SourceLocation};
+use ariadne_graph::{
+    IncludeClosure, IncludeEdge, IncludeGraph, IncludeKind, LanguageId, SourceLocation,
+};
 use ariadne_repo::FileId;
 use ariadne_ui::{
     build_include_elements, build_include_elements_from_groups, GraphExportPayload,
@@ -276,4 +278,169 @@ fn export_map_sections_serialize_keys_in_sorted_order() {
     assert_ascending(&json, &["a2k10", "a2k2", "a2k3"]);
     assert_ascending(&json, &["a3k10", "a3k2", "a3k3"]);
     assert_ascending(&json, &["c10", "c2", "c3"]);
+}
+
+/// Non-vacuity witness for the parity lock below
+/// (`acyclic_include_elements_are_byte_identical_under_both_cycle_currencies`):
+/// the SAME serialization comparison must be able to FAIL once a real cycle
+/// currency exists, so the parity equality is never green-by-construction.
+///
+/// P2 has no Red of its own: this `assert_ne!` and P1's mutated `assert_eq!`
+/// (the executed mutation trail, handoff sec4 step R2) are the SAME comparison
+/// over the SAME fixture family with OPPOSITE expectations, so the recorded R2
+/// run -- in which the group-based side differs from the legacy side -- is
+/// simultaneously the executed proof that this comparison has teeth. This is
+/// not a determinism test and not a re-test of IV-2/IV-3 or the OMITS rule
+/// (`dto_builders.rs` owns those); it exists only to keep the parity lock
+/// honest.
+#[test]
+fn the_parity_comparison_detects_a_cycle_classification_difference() {
+    let graph = cyclic_shuffled_file_graph();
+    let groups = graph.detect_cycle_groups();
+    assert_eq!(
+        groups.len(),
+        1,
+        "fixture sanity: the cyclic fixture must carry exactly one entangled group"
+    );
+    assert_eq!(
+        groups[0].member_files,
+        vec![FileId(2), FileId(5), FileId(11)],
+        "fixture sanity: the entangled group is exactly members 2, 5 and 11"
+    );
+    let legacy_elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let grouped_elements = build_include_elements_from_groups(
+        &graph,
+        &HashMap::new(),
+        &groups,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let legacy_json = serde_json::to_string(&legacy_elements).expect("legacy elements serialize");
+    let grouped_json = serde_json::to_string(&grouped_elements).expect("grouped serializes");
+    assert_ne!(
+        grouped_json, legacy_json,
+        "the byte comparison P1 relies on must be able to fail: with a real group \
+         currency the group-based side must differ from the legacy side"
+    );
+}
+
+/// Parity lock -- the companion item `tasks/m235-t3b-verdict.md` sec5.6 left
+/// open (ledger row "M23.5 companion parity test", expires at unit E): on a
+/// graph carrying NO cycle currency from either representation, the legacy
+/// path-based `build_include_elements` and the group-based
+/// `build_include_elements_from_groups` emit byte-identical elements. This is
+/// the evidence that unit E's deletion of the legacy builder is
+/// behaviour-preserving on acyclic graphs; after E the comparison cannot be
+/// written at all.
+///
+/// What this test does NOT lock: emission-order determinism. Both builders
+/// run in ONE process over the SAME graph, so any hash-iteration-order
+/// perturbation moves both sides equally and this comparison cannot see it
+/// (module doc at the top of this file). Determinism lives in
+/// `graph_api.rs:741-789` in-process and in the CLI two-process export lock
+/// `export_bytes_are_identical_across_two_separate_processes` in
+/// `crates/cli/tests/payload_tail_bench.rs`. P1 locks classification state on
+/// acyclic input, nothing more.
+#[test]
+fn acyclic_include_elements_are_byte_identical_under_both_cycle_currencies() {
+    // Step 1 -- fixture sanity, machine-checked rather than taken on the
+    // handoff's word.
+    let graph = shuffled_file_graph();
+    assert!(
+        graph.detect_cycle_groups().is_empty(),
+        "the parity fixture must be acyclic, or &[] is not the currency unit E will delete"
+    );
+
+    // Step 2 -- identical inputs on both calls. Every map is a NON-EMPTY
+    // strict subset of the fixture's ids, so the decorated nodes (closure
+    // size, D27 `language`/`unit_kind`) and the undecorated ones are BOTH
+    // inside the compared bytes.
+    let mut closures = HashMap::new();
+    closures.insert(
+        FileId(5),
+        IncludeClosure::new(FileId(5), vec![FileId(2)], vec![FileId(2), FileId(9)]),
+    );
+    closures.insert(
+        FileId(1),
+        IncludeClosure::new(FileId(1), vec![FileId(9)], vec![FileId(9)]),
+    );
+    let mut file_languages = HashMap::new();
+    file_languages.insert(1, "cpp".to_string());
+    file_languages.insert(3, "cpp".to_string());
+    let mut file_unit_kinds = HashMap::new();
+    file_unit_kinds.insert(1, "translation-unit".to_string());
+
+    // Step 3 -- the two calls, empty cycle currency on both sides.
+    let legacy_elements =
+        build_include_elements(&graph, &closures, &[], &file_languages, &file_unit_kinds);
+    let grouped_elements = build_include_elements_from_groups(
+        &graph,
+        &closures,
+        &[],
+        &file_languages,
+        &file_unit_kinds,
+    );
+
+    // Step 4 -- non-vacuity BEFORE the byte lock: without this, "both sides
+    // are empty, therefore equal" would satisfy the comparison.
+    assert!(
+        !legacy_elements.is_empty() && !grouped_elements.is_empty(),
+        "both builders must emit elements; legacy emitted {}, grouped emitted {}",
+        legacy_elements.len(),
+        grouped_elements.len()
+    );
+    let node_elements: Vec<&ariadne_ui::CytoscapeElement> = legacy_elements
+        .iter()
+        .filter(|element| {
+            matches!(
+                element.data["kind"].as_str(),
+                Some("HEADER") | Some("SOURCE")
+            )
+        })
+        .collect();
+    let nodes_with_closure = node_elements
+        .iter()
+        .filter(|element| element.data["closure"].as_u64().unwrap_or(0) > 0)
+        .count();
+    assert!(
+        nodes_with_closure > 0,
+        "at least one node must carry a non-zero closure size inside the compared bytes"
+    );
+    let nodes_with_language = node_elements
+        .iter()
+        .filter(|element| element.data.get("language").is_some())
+        .count();
+    assert!(
+        nodes_with_language > 0,
+        "at least one node must carry the D27 `language` key inside the compared bytes"
+    );
+    assert!(
+        nodes_with_language < node_elements.len(),
+        "at least one node must OMIT the D27 `language` key inside the compared bytes"
+    );
+
+    // Step 5 -- the byte lock. `serde_json::Map` is a BTreeMap in this
+    // workspace, so serialized-string equality pins the emitted key/value
+    // sequence, which a structural `PartialEq` (key/value sets) would not.
+    let legacy_json = serde_json::to_string(&legacy_elements).expect("legacy serializes");
+    let grouped_json = serde_json::to_string(&grouped_elements).expect("grouped serializes");
+    assert_eq!(
+        grouped_json, legacy_json,
+        "parity: on acyclic input with empty cycle currency the group-based and \
+         legacy builders must emit byte-identical elements"
+    );
+
+    // Step 6 -- the structural lock too, so a mismatch reports a readable
+    // element-level diff and not only a string blob (precedent:
+    // graph_api.rs:786-789).
+    assert_eq!(
+        legacy_elements, grouped_elements,
+        "parity as structured elements, for a readable diff alongside the byte lock"
+    );
 }
