@@ -98,3 +98,28 @@ contract findings. This file is the recovery artifact if the session dies.
   theme_contract.rs stays (the handoff forbids refactoring common.rs or
   theme_contract.rs beyond the export assertion). No code change after
   GREEN; scoped suite stays green.
+
+## Landing checkpoint (gates 4-7)
+
+- Gate 4 pre-commit: `theme_token_check.py --check-added --base d76a559`
+  exit 0, no violations (themes.css TOKEN_FILES-exempt from the added scan;
+  the regenerated count is what the frozen-count scan validated).
+- Staging: scoped `git add -- <the eight touch-set paths>` via
+  `tools/distill.py` (never `git add .`; foreign dirty files - `.kilo/plans`
+  and `tasks/milestone_ledger.md` - stayed unstaged, and foreign untracked
+  plan/handoff files stayed out of every scope glob).
+- Gate 5: `hygiene_check.py` exit 0; all emitted rows are warn-only R3
+  pre-existing sites; zero findings in the new oracle file or edits.
+- Gate 6: `encoding_guard.py --staged` exit 0 before committing.
+- Gate 7: single scoped commit `41ec354` carrying block + baseline +
+  justification sentence; stat: index.html +5/-4, theme.js 1/1, themes.css
+  +141, main.rs +1, theme_contract.rs +3/-2, new oracle file +307, handoff +
+  journal recorded, baseline 147+/77-.
+- Post-commit confirmation run: `188 passed / 0 failed / 0 ignored /
+  3 suites`, digest `### cargo test PASS (exit 0)`.
+- Deviations logged: (1) handoff's example precondition verifier names a
+  nonexistent `crates/ui/src/static_html.rs`; the handoff's own alternative
+  (T3 step-row markup in index.html) verified the post-T3 tree. (2) Baseline
+  regeneration necessarily re-stamps `generated_from_head` and re-keys
+  index.html `locations` line numbers (pre-existing pre-T3 drift); counts
+  semantics preserved, gate 4 green.
