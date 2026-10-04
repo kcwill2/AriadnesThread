@@ -295,7 +295,7 @@ fn export_map_sections_serialize_keys_in_sorted_order() {
 /// (`dto_builders.rs` owns those); it exists only to keep the frozen
 /// expectation honest.
 #[test]
-fn the_parity_comparison_detects_a_cycle_classification_difference() {
+fn the_non_vacuity_witness_detects_a_cycle_classification_difference() {
     let graph = cyclic_shuffled_file_graph();
     let groups = graph.detect_cycle_groups();
     assert_eq!(
@@ -308,22 +308,22 @@ fn the_parity_comparison_detects_a_cycle_classification_difference() {
         vec![FileId(2), FileId(5), FileId(11)],
         "fixture sanity: the entangled group is exactly members 2, 5 and 11"
     );
-    let legacy_elements = build_include_elements(
+    let empty_currency_elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[],
         &HashMap::new(),
         &HashMap::new(),
     );
-    let grouped_elements = build_include_elements(
+    let populated_currency_elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &groups,
         &HashMap::new(),
         &HashMap::new(),
     );
-    let legacy_json = serde_json::to_string(&legacy_elements).expect("legacy elements serialize");
-    let grouped_json = serde_json::to_string(&grouped_elements).expect("grouped serializes");
+    let legacy_json = serde_json::to_string(&empty_currency_elements).expect("legacy elements serialize");
+    let grouped_json = serde_json::to_string(&populated_currency_elements).expect("grouped serializes");
     assert_ne!(
         grouped_json, legacy_json,
         "the byte comparison P1 relies on must be able to fail: with a real group \
