@@ -18,6 +18,14 @@ Handoff: `tasks/ui-progress-parity-t1-handoff.md`. Execution slot 1 of 3.
 - Refactor: doc comments copied verbatim from shape lines 90-98/113-114 onto
   `ProgressStepStatus`, `ProgressStepView`, and the `steps` field; re-run
   `184 passed / 0 failed / 0 ignored / 3 suites`.
+- Commit `5eff824`: scoped commit of the four touch-set files plus
+  `tasks/milestone_ledger.md` (user-instructed ledger co-landing, deviation
+  noted above). Gates: hygiene exit 0 (R3 warns all pre-existing),
+  `encoding_guard.py --staged` exit 0, `git show --stat` shows touch-set
+  files + ledger only; `crates/pipeline/**` and
+  `crates/cli/src/commands/progress.rs` diffs across the commit are empty.
+  `server_api.rs` single deletion = the 1-line `use` statement widened to a
+  3-line import; no assertion touched.
 
 ## Findings
 
