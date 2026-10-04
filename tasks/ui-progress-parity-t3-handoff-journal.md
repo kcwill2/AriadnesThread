@@ -23,3 +23,14 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   only violations/ERROR; silent run == zero added hex, exit 0 per source).
   hygiene_check: R3 warn-only lines only, all pre-existing and none in the
   touched files; exit 0 per source contract (exit 1 only on R1/R2).
+- [Committed] Gate 5 encoding_guard --staged: silent (violation-only tool;
+  silent == exit 0). Gate 6 commit_scoped: `e9cf10d`, 6 files, 202+/4-,
+  exactly the declared scopes. Red needle, Green line and gate evidence are
+  in this journal; `ui_smoke` (G3) and `--baseline` (G7) stay with the
+  orchestrator closeout per the sizing law.
+- [Not done deliberately] No changes to crates/ui/src, server_api.rs,
+  themes.css, theme.js, fixtures, or the ledger (frozen / out of touch-set).
+  Deviation: theme_token_check/hygiene/encoding exit codes confirmed via
+  their silent-on-pass source contracts because compound echo wrappers were
+  refused by the bash permission matcher; the gate commands themselves ran
+  verbatim and unrefused.
