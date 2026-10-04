@@ -1,4 +1,5 @@
 use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
+use crate::commands::ui::boot_progress::BootStepSnapshot;
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{LoadMilestone, Pipeline, ProgressEvent};
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod boot_progress;
 mod node_maps;
 
 pub struct UiBuildResult {
@@ -91,6 +93,16 @@ const REDUCTION_PHASE: &str = "[3/5] Reducing semantic model...";
 const CALL_GRAPH_PHASE: &str = "[4/5] Building call graph...";
 const COLLATERAL_PHASE: &str = "[5/5] Analyzing collateral...";
 const STAGES_PER_RUN: usize = 5;
+
+/// The five `[k/5]` phase labels in stage order: the boot-seed input for
+/// `BootStepSnapshot::seeded` (run_ui) and the boot closure's own snapshot.
+const RUN_PHASES: [&'static str; STAGES_PER_RUN] = [
+    ARTIFACTS_PHASE,
+    TU_INDEX_PHASE,
+    REDUCTION_PHASE,
+    CALL_GRAPH_PHASE,
+    COLLATERAL_PHASE,
+];
 
 // ---------------------------------------------------------------------------
 // A4: calibrated stage-5 sub-spans, replacing the old fixed [80,95] lie that
@@ -640,15 +652,28 @@ fn make_bar_progress() -> ProgressFn {
 
 /// Boot progress for the interactive server: mirrors the global percent into
 /// web `UiState` (browser bar unchanged) and drives the live per-step bar.
+/// Each report additionally advances the per-step row snapshot written into
+/// `progress.steps` (ui-progress-parity T2): `apply` is pure, so it runs
+/// OUTSIDE the state write lock and the rows join the existing four global
+/// writes in the SAME single write pass (I4: globals written exactly as
+/// before; the error arm and `swap_into_state` never touch rows, so rows
+/// freeze by construction - I6).
 fn make_boot_progress(state: Arc<UiState>) -> ProgressFn {
     let bar = make_bar_progress();
+    let snapshot = std::sync::Mutex::new(BootStepSnapshot::seeded(STAGES_PER_RUN, &RUN_PHASES));
     Arc::new(move |report: ProgressReport| {
+        let rows = snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .apply(&report);
         {
             let mut p = write_state(&state.progress);
             p.state = "loading".to_string();
             p.phase = report.phase.to_string();
             p.message = report.message.clone();
             p.percent = report.percent;
+            p.steps = rows;
+            p.total_stages = STAGES_PER_RUN;
         }
         bar(report);
     })
@@ -686,6 +711,14 @@ pub async fn run_ui(
         println!("Report exported successfully to {}", path.display());
     } else {
         let state = Arc::new(UiState::new_loading(repo_path.clone()));
+        // DP-1 (ui-progress-parity T2): every step row exists from boot;
+        // not-yet-started rows are `Pending` until the boot progress
+        // closure's first report rewrites them.
+        {
+            let mut p = write_state(&state.progress);
+            p.steps = BootStepSnapshot::seeded(STAGES_PER_RUN, &RUN_PHASES).rows();
+            p.total_stages = STAGES_PER_RUN;
+        }
 
         let app = ariadne_ui::build_router(state.clone());
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
@@ -752,3 +785,6 @@ mod progress_contract_tests;
 
 #[cfg(test)]
 mod builder_tests;
+
+#[cfg(test)]
+mod boot_progress_tests;
