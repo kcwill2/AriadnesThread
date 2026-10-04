@@ -10,6 +10,12 @@ gates.
 
 | Worktree | State at 2026-10-01 | Disposition |
 |---|---|---|
+| `.kilo/worktrees/load-tail-phase-performance` | merged via `7a58e1f` | abandon with row |
+
+Row moved verbatim 2026-10-04 (Phase 4 closeout): its disposition -- merged --
+was carried out, so the row is discharged. The three rows still live in
+`tasks/milestone_ledger.md` (`troubled-concrete`, `linen-mice`, `jeweled-neon`,
+plus M23.5's own `tarjan-s-scc` added at closeout) have NOT been carried out.
 
 ## Discharged deferred findings
 
@@ -34,3 +40,58 @@ AUTHORIZED, repaired in place, dispatch-pending. The row is reproduced exactly
 as written while it was live: its "NOT started" clause records the state at
 authoring time and is superseded by the commits cited above. Its ACCEPTED
 two-sample residual stays closed -- do not re-open it.
+
+### Discharged 2026-10-04 (Phase 4 closeout): M23.5 unit E, SUPERSEDED
+
+Moved VERBATIM from the M23.5 detail sub-block in `tasks/milestone_ledger.md`.
+Its obligation is discharged: unit E was never started, it was replaced by E1
+and E2, and **both are APPROVED** (`5addad7` and `378b240`+`4bc3b88`+`dcd681b`).
+Its "NOT started" clauses record the state at authoring time and are superseded
+by those commits. Retained for audit; **do not re-open and do not treat any
+count or line reference below as current** -- the live sub-block carries the
+current state and the live F14 row carries the supersession of record.
+
+- **Unit E (`tasks/m235-t3e-handoff.md`): SUPERSEDED 2026-10-04. NOT started,
+  zero commits, nothing landed.** Its implementer stopped at preflight with an
+  executed probe: renaming `dto.rs:637` alone made
+  `cargo check -p ariadne-cli --all-targets` fail (exit 101,
+  `error[E0425]: cannot find function build_include_elements_from_groups in crate
+  ariadne_ui` at `crates/cli/src/commands/ui.rs:328:40`) while the contract
+  froze `crates/cli/**` byte-unchanged and `crates/ui/src/lib.rs:6` is a bare
+  `pub use dto::*;`. The contract shipped unsatisfiable -- see deferred row
+  **F14** and its sub-block. **Replaced by two units, both NOT started:**
+  - **E1** `tasks/m235-t3e1-handoff.md` -- crate:ui only. Deletes the legacy
+    `build_include_elements` (`dto.rs:608`) and its only helper
+    `IncludeCycleClass::from_paths`, repoints the NINE in-crate call sites,
+    collapses four two-name import lists, converts parity test P1 to a
+    frozen-expectation byte lock. It carries P1's conversion **because it
+    deletes the legacy builder**: once that builder is gone, P1 compares the
+    survivor against itself. Adds `cargo check -p ariadne-cli --all-targets`
+    as a gate. Sizing: 1 crate, 7 code paths + journal, 7 gate commands /
+    15 invocations (itemised in the handoff), ~250 produced lines.
+  - **E2** `tasks/m235-t3e2-handoff.md` -- renames the survivor to the plan's
+    canonical public name (plan line 69). The only unit with a declared
+    2-crate exception; touches `crates/cli/src/commands/ui.rs:328` and
+    `crates/cli/tests/payload_tail_bench.rs:325` (plus one stale comment clause
+    at `:64`); gates BOTH reverse dependencies (`-p ariadne-cli --all-targets`,
+    `-p ariadne-integration-tests --all-targets`). Sizing: 2 crates, 7 code
+    paths + journal, 8 gate commands / 14 invocations, ~70 produced lines.
+  - Split rationale: the deletion and the rename are separable across a
+    compile-green boundary (verified in both directions), and only the rename
+    needs `crates/cli`. E1 cannot carry the rename, because after E1 the sole
+    surviving name is the one `crates/cli` calls.
+  - **Superseded contract disposition: SUPERSEDED, retained byte-unchanged on
+    disk, not archived and not deleted.** E1 commit 1 lands it as the record of
+    what was dispatched and rejected; this sub-block and row F14 are the
+    supersession of record.
+  - D2 findings **F1** (stale counts/census) and **F2** (P1 tautology) stay
+    discharged: F1 by E1's re-derived caller census, F2 by E1's P1 conversion.
+  - Test counts move in NEITHER unit: `--test ui_test` stays `186 / 0 / 0 / 1`
+    and `-p ariadne-ui` stays `186 / 0 / 0 / 3` (186 - 0 + 0 in both). D2's
+    `+2` to the workspace line remains a PREDICTION, never a measurement.
+
+**Outcome (for orientation only, not part of the verbatim row):** the
+prediction held. D2 landed `+2`, E1 and E2 each landed `+0`, and the chain ends
+`1180/0/4/88` at `dcd681b`, reviewer-measured. The single public builder is now
+`crates/ui/src/dto.rs:621`, so every `dto.rs` line number in the verbatim row
+above is historical.
