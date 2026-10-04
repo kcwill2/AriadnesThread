@@ -307,16 +307,16 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let call_graph = pipeline.get_or_build_callgraph()?;
     let load_report = pipeline.get_or_build_load()?;
     let report = include_graph.generate_report();
-    let cycles = include_graph.detect_cycles();
+    let cycle_groups = include_graph.detect_cycle_groups();
 let node_maps = node_maps::build(
         &include_graph,
         &pipeline.discovery.files,
         &crate::registry::default_registry(),
     );
-    let include_elements = ariadne_ui::build_include_elements(
+    let include_elements = ariadne_ui::build_include_elements_from_groups(
         &include_graph,
         &closures,
-        &cycles,
+        &cycle_groups,
         &node_maps.languages,
         &node_maps.unit_kinds,
     );
