@@ -47,7 +47,7 @@ Handoff: `tasks/ui-progress-parity-t2-handoff.md`. Milestone base (pre-T1):
   pre-existing names inside `make_boot_progress`/`swap_into_state` style
   blocks, and the handoff's own wiring spec prescribes `p.steps`/
   `p.total_stages`). ui.rs 754 -> 790 lines (+36 <= 60, < 820 stop line).
-  boot_progress.rs 124 lines (<= 450).
+  boot_progress.rs 115 lines (<= 450).
 
 ## Deviations / decisions
 
