@@ -80,7 +80,7 @@ fn aggregate_kind_label(
 /// property, not a language aggregate, so no vocabulary word ever composes
 /// into it (deliberate, not an oversight).
 fn cycle_groups_label(_vocabulary: Option<&DependencyVocabulary>) -> &'static str {
-    "  Cycles Detected"
+    "  Cycle Groups Detected"
 }
 
 pub fn analyze_include_graph(repo_path: &PathBuf) -> Result<()> {
@@ -208,6 +208,17 @@ mod tests {
             aggregate_kind_label("Local", None),
             aggregate_kind_label("Local", cpp)
         );
+    }
+
+    /// M23.5 plan sec 1.3: the summary line names the group count, so the
+    /// label must read "Cycle Groups Detected" (with the two leading spaces
+    /// every neighbour line carries), not the old path-enumeration wording.
+    #[test]
+    fn includes_summary_labels_report_cycle_groups_not_cycle_paths() {
+        let cpp_vocab = vocabulary_for(ariadne_repo::SourceLanguage::Cpp);
+        let cpp = Some(&cpp_vocab);
+        assert_eq!(cycle_groups_label(cpp), "  Cycle Groups Detected");
+        assert_eq!(cycle_groups_label(None), "  Cycle Groups Detected");
     }
 
     #[test]
