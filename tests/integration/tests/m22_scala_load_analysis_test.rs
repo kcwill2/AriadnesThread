@@ -439,10 +439,10 @@ fn auto_shaped_graph_keeps_the_cycle_informational() -> Result<()> {
     let registry = default_registry();
     let graph = build_dependency_graph(&repo.root, &registry)?;
 
-    let cycles = graph.detect_cycles();
+    let cycle_groups = graph.detect_cycle_groups();
     assert!(
-        !cycles.is_empty(),
-        "the deliberate fixture cycle is present on the auto-shaped lane"
+        !cycle_groups.is_empty(),
+        "the deliberate fixture cycle is present on the auto-shaped lane as a group"
     );
     let tolerated =
         graph.generate_report_with_cycle_policies(&|_file_id| CyclePolicy::TolerateWithinPackage);
