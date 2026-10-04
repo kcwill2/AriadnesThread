@@ -58,6 +58,15 @@ impl<'a> ParserCtx<'a> {
     }
 
     pub(crate) fn handle_brace_close(&mut self) {
+        if self.brace_depth == 0 {
+            // Stray close (unbalanced TU, e.g. preprocessor-discarded branch):
+            // defined degradation - end every open scope, depth stays 0.
+            // The floor is the ONLY decrement guard: balanced streams never
+            // reach it, so debug and release behave identically (spec I2).
+            self.current_class = None;
+            self.current_function = None;
+            return;
+        }
         self.brace_depth -= 1;
         if let Some((_, depth)) = self.current_class {
             if self.brace_depth < depth {
@@ -492,3 +501,6 @@ impl<'a> ParserCtx<'a> {
 
 #[cfg(test)]
 mod characterization_tests;
+
+#[cfg(test)]
+mod brace_depth_tests;
