@@ -239,6 +239,11 @@
     }
 
     function updateProgress(percent, detailText) {
+      // Single trio-restore site (verdict N1/N2, Variant A): the frozen
+      // error branch writes 'Error: ...' here and the ready phase calls in
+      // to report progress - both must be visible again even after the
+      // step-row path hid the legacy fallback trio.
+      setLegacyFallbackVisible(true);
       const prog = document.getElementById('loadingProgress');
       const detail = document.getElementById('loadingDetail');
       if (prog) prog.style.width = percent + '%';

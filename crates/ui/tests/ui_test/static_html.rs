@@ -519,6 +519,15 @@ fn step_row_css_block(css: &str) -> &str {
     &css[start..]
 }
 
+/// Source slice from `marker` (a function definition in the bundle) to the
+/// next function definition - the body region source-lock asserts run on.
+fn body_slice<'a>(html: &'a str, marker: &str) -> &'a str {
+    let start = html.find(marker).expect(marker);
+    let tail = start + marker.len();
+    let end = tail + html[tail..].find("function ").expect("a function follows the marker");
+    &html[start..end]
+}
+
 #[test]
 fn test_ui_loading_overlay_and_progress() {
     let html = common::page_content();
@@ -555,21 +564,15 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(!step_css.contains('#'));
     assert!(step_css.contains("var(--"));
 
-    // T3 remediation (shape.md:182-184): while step rows render, the whole
-    // legacy fallback trio (bar row, loadingText, loadingDetail) is hidden;
-    // hideProgress and the empty-steps legacy branch restore it.
+    // Legacy fallback trio (shape.md:182-184): hidden while rows render;
+    // updateProgress (hop-3 N1/N2 Variant A - the frozen error branch and
+    // the ready phase report through it), hideProgress and the empty-steps
+    // legacy branch restore it, so 'Error: ...' detail is never invisible.
     assert!(html.contains("function setLegacyFallbackVisible"));
     assert!(html.contains("setLegacyFallbackVisible(false)"));
     assert!(html.matches("setLegacyFallbackVisible(true)").count() >= 2);
-    let hide_at = html
-        .find("function hideProgress")
-        .expect("hideProgress must exist");
-    let hide_end = html[hide_at + 1..]
-        .find("function ")
-        .map(|offset| hide_at + 1 + offset)
-        .expect("another function follows hideProgress in the bundle");
-    let hide_body = &html[hide_at..hide_end];
-    assert!(hide_body.contains("setLegacyFallbackVisible(true)"));
+    assert!(body_slice(html.as_str(), "function hideProgress").contains("setLegacyFallbackVisible(true)"));
+    assert!(body_slice(html.as_str(), "function updateProgress").contains("setLegacyFallbackVisible(true)"));
 }
 
 fn assert_hotspot_panel_markup_and_rendering(html: &str) {

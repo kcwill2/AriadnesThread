@@ -76,3 +76,26 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   styles.css untouched this hop, omitted per verdict). Follow-up docs-only
   commit `fe29dfc` fixes the T2 journal "124 lines" -> verified 115
   (verdict remediation step 5 carry-over).
+
+## Hop 3 - verdict N1/N2 (boot-failure invisibility), Variant A
+
+- [Context] Hop-2 verdict REJECTED on new blocker N1: the frozen error
+  branch (api.js:92) writes 'Error: ...' into `loadingDetail` while the
+  row path keeps it hidden - invisible error text. Variant A (preferred,
+  single restore site) applied; the frozen api.js branches stay untouched.
+- [N1 Red] New source-lock needle `update_body.contains(
+  "setLegacyFallbackVisible(true)")` failed as predicted:
+  `183 passed / 1 failed / 0 ignored / 2 suites`, capture
+  `C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt`.
+- [N1 Green] `updateProgress` now opens with `setLegacyFallbackVisible(true)`
+  (restores the trio before writing bar width + detail text; covers the
+  error branch N1 and the ready-phase 90%/100% calls N2 at one site):
+  `184 passed / 0 failed / 0 ignored / 3 suites`, exit 0, capture as above.
+- [N1 gates] `theme_token_check --check-added --base main`: exit 0, silent
+  (zero added hex). `encoding_guard.py --staged`: exit 0, silent.
+- [R2 self-inflicted, fixed] My hop-2+hop-3 needles pushed
+  `static_html.rs` to 1008 lines (> 1000, R2 blocking). Compacted my own
+  hop-2/hop-3 blocks into a shared `body_slice` helper (every needle
+  semantics preserved verbatim, no weakening) -> 997 lines; scoped gate
+  re-green `184 passed / 0 failed / 0 ignored / 3 suites`; `hygiene_check`
+  exit 0 with only the pre-existing R3 warn rows (none in touched files).
