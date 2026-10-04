@@ -99,3 +99,4 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   semantics preserved verbatim, no weakening) -> 997 lines; scoped gate
   re-green `184 passed / 0 failed / 0 ignored / 3 suites`; `hygiene_check`
   exit 0 with only the pre-existing R3 warn rows (none in touched files).
+- [N1 committed] `17e2299` (main.js + static_html.rs + journal).
