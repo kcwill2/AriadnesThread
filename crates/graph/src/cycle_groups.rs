@@ -145,8 +145,9 @@ impl TarjanRun {
     fn explore_from(&mut self, seed: FileId, adjacency: &HashMap<FileId, Vec<FileId>>) {
         self.enter_vertex(seed);
         while !self.frames.is_empty() {
-            if let FrameStep::NeighborsExhausted = self.advance_frame(adjacency) {
-                self.retire_frame();
+            match self.advance_frame(adjacency) {
+                FrameStep::Descended | FrameStep::EdgeVisited => continue,
+                FrameStep::NeighborsExhausted => self.retire_frame(),
             }
         }
     }

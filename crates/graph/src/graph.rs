@@ -78,9 +78,13 @@ impl IncludeGraph {
 
     /// Builds a `source -> sorted, deduplicated destinations` map from the edge list.
     /// Matches `direct_includes` semantics; lets whole-graph traversals run in O(V + E)
-    /// instead of rescanning the edge list at every visited node. The single
-    /// adjacency-build call sites are `compute_closures` and `LoadAnalyzer`'s
-    /// `file_adjacency` memo — no other code may duplicate this loop.
+    /// instead of rescanning the edge list at every visited node. The production
+    /// adjacency-build call sites are `compute_closures` (here),
+    /// `detect_cycle_groups` (`cycle_groups.rs`) and `LoadAnalyzer`'s
+    /// `file_adjacency` memo (`load_caches.rs`) - no other code may duplicate
+    /// this loop. The `#[cfg(test)]` callers (`compute_closures_bfs_oracle`
+    /// here and `closure_equivalence_tests.rs`) are separate, deliberate
+    /// consumers of this same contract, not a licence to add a loop.
     pub(crate) fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
         let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for edge in &self.edges {
@@ -229,62 +233,6 @@ impl IncludeGraph {
         }
 
         result
-    }
-
-    /// Detects cycles in the include graph using DFS traversal.
-    pub fn detect_cycles(&self) -> Vec<Vec<FileId>> {
-        let mut cycles = Vec::new();
-        let mut visited = HashSet::new();
-        let mut rec_stack = HashSet::new();
-        let mut current_path = Vec::new();
-
-        let mut all_files: Vec<FileId> = self.file_paths.keys().copied().collect();
-        all_files.sort();
-        let adj = self.adjacency();
-
-        for &node in &all_files {
-            if !visited.contains(&node) {
-                Self::dfs_cycle(
-                    node,
-                    &adj,
-                    &mut visited,
-                    &mut rec_stack,
-                    &mut current_path,
-                    &mut cycles,
-                );
-            }
-        }
-
-        cycles
-    }
-
-    fn dfs_cycle(
-        node: FileId,
-        adj: &HashMap<FileId, Vec<FileId>>,
-        visited: &mut HashSet<FileId>,
-        rec_stack: &mut HashSet<FileId>,
-        current_path: &mut Vec<FileId>,
-        cycles: &mut Vec<Vec<FileId>>,
-    ) {
-        visited.insert(node);
-        rec_stack.insert(node);
-        current_path.push(node);
-
-        if let Some(neighbors) = adj.get(&node) {
-            for &neighbor in neighbors {
-                if !visited.contains(&neighbor) {
-                    Self::dfs_cycle(neighbor, adj, visited, rec_stack, current_path, cycles);
-                } else if rec_stack.contains(&neighbor) {
-                    if let Some(pos) = current_path.iter().position(|&n| n == neighbor) {
-                        let cycle = current_path[pos..].to_vec();
-                        cycles.push(cycle);
-                    }
-                }
-            }
-        }
-
-        rec_stack.remove(&node);
-        current_path.pop();
     }
 
     /// Generates an aggregated summary report of the include graph, treating
@@ -539,9 +487,9 @@ mod tests {
             language: LanguageId::cpp(),
         });
 
-        let cycles = graph.detect_cycles();
+        let cycle_groups = graph.detect_cycle_groups();
         assert!(
-            !cycles.is_empty(),
+            !cycle_groups.is_empty(),
             "Cycle must be detected between a.h and b.h"
         );
     }

@@ -512,7 +512,7 @@ fn cyclic_chain(
 fn test_random_digraphs_with_cycles_match_bfs_oracle() {
     for &(seed, file_count, topology, name) in RANDOM_FIXTURES.iter() {
         let graph = random_graph(seed, file_count, topology);
-        let cyclic = !graph.detect_cycles().is_empty();
+        let cyclic = !graph.detect_cycle_groups().is_empty();
         match topology {
             Topology::PureDag => assert!(
                 !cyclic,
