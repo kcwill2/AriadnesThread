@@ -509,6 +509,16 @@ fn test_tour_overlay_dismissal_and_positioning() {
     // Verify btnTourPrev hidden on step 0
 }
 
+/// Slice of `styles.css` from the first appended step-row rule to the end
+/// of the stylesheet. The T3 step-row block is appended last, so this slice
+/// is exactly that block (used for the I8 token-only assertion).
+fn step_row_css_block(css: &str) -> &str {
+    let start = css
+        .find(".step-row {")
+        .expect("styles.css must define the .step-row rule");
+    &css[start..]
+}
+
 #[test]
 fn test_ui_loading_overlay_and_progress() {
     let html = common::page_content();
@@ -525,6 +535,25 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(html.contains("pollStatus"));
     assert!(html.contains("status.progress.state === 'loading'"));
     assert!(html.contains("status.progress.state === 'ready'"));
+
+    // T3 (ui-progress-parity): one snapshot renderer over step rows.
+    assert!(html.contains("id=\"loadingSteps\""));
+    assert!(html.contains("function renderProgressSnapshot"));
+    assert!(html.contains("renderProgressSnapshot(status.progress)"));
+
+    // I7 source lock: the bar fill mirrors format_step_bar's integer math.
+    assert!(html.contains("Math.floor(20 * percent / 100)"));
+    assert!(html.contains("total_stages"));
+
+    // Block glyphs exist as ASCII escape sequences in the bundle source,
+    // never as raw non-UTF-8-safe bytes (authored content is pure ASCII).
+    assert!(html.contains("\\u2588"));
+    assert!(html.contains("\\u2591"));
+
+    // I8: the appended step-row CSS block paints with var() tokens only.
+    let step_css = step_row_css_block(ariadne_ui::STYLES_CSS);
+    assert!(!step_css.contains('#'));
+    assert!(step_css.contains("var(--"));
 }
 
 fn assert_hotspot_panel_markup_and_rendering(html: &str) {

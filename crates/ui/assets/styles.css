@@ -1592,3 +1592,65 @@
       opacity: 1 !important;
     }
 
+    /* ui-progress-parity T3: boot overlay step rows mirroring the CLI's
+       per-step frames ([k/N] label [20-cell bar] pp% message). Token-only
+       (I8): --cyan family chrome for active/done, --text-muted for pending.
+       No verdict colors on progress rows (DP-3). */
+    .step-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      width: min(90vw, 620px);
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--text-main);
+    }
+    .step-index {
+      color: var(--text-sub);
+      font-family: monospace;
+      white-space: pre;
+    }
+    .step-label {
+      color: var(--text-main);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .step-bar {
+      font-family: monospace;
+      letter-spacing: 0;
+      white-space: pre;
+      color: var(--text-sub);
+    }
+    .step-percent {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--text-muted);
+    }
+    .step-detail {
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .step-pending {
+      opacity: 0.45;
+    }
+    .step-pending .step-label,
+    .step-pending .step-detail {
+      color: var(--text-muted);
+    }
+    .step-active .step-label,
+    .step-active .step-bar {
+      color: var(--cyan);
+    }
+    .step-active .step-bar {
+      text-shadow: 0 0 6px var(--cyan-glow);
+    }
+    .step-done .step-label,
+    .step-done .step-bar,
+    .step-done .step-percent {
+      color: var(--cyan);
+    }
+

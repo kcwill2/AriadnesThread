@@ -1,16 +1,40 @@
 // Data & boot layer split from index.html: live/offline data loading and client API helpers.
+    // Synthetic boot snapshot for the standalone export path: same wire shape
+    // as /api/status progress, three steps at the historical 25/65/100
+    // percents, statuses advancing pending -> active -> done as `activeIndex`
+    // moves. Routed through renderProgressSnapshot - one renderer, no second.
+    function standaloneBootSnapshot(activeIndex) {
+      const stepLabels = ['Loading graph datasets', 'Processing graph models', 'Rendering visualization'];
+      const stepPercents = [25, 65, 100];
+      const steps = stepLabels.map((label, stepIndex) => ({
+        stage: stepIndex + 1,
+        label: label,
+        percent: stepIndex <= activeIndex ? stepPercents[stepIndex] : 0,
+        message: '',
+        status: stepIndex < activeIndex ? 'done' : (stepIndex === activeIndex ? 'active' : 'pending'),
+      }));
+      return {
+        state: 'loading',
+        phase: '',
+        percent: stepPercents[activeIndex],
+        message: '',
+        total_stages: 3,
+        steps: steps,
+      };
+    }
+
     // Initialize application
     async function init() {
       setupCanvasPanZoom();
 
       if (window.__ARIADNE_DATA__ && window.__ARIADNE_DATA__.include_graph) {
-        showProgress('[1/3] Loading graph datasets... 25%', 25);
         // Use standalone exported data
         graphData = window.__ARIADNE_DATA__;
+        renderProgressSnapshot(standaloneBootSnapshot(0));
         setTimeout(() => {
-          updateProgress(65, '[2/3] Processing graph models... 65%');
+          renderProgressSnapshot(standaloneBootSnapshot(1));
           setTimeout(() => {
-             updateProgress(100, '[3/3] Rendering visualization... 100%');
+             renderProgressSnapshot(standaloneBootSnapshot(2));
              applyLoadedData();
              hideProgress();
           }, 50);
@@ -29,7 +53,7 @@
               const status = await statusRes.json();
               
               if (status.progress && status.progress.state === 'loading') {
-                updateProgress(status.progress.percent, status.progress.phase + ': ' + status.progress.message);
+                renderProgressSnapshot(status.progress);
                 setTimeout(pollStatus, 150);
                 return;
               }

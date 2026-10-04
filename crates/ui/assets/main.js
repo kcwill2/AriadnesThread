@@ -247,6 +247,8 @@
 
     function hideProgress() {
       const overlay = document.getElementById('loadingOverlay');
+      const steps = document.getElementById('loadingSteps');
+      if (steps) steps.textContent = '';
       if (overlay) {
         overlay.style.opacity = '0';
         setTimeout(() => {
@@ -254,6 +256,61 @@
           overlay.style.opacity = '1';
         }, 300);
       }
+    }
+
+    // 20-cell block-glyph bar, `[████░░░░░░░░░░░░░░░░░░]` look, with the
+    // CLI's own integer arithmetic (format_step_bar): clamped percent,
+    // Math.floor fill, remainder always completing 20 cells. Glyphs stay
+    // ASCII escapes in this authored file.
+    function buildStepBarCells(percent) {
+      percent = Math.min(percent, 100);
+      var filled = Math.floor(20 * percent / 100);
+      var remainder = 20 - filled;
+      return '[' + "\u2588".repeat(filled) + "\u2591".repeat(remainder) + ']';
+    }
+
+    // One renderer for both boot paths (ui-progress-parity T3). With step
+    // rows present it draws a CLI-parity frame per step; without them it
+    // delegates to the legacy single-bar width behavior (standalone exports
+    // and legacy fixtures land there - the honest fallback).
+    function renderProgressSnapshot(progress) {
+      if (!progress.steps || progress.steps.length === 0) {
+        const detailText = progress.phase ? progress.phase + ': ' + progress.message : progress.message;
+        updateProgress(progress.percent, detailText);
+        return;
+      }
+      const overlay = document.getElementById('loadingOverlay');
+      if (overlay) overlay.style.display = 'flex';
+      const legacyBar = document.getElementById('loadingProgress');
+      if (legacyBar && legacyBar.parentElement) legacyBar.parentElement.style.display = 'none';
+      const stepsBox = document.getElementById('loadingSteps');
+      if (!stepsBox) return;
+      stepsBox.textContent = '';
+      progress.steps.forEach(step => {
+        const row = document.createElement('div');
+        row.className = 'step-row step-' + step.status;
+        const chip = document.createElement('span');
+        chip.className = 'step-index';
+        chip.textContent = '[' + step.stage + '/' + progress.total_stages + ']';
+        const label = document.createElement('span');
+        label.className = 'step-label';
+        label.textContent = step.label;
+        const bar = document.createElement('span');
+        bar.className = 'step-bar';
+        bar.textContent = buildStepBarCells(step.percent);
+        const percentCell = document.createElement('span');
+        percentCell.className = 'step-percent';
+        percentCell.textContent = Math.min(step.percent, 100) + '%';
+        const detail = document.createElement('span');
+        detail.className = 'step-detail';
+        detail.textContent = step.status === 'pending' ? '' : step.message;
+        row.appendChild(chip);
+        row.appendChild(label);
+        row.appendChild(bar);
+        row.appendChild(percentCell);
+        row.appendChild(detail);
+        stepsBox.appendChild(row);
+      });
     }
 
     // Keyboard shortcut (Ctrl+K or /)
