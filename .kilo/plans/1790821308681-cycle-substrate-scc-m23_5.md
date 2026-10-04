@@ -98,7 +98,7 @@ impl IncludeGraph {
 - **Red:** T1.1 suite is red.
 - **Green:** replace recursion with explicit `Vec<TarjanFrame { symbol_ptr, neighbor_position, ... }>`; lowlink propagation happens on **frame pop**, not on call return -- the classic trap this design structurally avoids. Output contract identical (IV-8): same order, same intra-SCC sort, wrapper `compute_symbol_sccs` unchanged, frame state `Send + Sync`-compatible for the rayon planner (adjacency remains read-only).
 - **Refactor:** one predicate helper per frame-machine step, each < 100 lines; keep `build_symbol_adjacency` untouched.
-- **Review gate:** Code-reviewer audits lowlink update points specifically (push/advance/pop) against the Tarjan invariant; then `cargo test -p ariadne-cluster` + `planner_characterization` + `planner_facts_parity` + **`m00_facts_path_parity_test`** (production byte-lock) all green.
+- **Review gate:** Reviewer audits lowlink update points specifically (push/advance/pop) against the Tarjan invariant; then `cargo test -p ariadne-cluster` + `planner_characterization` + `planner_facts_parity` + **`m00_facts_path_parity_test`** (production byte-lock) all green.
 
 ### Phase 2 -- `CycleGroup` core in crate:graph
 
@@ -134,7 +134,7 @@ impl IncludeGraph {
 **T4.1 Full-workspace verification + hygiene.**
 - `python tools/testrun.py --distill` -> quote the canonical `N passed / M failed / K ignored / S suites` line verbatim (compare against the `1147 / 0 / 4 / 85` post-merge baseline; expect net-positive from new suites); golden suite byte-clean (LF pins intact); `python tools/hygiene_check.py` (R1/R2 blocking -- watch the 1000-line ceiling), `python tools/encoding_guard.py --all`; export determinism re-check on the SCC-dense 520-header bench fixture; `payload_tail_bench` timings recorded.
 - Commit this plan file alongside the code (repo.tracks_plan_files).
-- **Code-reviewer handoff:** diffs, T1.1/T2.3 oracle suites, bench numbers, goldens diff, m20/m22 migration diffs. Focus asks: lowlink update points, tie-break determinism, absence of any retained dual cycle representation, policy-seam stance preservation (IV-11).
+- **Reviewer handoff:** diffs, T1.1/T2.3 oracle suites, bench numbers, goldens diff, m20/m22 migration diffs. Focus asks: lowlink update points, tie-break determinism, absence of any retained dual cycle representation, policy-seam stance preservation (IV-11).
 
 ---
 
