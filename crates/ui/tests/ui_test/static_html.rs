@@ -554,6 +554,22 @@ fn test_ui_loading_overlay_and_progress() {
     let step_css = step_row_css_block(ariadne_ui::STYLES_CSS);
     assert!(!step_css.contains('#'));
     assert!(step_css.contains("var(--"));
+
+    // T3 remediation (shape.md:182-184): while step rows render, the whole
+    // legacy fallback trio (bar row, loadingText, loadingDetail) is hidden;
+    // hideProgress and the empty-steps legacy branch restore it.
+    assert!(html.contains("function setLegacyFallbackVisible"));
+    assert!(html.contains("setLegacyFallbackVisible(false)"));
+    assert!(html.matches("setLegacyFallbackVisible(true)").count() >= 2);
+    let hide_at = html
+        .find("function hideProgress")
+        .expect("hideProgress must exist");
+    let hide_end = html[hide_at + 1..]
+        .find("function ")
+        .map(|offset| hide_at + 1 + offset)
+        .expect("another function follows hideProgress in the bundle");
+    let hide_body = &html[hide_at..hide_end];
+    assert!(hide_body.contains("setLegacyFallbackVisible(true)"));
 }
 
 fn assert_hotspot_panel_markup_and_rendering(html: &str) {

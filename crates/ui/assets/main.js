@@ -245,6 +245,20 @@
       if (detail && detailText) detail.textContent = detailText;
     }
 
+    // The legacy single-bar fallback UI is the bar-row + loadingText +
+    // loadingDetail trio (shape.md:182-184): visible on the legacy path and
+    // restored when the overlay is dismissed, hidden while step rows render
+    // so the overlay never tells two progress stories at once.
+    function setLegacyFallbackVisible(visible) {
+      const fallbackDisplay = visible ? '' : 'none';
+      const legacyBar = document.getElementById('loadingProgress');
+      if (legacyBar && legacyBar.parentElement) legacyBar.parentElement.style.display = fallbackDisplay;
+      const legacyText = document.getElementById('loadingText');
+      if (legacyText) legacyText.style.display = fallbackDisplay;
+      const legacyDetail = document.getElementById('loadingDetail');
+      if (legacyDetail) legacyDetail.style.display = fallbackDisplay;
+    }
+
     function hideProgress() {
       const overlay = document.getElementById('loadingOverlay');
       const steps = document.getElementById('loadingSteps');
@@ -254,14 +268,18 @@
         setTimeout(() => {
           overlay.style.display = 'none';
           overlay.style.opacity = '1';
+          // Restore the trio only after the fade-out, so the overlay shows
+          // neither legacy fallback nor stale rows while invisible.
+          setLegacyFallbackVisible(true);
         }, 300);
       }
     }
 
-    // 20-cell block-glyph bar, `[████░░░░░░░░░░░░░░░░░░]` look, with the
-    // CLI's own integer arithmetic (format_step_bar): clamped percent,
-    // Math.floor fill, remainder always completing 20 cells. Glyphs stay
-    // ASCII escapes in this authored file.
+    // 20-cell block-glyph bar with the CLI's own integer arithmetic (the
+    // format_step_bar look): clamped percent, Math.floor fill, remainder
+    // always completing 20 cells, the whole bar wrapped in brackets. The
+    // block glyphs exist only as the \u2588 (fill) / \u2591 (remainder)
+    // escapes below, so this authored file stays pure ASCII.
     function buildStepBarCells(percent) {
       percent = Math.min(percent, 100);
       var filled = Math.floor(20 * percent / 100);
@@ -275,14 +293,16 @@
     // and legacy fixtures land there - the honest fallback).
     function renderProgressSnapshot(progress) {
       if (!progress.steps || progress.steps.length === 0) {
+        // The fallback must stay honest against legacy fixtures: make the
+        // trio visible again even if a previous snapshot rendered rows.
+        setLegacyFallbackVisible(true);
         const detailText = progress.phase ? progress.phase + ': ' + progress.message : progress.message;
         updateProgress(progress.percent, detailText);
         return;
       }
       const overlay = document.getElementById('loadingOverlay');
       if (overlay) overlay.style.display = 'flex';
-      const legacyBar = document.getElementById('loadingProgress');
-      if (legacyBar && legacyBar.parentElement) legacyBar.parentElement.style.display = 'none';
+      setLegacyFallbackVisible(false);
       const stepsBox = document.getElementById('loadingSteps');
       if (!stepsBox) return;
       stepsBox.textContent = '';

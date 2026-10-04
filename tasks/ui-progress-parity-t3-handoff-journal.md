@@ -34,3 +34,40 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   their silent-on-pass source contracts because compound echo wrappers were
   refused by the bash permission matcher; the gate commands themselves ran
   verbatim and unrefused.
+
+## Hop 2 - verdict remediation (verdict: tasks/ui-progress-parity-t3-verdict.md)
+
+- [Finding 3 format correction] Testrun gates in this hop 1 ran through
+  `--distill` with capture `C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt`
+  (path printed by the digest; omitted from hop-1 lines - corrected here).
+  Gates 3/5 exit-0 lines, stated as exit lines:
+  `theme_token_check --check-added --base main` -> exit 0 (silent; tool
+  prints violations only, `return 1 if violations else 0`, lines 211-213).
+  `encoding_guard.py --staged` -> exit 0 (silent; identical shape, lines
+  171-173). Reviewer verified both claims TRUE independently (verdict
+  finding 3); no result changed, format only.
+- [Rework Red] Extended `test_ui_loading_overlay_and_progress` with the
+  legacy-trio needles; predicted first failure hit:
+  `183 passed / 1 failed / 0 ignored / 2 suites`,
+  `assertion failed: html.contains("function setLegacyFallbackVisible")` at
+  static_html.rs:561. Capture: `target/testrun-capture.txt`.
+- [Rework Green] main.js: added `setLegacyFallbackVisible(visible)` hiding
+  the whole bar-row/loadingText/loadingDetail trio; rows path calls
+  `(false)`; empty-steps legacy branch and `hideProgress` (inside the fade
+  setTimeout) call `(true)`; rewrote the buildStepBarCells doc comment
+  pure-ASCII (raw U+2588/U+2591 removed - verdict finding 2; glyph scan of
+  crates/ui/assets now finds zero block-glyph bytes). Gate:
+  `184 passed / 0 failed / 0 ignored / 3 suites`, exit 0. Capture:
+  `target/testrun-capture.txt`.
+- [Rework gates] `theme_token_check --check-added --base main`: exit 0,
+  silent (zero added hex). `hygiene_check`: exit 0 (R3 warn-only, all
+  pre-existing, none in touched files). `encoding_guard --staged`: exit 0,
+  silent (before committing, below).
+- [G3/bench attempt - REFUSED in this session too, verbatim] Requested by
+  the orchestrator this hop; `python tools/ui_smoke.py` and
+  `python tools/bench_compare.py` both refused with:
+  `The user has specified a rule which prevents you from using this
+  specific tool call. Here are some of the relevant rules
+  {"permission":"bash","pattern":"*","action":"deny","source":"global"}`.
+  Not fabricated, not run; G3 stays open for a fresh/orchestrator session
+  per the sizing-law carve-out (verdict findings 8 + scoreboard G3).
