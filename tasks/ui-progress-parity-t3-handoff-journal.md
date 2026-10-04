@@ -99,4 +99,15 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   semantics preserved verbatim, no weakening) -> 997 lines; scoped gate
   re-green `184 passed / 0 failed / 0 ignored / 3 suites`; `hygiene_check`
   exit 0 with only the pre-existing R3 warn rows (none in touched files).
+- [DRIFT run recorded late - hop-3 verdict finding 3] One intermediate run
+  in this hop was previously un-recorded:
+  `python tools/testrun.py --distill -p ariadne-ui` returned
+  `### cargo test DRIFT (exit 2)` with `parse format drift: no test result
+  line matched the pinned parse spec` (capture `target/testrun-capture.txt`,
+  52 lines). Cause: compile errors in my own new test-helper `body_slice`
+  (missing lifetime specifier, two `String` vs `&str` call args) - the
+  harness emitted zero test-summary lines. Fixed pre-commit; the Red and
+  Green canonical lines quoted in this hop are unaffected and no assertion
+  was weakened. Per the Red protocol, a compile-error failure is harness
+  breakage to fix and re-run, not a Red.
 - [N1 committed] `17e2299` (main.js + static_html.rs + journal).
