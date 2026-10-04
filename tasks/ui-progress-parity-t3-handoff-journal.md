@@ -71,3 +71,8 @@ Predecessors landed: T1 DTO `5eff824`, T2 producer `587c409`.
   {"permission":"bash","pattern":"*","action":"deny","source":"global"}`.
   Not fabricated, not run; G3 stays open for a fresh/orchestrator session
   per the sizing-law carve-out (verdict findings 8 + scoreboard G3).
+- [Rework committed] `9d96272` via commit_scoped with only the three
+  touched scopes (main.js, static_html.rs, journal; index.html/api.js/
+  styles.css untouched this hop, omitted per verdict). Follow-up docs-only
+  commit `fe29dfc` fixes the T2 journal "124 lines" -> verified 115
+  (verdict remediation step 5 carry-over).
