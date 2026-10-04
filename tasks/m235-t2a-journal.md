@@ -8,12 +8,13 @@
 
 | Commit | Scope | Content |
 |---|---|---|
-| COMMIT-1-SHA (filled by commit 2) | `crates/graph/src/cycle_groups.rs`, `crates/graph/src/lib.rs`, `crates/graph/tests/cycle_groups_test.rs`, `tasks/m235-t2a-journal.md` | feat(graph): iterative CycleGroup detection with closed-walk witness (gate 7 verbatim) |
-| COMMIT-2-SHA (filled by checkpoint guard after commit 2) | `.kilo/plans/1790821308681-cycle-substrate-scc-m23_5.md`, `tasks/milestone_ledger.md`, `tasks/m235-t2a-handoff.md`, `tasks/m235-t2b-handoff.md`, journal (SHA fill-in) | orchestrator-declared already-approved planning artifacts + journal SHA record |
+| `34f5fe4` | `crates/graph/src/cycle_groups.rs`, `crates/graph/src/lib.rs`, `crates/graph/tests/cycle_groups_test.rs`, `tasks/m235-t2a-journal.md` | feat(graph): iterative CycleGroup detection with closed-walk witness (gate 7 verbatim; numstat 527/2/564/167 added) |
+| commit after `34f5fe4` (its SHA is the child of 34f5fe4 in checkpoint-guard RECENT COMMITS / `git log` -- a commit cannot carry its own SHA) | `.kilo/plans/1790821308681-cycle-substrate-scc-m23_5.md`, `tasks/milestone_ledger.md`, `tasks/m235-t2a-handoff.md`, `tasks/m235-t2b-handoff.md`, journal (SHA fill-in) | orchestrator-declared already-approved planning artifacts + journal SHA record |
 
 SHAs are re-read from `python tools/checkpoint_guard.py status`
-RECENT COMMITS after each commit; commit 2 fills commit 1's row here
-(the file itself cannot carry its own SHA at authoring time).
+RECENT COMMITS after each commit; this commit fills `34f5fe4` above
+(a file cannot carry its own SHA at authoring time; the second row's SHA
+is verifiable one hop away in the commit graph, honestly not self-attested).
 
 ## Preflight step 0 -- report.json LF restoration (F12)
 
