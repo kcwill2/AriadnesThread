@@ -297,6 +297,147 @@
       --preview-proposed-stroke: #7c3aed;
     }
 
+    /* DARK GREY - D6 discipline in its strictest form: this theme retints
+       the CHROME layer only (surfaces, borders, ink, edges, shadows,
+       scrims) on a pure neutral ramp with near-zero hue (zinc direction:
+       neither warm greige nor cool graphite). The SEMANTIC layer is
+       byte-equal to the default block (--green/--amber/--red verdicts and
+       their washes, the heat ramp, --heat-ramp-a, --node-cycle-*, the
+       preview verdicts): those hues ARE the information - the grey theme
+       changes the table, not the food. Decorative accents keep the default
+       sky-cyan family, and node-kind cards keep their saturated default
+       identities: identity cards read fine on neutral chrome. Every chrome
+       hex below has channel spread <= 4 and every chrome rgba has
+       r == g == b (locked by test_dark_grey_chrome_is_achromatic). */
+    :root[data-theme="dark-grey"] {
+      /* surfaces & ink (neutral grey - pure achromatic ramp) */
+      --bg-main: #141414;
+      --bg-canvas: #171717;
+      --bg-surface: #1c1c1c;
+      --bg-sub: #262626;
+      --bg-card: #2e2e2e;
+      --bg-card-hover: #3a3a3a;
+      --border: #3f3f3f;
+      --border-light: #525252;
+      --text-main: #f5f5f5;
+      --text-muted: #a3a3a3;
+      --text-sub: #8a8a8a;
+      /* accents (default sky-cyan family kept verbatim) */
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.4);
+      --green: #4ade80;
+      --amber: #fb923c;
+      --red: #ef4444;
+      /* bright ink & on-accent strokes */
+      --text-strong: #ffffff;
+      --on-accent: #fff;
+      --code-text: #e4e4e4;
+      /* brand & primary controls */
+      --brand-grad-a: #0284c7;
+      --brand-grad-b: #4f46e5;
+      --brand-glow: rgba(2, 132, 199, 0.4);
+      --primary-btn: #0284c7;
+      --primary-btn-hover: #0369a1;
+      --tag-pill-bg: rgba(14, 165, 233, 0.15);
+      --tag-pill-border: rgba(14, 165, 233, 0.3);
+      /* cyan washes (one per fixed alpha/role; 0.4 washes reuse --cyan-glow) */
+      --cyan-wash: rgba(56, 189, 248, 0.12);
+      --cyan-highlight: rgba(56, 189, 248, 0.15);
+      --cyan-glow-strong: rgba(56, 189, 248, 0.65);
+      --tour-glow: rgba(56, 189, 248, 0.7);
+      /* insight-card washes (graph.js selectNode): border + soft fill on the
+         stable-node card; the cycle card fills with --red-wash-soft */
+      --cyan-border: rgba(56, 189, 248, 0.3);
+      --cyan-wash-soft: rgba(56, 189, 248, 0.08);
+      /* red verdict washes/glows - LOCKED, byte-equal to the default block */
+      --red-wash: rgba(239, 68, 68, 0.15);
+      --red-wash-soft: rgba(239, 68, 68, 0.1);
+      --red-wash-hover: rgba(239, 68, 68, 0.3);
+      --red-glow: rgba(239, 68, 68, 0.4);
+      --red-glow-strong: rgba(239, 68, 68, 0.8);
+      --red-text: #f87171;
+      /* green verdict washes/glows - LOCKED */
+      --green-glow: rgba(74, 222, 128, 0.4);
+      /* amber verdict washes/glows - LOCKED */
+      --amber-wash: rgba(251, 146, 60, 0.1);
+      --amber-border: rgba(251, 146, 60, 0.3);
+      --amber-glow: rgba(251, 146, 60, 0.4);
+      --amber-text: #fdba74;
+      /* edge base strokes (context/transitive + incomplete) - neutral wire */
+      --edge-neutral: #5c5c5c;
+      --edge-incomplete: #7a7a7a;
+      /* canvas dot grid - white speckle, achromatic by construction */
+      --grid-dot: rgba(255, 255, 255, 0.08);
+      /* shadows at the four alphas used across the app - pure black */
+      --shadow-soft: rgba(0, 0, 0, 0.3);
+      --shadow-node: rgba(0, 0, 0, 0.4);
+      --shadow-ambient: rgba(0, 0, 0, 0.5);
+      --shadow-lift: rgba(0, 0, 0, 0.6);
+      /* overlays & translucent surfaces -- --tour-scrim is the guided-tour
+         scrim, a step stronger than --overlay-scrim (0.7 vs 0.5 alpha);
+         the translucent fills track the solid surface ladder, greys only */
+      --overlay-scrim: rgba(0, 0, 0, 0.5);
+      --tour-scrim: rgba(0, 0, 0, 0.7);
+      --overlay-panel-bg: rgba(28, 28, 28, 0.92);
+      --tile-bg: rgba(46, 46, 46, 0.6);
+      --progress-track: rgba(163, 163, 163, 0.2);
+      --heat-ramp-a: #f97316;
+      /* node kind cards (getNodeColors) - default saturated identities kept */
+      --node-header-bg: #082f49;
+      --node-header-text: #38bdf8;
+      --node-header-border: #0284c7;
+      --node-source-bg: #1e1b4b;
+      --node-source-text: #818cf8;
+      --node-source-border: #4f46e5;
+      --node-class-bg: #2e1065;
+      --node-class-text: #c084fc;
+      --node-class-border: #9333ea;
+      --node-function-bg: #052e16;
+      --node-function-text: #4ade80;
+      --node-function-border: #16a34a;
+      --node-other-bg: #1e293b;
+      --node-other-text: #94a3b8;
+      --node-other-border: #475569;
+      --node-cycle-bg: #3b0d0d;
+      --node-cycle-text: #fca5a5;
+      --node-cycle-border: #ef4444;
+      /* 5-tier collateral heat ramp (getHeatColor) -- cool -> hot, always */
+      --heat-0-bg: #06283d;
+      --heat-0-border: #38bdf8;
+      --heat-0-text: #7dd3fc;
+      --heat-1-bg: #063721;
+      --heat-1-border: #22c55e;
+      --heat-1-text: #86efac;
+      --heat-2-bg: #382a04;
+      --heat-2-border: #eab308;
+      --heat-2-text: #fde047;
+      --heat-3-bg: #431407;
+      --heat-3-border: #f97316;
+      --heat-3-text: #fdba74;
+      --heat-4-bg: #450a0a;
+      --heat-4-border: #ef4444;
+      --heat-4-text: #fca5a5;
+      /* preview after-state overlay (E3) - verdicts LOCKED; the proposed
+         family keeps the default violet hypothetical identity */
+      --preview-eliminated-bg: #450a0a;
+      --preview-eliminated-text: #fca5a5;
+      --preview-eliminated-glow: rgba(239, 68, 68, 0.9);
+      --preview-kept-bg: #052e16;
+      --preview-kept-text: #4ade80;
+      --preview-kept-glow: rgba(74, 222, 128, 0.85);
+      --preview-still-bg: #422006;
+      --preview-still-text: #fbbf24;
+      --preview-amber-edge: #f59e0b;
+      --preview-amber-text: #fbbf24;
+      --preview-amber-glow: rgba(245, 158, 11, 0.85);
+      --preview-amber-outline: rgba(245, 158, 11, 0.55);
+      --preview-hyp-bg: rgba(69, 26, 3, 0.92);
+      --preview-hyp-bg-active: rgba(69, 26, 3, 0.55);
+      --preview-proposed-bg: rgba(30, 27, 75, 0.85);
+      --preview-proposed-text: #e9d5ff;
+      --preview-proposed-stroke: #a78bfa;
+    }
+
     /* DARK STEAMPUNK — D6 discipline: the DECORATIVE layer is brass / copper /
        copper-patina / aged brass; the SEMANTIC layer (--green/--amber/--red,
        the heat ramp, the preview verdicts, --heat-ramp-a, --node-cycle-*) KEEPS

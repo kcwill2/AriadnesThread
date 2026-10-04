@@ -12,7 +12,7 @@
 // storage rewrite of stale values, and the re-render. Change the accepted
 // ids or the fallback here and you MUST mirror the bootstrap; the parity
 // test locks the themes.css [data-theme] blocks to THEMES below.
-const THEMES = ['light', 'dark', 'dark-steampunk'];
+const THEMES = ['light', 'dark', 'dark-grey', 'dark-steampunk'];
 const DEFAULT_THEME = 'dark';
 const THEME_STORAGE_KEY = 'ariadne_theme';
 

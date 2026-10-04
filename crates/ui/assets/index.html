@@ -8,14 +8,14 @@
        /app/theme.js on purpose: theme.js loads at the end of <body> (it must
        re-render through graph.js), which is always AFTER the themed CSS has
        painted, so a deferred-only bootstrap would flash the wrong theme.
-       This snippet must run before the /themes.css link below; the three
-       accepted ids mirror the THEMES registry in theme.js — adding a fourth
+       This snippet must run before the /themes.css link below; the four
+       accepted ids mirror the THEMES registry in theme.js — adding another
        theme there REQUIRES mirroring it here. No color literals: styles.css/
        themes.css own every color, and this script only picks an attribute. -->
   <script>
     var bootTheme = null;
     try { bootTheme = localStorage.getItem('ariadne_theme'); } catch (err) { /* private mode: default */ }
-    if (bootTheme !== 'light' && bootTheme !== 'dark' && bootTheme !== 'dark-steampunk') bootTheme = 'dark';
+    if (bootTheme !== 'light' && bootTheme !== 'dark' && bootTheme !== 'dark-grey' && bootTheme !== 'dark-steampunk') bootTheme = 'dark';
     document.documentElement.dataset.theme = bootTheme;
   </script>
   <link rel="stylesheet" href="/themes.css">
@@ -199,6 +199,7 @@
         <select class="select-dark" id="themeSelect" title="Color theme">
           <option value="light">Light</option>
           <option value="dark" selected>Dark</option>
+          <option value="dark-grey">Dark (Grey)</option>
           <option value="dark-steampunk">Dark (Steampunk)</option>
         </select>
       </div>
@@ -468,7 +469,7 @@
         <div id="helpTab-legend" class="help-tab-content" style="display: none;">
           <h4 style="margin-bottom: 8px; color: var(--cyan);">Graph Concepts</h4>
           <p><strong>Node Colors:</strong> Headers (.h), Sources (.cpp), and Cycles each carry a distinct card color; check the legend swatches &mdash; node colors vary by theme.</p>
-          <p><strong>Theme:</strong> The toolbar's <em>Theme:</em> dropdown switches Light / Dark / Dark (Steampunk); the choice persists across reloads and exports, and standalone exported reports carry the same selector. Semantic colors (verdict spines, heat tiers, cycle red) keep their meaning in all three themes.</p>
+          <p><strong>Theme:</strong> The toolbar's <em>Theme:</em> dropdown switches Light / Dark / Dark (Grey) / Dark (Steampunk); the choice persists across reloads and exports, and standalone exported reports carry the same selector. Semantic colors (verdict spines, heat tiers, cycle red) keep their meaning in all four themes.</p>
           <p><strong>Edges:</strong> Complete dependencies are solid, incomplete (forward declarations) are dashed.</p>
           <p><strong>Closure:</strong> Number of transitive dependencies.</p>
           <p><strong>Degree:</strong> Connection distance from selected node.</p>

@@ -16,4 +16,5 @@ mod server_api;
 mod static_html;
 mod static_html_sections;
 mod theme_contract;
+mod theme_dark_grey_palette;
 mod theme_js_zero_hex;

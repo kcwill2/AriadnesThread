@@ -102,8 +102,9 @@ fn test_standalone_export_inlines_theme_tokens() {
         "export must inline the theme token contract: file:// has no /themes.css"
     );
     assert!(
-        content.contains("[data-theme=\"dark-steampunk\"]"),
-        "export must inline all three theme blocks, not just the default"
+        content.contains("[data-theme=\"dark-steampunk\"]")
+            && content.contains("[data-theme=\"dark-grey\"]"),
+        "export must inline all four theme blocks, not just the default"
     );
     assert!(
         !content.contains("href=\"/themes.css\""),
