@@ -5,11 +5,12 @@ dispatch time -- see Commits). Dispatch base: HEAD `5addad7`, branch
 `tarjan-s-scc`, worktree `.kilo/worktrees/tarjan-s-scc`, confirmed by
 `checkpoint_guard.py status` before any edit.
 
-Outcome: COMPLETE. Two scoped commits -- commit 1 = the planner records the
-dispatch waived me to land (its SHA is in the Commits table), commit 2 = the
-eight code paths plus this journal (its own SHA cannot appear in its own
-commit body; read `git log -1`; precedent is T3-E1 verdict "the journal's own
-SHA correctly absent from its own commit table").
+Outcome: COMPLETE. Three scoped commits -- commit 1 `378b240` = the planner
+records the dispatch waived me to land; commit 2 `4bc3b88` = the eight code
+paths plus this journal; commit 3 = this journal alone, carrying `4bc3b88`
+(sec9 asks for your own SHA in the journal, which a commit body cannot do for
+itself; precedent is T3-E1 verdict "the journal's own SHA correctly absent
+from its own commit table").
 
 Per sec4, stated plainly: **there is NO production-behaviour Red for a
 rename.** This unit changes no behaviour, adds no test, removes no test. The
@@ -216,7 +217,7 @@ at `:624`; the 3 `tools/` bench keys unchanged; `crates/graph/**`,
 | 4 | `python tools/distill.py -- cargo check -p ariadne-integration-tests --all-targets` | `ok (exit 0, 9 warnings emitted)` (181-line capture; every warning is in `tests\integration\tests\**`, none in `ariadne-ui`) |
 | 5 | `python tools/distill.py -- cargo build -p ariadne-ui` | `ok (exit 0, 0 warnings emitted)` -- zero warnings proves no import or reference was missed |
 | 6 | `python tools/hygiene_check.py` | R1 **0** lines, R2 **0** lines, **120** R3 warn lines -- the same 120 T3-D2/T3-E1 measured at this base; none introduced in a file I touched (line numbers in my files are unshifted or above my edits: `dto.rs:330/:418/:445` sit above my `:599`+ edits, `ui.rs:557+` below my `:328`, `graph_api.rs` `res` lines unchanged) |
-| 7 | `python tools/encoding_guard.py --all` / `--staged` | no output, both forms (Dev-3 ordering) |
+| 7 | `python tools/encoding_guard.py --all` (x2, immediately before each commit) then `--staged` (x1, immediately after the code commit) | no output, all three forms (Dev-3 ordering) |
 | 8 | `python tools/commit_scoped.py --scope ... -m ...` | two commits, explicit `--scope` per path; F12 fixture in neither |
 
 Non-vacuity: gate 1 executes 186 with 0 ignored in 1 suite; gate 2's 3 suites
@@ -304,8 +305,9 @@ structural.
 ## Refusals encountered (verbatim, per sec9)
 
 None. Every command in this session ran on its first independent attempt:
-`checkpoint_guard.py status` (x2), `testrun.py` (x4), `distill.py` wrapping
-`cargo check`/`cargo build` (x6), `certutil` (x2) and `git diff --numstat`
+`checkpoint_guard.py status` (x3: preflight, after the test runs, after the
+commits), `testrun.py` (x4), `distill.py` wrapping `cargo check`/`cargo build`
+(x6), `certutil` (x2) and `git diff --numstat`
 through `distill.py`, `hygiene_check.py`, `encoding_guard.py`,
 `commit_scoped.py` (x2). The census greps ran through the `grep` tool because
 raw `grep`/`git`/`cargo` are off the allowlist by contract, not by refusal.
@@ -315,7 +317,8 @@ raw `grep`/`git`/`cargo` are off the allowlist by contract, not by refusal.
 | SHA | Scope | Content |
 |---|---|---|
 | `378b240` | 3 explicit `--scope`s under `tasks/` | planner records: `m235-t3e2-handoff.md` 283/405 (the rewritten contract), pure additions `m235-t3e1-verdict.md` (699/0) and `m235-t3e1-execution-results.md` (151/0) |
-| (commit 2, `git log -1`) | 9 explicit `--scope`s = sec1/sec8 exactly | the rename, the 19 repointed call sites, the 5 import lists, D1-D7, and this journal |
+| `4bc3b88` | 9 explicit `--scope`s = sec1/sec8 exactly | the rename, the 19 repointed call sites, the 5 import lists, D1-D7, and this journal as written through Checkpoint 2 |
+| (this journal-only follow-up) | `tasks/m235-t3e2-journal.md` alone | sec9's "your own SHA in it": it records `4bc3b88`, which cannot sit in its own commit body, plus the two gate-count corrections above. Its own SHA: read `git log -1`. Precedent for a journal's SHA living outside the commit that carries it: T3-E1, whose verdict called that "correctly absent". |
 
 Neither commit contains `tests/fixtures/basic/artifacts/includes/report.json`
 (F12), `crates/graph/**`, `crates/report/**`, `crates/pipeline/**`,
