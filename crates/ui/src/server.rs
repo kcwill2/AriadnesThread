@@ -62,6 +62,8 @@ impl UiState {
                 phase: "Initializing".to_string(),
                 percent: 0,
                 message: "Server started".to_string(),
+                steps: Vec::new(),
+                total_stages: 0,
             }),
             stage_status: std::sync::RwLock::new(crate::dto::StageStatus::default()),
         }
@@ -84,6 +86,8 @@ impl UiState {
                 phase: "Done".to_string(),
                 percent: 100,
                 message: "Ready".to_string(),
+                steps: Vec::new(),
+                total_stages: 0,
             }),
             stage_status: std::sync::RwLock::new(crate::dto::StageStatus::default()),
         };

@@ -1,12 +1,40 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Lifecycle of one boot step row, serialized lowercase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressStepStatus {
+    Pending,
+    Active,
+    Done,
+}
+
+/// One `[k/N]` boot step as the terminal would show it: its own 0-100 bar
+/// plus the in-flight detail. `label` carries the phase text with the
+/// `[k/N] ` prefix stripped (the browser composes the label from
+/// `stage`/`total_stages`). `message` is empty while `pending`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressStepView {
+    pub stage: usize,
+    pub label: String,
+    pub percent: usize,
+    pub message: String,
+    pub status: ProgressStepStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerProgress {
     pub state: String,
     pub phase: String,
     pub percent: usize,
     pub message: String,
+    /// Per-step rows mirroring the terminal's committed + live lines.
+    /// Empty only pre-seed (standalone exports, legacy fixtures).
+    #[serde(default)]
+    pub steps: Vec<ProgressStepView>,
+    #[serde(default)]
+    pub total_stages: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

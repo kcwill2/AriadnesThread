@@ -1,6 +1,9 @@
 use crate::common;
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
-use ariadne_ui::{build_router, GraphExportPayload, SummaryStats, UiState};
+use ariadne_ui::{
+    build_router, GraphExportPayload, ProgressStepStatus, ProgressStepView, ServerProgress,
+    SummaryStats, UiState,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -762,5 +765,178 @@ async fn test_rebuild_swap_installs_fresh_cold_memo() {
         memo_counters(&old_memo),
         stale_snapshot,
         "the detached generation-1 memo must never be queried after the swap"
+    );
+}
+
+#[tokio::test]
+async fn test_status_progress_json_has_step_row_fields() {
+    let app = build_router(common::loading_state());
+
+    let (status, _headers, body) = common::request_route(app, "/api/status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["progress"]["steps"].is_array(),
+        "additive contract: /api/status progress must carry a `steps` array"
+    );
+    assert!(
+        body["progress"]["total_stages"].is_number(),
+        "additive contract: /api/status progress must carry a numeric `total_stages`"
+    );
+}
+
+#[test]
+fn test_progress_serialization_gains_empty_step_fields() {
+    let state = UiState::new_loading(std::path::PathBuf::from("."));
+    let progress_value =
+        serde_json::to_value(state.progress.read().unwrap().clone()).unwrap();
+    assert!(
+        progress_value["steps"].is_array(),
+        "a fresh loading ServerProgress must serialize `steps` (empty array), got {progress_value}"
+    );
+    assert!(
+        progress_value["total_stages"].is_number(),
+        "a fresh loading ServerProgress must serialize `total_stages`, got {progress_value}"
+    );
+}
+
+/// The five example rows of the shape's mid-boot JSON example
+/// (`tasks/ui-progress-parity-shape.md` lines 125-137), installed verbatim
+/// by the fixture and error-freeze tests. Labels carry the `[k/N] ` prefix
+/// already stripped (the CLI producer strips; this crate never does).
+fn mid_boot_example_rows() -> Vec<ProgressStepView> {
+    let row = |stage: usize,
+               label: &str,
+               percent: usize,
+               message: &str,
+               status: ProgressStepStatus| ProgressStepView {
+        stage,
+        label: label.to_string(),
+        percent,
+        message: message.to_string(),
+        status,
+    };
+    vec![
+        row(1, "Loading artifacts...", 100, "Include graph ready", ProgressStepStatus::Done),
+        row(2, "Indexing translation units...", 30, "6/24 TUs", ProgressStepStatus::Active),
+        row(3, "Reducing semantic model...", 0, "", ProgressStepStatus::Pending),
+        row(4, "Building call graph...", 0, "", ProgressStepStatus::Pending),
+        row(5, "Analyzing collateral...", 0, "", ProgressStepStatus::Pending),
+    ]
+}
+
+/// Install the shape's mid-boot snapshot onto a loading state's progress.
+fn install_mid_boot_snapshot(state: &UiState) {
+    let mut progress = state.progress.write().unwrap();
+    progress.phase = "[2/5] Indexing translation units...".to_string();
+    progress.percent = 26;
+    progress.message = "6/24 TUs".to_string();
+    progress.steps = mid_boot_example_rows();
+    progress.total_stages = 5;
+}
+
+/// I5 additive serde: an old four-field `ServerProgress` JSON object (no
+/// `steps`/`total_stages`) must deserialize to empty rows, and the four
+/// legacy values must round-trip unchanged.
+#[test]
+fn test_server_progress_from_legacy_four_field_json_gains_empty_step_fields() {
+    let legacy_json =
+        r#"{"state":"loading","phase":"[1/5] Loading artifacts...","percent":12,"message":"scan"}"#;
+    let progress: ServerProgress = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(progress.state, "loading");
+    assert_eq!(progress.phase, "[1/5] Loading artifacts...");
+    assert_eq!(progress.percent, 12);
+    assert_eq!(progress.message, "scan");
+    assert_eq!(progress.steps, Vec::new(), "absent `steps` must default to empty");
+    assert_eq!(progress.total_stages, 0, "absent `total_stages` must default to 0");
+
+    let re_serialized = serde_json::to_value(&progress).unwrap();
+    assert_eq!(re_serialized["state"], "loading");
+    assert_eq!(re_serialized["phase"], "[1/5] Loading artifacts...");
+    assert_eq!(re_serialized["percent"], 12);
+    assert_eq!(re_serialized["message"], "scan");
+    assert_eq!(re_serialized["steps"], serde_json::json!([]));
+    assert_eq!(re_serialized["total_stages"], 0);
+}
+
+/// Mid-boot wire fixture: locks the shape's JSON example field-for-field on
+/// `/api/status`, including the lowercase `status` wire strings per row.
+#[tokio::test]
+async fn test_status_route_locks_mid_boot_step_rows_shape() {
+    let state = common::loading_state();
+    install_mid_boot_snapshot(&state);
+    let app = build_router(state);
+
+    let (status, _headers, body) = common::request_route(app, "/api/status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["progress"]["state"], "loading");
+    assert_eq!(body["progress"]["phase"], "[2/5] Indexing translation units...");
+    assert_eq!(body["progress"]["percent"], 26);
+    assert_eq!(body["progress"]["message"], "6/24 TUs");
+    assert_eq!(body["progress"]["total_stages"], 5);
+
+    let steps = body["progress"]["steps"]
+        .as_array()
+        .expect("mid-boot progress must serve a `steps` array");
+    let expected_rows = [
+        (1usize, "Loading artifacts...", 100usize, "Include graph ready", "done"),
+        (2, "Indexing translation units...", 30, "6/24 TUs", "active"),
+        (3, "Reducing semantic model...", 0, "", "pending"),
+        (4, "Building call graph...", 0, "", "pending"),
+        (5, "Analyzing collateral...", 0, "", "pending"),
+    ];
+    assert_eq!(steps.len(), expected_rows.len());
+    for (row_index, expected_row) in expected_rows.iter().enumerate() {
+        let (stage, label, percent, message, status_string) = *expected_row;
+        let step = &steps[row_index];
+        assert_eq!(step["stage"], stage, "row {row_index} `stage`");
+        assert_eq!(step["label"], label, "row {row_index} `label`");
+        assert_eq!(step["percent"], percent, "row {row_index} `percent`");
+        assert_eq!(step["message"], message, "row {row_index} `message`");
+        assert_eq!(
+            step["status"], status_string,
+            "row {row_index} `status` must be the lowercase wire string"
+        );
+    }
+}
+
+/// I6 error freeze: the `run_ui` error arm writes ONLY `state` + `message`
+/// (pattern of `crates/cli/src/commands/ui.rs:720`); `steps`/`total_stages`
+/// must stay byte-equal to the installed loading snapshot and no row may
+/// gain `Done`.
+#[test]
+fn test_error_arm_write_pattern_freezes_step_rows() {
+    let state = UiState::new_loading(std::path::PathBuf::from("."));
+    install_mid_boot_snapshot(&state);
+    let installed_rows = state.progress.read().unwrap().steps.clone();
+
+    {
+        let mut progress = state.progress.write().unwrap();
+        progress.state = "error".to_string();
+        progress.message = "analysis failed".to_string();
+    }
+
+    let frozen = state.progress.read().unwrap();
+    assert_eq!(frozen.state, "error");
+    assert_eq!(frozen.message, "analysis failed");
+    assert_eq!(
+        frozen.steps, installed_rows,
+        "error arm must leave `steps` byte-equal to the loading snapshot"
+    );
+    assert_eq!(
+        frozen.total_stages, 5,
+        "error arm must leave `total_stages` at the loading snapshot value"
+    );
+    let done_rows_after_error = frozen
+        .steps
+        .iter()
+        .filter(|step| step.status == ProgressStepStatus::Done)
+        .count();
+    let done_rows_at_install = installed_rows
+        .iter()
+        .filter(|step| step.status == ProgressStepStatus::Done)
+        .count();
+    assert_eq!(
+        done_rows_after_error, done_rows_at_install,
+        "no row may gain `Done` across the error-arm write"
     );
 }
