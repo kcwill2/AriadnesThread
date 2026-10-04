@@ -1012,18 +1012,93 @@
       border-left-color: var(--amber);
     }
 
+    .extraction-head {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .extraction-plan-id {
+      flex: 0 0 auto;
+      color: var(--text-muted);
+      background: var(--bg-card-hover);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 0 4px;
+      font-size: 9px;
+    }
+
     .extraction-title {
       font-weight: 700;
+      font-size: 12px;
       color: var(--amber);
     }
 
-    .extraction-delta {
-      color: var(--text-sub);
-      margin: 2px 0;
+    .extraction-problem {
+      margin-top: 3px;
     }
 
-    .extraction-names {
-      margin-bottom: 2px;
+    .extraction-label {
+      flex: 0 0 auto;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-sub);
+    }
+
+    .extraction-cost {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 3px;
+    }
+
+    .extraction-delta {
+      font-weight: 700;
+    }
+
+    .extraction-saving {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .extraction-chips {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 3px;
+    }
+
+    .extraction-chip {
+      font-family: monospace;
+      font-size: 10px;
+      background: var(--tile-bg);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 0 3px;
+    }
+
+    .extraction-tu {
+      color: var(--text-sub);
+    }
+
+    .extraction-risk {
+      color: var(--text-sub);
+      font-weight: 700;
+    }
+
+    .extraction-risk-conservative {
+      color: var(--green);
+    }
+
+    .extraction-risk-moderate {
+      color: var(--amber);
+    }
+
+    .extraction-risk-aggressive {
+      color: var(--red);
     }
 
     .extraction-row {

@@ -3,6 +3,7 @@ mod d27_node_provenance;
 mod dto_builders;
 mod edge_verdict_story;
 mod export_order;
+mod extraction_card_story;
 mod file_view;
 mod graph_api;
 mod gui_scrollbar_style;

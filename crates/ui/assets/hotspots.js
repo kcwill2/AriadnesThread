@@ -275,12 +275,50 @@
     // The preview control (E3) runs against the CURRENTLY selected consumer root,
     // never the planner's global target — the label says so — and only appears
     // when that root's justification data carries impact for this card's file.
+    // Chips replace the old comma run-on blobs: every item passes through
+    // escapeHtml here once, so both chip rows (moved symbols, required
+    // headers) share one escape path.
+    function extractionChips(items) {
+      const escaped = (items || []).map(escapeHtml);
+      return escaped.map(safeLabel => `<span class="extraction-chip">${safeLabel}</span>`).join('');
+    }
+
+    // Derived saving text for the cost beat: '-D (-P%)' shown only when the
+    // before load is a real positive baseline AND the after load is genuinely
+    // smaller - no division by zero, no negative percent otherwise.
+    function extractionSavingText(before, after) {
+      if (!(before > 0) || !(after < before)) return '';
+      const drop = before - after;
+      const percent = Math.round(drop * 100 / before);
+      return ` <span class="extraction-saving">-${drop} (-${percent}%)</span>`;
+    }
+
+    // Tiered risk badge: the class suffix is lowercased and stripped to
+    // [a-z], so unknown values degrade to the neutral base rule instead of
+    // injecting fragments into the class attribute.
+    function renderExtractionRiskTag(risk) {
+      const tier = (risk || '').toLowerCase().replace(/[^a-z]/g, '');
+      return `<span class="extraction-risk extraction-risk-${tier}">Risk: ${escapeHtml(risk || '')}</span>`;
+    }
+
+    // Five-beat story card (why -> what moves -> what it costs -> who is
+    // affected -> preview): identity head with plan_id chip, the problem
+    // sentence visible in the body, a labeled collateral drop with derived
+    // saving, symbol/header chips, and the reader-worded consumer-TU count.
+    // The preview button markup stays byte-faithful (class, label, attrs).
     function renderExtractionProposalCard(p) {
-      const headers = (p.required_headers || []).map(escapeHtml).join(', ');
-      const names = (p.symbol_names || []).map(escapeHtml).join(', ');
-      const hidden = (p.total_symbols || 0) - (p.symbol_names || []).length;
-      const more = hidden > 0 ? ` <span class="just-more">+${hidden} more</span>` : '';
-      const needs = headers ? headers : '<em>no additional headers</em>';
+      const targetLabel = escapeHtml(p.target_file || String(p.target_file_id));
+      const before = p.collateral_load_before || 0;
+      const after = p.collateral_load_after || 0;
+      const saving = extractionSavingText(before, after);
+      const hiddenCount = (p.total_symbols || 0) - (p.symbol_names || []).length;
+      const overflow = hiddenCount > 0 ? `<span class="just-more">+${hiddenCount} more</span>` : '';
+      const symbolChips = (p.symbol_names || []).length
+        ? `${extractionChips(p.symbol_names)}${overflow}`
+        : '<em>no symbol names</em>';
+      const headerChips = (p.required_headers || []).length
+        ? extractionChips(p.required_headers)
+        : '<em>no additional headers</em>';
       const previewRoot = selectedNodeId === null || selectedNodeId === undefined ? null : String(selectedNodeId);
       const previewable = previewRoot !== null && window.ariadnePreview
         && window.ariadnePreview.hasImpact(previewRoot, String(p.target_file_id));
@@ -288,12 +326,19 @@
         ? `<div class="extraction-row"><button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(previewRoot)}" data-preview-source="${escapeHtml(String(p.target_file_id))}">Preview drop from selected file</button></div>`
         : '';
       return `
-        <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${escapeHtml(p.problem || '')}">
-          <div class="extraction-title">Extract the following symbols from ${escapeHtml(p.target_file || String(p.target_file_id))}</div>
-          <div class="extraction-delta">${p.collateral_load_before || 0} &rarr; ${p.collateral_load_after || 0} collateral</div>
-          <div class="extraction-names"><strong>Symbols:</strong> ${names || '<em>no symbol names</em>'}${more}</div>
-          <div class="extraction-row"><span class="just-tag">extracted symbols need</span>${needs}</div>
-          <div class="extraction-row"><span class="just-tag">${p.consumer_tu_count || 0} TU(s)</span><span class="just-tag">${escapeHtml(p.risk || '')}</span></div>
+        <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${targetLabel}">
+          <div class="extraction-head">
+            <span class="extraction-plan-id">${escapeHtml(p.plan_id || '')}</span>
+            <span class="extraction-title">${targetLabel}</span>
+          </div>
+          <div class="extraction-problem"><span class="extraction-label">Why</span>${escapeHtml(p.problem || '')}</div>
+          <div class="extraction-cost">
+            <span class="extraction-label">Collateral drop</span>
+            <span class="extraction-delta">${before} &rarr; ${after}</span>${saving}
+          </div>
+          <div class="extraction-row"><span class="extraction-label">Extract (${p.total_symbols || 0})</span><span class="extraction-chips">${symbolChips}</span></div>
+          <div class="extraction-row"><span class="extraction-label">extracted symbols need</span><span class="extraction-chips">${headerChips}</span></div>
+          <div class="extraction-row"><span class="extraction-label">Impact</span><span class="extraction-tu">${p.consumer_tu_count || 0} consumer TU(s) need re-validation</span>${renderExtractionRiskTag(p.risk)}</div>
           ${previewBtn}
         </div>`;
     }
