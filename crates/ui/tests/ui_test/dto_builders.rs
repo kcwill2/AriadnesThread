@@ -205,6 +205,8 @@ fn d2_sample_proposal() -> ariadne_ui::ExtractionProposalDto {
         required_headers: vec!["a.h".to_string(), "b.h".to_string()],
         consumer_tu_count: 7,
         risk: "Conservative".to_string(),
+        target_files: vec![],
+        target_files_truncated: false,
     }
 }
 

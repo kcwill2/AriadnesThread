@@ -179,6 +179,24 @@ pub const EXTRACTION_PROPOSAL_MAX: usize = 12;
 pub const EXTRACTION_PROPOSAL_MAX_NAMES: usize = JUSTIFICATION_MAX_NAMES;
 pub const EXTRACTION_PROPOSAL_MAX_HEADERS: usize = JUSTIFICATION_MAX_HEADERS;
 
+/// Cap for destination-file rows per proposal (mirrors the header cap).
+pub const EXTRACTION_PROPOSAL_MAX_TARGET_FILES: usize = 8;
+
+/// One suggested destination file and the symbols it should contain.
+/// `path` is repo-relative, lossy-rendered like the plan's PathBuf (plain
+/// display data only — the cluster plan type never crosses into ui).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposedTargetFileDto {
+    /// Repo-relative destination path suggested by the plan.
+    pub path: String,
+    /// Symbols destined for this file, sorted by symbol_id, capped at
+    /// `EXTRACTION_PROPOSAL_MAX_NAMES`.
+    pub symbol_names: Vec<String>,
+    /// Uncapped member count for this file (truncation of `symbol_names`
+    /// is `symbol_count - symbol_names.len()`).
+    pub symbol_count: usize,
+}
+
 /// One Conservative extraction proposal shown in both surfaces (I5/I8):
 /// plain display data only — the cluster crate's `OptimizationPlan` never
 /// crosses into the ui crate.
@@ -195,6 +213,15 @@ pub struct ExtractionProposalDto {
     pub required_headers: Vec<String>,
     pub consumer_tu_count: usize,
     pub risk: String,
+    /// Suggested destination files with per-file symbol manifests, grouped
+    /// from the plan's proposed extractions; `serde(default)` keeps payloads
+    /// written before this field decodable (empty = no file plan known).
+    #[serde(default)]
+    pub target_files: Vec<ProposedTargetFileDto>,
+    /// True iff destination-file rows were capped at
+    /// `EXTRACTION_PROPOSAL_MAX_TARGET_FILES` by the producer.
+    #[serde(default)]
+    pub target_files_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

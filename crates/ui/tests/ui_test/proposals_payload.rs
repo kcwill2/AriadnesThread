@@ -1,4 +1,4 @@
-use ariadne_ui::{ExtractionProposalDto, GraphExportPayload, SummaryStats};
+use ariadne_ui::{ExtractionProposalDto, GraphExportPayload, ProposedTargetFileDto, SummaryStats};
 use std::collections::HashMap;
 
 fn sample_proposal(plan_id: &str) -> ExtractionProposalDto {
@@ -14,6 +14,8 @@ fn sample_proposal(plan_id: &str) -> ExtractionProposalDto {
         required_headers: vec!["a.h".to_string(), "b.h".to_string()],
         consumer_tu_count: 23,
         risk: "Conservative".to_string(),
+        target_files: vec![],
+        target_files_truncated: false,
     }
 }
 
@@ -92,7 +94,63 @@ fn test_proposal_dto_key_names_are_stable() {
             "symbol_names",
             "target_file",
             "target_file_id",
+            "target_files",
+            "target_files_truncated",
             "total_symbols",
         ]
     );
+}
+
+#[test]
+fn test_target_file_keys_emitted_when_fields_set() {
+    let json =
+        serde_json::to_value(payload_with(vec![sample_proposal("PLAN-001")])).unwrap();
+    assert!(
+        json["extraction_proposals"][0]
+            .get("target_files")
+            .is_some(),
+        "target_files key must be emitted for every proposal row"
+    );
+}
+
+#[test]
+fn test_legacy_payload_without_target_file_keys_decodes() {
+    let mut json =
+        serde_json::to_value(payload_with(vec![sample_proposal("PLAN-001")])).unwrap();
+    let legacy_row = json
+        .get_mut("extraction_proposals")
+        .and_then(|rows| rows.get_mut(0))
+        .and_then(|row| row.as_object_mut())
+        .expect("sample payload carries one proposal row");
+    legacy_row.remove("target_files");
+    legacy_row.remove("target_files_truncated");
+
+    let back: GraphExportPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        back.extraction_proposals[0].target_files,
+        vec![],
+        "payloads written before the target-file fields must decode to empty"
+    );
+    assert!(
+        !back.extraction_proposals[0].target_files_truncated,
+        "absent target_files_truncated must decode to false"
+    );
+}
+
+#[test]
+fn test_target_files_round_trip_preserves_content() {
+    let destination = ProposedTargetFileDto {
+        path: "include/thing_extracted.h".to_string(),
+        symbol_names: vec!["Thing".to_string(), "ThingBuilder".to_string()],
+        symbol_count: 3,
+    };
+    let mut proposal = sample_proposal("PLAN-001");
+    proposal.target_files = vec![destination.clone()];
+    proposal.target_files_truncated = true;
+
+    let json = serde_json::to_value(payload_with(vec![proposal.clone()])).unwrap();
+    let back: GraphExportPayload = serde_json::from_value(json).unwrap();
+
+    assert_eq!(back.extraction_proposals, vec![proposal]);
+    assert_eq!(back.extraction_proposals[0].target_files, vec![destination]);
 }
