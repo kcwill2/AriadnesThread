@@ -50,9 +50,11 @@ module's Green gate, per the handoff's discipline clauses.
   then `scan_raw_string` false -> `scan_string_literal` swallow-to-EOF. This
   is the only reading under which I4's `unterminated` and `fallback` fixtures
   are simultaneously satisfiable.
-- Refactor note (applied during Green A validation): the first inline dispatch
-  version pushed `tokenize_raw` to 111 lines (hygiene R1 blocking). The quote
-  branch was extracted into `scan_quote` (tokenize_raw back under 100); the
+- Refactor note (applied at the Refactor stage): the inline dispatch version
+  from Green A pushed `tokenize_raw` to 111 lines (hygiene R1 blocking, caught
+  by the first hygiene run after Green B). The quote branch was extracted into
+  `scan_quote` (tokenize_raw back under 100; second hygiene run has zero R1
+  lines); the
   branch now delegates. `scan_raw_string` re-verifies the header as its
   contract's false-branch, standalone per spec 4.1.
 
@@ -77,10 +79,13 @@ module's Green gate, per the handoff's discipline clauses.
 ## Gates run (implementer side)
 
 1. testrun Red A, 2. testrun Green A, 3. testrun Red B (drift, compile fix),
-4. testrun Red B, 5. testrun Green B, 6. testrun final G1 (one extra
-   invocation vs the ~5 planned, consumed by the harness compile fix),
-7. hygiene_check exit 0, 8. encoding_guard --staged (see run report),
-9. scoped commit (Step 0 committed earlier as `9ce140a`).
+4. testrun Red B, 5. testrun Green B, 6. testrun final G1 post-refactor,
+7. testrun post-commit verification (committed tree:
+   `147 passed / 0 failed / 0 ignored / 2 suites`, exit 0).
+7 invocations vs the ~5 planned: +1 for the harness compile fix (drift run),
++1 for the post-commit re-verification.
+Then: hygiene_check exit 0, encoding_guard --staged exit 0, scoped commit
+`ad65747` (Step 0 committed earlier as `9ce140a`).
 
 ## Out-of-scope observations (report-only, not fixed)
 
