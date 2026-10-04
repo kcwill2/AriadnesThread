@@ -1,7 +1,7 @@
 use crate::common;
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_ui::{
-    build_call_elements, build_include_elements_from_groups, build_router,
+    build_call_elements, build_include_elements, build_router,
     build_symbol_elements, GraphExportPayload, SummaryStats, UiState,
 };
 use axum::{
@@ -133,7 +133,7 @@ async fn assert_search_query_matches(app: axum::Router, uri: &str, query_kind: &
 async fn test_search_advanced_queries_and_dto_paths() {
     let (include_graph, call_graph, reduced_model) = given_mock_search_graphs();
 
-    let include_elements = build_include_elements_from_groups(
+    let include_elements = build_include_elements(
         &include_graph,
         &std::collections::HashMap::new(),
         &[],
@@ -749,14 +749,14 @@ fn include_elements_export_is_stable_across_two_calls_with_cycle_fixtures() {
     // belongs to the reviewer acceptance pass, not to this unit (handoff
     // sec5 test-5 note; tests/golden/** is out of scope here).
     let graph = stability_cycle_graph();
-    let elements_first = build_include_elements_from_groups(
+    let elements_first = build_include_elements(
         &graph,
         &HashMap::new(),
         &graph.detect_cycle_groups(),
         &HashMap::new(),
         &HashMap::new(),
     );
-    let elements_second = build_include_elements_from_groups(
+    let elements_second = build_include_elements(
         &graph,
         &HashMap::new(),
         &graph.detect_cycle_groups(),

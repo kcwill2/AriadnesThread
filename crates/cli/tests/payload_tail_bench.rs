@@ -61,8 +61,9 @@
 //!
 //! M23.5 T3.2 re-pin (2026-10-04): the `generate_report+detect_cycles`
 //! combined column became `generate_report+detect_cycle_groups` (the SCC
-//! replacement for `detect_cycles`; `detect_cycles` still exists until the
-//! crates/graph unit D deletes it). This row was re-pinned above to `5.6` ms
+//! replacement for `detect_cycles`; crates/graph unit D deleted the public
+//! `detect_cycles()` in `acea7f2`, approved range `adb53a3..aebfa9b`). This
+//! row was re-pinned above to `5.6` ms
 //! from a `--release -- --ignored --test-threads=1` run on 2026-10-04. The
 //! prior combined figure was `5.8` ms (this bench's 2026-09-29 table). The
 //! plan's stated baseline was a DIFFERENT number, `4.7` ms, quoted in the
@@ -322,7 +323,7 @@ fn run_assembly(
         timed(|| (graph.generate_report(), graph.detect_cycle_groups()));
     let (_elements, include_elements_ms) = timed(|| {
         let no_decoration = std::collections::HashMap::new();
-        ariadne_ui::build_include_elements_from_groups(&graph, &closures, &cycle_groups, &no_decoration, &no_decoration)
+        ariadne_ui::build_include_elements(&graph, &closures, &cycle_groups, &no_decoration, &no_decoration)
     });
     // ui.rs:247-248 — two cheap serial maps, timed together.
     let (justification_maps_ms, path_to_id) = {

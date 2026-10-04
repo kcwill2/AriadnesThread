@@ -1,7 +1,7 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_call_elements, build_include_elements_from_groups, build_symbol_elements,
+    build_call_elements, build_include_elements, build_symbol_elements,
     CytoscapeElement, GraphExportPayload, SummaryStats,
 };
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ async fn test_dto_builders() {
     let closures = HashMap::new();
     let cycle_groups = vec![];
 
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &include_graph,
         &closures,
         &cycle_groups,
@@ -467,7 +467,7 @@ fn intra_group_non_tree_edge_carries_the_cycle_class() {
     // step re-pointed it to the group-based builder per handoff sec4.
     let graph = chord_cycle_graph();
     let group = single_group_containing(&graph, FileId(1));
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[group],
@@ -498,7 +498,7 @@ fn node_cycle_data_reports_group_size_and_witness_only_for_grouped_nodes() {
     // re-pointed it to the group-based builder per handoff sec4.
     let graph = chord_cycle_graph();
     let group = single_group_containing(&graph, FileId(2));
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[group.clone()],
@@ -585,7 +585,7 @@ fn grouped_nodes_and_edges_are_classed_cycle_from_membership_not_from_reported_p
         !first_group.representative_cycle.contains(&FileId(12)),
         "fixture sanity: c.h must be grouped without appearing on any witness path"
     );
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[first_group, second_group],

@@ -6,7 +6,7 @@
 use ariadne_graph::{IncludeGraph, ReducedSemanticModel, ReducedSymbolRecord};
 use ariadne_index::SymbolId;
 use ariadne_repo::FileId;
-use ariadne_ui::{build_include_elements_from_groups, build_symbol_elements};
+use ariadne_ui::{build_include_elements, build_symbol_elements};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::common;
@@ -138,7 +138,7 @@ fn d27_file_nodes_emit_language_and_unit_kind_from_injected_maps() {
         [(4u64, "Scala".to_string())].into_iter().collect();
     let unit_kinds: HashMap<u64, String> =
         [(4u64, "SourceFile".to_string())].into_iter().collect();
-    let elements = build_include_elements_from_groups(&one_file_graph(), &HashMap::new(), &[], &languages, &unit_kinds);
+    let elements = build_include_elements(&one_file_graph(), &HashMap::new(), &[], &languages, &unit_kinds);
     let file_node = &elements[0];
     assert_eq!(file_node.data["language"], "Scala");
     assert_eq!(file_node.data["unit_kind"], "SourceFile");
@@ -149,7 +149,7 @@ fn d27_file_nodes_emit_language_and_unit_kind_from_injected_maps() {
 fn d27_file_node_decoration_is_omitted_when_map_entry_absent() {
     // Locked default for missing entries: the key is OMITTED (honest absence),
     // never a fabricated "UNKNOWN" on files discovery never classified.
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &one_file_graph(),
         &HashMap::new(),
         &[],
@@ -171,7 +171,7 @@ fn d27_file_node_decoration_is_omitted_when_map_entry_absent() {
     grouped_graph.edges.push(grouped_include_edge(5, 4));
     let groups = grouped_graph.detect_cycle_groups();
     assert_eq!(groups.len(), 1, "the two-file include pair is one entangled group");
-    let grouped_elements = build_include_elements_from_groups(
+    let grouped_elements = build_include_elements(
         &grouped_graph,
         &HashMap::new(),
         &groups,

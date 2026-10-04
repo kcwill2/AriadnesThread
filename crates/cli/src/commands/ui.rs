@@ -325,7 +325,7 @@ let node_maps = node_maps::build(
         &pipeline.discovery.files,
         &crate::registry::default_registry(),
     );
-    let include_elements = ariadne_ui::build_include_elements_from_groups(
+    let include_elements = ariadne_ui::build_include_elements(
         &include_graph,
         &closures,
         &cycle_groups,

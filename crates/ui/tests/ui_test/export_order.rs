@@ -12,7 +12,7 @@ use ariadne_graph::{
 };
 use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_include_elements_from_groups, GraphExportPayload, JustificationEntry,
+    build_include_elements, GraphExportPayload, JustificationEntry,
     SummaryStats,
 };
 use std::collections::HashMap;
@@ -88,7 +88,7 @@ fn node_ids(elements: &[ariadne_ui::CytoscapeElement]) -> Vec<&str> {
 #[test]
 fn include_nodes_emit_in_canonical_path_then_file_id_order() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[],
@@ -105,7 +105,7 @@ fn include_nodes_emit_in_canonical_path_then_file_id_order() {
 #[test]
 fn include_edges_keep_source_vec_order_behind_sorted_nodes() {
     let graph = shuffled_file_graph();
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[],
@@ -164,7 +164,7 @@ fn grouped_nodes_keep_the_canonical_emission_order_and_edge_order() {
         vec![FileId(2), FileId(5), FileId(11)],
         "fixture sanity: the entangled group is exactly members 2, 5 and 11"
     );
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &groups,
@@ -280,10 +280,11 @@ fn export_map_sections_serialize_keys_in_sorted_order() {
     assert_ascending(&json, &["c10", "c2", "c3"]);
 }
 
-/// Non-vacuity witness for the parity lock below
-/// (`acyclic_include_elements_are_byte_identical_under_both_cycle_currencies`):
-/// the SAME serialization comparison must be able to FAIL once a real cycle
-/// currency exists, so the parity equality is never green-by-construction.
+/// Non-vacuity witness for the frozen-expectation lock below
+/// (`acyclic_include_elements_match_the_frozen_acyclic_payload`): the SAME
+/// serialization comparison must be able to FAIL once a real cycle currency
+/// exists, so a byte equality over this builder's output is never
+/// green-by-construction.
 ///
 /// P2 has no Red of its own: this `assert_ne!` and P1's mutated `assert_eq!`
 /// (the executed mutation trail, handoff sec4 step R2) are the SAME comparison
@@ -291,8 +292,8 @@ fn export_map_sections_serialize_keys_in_sorted_order() {
 /// run -- in which the group-based side differs from the legacy side -- is
 /// simultaneously the executed proof that this comparison has teeth. This is
 /// not a determinism test and not a re-test of IV-2/IV-3 or the OMITS rule
-/// (`dto_builders.rs` owns those); it exists only to keep the parity lock
-/// honest.
+/// (`dto_builders.rs` owns those); it exists only to keep the frozen
+/// expectation honest.
 #[test]
 fn the_parity_comparison_detects_a_cycle_classification_difference() {
     let graph = cyclic_shuffled_file_graph();
@@ -307,14 +308,14 @@ fn the_parity_comparison_detects_a_cycle_classification_difference() {
         vec![FileId(2), FileId(5), FileId(11)],
         "fixture sanity: the entangled group is exactly members 2, 5 and 11"
     );
-    let legacy_elements = build_include_elements_from_groups(
+    let legacy_elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &[],
         &HashMap::new(),
         &HashMap::new(),
     );
-    let grouped_elements = build_include_elements_from_groups(
+    let grouped_elements = build_include_elements(
         &graph,
         &HashMap::new(),
         &groups,
@@ -365,7 +366,7 @@ const ACYCLIC_EMPTY_CURRENCY_PAYLOAD: &str = concat!(
 /// Frozen-byte lock -- what remains of the unit T3-D2 parity lock after unit
 /// T3-E1 deleted the path-based builder. What it locks: on a graph carrying NO
 /// cycle currency, the ONE surviving builder
-/// `build_include_elements_from_groups` must emit exactly the recorded bytes.
+/// `build_include_elements` must emit exactly the recorded bytes.
 ///
 /// Where the recorded bytes came from: they were captured from this builder's
 /// own output at `b0a91d2`, where the committed parity lock of unit T3-D2
@@ -419,7 +420,7 @@ fn acyclic_include_elements_match_the_frozen_acyclic_payload() {
     // Step 3 -- EXACTLY ONE builder call, with empty cycle currency. Two calls
     // of the surviving name on one input would assert a value equals itself;
     // the single-invocation rule is this lock's anti-tautology invariant.
-    let elements = build_include_elements_from_groups(
+    let elements = build_include_elements(
         &graph,
         &closures,
         &[],

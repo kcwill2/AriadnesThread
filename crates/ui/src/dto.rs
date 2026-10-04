@@ -597,8 +597,11 @@ fn path_basename(path: &std::path::Path) -> String {
 }
 
 /// File nodes plus include edges classified from `CycleGroup` membership
-/// (M23.5, plan sec1.3): the group-based sibling of
-/// `build_include_elements`, keeping the exact 5-argument D27 shape.
+/// (M23.5, plan sec1.3): the ONE include-element entry point in `crates/ui`
+/// (the path-based one was retired in T3-E by E1), keeping the exact
+/// 5-argument D27 shape. The third parameter was `&[Vec<FileId>]` (reported
+/// DFS path enumeration) before M23.5 and is now `&[CycleGroup]` (the SCC
+/// partition), so the earlier type must not be "restored" here.
 ///
 /// File nodes plus include edges. D27: `file_languages`/`file_unit_kinds`
 /// (numeric FileId → display string) are injected by the cli payload builder
@@ -615,7 +618,7 @@ fn path_basename(path: &std::path::Path) -> String {
 /// `"cycle_witness"` (the group's representative-cycle path labels in
 /// `representative_cycle` order, IV-5); both follow the D27 OMITS rule -- a
 /// node in no group gets NEITHER key, never `null` and never `0`.
-pub fn build_include_elements_from_groups(
+pub fn build_include_elements(
     graph: &ariadne_graph::IncludeGraph,
     closures: &std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
     cycle_groups: &[ariadne_graph::CycleGroup],
@@ -631,10 +634,10 @@ pub fn build_include_elements_from_groups(
     )
 }
 
-/// Shared emission tail for both include-element entry points: exactly one
-/// node loop in canonical `(path asc, file_id asc)` order followed by one
-/// edge loop in `graph.edges` order. The only input differing between the
-/// entry points is the cycle-classification view; degree tallying, sorting,
+/// Shared emission tail behind the one include-element entry point: exactly
+/// one node loop in canonical `(path asc, file_id asc)` order followed by one
+/// edge loop in `graph.edges` order. The cycle-classification view is this
+/// layer's only cycle-classification input; degree tallying, sorting,
 /// kind derivation, D27 decoration and the OMITS rule for the group keys are
 /// shared, so there is no duplicated emission loop (M23.5 T3-A).
 fn emit_include_elements(
