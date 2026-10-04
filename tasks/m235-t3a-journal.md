@@ -156,3 +156,24 @@ and the shared emission tail:
   NEW `crates/ui/src/cycle_groups_view.rs`). A commit without them would
   reference a module it does not contain (unbuildable commit); the sec6
   extension clause is the authorization and this journal is its declaration.
+
+## Checkpoint 4 - commits
+
+- COMMIT A (gate 8): `31513b9` "feat(ui): add group-based include element
+  builder with cycle group data" -- carries exactly the 6 touch-set paths
+  plus the 2 sec6-declared extension files (dto.rs +65/-16, dto_builders.rs
+  +283/-2, graph_api.rs +94/-2, export_order.rs +92/-1,
+  d27_node_provenance.rs +61/-1, journal, cycle_groups_view.rs +149/-0 new,
+  lib.rs +1/-0). `tests/fixtures/basic/artifacts/includes/report.json` is in
+  NO commit of this unit.
+- COMMIT B (this row's subject, recorded after creation): planning record
+  commit carrying the planner-authored dirty files (plan AMENDED row,
+  milestone ledger rows) + the five untracked m235-t3*-handoff.md +
+  m235-t2b-verdict.md + m235-t2b-execution-results.md (all orchestrator-
+  declared) + this journal SHA fill-in; its SHA is `PENDING-B` -- filled by
+  checkpoint_guard `status` RECENT COMMITS in the same row below, per the
+  T2-A/T2-B row-2 precedent (T2-B verdict finding 5 accepted that form).
+- Post-commit gates: `python tools/encoding_guard.py --staged` (literal
+  gate-6 form, executed after the scoped commits -> no output) and the
+  after-state `python tools/checkpoint_guard.py status` follow this commit;
+  the fixture after-state check is in Checkpoint 5.
