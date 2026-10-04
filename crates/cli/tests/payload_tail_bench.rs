@@ -20,7 +20,8 @@
 //! - `generate_report`/`detect_cycle_groups` and the `path_to_id`/`file_collateral`
 //!   maps are each timed COMBINED (two adjacent public calls per row).
 //!
-//! ## Baseline table (recorded 2026-09-29, this bench, `--test-threads=1`)
+//! ## Baseline table (recorded 2026-09-29, combined cycle row re-pinned
+//! ## 2026-10-04, this bench, `--test-threads=1`)
 //!
 //! Fixture: 520 headers / 40 TUs, 2160 reduced symbols, 560 file metrics,
 //! 8960 justification entries, 520 plans (all Conservative rows).
@@ -36,7 +37,7 @@
 //! get_or_build_load clone (cold)                   |   1048.8
 //! get_or_build_include_graph clone (warm)          |      1.4
 //! get_or_build_load clone (warm)                   |   1056.5
-//! generate_report+detect_cycles (combined)         |      5.8
+//! generate_report+detect_cycle_groups (combined)   |      5.6
 //! build_include_elements                           |      5.4
 //! path_to_id+file_collateral maps (combined)       |     29.5
 //! build_file_justification_with_memo               |  15383.9
@@ -57,6 +58,32 @@
 //! true boot order — proposals before the justification memo takes the
 //! closures), so the current planner row is NOT comparable against the A0
 //! cold number kept above for history.
+//!
+//! M23.5 T3.2 re-pin (2026-10-04): the `generate_report+detect_cycles`
+//! combined column became `generate_report+detect_cycle_groups` (the SCC
+//! replacement for `detect_cycles`; `detect_cycles` still exists until the
+//! crates/graph unit D deletes it). This row was re-pinned above to `5.6` ms
+//! from a `--release -- --ignored --test-threads=1` run on 2026-10-04. The
+//! prior combined figure was `5.8` ms (this bench's 2026-09-29 table). The
+//! plan's stated baseline was a DIFFERENT number, `4.7` ms, quoted in the
+//! `ui.rs:103` stage-5 calibration table for the same combined call; `4.7`
+//! and `5.8` were never reconciled in the tree. I re-pinned against this
+//! bench's OWN recorded `5.8` (the same bench, same table, same combined
+//! call) and measured `5.6`: parity within single-run noise, the expected
+//! outcome since SCC detection is linear in V+E. Both sites now record the
+//! single measured `5.6` (the `ui.rs` stage-5 calibration comment moved
+//! with this row per handoff sec 3.3); the split `5.8`-vs-`4.7` pre-unit
+//! baseline is recorded here and in `tasks/m235-t3b-journal.md` rather than
+//! silently resolved.
+//!
+//! UNVERIFIED (handoff sec 5): `5.6` is a SINGLE LOCAL MEASUREMENT on this
+//! machine on 2026-10-04, NOT a bench-compare-verified result.
+//! `python tools/bench_compare.py` is REFUSED by the reviewer bash allowlist
+//! (ledger M23.5 F10) and was NOT run, so there is NO reviewer-run
+//! perf-regression evidence for `detect_cycle_groups`. "Expected parity" is
+//! not "measured parity": the comparison above is UNVERIFIED against
+//! `bench_compare.py`, and it was NOT routed through `distill.py` to evade
+//! the denial.
 //!
 //! Run with:
 //!   cargo test -p ariadne-cli --test payload_tail_bench --release -- \

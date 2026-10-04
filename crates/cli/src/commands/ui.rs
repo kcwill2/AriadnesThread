@@ -100,11 +100,23 @@ const STAGES_PER_RUN: usize = 5;
 // 2026-09-29: symbol_pass+prep 301ms · file_pass 75.4ms ·
 // save_load_artifacts+cache 1417.8ms · ensure_load total 1794.2ms (vs the
 // post-A6 runs 1893/1743 — milestone notifies cost nothing measurable) ·
-// generate_report+detect_cycles 4.7ms · build_include_elements 5.1ms ·
+// generate_report+detect_cycle_groups 5.6ms · build_include_elements 5.1ms ·
 // path_to_id+file_collateral 28.9ms · planner facts+closures 232.4ms ·
 // build_file_justification_with_memo 5313.4ms (DOMINANT) · conservative
 // 0.0ms. The stage-5 window totals ~7.38 s over the 20-point global span
 // [80,100], so 1 point ~= 0.37 s.
+// Re-pin 2026-10-04 (M23.5 T3.2): the cycle row above is now
+// detect_cycle_groups at a measured 5.6 ms (--release run of the tail
+// bench, 2026-10-04). It replaces 4.7 ms, which already disagreed with
+// payload_tail_bench.rs's own 2026-09-29 row of 5.8 ms for the same
+// combined call; the measured 5.6 sits with the bench table (parity
+// within single-run noise, as linear-time SCC predicts), so the
+// pre-existing 4.7-vs-5.8 split is recorded, not papered over.
+// UNVERIFIED against bench_compare.py: that tool is off the reviewer
+// allowlist (ledger M23.5 F10) and was not run; 5.6 ms is a single local
+// measurement, not bench-compare-verified perf evidence. The percent
+// constants below are unmoved: this span is a fraction of a point either
+// way. Full provenance: payload_tail_bench.rs header + T3-B journal.
 // Every milestone sits at the nearest integer point of its CUMULATIVE
 // measured time (milestone boundaries within ~0.2 pt of measured reality).
 // The largest forward error is <=1 pt mid-file-loop, where the loop-end
