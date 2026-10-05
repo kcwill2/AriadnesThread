@@ -8,8 +8,13 @@ answers 200 with the product's verified content types and Cache-Control.
 
 Usage: python tools/ui_smoke.py [--fixture PATH] [--no-build] [--cold|--warm]
                                 [--timeout SECONDS] [--exe PATH]
-                                [--target-dir DIR]
+                                [--target-dir DIR] [--release]
 Exit codes: 0 PASS, 1 smoke failure, 2 internal/usage error.
+
+--release is opt-in (M28 T3 rider): it builds `cargo build --release
+--bin tool` and launches target/release/tool(.exe) with the same cold/warm
+routes and route + Cache-Control assertions. Without it the behavior is
+exactly the debug-profile default (cargo build --bin tool, target/debug).
 
 Verified product contract (2026-10-01, read-only inspection):
 - crates/cli/src/lib.rs Ui command: positional `repo`, `--port`, `--no-open`,
@@ -83,6 +88,9 @@ def parse_arguments(argv):
                         help="fixture repo to copy (default tests/fixtures/basic)")
     parser.add_argument("--no-build", action="store_true",
                         help="skip cargo build and reuse the existing binary")
+    parser.add_argument("--release", action="store_true",
+                        help="build and launch the release profile "
+                             "(cargo build --release, target/release)")
     temperature = parser.add_mutually_exclusive_group()
     temperature.add_argument("--cold", action="store_true",
                              help="strip artifacts/ and .ariadne from the copy (default)")
@@ -92,8 +100,9 @@ def parse_arguments(argv):
                         help="seconds to wait for the server to reach ready state")
     parser.add_argument("--exe", default=None,
                         help="explicit path to the tool binary (overrides --target-dir)")
-    parser.add_argument("--target-dir", default="target/debug",
-                        help="directory holding tool.exe (default target/debug)")
+    parser.add_argument("--target-dir", default=None,
+                        help="directory holding tool.exe (default target/debug,"
+                             " or target/release with --release)")
     options = parser.parse_args(argv)
     if options.timeout <= 0:
         raise UsageError("--timeout must be a positive number of seconds")
@@ -296,9 +305,18 @@ def check_routes(base_url: str):
     return failures
 
 
-def build_binary(repo_root: Path):
+def cargo_build_argv(release: bool):
+    """Cargo argv for the smoke build; default profile stays exactly debug."""
+    argv = ["cargo", "build"]
+    if release:
+        argv.append("--release")
+    argv += ["--bin", "tool"]
+    return argv
+
+
+def build_binary(repo_root: Path, release: bool = False):
     finished = subprocess.run(
-        ["cargo", "build", "--bin", "tool"], cwd=str(repo_root),
+        cargo_build_argv(release), cwd=str(repo_root),
         capture_output=True, text=True, errors="replace")
     output = (finished.stdout or "") + (finished.stderr or "")
     return finished.returncode == 0, output
@@ -307,7 +325,12 @@ def build_binary(repo_root: Path):
 def resolve_exe_path(options, repo_root: Path) -> Path:
     if options.exe is not None:
         return Path(options.exe).resolve()
-    target_dir = Path(options.target_dir)
+    if options.target_dir is not None:
+        target_dir = Path(options.target_dir)
+    elif options.release:
+        target_dir = Path("target/release")
+    else:
+        target_dir = Path("target/debug")
     if not target_dir.is_absolute():
         target_dir = repo_root / target_dir
     exe_name = "tool.exe" if sys.platform == "win32" else "tool"
@@ -393,9 +416,10 @@ def run_smoke(options, repo_root: Path) -> int:
         return EXIT_INTERNAL_ERROR
     exe_path = resolve_exe_path(options, repo_root)
     if options.build:
-        built, build_output = build_binary(repo_root)
+        built, build_output = build_binary(repo_root, options.release)
         if not built:
-            print("ERROR cargo build --bin tool failed; output tail:\n"
+            print("ERROR " + " ".join(cargo_build_argv(options.release))
+                  + " failed; output tail:\n"
                   + _tail_text(build_output, TAIL_LINES_KEPT))
             return EXIT_INTERNAL_ERROR
     if not exe_path.is_file():

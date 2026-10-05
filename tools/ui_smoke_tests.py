@@ -13,12 +13,14 @@ import io
 import json
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -332,6 +334,94 @@ class CliValidationTests(unittest.TestCase):
         code, output = run_main_captured(["--no-build", "--exe", str(missing)])
         self.assertEqual(code, 2)
         self.assertIn("ERROR", output)
+
+
+class ReleaseProfilePlumbingTests(unittest.TestCase):
+    """M28 T3 rider: the --release flag's build-argv and target wiring.
+
+    Plumbing-only by design (no server boot, no cargo): the honest ceiling
+    for a doc/flag change is the flag plumbing itself; the live release-boot
+    witness belongs to the reviewer's `ui_smoke --release` run.
+    """
+
+    def setUp(self):
+        self.repo_root = Path(tempfile.mkdtemp(prefix="ui-smoke-profile-"))
+        self.addCleanup(shutil.rmtree, str(self.repo_root), True)
+
+    def captured_build_argv(self, cargo_call):
+        """Run one build_binary call with subprocess.run faked.
+
+        Returns (build_ok, cargo_argv) recorded from the fake.
+        """
+        recorded = []
+
+        def fake_run(command, **_kwargs):
+            recorded.append(list(command))
+            return subprocess.CompletedProcess(command, returncode=0,
+                                               stdout="", stderr="")
+
+        with mock.patch.object(ui_smoke.subprocess, "run", fake_run):
+            build_ok, _output = cargo_call()
+        self.assertEqual(len(recorded), 1,
+                         "expected exactly one cargo invocation")
+        return build_ok, recorded[0]
+
+    def test_default_build_argv_and_exe_stay_debug_profile(self):
+        # Characterization floor (written BEFORE the flag existed): the
+        # default route must keep exactly today's argv and target/debug.
+        options = ui_smoke.parse_arguments([])
+        build_ok, argv = self.captured_build_argv(
+            lambda: ui_smoke.build_binary(self.repo_root))
+        self.assertTrue(build_ok)
+        self.assertEqual(argv, ["cargo", "build", "--bin", "tool"])
+        exe_path = ui_smoke.resolve_exe_path(options, self.repo_root)
+        self.assertEqual(exe_path,
+                         self.repo_root / "target" / "debug" / exe_path.name)
+        self.assertIn(exe_path.name, ("tool", "tool.exe"))
+
+    def test_release_flag_builds_cargo_build_release(self):
+        options = ui_smoke.parse_arguments(["--release"])
+        self.assertTrue(options.release)
+        build_ok, argv = self.captured_build_argv(
+            lambda: ui_smoke.build_binary(self.repo_root, options.release))
+        self.assertTrue(build_ok)
+        self.assertEqual(argv, ["cargo", "build", "--release", "--bin", "tool"])
+
+    def test_release_resolves_exe_under_target_release(self):
+        options = ui_smoke.parse_arguments(["--release"])
+        exe_path = ui_smoke.resolve_exe_path(options, self.repo_root)
+        self.assertEqual(exe_path,
+                         self.repo_root / "target" / "release" / exe_path.name)
+        self.assertIn(exe_path.name, ("tool", "tool.exe"))
+
+    def test_release_no_build_resolves_release_without_cargo_call(self):
+        # The skip-build branch itself is the pre-existing `if options.build`
+        # wiring (locked by test_missing_exe_with_no_build_exits_2); this
+        # test pins the release-profile half: parse + resolution, zero cargo.
+        options = ui_smoke.parse_arguments(["--release", "--no-build"])
+        self.assertTrue(options.no_build)
+        recorded = []
+        with mock.patch.object(ui_smoke.subprocess, "run",
+                               lambda *args, **kwargs: recorded.append(args)):
+            exe_path = ui_smoke.resolve_exe_path(options, self.repo_root)
+        self.assertEqual(recorded, [], "--no-build must not invoke cargo")
+        self.assertEqual(exe_path.parent.name, "release")
+
+    def test_exe_option_wins_over_release_and_target_dir(self):
+        explicit_exe = self.repo_root / "somewhere" / "tool.exe"
+        options = ui_smoke.parse_arguments(
+            ["--release", "--target-dir", "target/other",
+             "--exe", str(explicit_exe)])
+        exe_path = ui_smoke.resolve_exe_path(options, self.repo_root)
+        self.assertEqual(exe_path, explicit_exe.resolve())
+
+    def test_target_dir_option_wins_over_release_default(self):
+        options = ui_smoke.parse_arguments(
+            ["--release", "--target-dir", "custom/out"])
+        exe_path = ui_smoke.resolve_exe_path(options, self.repo_root)
+        self.assertEqual(exe_path,
+                         self.repo_root / "custom" / "out" / exe_path.name)
+        self.assertIn(exe_path.name, ("tool", "tool.exe"))
 
 
 if __name__ == "__main__":

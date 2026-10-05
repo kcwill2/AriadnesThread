@@ -67,6 +67,7 @@ This is a Rust workspace for C++ dependency analysis:
 - Canonical reporting: `python tools/testrun.py [scoped cargo test args]` prints one line `N passed / M failed / K ignored / S suites` (exit 2 = parse drift; use `--baseline` for milestone gates)
 - Agents run tests via `python tools/testrun.py --distill [scoped args]` (bounded digest + full capture at `target/testrun-capture.txt`, path printed in the digest); raw mode remains for humans
 - UI runtime smoke (one command): `python tools/ui_smoke.py` builds the tool, cold-boots the UI on an ephemeral port, asserts routes + `Cache-Control: no-store`
+- Smoke release form (opt-in; M28 T3 profile-lever rider, 2026-10-05): `python tools/ui_smoke.py --release` builds `cargo build --release --bin tool` and launches `target/release/tool(.exe)` with the same route assertions; the default smoke route stays debug, and `--exe` overrides `--target-dir` overrides the profile default
 - Tool unit suites: `python -m unittest discover -s tools -p "*_tests.py"` (what CI runs)
 - Tests are organized by crate in `crates/*/tests/` and `tests/`
 - Integration tests are in `tests/integration/`
