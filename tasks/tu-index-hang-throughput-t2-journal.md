@@ -345,3 +345,50 @@ a commitment, not built here.
 - No shard-envelope field change anywhere (DP-6: the version CONSTANT
   is the only cache-visible change - reviewer eyeballed the hunks).
 
+## Rider checkpoint (verdict 72252a4 landing - ERRATA ADDENDUM re-adjudication)
+
+Verdict `tasks/tu-index-hang-throughput-t2-verdict.md` =
+APPROVED-PENDING-RIDERS, then GO after re-adjudication ("reconciliation
+SOUND"). Riders landed as commit `72252a4` (parent `bcc3bb0`), direct
+`commit_scoped.py` (sanctioned route D1), scopes + message relayed
+UNCHANGED. numstat: crates/report/src/manager/tests.rs 6/4,
+tests/integration/tests/m21_scala_semantic_index_test.rs 1/1 - exactly
+the two files, both diffs literal-only (m21 witness string byte-
+unchanged; report json/bin constants untouched). Staged set verified
+exactly those two paths (`git diff --cached --name-only`);
+`encoding_guard.py --staged` -> `### generic PASS (exit 0)`
+(0-line capture).
+
+- R1 m21 witness: `"2.0.0"` -> `"2.1.0"`, message string unchanged.
+- R2 report byte-lock: `LOCK_MANIFEST_JSON_HASH` `0xddc3_f9ee_566b_5ea6`
+  -> `0xbee9_1e36_1bbe_1e4b` + pure-ASCII resync comment (the
+  reviewer-observed hash, third independent observation via
+  `load_artifact_bytes_are_byte_locked ... ok`).
+
+Amended package gate lines (verdict ERRATA ADDENDUM; the original MUST
+lines inherited measurement blind spots - the landing fail-fast abort
+hid 10 package targets sorting after m21, and the report proof was
+lib-target-only):
+- `python tools/testrun.py --distill -p ariadne-integration-tests` ->
+  `141 passed / 0 failed / 0 ignored / 35 suites` (armed tree, re-run
+  during stop-and-report).
+- `python tools/testrun.py --distill -p ariadne-report` ->
+  `36 passed / 0 failed / 0 ignored / 3 suites` (lib 35 + extraction
+  target 1 + doc-tests 0).
+- Binding workspace anchor, re-verified green by the reviewer on the
+  armed tree: `1219 passed / 0 failed / 4 ignored / 86 suites`.
+
+Finding-3 ledger errata (M27 row; orchestrator lands the dated row): the
+DP-6 dependent set is FIVE sites - cache.rs const, cache.rs assert,
+m12 pin, m27 un-ignore, m21 witness - plus the report manifest
+byte-lock HASH (hash-pin, references no version string, invisible to
+the lock row's "grep the constant across crates/" proof). Five literal
+sites + one hash pin, all now landed.
+
+Finding-4 (reported, NOT fixed - out of this hop's scope): plain
+(non-distill) `python tools/testrun.py` crashes in its echo path
+(`tools/testrun.py:262`, `_echo`) with `UnicodeEncodeError` on a cp1252
+console - the m21 assert message contains an em-dash; pre-existing
+(testrun predates this hop); the `--distill` standing-contract path is
+unaffected; routed to ledger deferred-findings by the verdict.
+
