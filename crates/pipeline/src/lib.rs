@@ -9,29 +9,20 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
-use rayon::prelude::*;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult, TranslationUnit};
+use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult};
 use ariadne_graph::{
-    build_dependency_graph, CallGraph, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMetric,
-    ReducedSemanticModel,
+    build_dependency_graph, CallGraph, IncludeClosure, IncludeGraph, ReducedSemanticModel,
 };
-use ariadne_index::{
-    IncrementalStats, IndexResult, StageFingerprints, TuAnalysis, CURRENT_ANALYSIS_VERSION,
-};
-use ariadne_lang::{CyclePolicy, LanguageId, LanguagePlugin, LanguageRegistry, UnitShaper};
+use ariadne_index::{IndexResult, StageFingerprints};
+use ariadne_lang::{CyclePolicy, LanguageId, LanguageRegistry};
 use ariadne_repo::{FileId, Repository, RepositoryDiscoveryResult, SourceLanguage};
 use ariadne_report::{ArtifactManager, LoadReport};
-use ariadne_scheduler::{
-    analyze_closure_with, compute_tu_closure_plugin, load_shard, save_shard, shard_dir,
-    ProductionAnalysisStats, ProductionAnalyzer, ShardCheckpoint, SharedPluginWorkerBackend,
-    SharedTuStoreContext, TuClosure, TuStoreContext,
-};
+use ariadne_scheduler::{ProductionAnalysisStats, SharedTuStoreContext, TuStoreContext};
 
 pub const STAGE_INCLUDE_GRAPH: &str = "include-graph";
 pub const STAGE_INDEX: &str = "index";
@@ -46,6 +37,13 @@ pub const STAGE_LOAD: &str = "load";
 // callers unchanged (cli delegation contract, D9).
 mod registry;
 pub use registry::{build_default_registry, default_registry};
+
+// Stage modules extracted VERBATIM from this file (boot-progress-visibility
+// V3a, hygiene sec. 9: this file sat AT the 1000-line ceiling). The index
+// and load stages are `impl Pipeline` blocks in these modules; behavior
+// zero-change. M27 T3/T4 add INTO these modules, not `lib.rs`.
+mod stage_index;
+mod stage_load;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -380,163 +378,6 @@ impl Pipeline {
     }
 
     // ------------------------------------------------------------------
-    // Index stage (TU-level reuse via the shard store)
-    // ------------------------------------------------------------------
-
-    pub fn ensure_index(&mut self) -> Result<()> {
-        if self.index_cache.is_some() {
-            return Ok(());
-        }
-
-        if self.manager.stage_is_fresh("index", &self.fps.index) && self.language_filter.is_none() {
-            if let Ok(loaded) = self.manager.load_index_checked(&self.fps.index) {
-                self.index_cache = Some(loaded);
-                self.stats.record(STAGE_INDEX, StageReuse::Loaded);
-                return Ok(());
-            }
-        }
-
-        let indexed_build = self.indexed_build()?;
-        let (index_result, stats, production_stats) = match self.workers {
-            Some(workers) => {
-                // M18.11: the production path always runs the registry-backed
-                // plugin backend and the plugin-driven shard prepass.
-                let analyzer =
-                    ProductionAnalyzer::new(&self.repo, &self.discovery, &indexed_build)
-                        .with_workers(workers)
-                        .with_backend(Arc::new(SharedPluginWorkerBackend::new(Arc::clone(
-                            &self.registry,
-                        ))))
-                        .with_registry(Arc::clone(&self.registry));
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()?;
-                let analysis_result = rt.block_on(analyzer.analyze())?;
-                let production = analysis_result.stats;
-                let reuse =
-                    IncrementalStats::calculate(production.reused_tus, production.reanalyzed_tus);
-                (analysis_result.index_result, reuse, Some(production))
-            }
-            None => {
-                let (index_result, stats) = self.rebuild_index_single_threaded(&indexed_build)?;
-                (index_result, stats, None)
-            }
-        };
-
-        self.production_stats = production_stats;
-
-        // A `--lang` restriction is a filtered view, never the authoritative
-        // full-stage artifact; saving it under the full index fingerprint would
-        // poison every later full run, so only the unfiltered result persists.
-        if self.language_filter.is_none() {
-            self.manager
-                .save_index_artifacts(&index_result, &self.fps.index, Some(&stats))?;
-        }
-        self.stats.reused_tus = stats.reused_tus;
-        self.stats.reanalyzed_tus = stats.reanalyzed_tus;
-        self.index_cache = Some(index_result);
-        self.stats.record(STAGE_INDEX, StageReuse::Rebuilt);
-        Ok(())
-    }
-
-    /// The build result the index stage analyzes: full, or restricted to the
-    /// `--lang` language (plan M18.3). Contexts are kept intact either way —
-    /// closures resolve per TU context exactly as in a full run.
-    ///
-    /// A filtered run re-shapes through the filter's plugin shaper (D15):
-    /// construction-time discovery ran the registry's marker-based selection
-    /// (D22), which may recognize none of the filtered language's build
-    /// markers at all (a repo shaped by another language's shaper yields
-    /// zero units), so retention alone could never surface units of the
-    /// filtered language.
-    /// The unfiltered path returns the construction-time result unchanged —
-    /// `select_unit_shaper`'s `None` branch is that same marker-based call,
-    /// so `compute_inputs`' discovery and every derived fingerprint are
-    /// exactly what the unfiltered run analyzes.
-    fn indexed_build(&mut self) -> Result<BuildDiscoveryResult> {
-        let mut build = match self.language_filter {
-            None => self.build.clone(),
-            Some(_) => {
-                let reshaped = BuildDiscoverer::new(&self.repo.root)
-                    .with_repo_discovery(&self.discovery)
-                    .with_unit_shaper(select_unit_shaper(
-                        &self.registry,
-                        self.language_filter,
-                        &self.repo.root,
-                    ))
-                    .discover()?;
-                // The shard store context must see the contexts the shaping
-                // named, exactly as construction-time shaping provided them
-                // (context content is part of every TU cache fingerprint).
-                self.store_ctx =
-                    TuStoreContext::new(&self.discovery, reshaped.contexts.clone());
-                reshaped
-            }
-        };
-        if let Some(language) = self.language_filter {
-            // M24 Part A: the `--lang` filter arrives as the closed file-kind
-            // label, while detection answers in the open identity, so the
-            // comparison goes through the one direction that exists.
-            let selected = LanguageId::from(language);
-            build
-                .translation_units
-                .retain(|tu| self.registry.detect_language(&tu.source_path).as_ref() == Some(&selected));
-        }
-        Ok(build)
-    }
-
-    fn rebuild_index_single_threaded(
-        &mut self,
-        build: &BuildDiscoveryResult,
-    ) -> Result<(IndexResult, IncrementalStats)> {
-        let store_dir = shard_dir(&self.repo.root);
-        let store_ctx = self.store_ctx.clone();
-        let repo_root = self.repo.root.clone();
-        let mut progress = self.progress.take();
-        let mut notify = |event: &ProgressEvent| {
-            if let Some(cb) = progress.as_mut() {
-                cb(event);
-            }
-        };
-
-        let mut reused = 0usize;
-        let mut reanalyzed = 0usize;
-        let mut analyses = Vec::new();
-
-        let total = build.translation_units.len();
-        for (i, tu) in build.translation_units.iter().enumerate() {
-            notify(&ProgressEvent::TuIndex { done: i, total });
-
-            let (analysis, was_reused) = index_unit_with_plugin(
-                tu,
-                &repo_root,
-                &store_ctx,
-                &store_dir,
-                plugin_for_path(&self.registry, &tu.source_path)?,
-            )?;
-            if was_reused {
-                reused += 1;
-            } else {
-                reanalyzed += 1;
-            }
-            analyses.push(analysis);
-        }
-        notify(&ProgressEvent::TuIndex { done: total, total });
-
-        self.progress = progress;
-        let index_result = IndexResult::new(repo_root, analyses);
-        Ok((
-            index_result,
-            IncrementalStats::calculate(reused, reanalyzed),
-        ))
-    }
-
-    pub fn get_or_build_index(&mut self) -> Result<IndexResult> {
-        self.ensure_index()?;
-        self.cached_index()
-    }
-
-    // ------------------------------------------------------------------
     // Reduced stage
     // ------------------------------------------------------------------
 
@@ -614,132 +455,6 @@ impl Pipeline {
         self.cached_callgraph()
     }
 
-    // ------------------------------------------------------------------
-    // Load stage
-    // ------------------------------------------------------------------
-
-    pub fn ensure_load(&mut self) -> Result<()> {
-        if self.load_cache.is_some() {
-            return Ok(());
-        }
-
-        if self.manager.stage_is_fresh("load", &self.fps.load) {
-            if let Ok(loaded) = self.manager.load_load_checked(&self.fps.load) {
-                self.load_cache = Some(Arc::new(loaded));
-                self.stats.record(STAGE_LOAD, StageReuse::Loaded);
-                return Ok(());
-            }
-        }
-
-        self.ensure_include_graph()?;
-        self.ensure_reduced()?;
-        let (graph, closures) = self.cached_include_graph()?;
-        let reduced = self.cached_reduced()?;
-
-        // Phase 4 (plans/LoadPerfImprovements): both analysis loops are
-        // CPU-bound and independent per item, so they run under rayon with
-        // `par_iter().filter_map().collect()`, which preserves the
-        // sequential item order element-for-element. ONE memoized
-        // `LoadAnalyzer` is shared via `&` across all workers (it is
-        // `Send + Sync` — compile-asserted in the graph crate) so the
-        // append-only semantic-closure memo keeps warming across seeds;
-        // building an analyzer per item would lose that cross-seed reuse.
-        //
-        // Deliberate deviation from the plan: there is NO cargo feature
-        // flag for parallel vs sequential. A flag would ship a default
-        // path that no CI run ever exercises; instead the `workers` knob
-        // (already the parallelism control for the index stage) selects
-        // the pool size, and the test
-        // `test_load_report_matches_sequential_reference` locks the
-        // parallel output against an in-test sequential reference.
-        let analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
-        let total_files = reduced.file_symbols.len();
-        let repository_root = self.repo.root.clone();
-        // A4: the two analysis passes run as separate pool sections so the
-        // symbol-pass boundary can notify through `self.notify` while the
-        // callback is still on `self`; the file pass then takes the callback
-        // into a Mutex for the rayon workers, mirroring
-        // `rebuild_index_single_threaded`. Field order of the old `LoadReport`
-        // struct literal already guaranteed symbols-before-files; the split
-        // keeps that order and makes it a notifiable milestone.
-        let symbol_metrics =
-            self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer, &reduced))?;
-        self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
-            symbols: symbol_metrics.len(),
-        }));
-
-        // take/restore the callback around the parallel section, mirroring
-        // `rebuild_index_single_threaded`; the Mutex lets every worker share
-        // one `FnMut` sink and guards are only held for a single event.
-        let progress = Mutex::new(self.progress.take());
-        let completed_files = AtomicUsize::new(0);
-        let file_metrics = self.run_on_configured_pool(|| {
-            collect_file_metrics(
-                &analyzer,
-                &graph,
-                &reduced,
-                total_files,
-                &progress,
-                &completed_files,
-            )
-        })?;
-
-        self.progress = progress.into_inner().unwrap_or_else(|err| err.into_inner());
-        self.notify(&ProgressEvent::CollateralFile {
-            done: total_files,
-            total: total_files,
-        });
-
-        let report = LoadReport {
-            repository_root,
-            symbol_metrics,
-            file_metrics,
-        };
-        // M22 D25: the load report itself carries no language data, so the
-        // stage feeds the manifest from discovery records; an all-default
-        // repository still writes byte-identical pre-M22 manifest bytes.
-        let stage_languages: Vec<SourceLanguage> =
-            self.discovery.files.iter().map(|f| f.language).collect();
-        self.manager.save_load_artifacts_with_languages(
-            &report,
-            &self.fps.load,
-            &stage_languages,
-        )?;
-        self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
-        self.load_cache = Some(Arc::new(report));
-        self.stats.record(STAGE_LOAD, StageReuse::Rebuilt);
-        Ok(())
-    }
-
-    /// A3: hands out a shared `Arc<LoadReport>` handle, not a copy.
-    pub fn get_or_build_load(&mut self) -> Result<Arc<LoadReport>> {
-        self.ensure_load()?;
-        self.cached_load()
-    }
-
-    /// Runs `work` on a rayon-managed thread set honoring the `workers`
-    /// knob: `Some(n)` builds a scoped pool of exactly `n` threads and
-    /// `install`s the work into it; `None` runs it inline, letting the
-    /// `par_iter` calls inside use the global pool. Same knob the index
-    /// stage already uses — the deliberate no-feature-flag design is
-    /// documented at the call site in `ensure_load`.
-    fn run_on_configured_pool<T, F>(&self, work: F) -> Result<T>
-    where
-        T: Send,
-        F: FnOnce() -> T + Send,
-    {
-        match self.workers {
-            Some(num_threads) => {
-                let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(num_threads.max(1))
-                    .build()
-                    .map_err(|err| anyhow!("failed to build rayon thread pool: {err}"))?;
-                Ok(pool.install(work))
-            }
-            None => Ok(work()),
-        }
-    }
-
     fn cached_include_graph(
         &self,
     ) -> Result<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)> {
@@ -776,27 +491,6 @@ impl Pipeline {
     }
 }
 
-/// Unit shaper for the index stage's unit shaping (D15 + D22): with an
-/// explicit `--lang` filter the shaper comes from that language's plugin — a
-/// plugin that provides no shaper honestly stays `None`, leaving build
-/// discovery neutral instead of guessing another language's defaults;
-/// without a filter the registry's marker-based selection against the
-/// repository root applies (the same call `compute_inputs` made at
-/// construction). Registry lookups only — no language-identity branching
-/// (R3).
-fn select_unit_shaper<'a>(
-    registry: &'a LanguageRegistry,
-    language_filter: Option<SourceLanguage>,
-    repo_root: &Path,
-) -> Option<&'a dyn UnitShaper> {
-    match language_filter {
-        Some(language) => registry
-            .plugin_for_id(LanguageId::from(language))
-            .and_then(|plugin| plugin.shaper()),
-        None => registry.unit_shaper_for_repo(repo_root),
-    }
-}
-
 /// Per-file cycle stance for the include-graph report (plan M20 D11, IV-5):
 /// each discovery record's `language` is resolved through the registry
 /// (`plugin_for_id` — R3-legal registry lookup, no `match LanguageId`), and
@@ -819,141 +513,25 @@ fn cycle_policy_by_file(
         .collect()
 }
 
-/// Plugin that owns `path`'s language (plan §3.3 fact 3): the registry
-/// detection is the dispatch key, and an unclaimed path is reported as
-/// "unhandled language" rather than silently parsed with some other plugin.
-fn plugin_for_path<'a>(
-    registry: &'a LanguageRegistry,
-    path: &Path,
-) -> Result<&'a dyn LanguagePlugin> {
-    let language = registry.detect_language(path).ok_or_else(|| {
-        anyhow!(
-            "unhandled language for {} (no registered plugin claims it)",
-            path.display()
-        )
-    })?;
-    registry
-        .plugin_for_id(language.clone())
-        .ok_or_else(|| anyhow!("language plugin not registered: {language:?}"))
-}
-
-/// Shard-backed analysis of one unit through the plugin resolver/analyzer
-/// (plan M18.3, the only path since M18.11). `compute_tu_closure_plugin`
-/// reproduces the canonical closure file order byte-for-byte (locked by the
-/// vendored oracles in `m18_cpp_plugin_parity_test`), so shard envelopes and
-/// merged analyses are identical to the pre-M11 hardcoded-C++ path.
-fn index_unit_with_plugin(
-    tu: &TranslationUnit,
-    repo_root: &Path,
-    store_ctx: &SharedTuStoreContext,
-    store_dir: &Path,
-    plugin: &dyn LanguagePlugin,
-) -> Result<(TuAnalysis, bool)> {
-    let closure = compute_tu_closure_plugin(
-        tu,
-        repo_root,
-        store_ctx,
-        CURRENT_ANALYSIS_VERSION,
-        plugin.resolver(),
-        // M18.10 fingerprint identity: `LanguageId` IS `SourceLanguage`
-        // (plan §3.2), and for C++ these two values equal the constants the
-        // pre-M11 walk hardcoded — keeping shard envelopes byte-identical.
-        plugin.id(),
-        &plugin.analysis_fingerprint(),
-    )?;
-    sharded_analysis(tu, &closure, store_dir, || {
-        analyze_closure_with(tu, &closure, plugin.analyzer())
-    })
-}
-
-/// Shared shard envelope contract of both unit paths: reuse the checkpoint
-/// when the closure fingerprint still matches, else analyze and re-stamp.
-fn sharded_analysis(
-    tu: &TranslationUnit,
-    closure: &TuClosure,
-    store_dir: &Path,
-    analyze: impl FnOnce() -> TuAnalysis,
-) -> Result<(TuAnalysis, bool)> {
-    if let Some(shard) = load_shard(store_dir, tu.file_id) {
-        if shard.fingerprint == closure.fingerprint.combined_hash {
-            return Ok((shard.analysis, true));
-        }
-    }
-    let analysis = analyze();
-    save_shard(
-        store_dir,
-        &ShardCheckpoint {
-            fingerprint: closure.fingerprint.combined_hash.clone(),
-            analysis: analysis.clone(),
-        },
-    )?;
-    Ok((analysis, false))
-}
-
-/// Parallel, order-preserving symbol metric pass for `ensure_load`. The
-/// BTreeMap `.values()` view is materialized into a `Vec` first (b-tree
-/// value iterators are not rayon parallel iterators); rayon's
-/// `par_iter().filter_map().collect()` then yields the same vector — and
-/// the same order — as the old sequential loop.
-fn collect_symbol_metrics(
-    analyzer: &LoadAnalyzer<'_>,
-    reduced: &ReducedSemanticModel,
-) -> Vec<LoadMetric> {
-    let symbol_names: Vec<String> = reduced
-        .symbols
-        .values()
-        .map(|record| record.name.clone())
-        .collect();
-    symbol_names
-        .par_iter()
-        .filter_map(|name| analyzer.analyze_symbol_load(name).ok())
-        .collect()
-}
-
-/// Parallel, order-preserving file metric pass for `ensure_load`. Each
-/// worker emits one `CollateralFile` progress event after its file
-/// completes; `done` comes from `AtomicUsize::fetch_add`, so the values
-/// stay unique (0..total-1) while event arrival may interleave — the UI
-/// only reads done/total. The `done == total` completion event is the
-/// caller's. `completed` is incremented once per file id (matching the
-/// sequential `enumerate`), even when the id has no registered path.
-fn collect_file_metrics(
-    analyzer: &LoadAnalyzer<'_>,
-    graph: &IncludeGraph,
-    reduced: &ReducedSemanticModel,
-    total_files: usize,
-    progress: &Mutex<Option<ProgressCb>>,
-    completed: &AtomicUsize,
-) -> Vec<LoadMetric> {
-    let file_ids: Vec<FileId> = reduced.file_symbols.keys().copied().collect();
-    file_ids
-        .par_iter()
-        .map(|&file_id| {
-            // By-id analysis drops the per-file O(V) `find_file_id` string
-            // scan the old path round-trip paid (plan LoadPerf A2). The
-            // registration check preserves the old skip contract: an id
-            // without a path yields None and disappears via `flatten()`.
-            let metric = if graph.file_paths.contains_key(&file_id) {
-                analyzer.analyze_file_load_by_id(file_id).ok()
-            } else {
-                None
-            };
-            let done = completed.fetch_add(1, Ordering::SeqCst);
-            if let Some(cb) = progress.lock().unwrap().as_mut() {
-                cb(&ProgressEvent::CollateralFile {
-                    done,
-                    total: total_files,
-                });
-            }
-            metric
-        })
-        .flatten()
-        .collect()
-}
-
 // The full cold/warm pipeline suite moved to `crates/pipeline/tests/
 // pipeline_test.rs` (M23 T3, D-M23-10): its fixtures embed C++ compile-command
 // and directive text, so they live outside the guard walk scope. Tests that
 // need the private collection internals stay in `internal_tests.rs`.
+//
+// Test-only re-export: `internal_tests` reaches the moved
+// `collect_file_metrics` through the crate-root glob (`use super::*`),
+// exactly as it did before the stage modules were split out (V3a). The
+// cfg(test) imports below are the companion set: the same glob used to
+// inherit them from the pre-split production import block; they stay
+// test-gated so the production build keeps a zero unused-import surface.
+#[cfg(test)]
+use ariadne_graph::{LoadAnalyzer, LoadMetric};
+#[cfg(test)]
+use stage_load::collect_file_metrics;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::Mutex;
+
 #[cfg(test)]
 mod internal_tests;
