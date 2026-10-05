@@ -58,6 +58,22 @@ re-exported) carries the hook; `discover_repository_files` delegates with a
 no-op closure; `Repository::discover` delegates to `discover_with_progress`
 no-op. Walk/skip rules, sort, and all pre-existing tests untouched.
 
+## Gates + landing
+
+- Gate 3 `python tools/hygiene_check.py` -> exit 0; output held only
+  pre-existing R3 warn-only rows, none attributable to new lines.
+- Staging: explicit `git add -- <touch-set>` (distill-wrapped) per the V1
+  verdict finding 4 route.
+- Gate 4 `python tools/encoding_guard.py --staged` -> exit 0 (no output).
+- Gate 5 landing commit `3f8be39` via direct
+  `python tools/commit_scoped.py` (distill-wrapped commit allowlist-refused
+  this lineage per the dispatch ruling); numstat = exactly
+  discovery.rs (+182), lib.rs (+10/-1), journal (+66).
+- Lock proof: `git diff --stat f325bee..HEAD` lists exactly the 3 touch-set
+  files (258 insertions, 1 deletion).
+- This landing bookkeeping edit lands as a follow-up journal-only scoped
+  commit to keep the shared worktree clean.
+
 ## Refactor pass
 
 `discover_repository_files_with_progress` is ~72 lines - well under the
