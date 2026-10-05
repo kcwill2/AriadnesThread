@@ -593,10 +593,12 @@ fn test_save_load_callgraph_artifacts() {
 
 const LOCK_REPORT_JSON_HASH: u64 = 0x70c9_1d07_9946_f7d9;
 const LOCK_REPORT_BIN_HASH: u64 = 0x7a12_1e91_0cbf_2e00;
-// Resynced for the M18.10 cache-epoch bump ("1.0.0" → "2.0.0"): the load
-// manifest embeds `analysis_version`, so its bytes legitimately shift while
-// the report json/bin locks stay pinned (they carry no version).
-const LOCK_MANIFEST_JSON_HASH: u64 = 0xddc3_f9ee_566b_5ea6;
+// Resynced for the M27 T2 DP-6 epoch bump ("2.0.0" -> "2.1.0"): the load
+// manifest embeds `analysis_version`, so its bytes legitimately shift
+// while the report json/bin locks stay pinned (they carry no version).
+// Prior value 0xddc3_f9ee_566b_5ea6 recorded the M18.10 bump
+// ("1.0.0" -> "2.0.0").
+const LOCK_MANIFEST_JSON_HASH: u64 = 0xbee9_1e36_1bbe_1e4b;
 
 fn fnv1a64_hash(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
