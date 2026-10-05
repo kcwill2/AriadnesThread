@@ -303,3 +303,140 @@
             }
         }
     }
+
+    /// V3 (I9, handoff test 4): the `BootMilestone` mapping stays inside the
+    /// stage-1 span. Mirror of `test_tu_index_events_stay_in_stage_two_span`:
+    /// mapped percents sit in-span, `IncludeScan` is monotone over `done`,
+    /// and `DiscoveryHashed { total: None }` holds the stage-start percent
+    /// honestly (only the message advances). The stage-end frame `(1, 20)`
+    /// remains owned by the `run_pipeline_stages` frame (I9).
+    #[test]
+    fn test_discovery_and_scan_events_stay_in_stage_one_span() {
+        use super::{discovery_hashed_percent, include_scan_percent};
+        use ariadne_pipeline::{BootMilestone, ProgressEvent};
+
+        assert_eq!(
+            discovery_hashed_percent(0, None),
+            stage_start_percent(1),
+            "message-only hashing (total None) holds the stage start"
+        );
+        assert_eq!(discovery_hashed_percent(7, None), stage_start_percent(1));
+        assert_eq!(discovery_hashed_percent(0, Some(9)), stage_start_percent(1));
+        assert_eq!(
+            discovery_hashed_percent(9, Some(9)),
+            10,
+            "bounded hashing ends at the D split point [0, 10]"
+        );
+        assert_eq!(include_scan_percent(0, 9), 10, "scan starts at the D split");
+        assert_eq!(
+            include_scan_percent(9, 9),
+            19,
+            "scan ends one point short of where the stage-end frame owns 20"
+        );
+        let mut previous = include_scan_percent(0, 9);
+        for done in 1..=9 {
+            let percent = include_scan_percent(done, 9);
+            assert!(
+                (10..=19).contains(&percent),
+                "{done}/9 scan mapped to {percent}%"
+            );
+            assert!(percent >= previous, "scan percent regressed at {done}/9");
+            previous = percent;
+        }
+
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut event_cb = stage_progress_callback(progress.clone());
+
+        progress(stage_report(
+            1,
+            stage_start_percent(1),
+            ARTIFACTS_PHASE,
+            "Hashing sources",
+        ));
+        for done in 1..=3 {
+            event_cb(&ProgressEvent::BootMilestone(BootMilestone::DiscoveryHashed {
+                done,
+                total: None,
+            }));
+        }
+        for done in 1..=4 {
+            event_cb(&ProgressEvent::BootMilestone(BootMilestone::IncludeScan {
+                done,
+                total: 4,
+            }));
+        }
+        progress(stage_report(
+            1,
+            stage_end_percent(1),
+            ARTIFACTS_PHASE,
+            "Include graph ready",
+        ));
+
+        let reports = collected.lock().unwrap();
+        assert_eq!(
+            reports[0].percent,
+            stage_start_percent(1),
+            "the frame-1 first statement stays intact (V1 lock)"
+        );
+        let event_reports = &reports[1..reports.len() - 1];
+        let mut previous = stage_start_percent(1);
+        for report in event_reports {
+            assert_eq!(report.stage, 1, "boot events stay on step [1/5]");
+            assert_eq!(report.phase, ARTIFACTS_PHASE);
+            assert!(
+                report.percent <= 19,
+                "I9: event mapping stops at 19, only the stage-end frame shows 20, got {}",
+                report.percent
+            );
+            assert!(
+                report.percent >= previous,
+                "stage-1 percent regressed at message {:?}",
+                report.message
+            );
+            previous = report.percent;
+        }
+        assert_eq!(
+            reports[1].percent,
+            stage_start_percent(1),
+            "total: None hashing holds the stage start through the real callback"
+        );
+        assert_eq!(
+            reports.last().unwrap().percent,
+            stage_end_percent(1),
+            "the stage-end frame (1, 20) is still produced and closes the stage"
+        );
+    }
+
+    /// V3 (I10, handoff test 5): the stage-2 Active message must name the
+    /// TU's repo-relative path verbatim - the path-in-row that names the
+    /// file the next incident dies in. The literal lock includes the double
+    /// space before the path (shape sec. 3.1 verbatim literal).
+    #[test]
+    fn test_tu_started_message_names_verbatim_relative_path() {
+        use ariadne_pipeline::ProgressEvent;
+        use std::path::PathBuf;
+
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut event_cb = stage_progress_callback(progress);
+
+        event_cb(&ProgressEvent::TuStarted {
+            done: 3,
+            total: 9,
+            source: PathBuf::from("src/some TU.cpp"),
+        });
+
+        let reports = collected.lock().unwrap();
+        assert_eq!(reports.len(), 1, "one TuStarted maps to exactly one report");
+        let report = &reports[0];
+        assert_eq!(report.stage, 2);
+        assert_eq!(report.phase, TU_INDEX_PHASE);
+        assert_eq!(
+            report.message, "3/9 TUs  src/some TU.cpp",
+            "the message must carry the double space and the verbatim relative path"
+        );
+        assert_eq!(report.percent, tu_index_percent(3, 9));
+    }

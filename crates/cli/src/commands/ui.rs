@@ -2,7 +2,7 @@ use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
 use crate::commands::ui::boot_progress::BootStepSnapshot;
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
-use ariadne_pipeline::{LoadMilestone, Pipeline, ProgressEvent};
+use ariadne_pipeline::{BootMilestone, LoadMilestone, Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 use std::collections::HashMap;
 use std::io::Write;
@@ -15,9 +15,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // name production code here still calls (child modules see parent-private
 // `use` bindings, so the frozen import lines stay UNEDITED).
 use stage_spans::{
-    collateral_file_percent, stage_end_percent, stage_start_percent, step_percent,
-    tu_index_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT, CALL_GRAPH_PHASE,
-    COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
+    collateral_file_percent, discovery_hashed_percent, include_scan_percent, stage_end_percent,
+    stage_start_percent, step_percent, tu_index_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT,
+    CALL_GRAPH_PHASE, COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
     PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, REDUCTION_PHASE, RUN_PHASES,
     STAGES_PER_RUN, SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
 };
@@ -207,6 +207,27 @@ fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent
                 "Load artifacts saved",
             ),
         }),
+        ProgressEvent::BootMilestone(milestone) => (cb_progress)(match milestone {
+            BootMilestone::DiscoveryHashed { done, total } => stage_report(
+                1,
+                discovery_hashed_percent(*done, *total),
+                ARTIFACTS_PHASE,
+                &format!("Hashing {done} files"),
+            ),
+            BootMilestone::IncludeScan { done, total } => stage_report(
+                1,
+                include_scan_percent(*done, *total),
+                ARTIFACTS_PHASE,
+                &format!("{done}/{total} include scan"),
+            ),
+        }),
+        ProgressEvent::TuStarted { done, total, source } => (cb_progress)(stage_report(
+            2,
+            tu_index_percent(*done, *total),
+            TU_INDEX_PHASE,
+            // I10 verbatim literal: double space before the relative path.
+            &format!("{done}/{total} TUs  {}", source.display()),
+        )),
     }
 }
 
@@ -222,7 +243,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     // sources serially. Exactly one such start emission - dedup-locked.
     progress(stage_report(1, stage_start_percent(1), ARTIFACTS_PHASE, "Hashing sources"));
     let progress_cb = stage_progress_callback(progress.clone());
-    let mut pipeline = Pipeline::new(repo_path, None)?.with_progress(progress_cb);
+    let mut pipeline = Pipeline::new_with_progress(repo_path, None, Box::new(progress_cb))?;
 
     let reduced_model = run_pipeline_stages(&mut pipeline, &progress)?;
     // A3: graph/closures MOVE out of the single-use pipeline, no clone.

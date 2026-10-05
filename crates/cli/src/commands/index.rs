@@ -31,7 +31,12 @@ fn report_index_result(pipeline: &Pipeline, index_result: &IndexResult) {
 }
 
 fn index_progress_cb(event: &ProgressEvent) {
-    if let ProgressEvent::TuIndex { done, total } = event {
+    // V3 rider (open Q8 default): TuStarted drives the same terminal bar as
+    // the terminal TuIndex; the path itself is a UI affordance, so `tool
+    // index` behavior stays neutral.
+    if let ProgressEvent::TuIndex { done, total } | ProgressEvent::TuStarted { done, total, .. } =
+        event
+    {
         crate::commands::progress::print_progress(*done, *total, "Indexing translation units", "TUs")
     }
 }

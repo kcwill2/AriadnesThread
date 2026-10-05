@@ -29,8 +29,11 @@ pub const RUN_PHASES: [&'static str; STAGES_PER_RUN] = [
 // graph walk. Declared here so V3 grows this file, not `ui.rs`.
 // TODO(calibrate M27 T1): replace 10 with the measured stage-1 split
 // point from the boot_stages release table (A4 precedent).
-#[allow(dead_code)] // first consumer is the V3 handoff, by design
 pub const DISCOVERY_HASHED_SPAN_END: usize = 10;
+
+// Stage-1 scan end: one point short of the stage boundary so the stage-end
+// frame `(1, 20)` keeps sole ownership of 20 (I9, contract test 4).
+pub const INCLUDE_SCAN_SPAN_END: usize = 19;
 
 // ---------------------------------------------------------------------------
 // A4: calibrated stage-5 sub-spans, replacing the old fixed [80,95] lie that
@@ -111,6 +114,30 @@ pub fn collateral_file_percent(done: usize, total: usize) -> usize {
     mapped_span_percent(
         SYMBOLS_ANALYZED_PERCENT,
         COLLATERAL_FILE_SPAN_END,
+        done,
+        total,
+    )
+}
+
+/// V3 stage-1 split: `DiscoveryHashed` percent over [stage start(1), D].
+/// `total: None` (the single-pass walk has no bounded total) holds the
+/// percent at the stage start while the message advances (honest, I9).
+pub fn discovery_hashed_percent(done: usize, total: Option<usize>) -> usize {
+    total.map_or(stage_start_percent(1), |bounded| {
+        mapped_span_percent(
+            stage_start_percent(1),
+            DISCOVERY_HASHED_SPAN_END,
+            done,
+            bounded,
+        )
+    })
+}
+
+/// V3 stage-1 split: the cold include-scan substeps over [D, 19].
+pub fn include_scan_percent(done: usize, total: usize) -> usize {
+    mapped_span_percent(
+        DISCOVERY_HASHED_SPAN_END,
+        INCLUDE_SCAN_SPAN_END,
         done,
         total,
     )

@@ -151,7 +151,19 @@ impl Pipeline {
 
         let total = build.translation_units.len();
         for (i, tu) in build.translation_units.iter().enumerate() {
-            notify(&ProgressEvent::TuIndex { done: i, total });
+            // R7 (V3): exactly one event per TU - TuStarted REPLACES the
+            // per-TU TuIndex, carrying the repo-relative source path
+            // verbatim (I10); strip_prefix falls back to the path as-is.
+            // The terminal TuIndex below stays as the bar's final frame.
+            notify(&ProgressEvent::TuStarted {
+                done: i,
+                total,
+                source: tu
+                    .source_path
+                    .strip_prefix(&repo_root)
+                    .unwrap_or(&tu.source_path)
+                    .to_path_buf(),
+            });
 
             let (analysis, was_reused) = index_unit_with_plugin(
                 tu,

@@ -128,6 +128,18 @@ pub enum ProgressEvent {
     /// A4: named checkpoints inside the load stage that no per-item event
     /// covers — the symbol pass boundary and the artifact-save completion.
     LoadMilestone(LoadMilestone),
+    /// boot-progress-visibility V3 (stage 1): boot milestones at/before the
+    /// include stage - discovery hashing and the cold include-scan substeps.
+    BootMilestone(BootMilestone),
+    /// boot-progress-visibility V3 (stage 2, I10/R7): fired once per TU as
+    /// its analysis starts, carrying the repo-relative source path so the
+    /// boot row names the current unit. Replaces the per-TU `TuIndex`
+    /// event; the terminal `TuIndex { done: total, total }` stays.
+    TuStarted {
+        done: usize,
+        total: usize,
+        source: std::path::PathBuf,
+    },
 }
 
 /// Load-stage milestones (plan load-tail A4). `SymbolsAnalyzed` fires once
@@ -139,6 +151,16 @@ pub enum ProgressEvent {
 pub enum LoadMilestone {
     SymbolsAnalyzed { symbols: usize },
     ArtifactsSaved,
+}
+
+/// Boot milestones of stage 1 (boot-progress-visibility V3, shape sec. 3.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootMilestone {
+    /// Input-computation hashing progressed; total None while the
+    /// single-pass walk has not bounded the file set.
+    DiscoveryHashed { done: usize, total: Option<usize> },
+    /// Include-scan progress of the [1/5] cold rebuild.
+    IncludeScan { done: usize, total: usize },
 }
 
 type ProgressCb = Box<dyn FnMut(&ProgressEvent) + Send>;
@@ -211,7 +233,22 @@ impl Pipeline {
         workers: Option<usize>,
         registry: Arc<LanguageRegistry>,
     ) -> Result<Self> {
-        let (repo, discovery, build, fps) = Self::compute_inputs(repo_path, &registry)?;
+        Self::build_with_progress(repo_path, workers, registry, None)
+    }
+
+    /// `build` with the construction-time callback threaded into input
+    /// computation (boot-progress-visibility V3 construction seam): the repo
+    /// hook can emit `BootMilestone::DiscoveryHashed` while hashing. `None`
+    /// keeps the exact pre-V3 sequence - the behavioral no-op the G1-5
+    /// exemption rests on (locked by `boot_events_test.rs` test 1).
+    fn build_with_progress(
+        repo_path: &Path,
+        workers: Option<usize>,
+        registry: Arc<LanguageRegistry>,
+        mut progress: Option<ProgressCb>,
+    ) -> Result<Self> {
+        let (repo, discovery, build, fps) =
+            Self::compute_inputs_with_progress(repo_path, &registry, progress.as_mut())?;
         let manager = ArtifactManager::prepare_for_repo(&repo)?;
 
         // Repository + contexts artifacts are cheap; refresh them whenever
@@ -235,7 +272,7 @@ impl Pipeline {
             production_stats: None,
             store_ctx,
             workers,
-            progress: None,
+            progress,
             registry,
             language_filter: None,
             include_cache: None,
@@ -254,6 +291,16 @@ impl Pipeline {
         self
     }
 
+    /// Pipeline whose CONSTRUCTION already reports through `progress`
+    /// (boot-progress-visibility V3 construction seam).
+    pub fn new_with_progress(
+        repo_path: &Path,
+        workers: Option<usize>,
+        progress: Box<dyn FnMut(&ProgressEvent) + Send>,
+    ) -> Result<Self> {
+        Self::build_with_progress(repo_path, workers, default_registry(), Some(progress))
+    }
+
     /// Fresh discovery + build discovery + stage fingerprint chain, computed
     /// identically by every path that derives fingerprints. The unit shaper
     /// comes from the registry's marker-based selection against the located
@@ -268,8 +315,37 @@ impl Pipeline {
         BuildDiscoveryResult,
         StageFingerprints,
     )> {
+        Self::compute_inputs_with_progress(repo_path, registry, None)
+    }
+
+    /// `compute_inputs` with the boot callback threaded into the repo hook
+    /// (boot-progress-visibility V3): `Some` routes discovery through
+    /// `Repository::discover_with_progress` and emits one
+    /// `BootMilestone::DiscoveryHashed { done, total: None }` per hashed
+    /// file - the single-pass walk has no bounded total, so `total` is
+    /// always `None` on this path (enum doc). `None` runs the identical
+    /// pre-V3 sequence (`repo.discover()` is already V2's no-op delegation
+    /// of the same walk), so the no-callback path executes zero new code.
+    fn compute_inputs_with_progress(
+        repo_path: &Path,
+        registry: &LanguageRegistry,
+        mut progress: Option<&mut ProgressCb>,
+    ) -> Result<(
+        Repository,
+        RepositoryDiscoveryResult,
+        BuildDiscoveryResult,
+        StageFingerprints,
+    )> {
         let repo = Repository::locate(repo_path)?;
-        let discovery = repo.discover()?;
+        let discovery = match progress.as_mut() {
+            None => repo.discover()?,
+            Some(cb) => repo.discover_with_progress(&mut |hashed, _discovered| {
+                cb(&ProgressEvent::BootMilestone(BootMilestone::DiscoveryHashed {
+                    done: hashed,
+                    total: None,
+                }))
+            })?,
+        };
         let build = BuildDiscoverer::new(&repo.root)
             .with_repo_discovery(&discovery)
             .with_unit_shaper(registry.unit_shaper_for_repo(&repo.root))
@@ -334,16 +410,37 @@ impl Pipeline {
             }
         }
 
+        // V3 boot milestones: one honest notify per real substep, cold
+        // rebuild branch only - the warm-load branch above returned early
+        // and emits nothing (warm runs already jump honestly). There is no
+        // per-file loop at this seam (the BFS lives in `crates/graph`,
+        // which V3 must not touch), so substeps are the honest granularity.
         let graph = build_dependency_graph(&self.repo.root, &self.registry)?;
+        self.notify(&ProgressEvent::BootMilestone(BootMilestone::IncludeScan {
+            done: 1,
+            total: 4,
+        }));
         let closures = graph.compute_closures();
+        self.notify(&ProgressEvent::BootMilestone(BootMilestone::IncludeScan {
+            done: 2,
+            total: 4,
+        }));
         let cycle_policies = cycle_policy_by_file(&self.registry, &self.discovery);
         let report = graph.generate_report_with_cycle_policies(&|file_id| {
             *cycle_policies
                 .get(&file_id)
                 .unwrap_or(&CyclePolicy::Reject)
         });
+        self.notify(&ProgressEvent::BootMilestone(BootMilestone::IncludeScan {
+            done: 3,
+            total: 4,
+        }));
         self.manager
             .save_include_artifacts(&graph, &closures, &report, &self.fps.include_graph)?;
+        self.notify(&ProgressEvent::BootMilestone(BootMilestone::IncludeScan {
+            done: 4,
+            total: 4,
+        }));
         self.include_cache = Some((graph, closures));
         self.stats.record(STAGE_INCLUDE_GRAPH, StageReuse::Rebuilt);
         Ok(())

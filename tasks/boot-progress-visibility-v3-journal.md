@@ -101,22 +101,80 @@ compile-coupled exception: pipeline + cli). V1 landed `f325bee`, V2 landed
   all 452 kept non-blank lib.rs lines survive in order. Output:
   `VERBATIM PROOF OK`.
 
-## Commit 1
+## Commit 1 (LANDED)
 
-- PENDING (staged via `git add --` on the four commit-1 files;
-  `encoding_guard.py --staged` before commit; commit message per gate 2)
+- `1819b8f` "refactor(pipeline): verbatim stage_index/stage_load extraction
+  from lib.rs (boot-progress-visibility V3a)" - staged via `git add --` on
+  the four commit-1 files; `encoding_guard.py --staged` exit 0 before commit.
 
 ## Red (commit 2)
 
-- PENDING
+- Failures captured for the record (first capture lost with the previous
+  session's payload; re-run on the identical working-tree state after the
+  `checkpoint_guard.py status` resume - same tree, same results):
+  - `python tools/testrun.py --distill -p ariadne-pipeline` ->
+    `### cargo test FAIL (exit 1)` / `12 passed / 3 failed / 0 ignored / 2 suites`
+    - failing: `test_discovery_hashed_events_fire_during_construction`
+      ("0 DiscoveryHashed during construction"),
+      `test_include_scan_events_cold_only_and_monotone` (empty sequence),
+      `test_tu_started_fires_exactly_once_per_tu_with_relative_path`
+      ("got 0 for 2 TUs") - exit 1, never a PASS.
+  - `python tools/testrun.py --distill -p ariadne-cli` ->
+    `### cargo test FAIL (exit 1)` / `108 passed / 2 failed / 0 ignored / 1 suites`
+    - cli test 4 passed the `None`-holds asserts and failed the
+      bounded/scan-span walk at the D-split assertion ("bounded hashing ends
+      at the D split point [0, 10]"); cli test 5 failed on the message
+      (`left: "3/9 TUs"` - no path in the count-only message), exactly as
+      the handoff's Red protocol predicted.
+- One test-side correction BEFORE Green, in my own new file (touch-set):
+  test 1's no-op arm originally ran `ensure_include_graph`, which under the
+  contract's own emission design fires stage-time `IncludeScan` on the cold
+  rebuild - an event the recorder legitimately sees (test 2's subject), not
+  a construction replay. switched the arm to `ensure_index` (the index stage
+  has no include-stage dependency - verified in `stage_index.rs`, closures
+  resolve per-TU through plugin resolvers), which emits no BootMilestone by
+  design, so the zero-BootMilestone assertion stands unchanged as the exact
+  buffer/replay leak it locks.
 
 ## Green (commit 2)
 
-- PENDING
+- `python tools/testrun.py --distill -p ariadne-pipeline` ->
+  `### cargo test PASS (exit 0)` / `25 passed / 0 failed / 2 ignored / 5 suites`
+  (baseline 22/0/2/4 + the 3 boot locks in new suite `boot_events_test`).
+- `python tools/testrun.py --distill -p ariadne-cli` ->
+  `### cargo test PASS (exit 0)` / `110 passed / 0 failed / 1 ignored / 5 suites`
+  (108 + 2 recovered = 110; contract file appended, V1 files green UNEDITED).
+- Wiring landed: `build` delegates `build_with_progress(.., None)`;
+  `compute_inputs` delegates `compute_inputs_with_progress(.., None)` whose
+  `Some` arm routes `Repository::discover_with_progress` and emits one
+  `DiscoveryHashed { done: hashed, total: None }` per hashed file;
+  `new_with_progress` = one-line delegation to `build_with_progress(..,
+  Some(progress))`; `ensure_include_graph` cold branch notifies
+  `IncludeScan { done: 1..=4, total: 4 }` after each of the four real
+  substeps (warm/load branches untouched); `rebuild_index_single_threaded`
+  REPLACES the per-TU `TuIndex` notify with `TuStarted` (R7: replace not
+  add; `source = strip_prefix(&repo_root)` fallback as-is; terminal
+  `TuIndex { done: total, total }` stays); `stage_spans.rs` mapping fns
+  real (`map_or` for `None`, `INCLUDE_SCAN_SPAN_END = 19` new const,
+  `#[allow(dead_code)]` lifted from `DISCOVERY_HASHED_SPAN_END`);
+  `ui.rs::stage_progress_callback` `TuStarted` arm binds `source`, message
+  `format!("{done}/{total} TUs  {}", source.display())` (I10 double space);
+  `index_progress_cb` or-pattern rider keeps the same `print_progress` call
+  and both locked literals (`ProgressEvent::TuIndex`, `print_progress`).
 
 ## Gates
 
-- PENDING
+- 1a pre-move: `22 passed / 0 failed / 2 ignored / 4 suites` PASS (above).
+- 1b post-move: `22 passed / 0 failed / 2 ignored / 4 suites` PASS -
+  identical counts (above); commit-2 (gate 2) landed as `1819b8f` (above).
+- 3 Red: the two FAIL lines above (exit 1 each; re-run at resume with
+  identical results - see Red section note).
+- 4 Green: the two PASS lines above (exit 0 each).
+- 5 `python tools/hygiene_check.py`: recorded below at commit time.
+- 6 `python tools/encoding_guard.py --staged` (per commit): recorded below.
+- 7 commit 2: landed as recorded below.
+- Captures: `target/testrun-capture.txt` per digest (the capture file is
+  shared; the digest lines quoted here are the verbatim evidence).
 
 ## Behavioral no-op proof line (G1-5 exemption basis)
 
@@ -128,7 +186,8 @@ compile-coupled exception: pipeline + cli). V1 landed `f325bee`, V2 landed
   path; locked by `boot_events_test.rs::
   test_discovery_hashed_events_fire_during_construction` no-callback arm
   (zero `BootMilestone` events observable through a `with_progress`
-  recorder over a full stage run).
+  recorder over a full cold index-stage run; the cold include stage's own
+  stage-time `IncludeScan` is emission, not replay - test 2 owns it).
 
 ## Deviations
 
@@ -151,6 +210,15 @@ compile-coupled exception: pipeline + cli). V1 landed `f325bee`, V2 landed
   two-commit structure requires it twice). All through distilling entry
   points; zero raw high-volume output entered context.
 
+- Red-evidence re-run at resume: the previous session's Red capture was lost
+  in transport and `target/testrun-capture.txt` is a shared overwritten file,
+  so both Red gates were re-run on the identical working tree before any
+  Green edit (one extra pair of invocations beyond the count above). All
+  evidence in this journal is from the resuming session's own runs.
+- Green-mode distill shapes differ from fail-mode (`5 suites` vs `1 suites`,
+  ignored shown only when green) - digests quoted verbatim per shape; the
+  counts reconcile (108 + 2 = 110; 22 + 3 = 25).
+
 ## Out-of-scope observations (report-only)
 
-- (none recorded yet)
+- (none recorded)
