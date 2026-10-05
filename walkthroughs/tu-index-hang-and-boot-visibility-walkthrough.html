@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: The Hang That Wasn't - M27 tu-index-hang-throughput + M26 boot-progress-visibility</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            white-space: pre;
+            line-height: 1.45;
+        }
+        .before { border-left: 4px solid #f44336; }
+        .after  { border-left: 4px solid #4caf50; }
+        .tag {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 2px;
+        }
+        .tag.before-tag { background: #fdecea; color: #b91c1c; }
+        .tag.after-tag  { background: #e8f5e9; color: #15803d; }
+        .tag.file-tag   { background: #e3f2fd; color: #0369a1; font-family: 'Courier New', monospace; text-transform: none; }
+        .tag.dec-tag    { background: #fef9c3; color: #854d0e; }
+        .tag.lock-tag   { background: #fee2e2; color: #b91c1c; }
+        .compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        @media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
+        .callout {
+            border-left: 4px solid #007acc;
+            background: #eef6fb;
+            padding: 10px 14px;
+            border-radius: 4px;
+            margin: 12px 0;
+        }
+        .callout.warn { border-left-color: #fb923c; background: #fff4e8; }
+        table.tokens {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 13px;
+            margin: 12px 0;
+        }
+        table.tokens th, table.tokens td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+            text-align: left;
+        }
+        table.tokens th { background: #f1f5f9; }
+        table.tokens td.mono, table.tokens th.mono { font-family: 'Courier New', monospace; }
+        ul.checklist li { margin: 6px 0; }
+        .big-number { font-size: 34px; font-weight: 700; color: #007acc; }
+        .stat { display: inline-block; margin: 0 24px 12px 0; text-align: center; }
+        .stat .lbl { color: #666; font-size: 12px; }
+        .dec {
+            display: inline-block;
+            background: #0f172a;
+            color: #7dd3fc;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            padding: 1px 7px;
+            border-radius: 4px;
+            margin-right: 6px;
+        }
+        code {
+            background: #eef1f4;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 90%;
+        }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+        .muted { color: #666; }
+    </style>
+</head>
+<body>
+
+<!-- ============ SLIDE 1: TITLE ============ -->
+<div class="slide">
+    <h1>The Hang That Wasn't</h1>
+    <p style="font-size:19px; color:#444;">
+M27 <code>tu-index-hang-throughput</code> + M26 <code>boot-progress-visibility</code>:
+a boot that looked frozen was a dead worker swallowed by the boot task;
+the killer was char-vs-byte arithmetic that <em>panics in debug and silently wraps in release</em>.
+    </p>
+    <p>
+        <strong>Field incident:</strong> 2026-10-05, a 5744-TU corpus boot frozen at 1780/5744 with ~20% CPU.<br>
+        <strong>Shipped:</strong> tokenizer both-site fix + class audit + cache epoch 2.1.0; honest boot frames
+        (path in the stage-2 row, dead boots surface as error); release-profile launch route with loud
+        overflow checks; throughput machinery <em>not</em> shipped - measurement said it would be a regression.<br>
+        <strong>Status:</strong> M26 CLOSED (<code>42d4a6e</code>). M27 fix/measurement/flag landed APPROVED;
+        <strong>T1b bench gate still pending</strong>, PR-2-bound. See slide 16 for the honest ledger.
+    </p>
+    <p class="muted">Navigate with the buttons or <kbd>&larr;</kbd> <kbd>&rarr;</kbd> / <kbd>Space</kbd>. 17 slides.
+Deck anchors: <code>main</code> @ <code>5b517e6</code>, 2026-10-05.</p>
+</div>
+
+<!-- ============ SLIDE 2: EXECUTIVE SUMMARY ============ -->
+<div class="slide">
+    <h1>Executive summary <span class="muted" style="font-size:14px;">(intent / scope / risk)</span></h1>
+    <h2>Intent</h2>
+    <p>
+A two-milestone response to one incident with two independent lessons.
+The hang was a CONSEQUENCE: the boot worker died from a panic and the UI swallowed the death.
+M27 <code>tu-index-hang-throughput</code> kills the panic class, measures the truth, and only builds
+throughput machinery if the measurement justifies it.
+M26 <code>boot-progress-visibility</code> makes boot progress honest - frames from the first second,
+the current TU path in the stage-2 row, and a dead boot surfacing as an error, never a frozen row.
+    </p>
+    <h2>Scope landed</h2>
+    <ul>
+        <li><strong>M27:</strong> <code>tokenizer.rs</code> both flush sites fixed + 12-site usize audit (clean)
+            + both-profiles locks (<code>ea21687</code>); cache epoch <code>2.0.0 -&gt; 2.1.0</code> as cache-wide
+            invalidation of silently-corrupted shards (<code>59f0512</code> + riders <code>72252a4</code>);
+            RELEASE-profile bench + sufficiency gate ACCEPT (<code>bd4fb1a</code>);
+            release launch route + <code>overflow-checks = true</code> (<code>5b517e6</code>).</li>
+        <li><strong>M26:</strong> frame-1-first boot + panic-to-error bridge (V1 <code>f325bee</code>);
+            additive discovery hashing hook (V2 <code>3f8be39</code>);
+            <code>BootMilestone</code> + <code>TuStarted</code> events + <code>new_with_progress</code> (V3 <code>8eedb05</code>).</li>
+    </ul>
+    <h2>Risk</h2>
+    <p>
+Medium-low.
+The tokenizer hot path changed, but the fix is bit-identical on ASCII by construction and locked
+(<code>test_ascii_path_tokenization_unchanged</code>, m00/m18 parity UNEDITED).
+The epoch bump costs every user a full rebuild - that is the point: corrupted shards reload by design otherwise.
+Release binaries now pay measured ~0 steady-state cost for loud arithmetic.
+    </p>
+    <h2>Jump to</h2>
+    <p>
+        <a href="javascript:void(0)" onclick="jumpTo(2)">[3] The field story E1-E3</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(3)">[4] The swallow</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(4)">[5] Root cause</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(5)">[6] M25 class + audit</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(6)">[7] DP-6 invalidation</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(7)">[8] Visibility landed</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(9)">[10] TuStarted row</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(10)">[11] Boot flow map</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(11)">[12] Measured truth</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(12)">[13] Profile lever</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(13)">[14] Invariants + locks</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(14)">[15] Trade-offs</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(15)">[16] Commit map</a> &middot;
+        <a href="javascript:void(0)" onclick="jumpTo(16)">[17] Honest state</a>
+    </p>
+</div>
+
+<!-- ============ SLIDE 3: FIELD STORY ============ -->
+<div class="slide">
+    <h1>The field story: E1 -&gt; E2 -&gt; E3</h1>
+    <p>
+Three field measurements, eleven minutes apart, turned "indexing is slow" into a dead-worker diagnosis.
+All recorded in <code>tasks/tu-index-hang-throughput-t0-evidence.md</code> (commit <code>62ce72b</code>).
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">E1 04:11Z - slow</span>
+            <div class="code-block before">Stage 2 at ~30% after 90+ minutes.
+5744 TUs; counter ~1723/5744.
+Mean ~3.1 s/TU, single-threaded.
+Projection: multi-hour cold boot.</div>
+        </div>
+        <div>
+            <span class="tag before-tag">E2 04:17Z - "hang"</span>
+            <div class="code-block before">Counter FROZEN at 1780/5744 for
+several minutes.
+Total CPU ~20%; RAM free.
+UI server alive, zero build CPU.</div>
+        </div>
+    </div>
+    <span class="tag before-tag">E3 04:22Z - the specimen self-reported its death</span>
+    <div class="code-block before">thread 'tokio-rt-worker' (55408) panicked at
+crates\lang-cpp\src\tokenizer.rs:331:21:
+attempt to subtract with overflow</div>
+    <p>
+The per-core Task Manager graph at 04:21Z (8-core/16-thread Ryzen 9800X3D): several cores active, <strong>NONE pinned</strong>.
+That is the "worker died mid-run, siblings wind down, frozen counter" signature - not a deadlock, not a pathological TU, not I/O.
+    </p>
+    <div class="callout">
+The panic line itself is evidence about the <em>profile</em>: overflow-checks were ON, so the user's 90-minute
+run was a DEBUG build. Part of "indexing takes forever" was profile, not algorithm - a fact that later
+killed a whole milestone of planned parallelism (slide 12).
+Hypotheses H-A/H-D/H-E were killed by evidence; H-B CONFIRMED as root cause; H-C survived as a
+throughput contributor only (<code>t0-evidence.md</code> sec. 5).
+    </p></div>
+</div>
+
+<!-- ============ SLIDE 4: THE SWALLOW ============ -->
+<div class="slide">
+    <h1>Why a dead worker looked like a hang</h1>
+    <p><span class="tag file-tag">crates/cli/src/commands/ui.rs</span> - the hole was not in the parser, it was in the boot task.</p>
+    <p>
+The background <em>watcher</em> already caught panics and logged (the <code>ui.rs:636-673</code> precedent).
+The boot path never copied that protection: no <code>catch_unwind</code>, and the <code>JoinHandle</code> was dropped.
+A panic escaping the build closure left progress frozen at the last frame, state stuck <code>"loading"</code>,
+the error arm never reached, the watcher never started - the server serving forever with zero build CPU.
+<strong>A dead boot was indistinguishable from a hung boot.</strong>
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before - the swallow (ui.rs ~:786-805, paraphrased per shape sec. 0)</span>
+            <div class="code-block before">let _handle = tokio::task::spawn_blocking(
+    move || {
+        build_ui_payload(...)  // panic
+                               // escapes here
+    });
+// no catch_unwind
+// JoinHandle dropped
+// -&gt; frozen row, state "loading",
+//    error arm unreachable</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After - drive_boot_build (live ui.rs:706-732)</span>
+            <div class="code-block after">match std::panic::catch_unwind(
+    std::panic::AssertUnwindSafe(build_fn)) {
+  Ok(Ok(out)) =&gt; { ...swap_into_state... }
+  Ok(Err(e)) =&gt; {
+    surface_boot_failure(state, e.to_string());
+    let _ = fps_tx.send(None);
+  }
+  Err(payload) =&gt; {
+    let text = panic_payload_text(&amp;*payload);
+    surface_boot_failure(state, text.clone());
+    tracing::error!("UI boot task
+        panicked: {text}");
+    let _ = fps_tx.send(None);
+  }
+}</div>
+        </div>
+    </div>
+    <div class="callout">
+E3 PROVED this lock necessary independent of the arithmetic bug: the UI sat on a frozen loading row while
+its own worker lay dead with a truthful panic line on a console stderr nobody was watching (invariant I11).
+Escaped panics <em>and</em> <code>Err</code> results both write web state <code>"error"</code> with the failure text;
+the panic arm logs <code>error!</code> where the watcher warns - never silent (risk R8).
+    </div>
+</div>
+
+<!-- ============ SLIDE 5: ROOT CAUSE ============ -->
+<div class="slide">
+    <h1>Root cause: the same value, two units</h1>
+    <p><span class="tag file-tag">crates/lang-cpp/src/tokenizer.rs</span> fix commit <code>ea21687</code> (M27 T2)</p>
+    <p>
+The tokenizer walks a <code>Vec&lt;char&gt;</code> and advances <code>column</code> per <strong>CHAR</strong> (<code>:49</code>).
+At both flush sites it subtracted the run's <strong>BYTE</strong> length - while the adjacent <code>end</code>
+correctly used <code>chars().count()</code>. The unit inconsistency was internal to the file.
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before - byte subtracted from a char-counted column</span>
+            <div class="code-block before">fn flush_word(...) {
+    let len = word.chars().count();
+    tokens.push(RawToken {
+        kind: TokenKind::Word(..),
+        line,
+        column: column - word.len(), // :311 BYTES
+        start,
+        end: start + len,            // :313 CHARS
+    });
+}
+fn flush_punct(...) {
+    let len = punct.chars().count();
+    tokens.push(RawToken {
+        kind: TokenKind::Punct(..),
+        line,
+        column: column - punct.len(),// :331 BYTES
+        start,                       //       = E3 panic site
+        end: start + len,            // :333 CHARS
+    });
+}</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After - one unit for column and end (live :299-337)</span>
+            <div class="code-block after">fn flush_word(...) {
+    let len = word.chars().count();
+    tokens.push(RawToken {
+        kind: TokenKind::Word(..),
+        line,
+        column: column - len,        // :311
+        start,
+        end: start + len,            // :313
+    });
+}
+fn flush_punct(...) {
+    let len = punct.chars().count();
+    tokens.push(RawToken {
+        kind: TokenKind::Punct(..),
+        line,
+        column: column - len,        // :331
+        start,
+        end: start + len,            // :333
+    });
+}</div>
+        </div>
+    </div>
+    <h2>Why this was so ugly</h2>
+    <p>
+Any non-ASCII bytes in a word or punct run near a line start make <code>column &lt; byte_len</code>, and <code>usize</code>
+underflows. In DEBUG (overflow-checks on) it <strong>panics</strong> - that is what E3 caught.
+In RELEASE it <strong>wraps silently</strong>: the captured pre-fix values were
+<code>18446744073709551615</code> (= <code>2 - 3</code>, a U+20AC punct at column 1) and <code>10 - 11</code> (a word run) -
+huge columns flowing downstream with no panic, no log, no signal.
+    </p>
+    <div class="callout warn">
+The fix corrects <em>non-ASCII column values only</em>: on ASCII paths <code>len() == chars().count()</code>,
+so the change is bit-identical by construction - locked by <code>test_ascii_path_tokenization_unchanged</code>
+in <strong>both</strong> profiles, with m00 goldens and m18 parity UNEDITED.
+Invariant I14 states the kill: <code>RawToken.column</code> stays within <code>[1, line_chars + 1]</code> and
+<code>end - start == chars().count()</code> under <code>cargo test</code> AND <code>cargo test --release</code>.
+    </div>
+</div>
+
+<!-- ============ SLIDE 6: M25 CLASS FAMILY + AUDIT ============ -->
+<div class="slide">
+    <h1>The M25 lesson: one-site fixes are forbidden</h1>
+    <p>
+M25 <code>cpp-brace-depth-underflow</code> (CLOSED 2026-10-04 at <code>af11113</code>) was the <em>same usize-underflow class</em>:
+brace-depth subtraction in <code>parser.rs</code>, fixed site-by-site after a one-site REJECTION round.
+The guards landed and the class survived - the 2026-10-05 corrections memory records a runtime
+underflow observation still happening at <code>parser.rs:61</code> during TU indexing, the same day E3 fired.
+That precedent wrote T2's obligation shape: <strong>both flush sites in one commit + a same-class audit</strong>;
+a one-site fix here would have been a plan-literal violation.
+    </p>
+    <h2>The audit (T2, dispositioned in the journal)</h2>
+    <p>
+Every usize subtraction on position math across <code>tokenizer.rs</code> + <code>parser.rs</code>: exactly <strong>12 sites</strong>.
+Disposition: <strong>FIXED x2</strong> (the flush sites above) / <strong>SAFE-BY-INVARIANT x8</strong>
+(each guard independently re-read by the reviewer, e.g. the <code>quote_at == 0 ||</code> short-circuit at
+<code>tokenizer.rs:233</code>, the <code>self.i &gt;= 2</code> / <code>self.i &gt;= 3</code> guards, the <code>paren_depth &gt; 0</code> loop condition) /
+<strong>ALREADY-GUARDED x1</strong>. Zero second bugs.
+    </p>
+    <div class="callout">
+<code>parser.rs</code> is <strong>byte-identical</strong> in the fix range - absent from the diff, the M25 floor guard at
+<code>:61-69</code> intact and unweakened.
+The RED evidence stayed credible post-landing without a revert: quoted panic sites <code>:311</code>/<code>:331:21</code>
+match live call-graph arithmetic, the release wrap values reproduce exactly on the pinned test sources,
+and the T0b hop (<code>d6267a3</code>) <em>independently reproduced</em> the corpus panic at the approved,
+documented-approval fixture path (<code>tests/fixtures/m27-nonascii-underflow/</code> - single-encoded
+U+00E9 word-run and U+20AC punct-run specimens, nothing inside <code>basic</code>/<code>expensive</code>).
+    </div>
+    <h2>What the fix tests are</h2>
+    <p><span class="tag file-tag">crates/lang-cpp/src/tokenizer/underflow_fix_tests.rs</span></p>
+    <ul>
+        <li><code>test_e3_punct_shape_no_panic_and_bounded_columns</code> - the E3 shape itself.</li>
+        <li><code>test_word_shape_no_panic_and_bounded_columns</code> - the sibling <code>:311</code> fault.</li>
+        <li><code>test_mixed_multibyte_matrix_bounded</code> - the multi-byte matrix.</li>
+        <li><code>test_ascii_path_tokenization_unchanged</code> - the parity lock.</li>
+    </ul>
+    <p class="muted">Sources are built from numeric byte arrays (pure-ASCII authored rule); bounds are real external
+properties computed from the source, not tautologies. Both profiles: 152 passed / 0 failed.</p>
+</div>
+
+<!-- ============ SLIDE 7: DP-6 CACHE INVALIDATION ============ -->
+<div class="slide">
+    <h1>DP-6: the shards were already corrupt <span class="dec">DP-6</span></h1>
+    <p>
+This is the data-integrity half people forget: every <code>artifacts/shards</code> JSON and index written by a
+<strong>RELEASE</strong> build over a non-ASCII corpus - including E1's completed 30% - carries silently-wrapped columns.
+Post-fix, those artifacts are <strong>RELOADED, not rebuilt</strong>: the fingerprint chain hashes file
+<em>content</em>, not <em>analyzer code</em>, so it never self-invalidates.
+A correct analyzer would happily load corrupted shards forever.
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before - the reload trap</span>
+            <div class="code-block before">pub const CURRENT_ANALYSIS_VERSION:
+    &amp;str = "2.0.0";   // cache.rs:21
+
+Fingerprint match -&gt; shard reload
+Corrupted columns persist
+Nothing signals</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After - epoch bump invalidates globally</span>
+            <div class="code-block after">pub const CURRENT_ANALYSIS_VERSION:
+    &amp;str = "2.1.0";   // cache.rs:21
+
+ArtifactManager::check_manifest
+rejects the stale epoch BEFORE any
+blob deserialization -&gt; forced
+fresh rebuild</div>
+        </div>
+    </div>
+    <p>
+DP-6 was a user decision (<code>YES</code>, 2026-10-05) because a cache-wide bump is a blunt instrument - the alternative
+was a named per-corpus re-index instruction with no automatic enforcement.
+It landed <em>with</em> the fix as one commit (<code>59f0512</code>), a single constant - shard envelope <em>fields</em> stay byte-identical (I7).
+    </p>
+    <div class="callout warn">
+<strong>Ledger lesson (finding 3): the dependent set is five literal pins + one HASH pin, not the two the handoff grep found.</strong>
+<code>cache.rs</code> const + its assert, the m12 integration pin, the m27-corpus un-ignore, the m21 witness literal
+(a pinned <code>"2.0.0"</code> in <code>tests/</code>), and the report manifest <strong>byte-lock</strong> - an FNV hash of saved
+manifest bytes that embeds <code>analysis_version</code> while referencing no version string at all
+(<code>0xddc3f9ee -&gt; 0xbee91e36</code>, riders <code>72252a4</code>). The bump went RED twice for these; both had precedent fixes.
+A grep for the constant finds literal definitions only - hash pins are invisible to it.
+    </div>
+    <p><strong>User duty shipped with this:</strong> re-index non-ASCII corpora post-T2. The 2.1.0 bump is the only automatic invalidation; ASCII corpora need no re-index (parity proves byte-identical output).</p>
+</div>
+
+<!-- ============ SLIDE 8: VISIBILITY LANDED ============ -->
+<div class="slide">
+    <h1>M26: visibility landed - events and honest percents</h1>
+    <p>
+Before M26, everything before <code>Pipeline::new</code> returned (serial SHA-256 discovery, build discovery, fingerprints)
+ran with <strong>no callback existing yet</strong>, stage 1 emitted exactly two frames, and stage 2's row never named a file.
+The seam is append-only everywhere (DP-1 frozen floor): existing variants and the stage-5 13-frame replay untouched.
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before - three variants</span>
+            <div class="code-block before">pub enum ProgressEvent {
+    TuIndex { done, total },
+    CollateralFile { done, total },
+    LoadMilestone(LoadMilestone),
+}</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After - two appends (live pipeline lib.rs:125-142)</span>
+            <div class="code-block after">pub enum ProgressEvent {
+    TuIndex { done, total },
+    CollateralFile { done, total },
+    LoadMilestone(LoadMilestone),
+    BootMilestone(BootMilestone),
+    TuStarted { done, total,
+                source: PathBuf },
+}
+pub enum BootMilestone {
+    DiscoveryHashed { done,
+                      total: Option&lt;usize&gt; },
+    IncludeScan { done, total },
+}</div>
+        </div>
+    </div>
+    <ul>
+        <li><strong>V1</strong> (<code>79f3403</code> + <code>f325bee</code>): the boot first statement is now
+            <code>stage_report(1, 0, ARTIFACTS_PHASE, "Hashing sources")</code> <em>before</em> <code>Pipeline</code> construction (I5);
+            the panic bridge (slide 4); the stage-span model extracted verbatim to <code>ui/stage_spans.rs</code>
+            so later growth lands there, not in the 839-line <code>ui.rs</code>.</li>
+        <li><strong>V2</strong> (<code>3f8be39</code>): <code>Repository::discover_with_progress(on_hashed)</code> - additive,
+            order-preserving; <code>discover()</code> delegates with a no-op closure, so every existing caller runs
+            the identical walk (live <code>repo/src/lib.rs:32,37</code>).</li>
+        <li><strong>V3</strong> (<code>1819b8f</code> + <code>8eedb05</code>): <code>Pipeline::new_with_progress</code> threads the boot callback
+            into construction; <code>Pipeline::new</code> delegates with <code>None</code> - a behavioral no-op, which is what the
+            G1-5 no-bench exemption rests on.</li>
+    </ul>
+    <div class="callout">
+<strong>Honest percents (I9), the part that was easy to get wrong:</strong>
+<code>DiscoveryHashed</code> carries <code>total: None</code> because the single-pass walk has no bounded total -
+so the percent <em>holds</em> at the stage start while the message advances ("Hashing {done} files"),
+never inventing movement.
+The cold include-scan has no per-file loop at its seam (the BFS lives in <code>crates/graph</code>, which V3 must not touch),
+so it emits exactly 4 substep frames over <code>[D, 19]</code> - the honest granularity that exists, not a fake counter.
+    </div>
+</div>
+
+<!-- ============ SLIDE 9: TU PATH IN THE ROW ============ -->
+<div class="slide">
+    <h1>I10: the row that would have named the killer</h1>
+    <p>
+E3's panic carried no file path; finding the offending TU today needs the shard-mtime detective rule
+(<code>t0-evidence.md</code> sec. 6). <code>TuStarted</code> ends that: while stage 2 is Active, the row names the current TU's
+repo-relative path. One event per TU - it <strong>replaces</strong> the per-TU <code>TuIndex</code> event (R7: no flood),
+and the terminal <code>TuIndex { done: total, total }</code> frame stays.
+    </p>
+    <div class="compare">
+        <div>
+            <span class="tag before-tag">Before - stage 2 row never named a file</span>
+            <div class="code-block before">ProgressEvent::TuIndex { done, total }
+  =&gt; ... &amp;format!("{done}/{total} TUs")
+// 1780/5744 TUs   &lt;- which one? nobody knows</div>
+        </div>
+        <div>
+            <span class="tag after-tag">After - path in the row (live ui.rs:224-230)</span>
+            <div class="code-block after">ProgressEvent::TuStarted { done, total,
+    source } =&gt; ... &amp;format!(
+      "{done}/{total} TUs  {}",
+      source.display())
+// 1780/5744 TUs  src/engine/load.cpp</div>
+        </div>
+    </div>
+    <p><span class="tag file-tag">crates/pipeline/src/stage_index.rs:152-165</span> emission point:</p>
+    <div class="code-block after">for (i, tu) in build.translation_units
+        .iter().enumerate() {
+    notify(&amp;ProgressEvent::TuStarted {
+        done: i, total,
+        source: tu.source_path
+            .strip_prefix(&amp;repo_root)
+            .unwrap_or(&amp;tu.source_path)
+            .to_path_buf(),
+    });
+    ...
+}</div>
+    <p>
+The path is repo-relative and verbatim - identifiability wins over line length (double space before the path is
+an I10 contract-test literal).
+Terminal and web rows ride the same frames (I6 parity oracle UNEDITED); <code>tool index</code>'s bar adopted the same payload as a rider.
+If anything dies mid-stage next time, the row itself names the unit - no shard forensics required.
+    </p>
+</div>
+
+<!-- ============ SLIDE 10: BOOT FLOW MAP ============ -->
+<div class="slide">
+    <h1>Control + data flow of the changed path</h1>
+    <div class="code-block">tool ui  (run_ui)
+  |
+  +-- boot task launched via drive_boot_build  [catch_unwind bridge]
+        |     panic/Err -&gt; web state "error" + text, fps_tx.send(None)  (I11)
+        v
+  build_ui_payload:
+    (1) stage_report(1, 0, "[1/5] Loading artifacts...",
+            "Hashing sources")            &lt;-- FRAME 1, before any hashing (I5)
+    (2) Pipeline::new_with_progress(repo, None, cb)
+          |  repo.discover_with_progress(hook)     [V2 hook]
+          |     per hashed file -&gt; BootMilestone::
+          |        DiscoveryHashed { done, total: None }
+          |        -&gt; message advances, percent HELD on [0,D] (I9)
+          |  cold include branch -&gt; 4 x IncludeScan { n/4 }
+          |        -&gt; percent mapped on [D,19]; stage-end frame keeps (1,20)
+          |        D = DISCOVERY_HASHED_SPAN_END = 10
+          |        (TODO calibrate from the T1a table - stage-1 is 1.2%
+          |         of measured cold-boot work, so calibration is cosmetic)
+    (3) stage 2, rebuild_index_single_threaded:
+          per TU -&gt; TuStarted { done, total, source }
+          row: "[2/5] Indexing translation units... i/total  rel/path.cpp" (I10)
+          terminal TuIndex frame stays; stages 3-5 unchanged
+  |
+  +-- warm path: fingerprint match -&gt; shard reload, NO TuStarted flood
+  +-- CURRENT_ANALYSIS_VERSION 2.1.0 rejects pre-fix shards BEFORE
+        deserialization (DP-6, slide 7)</div>
+    <h2>What did NOT move</h2>
+    <ul class="checklist">
+        <li><code>progress.rs</code> - byte-identical (DP-1 frozen); new frames reuse <code>format_step_bar</code>/<code>StepBarRenderer</code> unchanged.</li>
+        <li>The stage-5 13-frame replay contract test - green UNEDITED at every commit of both milestones (I2).</li>
+        <li><code>crates/ui/**</code> assets - zero diff; the web rows are generic renderers of the same frames.</li>
+        <li>Stage sequence and percent spans <code>[(k-1)*20, k*20]</code> - <code>total_stages</code> stays 5, labels unchanged.</li>
+    </ul>
+</div>
+
+<!-- ============ SLIDE 11: MEASURED TRUTH ============ -->
+<div class="slide">
+    <h1>The measured truth: profile first, parallelism never</h1>
+    <p>
+M27's shape said measurement-before-prescription - including <em>which profile you measure</em>.
+T1a (<code>bd4fb1a</code>, <code>tasks/tu-index-hang-throughput-t1-measurement.md</code>) benched the boot stages in
+RELEASE at 2000 headers / 400 TUs, medians of 3 runs, then answered the sufficiency gate.
+    </p>
+    <div style="text-align:center;">
+        <div class="stat"><div class="big-number">3.1 s/TU</div><div class="lbl">DEBUG, observed (E1)<br>= multi-hour cold boot</div></div>
+        <div class="stat"><div class="big-number">151.4 ms/TU</div><div class="lbl">RELEASE W=1 (60553.4 ms / 400)<br>= ~14.5 min projected @5744 TUs</div></div>
+        <div class="stat"><div class="big-number">0.71x</div><div class="lbl">workers W=N vs W=1<br>= 1.41x SLOWER, 4/4 runs, 2 sessions</div></div>
+        <div class="stat"><div class="big-number">~3.2 s</div><div class="lbl">warm reuse (3176.2 ms)<br>already rides today</div></div>
+    </div>
+    <p>
+Cross-session medians: implementer projection 13.6-16.4 min, reviewer's independent fresh run 15.2 min.
+The ratified bar (orchestrator + user at the evidence review): release single-thread cold stage-2 must be
+minutes-to-tens-of-minutes at corpus scale - an order of magnitude under the multi-hour DEBUG reality - warm in seconds.
+The formal verdict, quoted verbatim from <code>t1-measurement.md</code> sec. (d-final):
+    </p>
+    <div class="code-block after">SUFFICIENCY-GATE: ACCEPT - release+single-thread
+  meets the ratified wall-time bar at corpus scale
+  (T3 NOT dispatched)</div>
+    <div class="callout">
+That 0.71 is the whole plot twist: the production <code>Some(workers)</code> path is measurably <em>slower</em> than single-threaded
+on this fixture - the win was not in the wiring, so T3 (workers plumbing, <code>--workers</code> auto-default, completion-count percents)
+stayed <strong>dormant by evidence</strong>, not by oversight. Its contract stays ready (shape sec. 3.5);
+its dispatch precondition is now a written sufficiency FAIL. <code>K = 1.0</code> ratified: any future throughput gate
+requires parity-at-best against the T1 W=1 medians. DP-4 (repo hash parallelism) closed on the same bench:
+stage-1 components are ~1.2% of measured cold-boot work.
+    </div>
+    <p class="muted">One recorded method errata, kept honest: the doc's printed "151.4 * 5744 = 869,547" is full-precision math
+(151.3835 x 5744); the rounded 151.4 alone gives 869,641.6. Display-only, results unchanged (verdict finding 1).</p>
+</div>
+
+<!-- ============ SLIDE 12: PROFILE LEVER ============ -->
+<div class="slide">
+    <h1>The cheap lever T1a exposed, and the flag that made it safe <span class="dec">T5</span></h1>
+    <p>
+T1a's launch-profile record found the uncomfortable truth: <strong>DEBUG was the de-facto launch profile through
+every documented route</strong> - AGENTS.md says <code>cargo build</code> with <code>--release</code> as the special case,
+<code>ui_smoke.py</code> builds and launches <code>target/debug</code>, the extension docs use <code>cargo run</code>.
+So part of the incident's "forever" was hours of profile, not algorithm - worth more than any plausible T3 win.
+T5 (<code>5b517e6</code>) shipped the route: release lines in AGENTS.md / EXTENSIONS.md / the extension README,
+and made release honest about arithmetic:
+    </p>
+    <div class="code-block after"># AriadnesThread: keep integer underflow LOUD in
+# release. Two incidents (M25 parser.rs brace-depth,
+# M27 tokenizer char/byte columns) both
+# silent-wrapped in release; debug already checks.
+# Cost measured at T5: measurement doc sec. (e).
+[profile.release]
+overflow-checks = true</div>
+    <h2>The cost measurement (and a good trip-resolution story)</h2>
+    <p>
+Post-flag run 1 printed include-graph cold at 1240.3 ms - +167.1% over the 464.3 median, past the handoff's
++10% stop bar. The implementer STOPPED without committing, spent exactly ONE confirming re-run,
+got 478.3 ms - <em>inside</em> the recorded T1a run spread (460.9-491.2) - so the bar's own rule said NOT A TRIP;
+the reviewer added a third run: 490.9, also inside. Both numbers live in the record.
+    </p>
+    <table class="tokens">
+        <tr><th>label (release, post-flag)</th><th>vs T1a median</th><th>verdict</th></tr>
+        <tr><td class="mono">7 of 8 labels</td><td>-3.6% .. +4.1% (first run)</td><td>uniform, within bar</td></tr>
+        <tr><td class="mono">include-graph cold</td><td>1240.3 then 478.3 / 490.9</td><td>first-launch disk state, not flag cost</td></tr>
+        <tr><td class="mono">steady state (2 sessions)</td><td>-4.5% .. +13.5%</td><td>every row inside its own T1a run spread - no cliff</td></tr>
+    </table>
+    <div class="callout">
+FLAG: <strong>ACCEPT</strong> (reviewer's call, <code>t5-profile-lever-verdict.md</code>).
+The rationale is not hypothetical insurance: the corrections ledger carries a <em>same-day</em> M25-class
+<code>parser.rs:61</code> underflow observation, and this same hop points every user at the release binary -
+pairing a loud profile with a loud launch is the point.
+Deliberately left debug: <code>ui_smoke.py</code> stays on the debug route - it is PR-2/bench-bound, recorded on the ledger, not a silent gap.
+    </div>
+</div>
+
+<!-- ============ SLIDE 13: INVARIANTS + LOCKS ============ -->
+<div class="slide">
+    <h1>Invariants -&gt; the test that locks each</h1>
+    <table class="tokens">
+        <tr><th class="mono">Invariant</th><th>What it holds</th><th>Locking test (module)</th></tr>
+        <tr><td class="mono">I5</td><td>stage-1 Active frame before <code>Pipeline</code> construction; &gt;=2 stage-1 states</td>
+            <td><code>test_first_frame_precedes_pipeline_construction</code>, <code>test_stage_one_start_frame_emitted_exactly_once</code>, <code>test_cold_boot_first_report_is_stage_one_and_two_states</code> (cli <code>first_frame_tests.rs</code>)</td></tr>
+        <tr><td class="mono">I11</td><td>dead boot = state "error", never frozen loading</td>
+            <td><code>test_panic_in_boot_task_surfaces_error_state</code>, <code>test_error_result_surfaces_error_state</code>, <code>test_panicked_boot_commits_the_open_bar_line</code> (cli <code>boot_panic_tests.rs</code>)</td></tr>
+        <tr><td class="mono">I10</td><td>stage-2 Active row names the verbatim relative TU path; 1 event per TU</td>
+            <td><code>test_tu_started_message_names_verbatim_relative_path</code> (cli <code>progress_contract_tests.rs</code>); <code>test_tu_started_fires_exactly_once_per_tu_with_relative_path</code> (pipeline <code>boot_events_test.rs</code>)</td></tr>
+        <tr><td class="mono">I9</td><td>every new frame lands inside its stage span; honest holds</td>
+            <td><code>test_discovery_and_scan_events_stay_in_stage_one_span</code> + the UNEDITED stage-2/5 span tests (append-only contract file)</td></tr>
+        <tr><td class="mono">I2/I3</td><td>stage-5 13-frame replay + <code>progress.rs</code> frozen</td>
+            <td><code>test_stage_five_milestone_sequence_is_monotonic_and_contained</code> green UNEDITED every hop; <code>progress.rs</code> diff-EMPTY (proof, not test)</td></tr>
+        <tr><td class="mono">V2 hook</td><td>hook result identical, once per file, monotone, order-stable</td>
+            <td><code>test_discover_with_progress_result_identical_to_discover</code> + 3 siblings (repo <code>discovery.rs</code>)</td></tr>
+        <tr><td class="mono">I14</td><td>underflow impossible in BOTH profiles</td>
+            <td>4 tests in <code>tokenizer/underflow_fix_tests.rs</code>, run under <code>cargo test</code> AND <code>cargo test --release</code> (152/152 each)</td></tr>
+        <tr><td class="mono">I12</td><td>the corpus that panicked now completes</td>
+            <td><code>test_m27_nonascii_corpus_cold_index_completes</code> + anti-vacuity <code>test_specimen_bytes_are_single_encoded_utf8</code> (fixture, approved path)</td></tr>
+        <tr><td class="mono">I1</td><td>ASCII tokenization bytes never shift</td>
+            <td><code>test_ascii_path_tokenization_unchanged</code> (both profiles); m00/m18 parity UNEDITED; goldens diff-EMPTY</td></tr>
+    </table>
+    <h2>How to run the locks</h2>
+    <div class="code-block">python tools/testrun.py --distill -p ariadne-lang-cpp
+python tools/testrun.py --distill -p ariadne-lang-cpp -- --release
+python tools/testrun.py --distill -p ariadne-cli
+python tools/testrun.py --distill -p ariadne-repo
+python tools/testrun.py --distill -p ariadne-pipeline
+python tools/testrun.py --distill -- --workspace --no-fail-fast
+# release bench (ignored): cargo test --release -p ariadne-pipeline
+#   --test boot_stages_bench -- boot_stages_release_timing
+#   --ignored --nocapture --test-threads=1  (via tools/distill.py)</div>
+    <p class="muted">Census anchors: <code>1235 passed / 0 failed / 4 ignored / 87 suites</code> @ <code>1e81d7e</code> (M26 close);
+<code>1235 / 0 / 6 ignored / 88 suites</code> @ <code>bd4fb1a</code> (M27 current; +2 = the ignored benches).
+MUST count lines are only trustworthy from a GREEN-tree or <code>--no-fail-fast</code> run - default cargo aborts at the
+first failing target and hides never-started suites (dated ledger lesson from this milestone's own rider hop).</p>
+</div>
+
+<!-- ============ SLIDE 14: TRADE-OFFS ============ -->
+<div class="slide">
+    <h1>Trade-offs - what was rejected, and why it matters</h1>
+    <ul class="checklist">
+        <li><strong>Rejected: the planned T3 parallelism.</strong> It was <em>in the milestone</em> - and the measurement killed it.
+The only workers capability that exists today (<code>Some(n)</code>) is 0.71x, i.e. <em>slower</em>, reproducibly
+(4/4 runs across two independent sessions). Dispatching T3 would have shipped a regression with a nicer progress bar.
+The contract stays ready for a written sufficiency FAIL; wiring before fixing the workers path is banned by the same data.</li>
+        <li><strong>Rejected: auto-workers by default.</strong> <code>min(8, available_parallelism)</code> survives ONLY as an
+explicit <code>--workers</code> escape hatch; the default boot stays single-threaded on this evidence.</li>
+        <li><strong>Rejected: fake stage-1 percent movement.</strong> The walk has no bounded total, so <code>DiscoveryHashed</code>
+holds the percent and moves only the message (I9). A counter that advances before work proportionally did is
+exactly the dishonesty the A4 calibration precedent exists to prevent.</li>
+        <li><strong>Rejected: DP-4 repo-hash parallelism / DP-4 parse work (for now).</strong> Stage-1 measured 1.2% of
+cold-boot work - parallel hashing cannot move the wall. The lang-cpp parse limb stays the reserved sub-bar route, moot at the ratified bar.</li>
+        <li><strong>Rejected: SSE / streaming rows.</strong> None exists; the UI polls; the web rows already mirror every frame (I6).</li>
+        <li><strong>Accepted: a cache-wide epoch bump over targeted re-indexing.</strong> Blunt (everyone rebuilds once)
+but the only <em>enforced</em> invalidation - fingerprints cannot see analyzer-code corruption (slide 7).</li>
+        <li><strong>Accepted: overflow-checks in release at measured ~0 steady cost.</strong> The handoff's acceptance
+shape was "uniform +2..+8% is fine, a stage-level cliff is not"; observed cost beat the shape.</li>
+        <li><strong>Accepted deliberately: ui_smoke stays debug.</strong> It is the PR-2/bench-regime boundary; recorded on
+the ledger with its scope written down, per the T5 verdict's finding-3 discharge-note requirement.</li>
+    </ul>
+    <div class="callout">
+The governing rule this milestone tested hard: <strong>measurement before prescription - including which
+profile you measure.</strong> The pre-milestone assumption ("stage 2 is slow, parallelize it") was true,
+irrelevant, and would have shipped a 1.41x regression, all at once.
+    </div>
+</div>
+
+<!-- ============ SLIDE 15: COMMIT MAP ============ -->
+<div class="slide">
+    <h1>Commit map - drill from summary to diff</h1>
+    <p class="muted">Oldest first; every one gated + reviewed. <code>git show &lt;hash&gt;</code> is the drill-through.</p>
+    <table class="tokens">
+        <tr><th class="mono">Commit</th><th>What</th></tr>
+        <tr><td class="mono">62ce72b</td><td>docs: T0-report - E1/E2/E3 + confirmed mechanism + decision list (<code>t0-evidence.md</code>)</td></tr>
+        <tr><td class="mono">d6267a3</td><td>test: approved m27-nonascii-underflow fixture (word AND punct runs) + RED lock</td></tr>
+        <tr><td class="mono">ea21687</td><td><strong>fix: char-count column at BOTH tokenizer flush sites + 12-site class audit + both-profile locks</strong></td></tr>
+        <tr><td class="mono">59f0512</td><td>chore: CURRENT_ANALYSIS_VERSION 2.0.0 -&gt; 2.1.0 (DP-6) + m12 pin + m27 un-ignore</td></tr>
+        <tr><td class="mono">72252a4</td><td>test: DP-6 riders - m21 witness literal + report byte-lock 0xddc3f9ee -&gt; 0xbee91e36</td></tr>
+        <tr><td class="mono">9ceb8e3</td><td>docs(journal): T2 gate checkpoints + five-site dependent census</td></tr>
+        <tr><td class="mono">7aeee44</td><td>docs: planning + hop artifacts; ledger M27 T2 APPROVED-FINAL</td></tr>
+        <tr><td class="mono">79f3403 / f325bee</td><td>M26 V1: verbatim stage-spans extraction / frame-1-first + catch_unwind bridge + 7 tests</td></tr>
+        <tr><td class="mono">3f8be39</td><td>M26 V2: discover_with_progress hook, discover() delegates no-op</td></tr>
+        <tr><td class="mono">1819b8f / 8eedb05</td><td>M26 V3: stage_index/stage_load extraction / BootMilestone + TuStarted + new_with_progress + honest mapping</td></tr>
+        <tr><td class="mono">42d4a6e</td><td>docs(ledger): <strong>M26 CLOSED</strong> (census 1235/0/4/87)</td></tr>
+        <tr><td class="mono">bd4fb1a</td><td>test: boot_stages RELEASE bench + launch-profile record + sufficiency verdict (T1a)</td></tr>
+        <tr><td class="mono">41f7ad4</td><td>docs(ledger): T1a APPROVED, SUFFICIENCY-GATE ACCEPT ratified, T3 dormant, T4 closed</td></tr>
+        <tr><td class="mono">5b517e6</td><td>feat(release): overflow-checks=true + release launch route (T5)</td></tr>
+    </table>
+    <p class="muted">
+Evidence trail: <code>tasks/tu-index-hang-throughput-{t0-evidence,t1-measurement,t0b/t2/t1a/t5-profile-lever}-*.md</code>,
+<code>tasks/boot-progress-visibility-v{1,2,3}-{journal,verdict}.md</code>, both <code>execution-results.md</code> files
+(5 addenda total on the M27 side), ledger rows M26/M27 + dated rows 59-67.
+    </p>
+</div>
+
+<!-- ============ SLIDE 16: HONEST STATE ============ -->
+<div class="slide">
+    <h1>Honest state six months from now</h1>
+    <h2>M26 boot-progress-visibility: CLOSED (2026-10-05)</h2>
+    <p>All three hops gated APPROVED; shipped: frame-1-first, stage-1 events, TU path in the row, dead-boot error surface. Census anchor 1235/0/4/87 @ <code>1e81d7e</code>.</p>
+    <h2>M27 tu-index-hang-throughput: fix / measurement / flag LANDED; T1b PENDING</h2>
+    <ul class="checklist">
+        <li><strong>Landed APPROVED:</strong> T0-report + T0b fixture, T2 fix + audit + DP-6, T1a measurement + ratified
+SUFFICIENCY-GATE ACCEPT, T5 profile lever. Census anchor <code>1235 / 0 / 6 ignored / 88 suites</code> @ <code>bd4fb1a</code>.</li>
+        <li><strong>OPEN - T1b:</strong> the <code>--bench boot-stages</code> gate in <code>bench_compare.py</code> +
+<code>DOCUMENTED_PHASES_BOOT_STAGES</code> tuple. PR-2-bound: the operator must first run
+<code>bench_compare.py --update-baseline</code> on a VERIFIED-IDLE machine so the new baseline inherits the
+overflow-checks profile regime (the ratified ordering put T5 <em>before</em> the baseline refresh on purpose).</li>
+        <li><strong>DORMANT BY EVIDENCE - T3:</strong> not deleted, not forgotten; dispatch precondition is a written
+release+single-thread sufficiency FAIL, and it must ride <em>after</em> the workers path itself gets faster than 1.0x (K=1.0 ratified).</li>
+        <li><strong>EVIDENCE-CLOSED - T4/DP-4.</strong> <strong>MOOT - Q7</strong> auto-workers cap (T3 never fired).</li>
+    </ul>
+    <h2>Standing duties this change shipped</h2>
+    <ul class="checklist">
+        <li><strong>User:</strong> re-index non-ASCII corpora (the 2.1.0 bump forces the rebuild; ASCII corpora need none).</li>
+        <li><strong>Calibration TODO:</strong> <code>DISCOVERY_HASHED_SPAN_END = 10</code> awaits the T1a-table split point
+- cosmetic at stage-1's measured 1.2% share.</li>
+        <li><strong>Routed doc defects:</strong> the <code>--bin cli</code> trio (no bin named <code>cli</code> exists) got a named
+follow-up hop, deliberately NOT patched inside T5 - the discipline clause called it verbatim.</li>
+        <li><strong>Operator:</strong> throwaway purge (5 reviewer scratch scripts), worktree census, PR-2 baseline refresh.</li>
+    </ul>
+    <h2>If you take one rule from this deck</h2>
+    <p>
+<strong>A "hung" boot with near-zero CPU is a dead worker until proven otherwise - read the console first;
+and measure the profile before buying parallelism.</strong>
+The panic hook was the only error channel this product had; the frozen row was lying by omission; and the
+90-minute number that justified the milestone was a debug-build artifact. All three lies died in one milestone pair.
+    </p>
+</div>
+
+<div class="navigation">
+    <button onclick="prevSlide()">Previous</button>
+    <span id="slideNumber">1 / 17</span>
+    <button onclick="nextSlide()">Next</button>
+</div>
+
+<script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+
+    function showSlide(n) {
+        slides.forEach(slide => slide.classList.remove('active'));
+        slides[n].classList.add('active');
+        document.getElementById('slideNumber').textContent =
+            `${n + 1} / ${slides.length}`;
+    }
+
+    function jumpTo(n) {
+        currentSlide = n;
+        showSlide(n);
+    }
+
+    function nextSlide() {
+        currentSlide = (currentSlide + 1) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+        currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    showSlide(0);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+        if (e.key === 'ArrowLeft') prevSlide();
+    });
+</script>
+</body>
+</html>

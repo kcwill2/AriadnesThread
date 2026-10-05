@@ -419,3 +419,114 @@ PowerShell `Get-Content` line count (-> Read tool reports 866 lines).
   the authoritative capture is cited at t0-evidence sec. 1, verified present.
 - Anything mutating git: reviewer is read-only; verdict + this addendum are
   the only writes.
+
+---
+
+# Addendum 5 - T5 profile-lever reviewer hop, 2026-10-05
+
+Reviewer hop for `tasks/tu-index-hang-throughput-t5-profile-lever-handoff.md`
+(UNTRACKED - orchestrator finalization item); single commit `5b517e6`, parent
+`41f7ad4` (verified `git rev-parse "5b517e6^"`). Verdict: **APPROVED**;
+FLAG: **ACCEPT** (`[profile.release] overflow-checks = true`) -
+`tasks/tu-index-hang-throughput-t5-profile-lever-verdict.md`.
+
+## Acceptance criteria vs evidence (each with its evidence line)
+
+1. Landing commit = exactly the six touch-set paths.
+   Evidence: `git diff --name-only 41f7ad4..HEAD` -> Cargo.toml, AGENTS.md,
+   EXTENSIONS.md, extensions/ariadne-extension/README.md,
+   tasks/tu-index-hang-throughput-t1-measurement.md,
+   tasks/tu-index-hang-throughput-t5-profile-lever-journal.md. `git show
+   --stat "5b517e6"` -> `6 files changed, 219 insertions(+), 3
+   deletions(-)`. Cargo.lock zero-diff (single-pathspec `git diff
+   41f7ad4..HEAD --stat -- Cargo.lock` -> empty).
+2. Frozen locks / I1-I3. Evidence: `tools/**`, `crates/**`, `tests/**`
+   absent from the range diff (byte-identical, covering every named lock);
+   `tools/ui_smoke.py` untouched + PASS re-run; census UNCHANGED (line
+   below); measurement-doc hunk carries ZERO deletion lines (I4 append-only
+   verified on the diff).
+3. Plan-literal. Evidence: Cargo.toml stanza byte-faithful to handoff item 1
+   (comment + `overflow-checks = true`, flag names only `[profile.release]`);
+   AGENTS.md bullet verbatim per item 2, anchored after the
+   `cargo build --release` line; sec. (e) bench invocation verbatim equal to
+   t1a-handoff gate 1 (:161-163); all 9 cited sec. (a) numbers and all 8
+   delta-% values re-derived correct by hand.
+4. STOP-bar trip-resolution exchange (the FLAG crux). Evidence: journal TRIP
+   record (1240.3 = +167.1%, "NOT committing until adjudicated"), ONE
+   confirming re-run of the allowed form -> 478.3 INSIDE the recorded spread
+   460.9-491.2, both numbers recorded in journal AND measurement sec. (e),
+   commit only after resolution. Reviewer's independent third data point
+   (this hop, pinned invocation, exit 0, identical machine header,
+   `profile=release debug_assertions=false`, `finished in 162.71s`, capture
+   `target/distill-capture.txt` 19 lines read fresh): include-graph cold
+   `490.9` (inside spread); labels 244.3/1.0/0.7/490.9/50.3/57846.9/86737.9/
+   3342.8 -> deltas -4.5%..+13.5% single-value, every row inside its own T1a
+   run spread (warm-load's spread 37.2-51.3 spans ~+/-16% around its
+   median). Adjudicated: exchange protocol-faithful; +167.1% was first-launch
+   disk state, not flag cost; no steady-state cliff; flag ACCEPTED.
+5. Invocation ceiling. Evidence: 7 enumerated + 1 confirming = 8 <= 8; the
+   +1 staging distill support call is disclosed (D2, non-vacuous `--staged`
+   rationale, M26 V3 set-equality precedent).
+6. Report-evidence check (distillation contract). Evidence: journal is
+   digest-shaped - MUST lines, exit codes, capture path cited, zero raw
+   dumps, gate commands via distilling entry points. PASS (one omission:
+   gate 6's own line is absent from the journal gate log - verdict
+   finding 1, superseded by the reviewer's `--all` exit 0).
+
+## Canonical summary lines (quoted verbatim)
+
+- Gate 1 fresh: `25 passed / 0 failed / 4 ignored / 6 suites`
+  (`### cargo test PASS (exit 0)`). MUST verbatim.
+- Gate 2 fresh: `110 passed / 0 failed / 1 ignored / 5 suites`
+  (`### cargo test PASS (exit 0)`). MUST verbatim.
+- Census fresh (`python tools/testrun.py --distill -- --workspace
+  --no-fail-fast`, exit 0, `[capture: ...target\testrun-capture.txt,
+  2176 lines]`): `1235 passed / 0 failed / 6 ignored / 88 suites` -
+  UNCHANGED vs the `bd4fb1a` anchor (I3 met).
+- Reviewer release bench (third data point): `ok (exit 0, 0 warnings
+  emitted) -> capture: ...target\distill-capture.txt`; capture
+  `test result: ok. 1 passed; 0 failed; ... finished in 162.71s`.
+- Tool suites: `Ran 188 tests in 21.887s` / `OK`.
+- `ui_smoke` (distill route): `boot+route checks clean (cold fixture,
+  attempt 1, 0.9s)` / `ui_smoke: PASS` - debug route demonstrably unaffected.
+- `hygiene_check.py` -> `### generic PASS (exit 0)` (distill attestation;
+  standalone run identical): R3 warn-only, all pre-existing or foreign
+  (incl. the row-66 purge-queue `tasks/v3-review-*.py` throwaways), zero
+  R1/R2, zero in touch-set files.
+- `encoding_guard.py --all` -> `### generic PASS (exit 0)`, 0-line capture.
+- Literal `python tools/testrun.py --baseline`: NOT RUNNABLE - `usage error:
+  missing value for --baseline` (6th encounter, ledger row 59 errata;
+  `--distill` census substitute quoted above).
+
+## Gate reachability log (per-gate attempt discipline)
+
+Ran successfully: `checkpoint_guard.py status`; scoped + workspace
+`testrun.py --distill`; pinned release bench via `distill.py`; Read-tool
+capture read immediately after the bench (before any overwrite);
+`unittest discover`; `hygiene_check.py` (standalone + distill attestation);
+`encoding_guard.py --all` (standalone + distill attestation); `ui_smoke.py`
+via distill; `git log/show --stat/diff --name-only/diff --stat
+(single-pathspec)/rev-parse`. Refused by the global catch-all
+(`{"permission":"bash","pattern":"*","action":"deny","source":"global"}`
+boilerplate - each attempted once, then routed around; no gate skipped):
+`git show ... | findstr` pipe form (-> Read tool on tracked-file working
+copy; the t1a-* files are provably absent from the range diff, so
+worktree == base blob); `unittest ... 2>&1 | Select-Object` pipe (-> plain
+standalone run); BOTH `cmd; echo "EXIT=$LASTEXITCODE"` chained forms for
+hygiene and encoding (-> distill digest attestation prints the exit code);
+inline `python -c`/`python -X utf8 -c` capture extraction (-> Read tool);
+bare `python tools/ui_smoke.py` (-> sanctioned distill route).
+
+## Explicitly NOT run at this hop
+
+- `python tools/bench_compare.py`: NOT RUN - PR-2/T1b-bound exemption
+  stands (handoff discipline clause; the boot-stages baseline rows do not
+  exist yet; the operator `--update-baseline` on VERIFIED-IDLE must
+  precede T1b's live gate; the landing touched zero code, so a compare run
+  would measure the stale regime this hop deliberately precedes). Stated,
+  not silent.
+- Literal `--baseline`: unrunnable (above); `--distill` substitute quoted.
+- `encoding_guard --staged`: not re-runnable post-commit (index empty);
+  superseded by `--all` exit 0 on the landing tree - strictly broader.
+- Anything mutating git: reviewer is read-only; verdict + this addendum are
+  the only writes.
