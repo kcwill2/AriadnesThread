@@ -2,6 +2,7 @@ mod common;
 mod d27_node_provenance;
 mod dto_builders;
 mod edge_verdict_story;
+mod extraction_card_playbook;
 mod export_order;
 mod extraction_card_story;
 mod file_view;

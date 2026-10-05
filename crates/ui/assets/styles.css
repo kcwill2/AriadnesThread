@@ -1108,6 +1108,73 @@
       margin-top: 2px;
     }
 
+    .extraction-disclosure {
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: var(--tile-bg);
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .extraction-disclosure:hover {
+      background: var(--tile-bg);
+      box-shadow: 0 0 0 1px var(--border-light) inset;
+    }
+
+    .extraction-summary-meta {
+      color: var(--text-muted);
+    }
+
+    .extraction-summary-saving {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .extraction-details {
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid var(--border-light);
+      color: var(--text-sub);
+    }
+
+    .extraction-files {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 3px;
+    }
+
+    .extraction-file {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 3px;
+    }
+
+    .extraction-file-path {
+      font-family: monospace;
+      background: var(--tile-bg);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 0 3px;
+    }
+
+    .extraction-command {
+      font-family: monospace;
+      background: var(--tile-bg);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 0 3px;
+    }
+
+    .extraction-apply-note {
+      color: var(--text-sub);
+    }
+
     .hotspot-row {
       display: grid;
       grid-template-columns: 16px 1fr auto;

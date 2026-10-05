@@ -268,6 +268,20 @@
       selectNode(id);
     }
 
+    // Disclosure DOM-walk contract (shape C5): locate the detail div inside
+    // the same card via closest/querySelector, never an element id, because
+    // the identical card renders in the hotspot list and the inspector at
+    // once. Re-render rebuilds the card markup, so disclosure state lives in
+    // the DOM only and resets to collapsed - the documented behavior.
+    function toggleExtractionCard(event, buttonEl) {
+      event.stopPropagation();
+      const card = buttonEl.closest('.extraction-card');
+      const details = card ? card.querySelector('.extraction-details') : null;
+      if (!details) return;
+      details.hidden = !details.hidden;
+      buttonEl.setAttribute('aria-expanded', details.hidden ? 'false' : 'true');
+    }
+
     // === PROPOSED EXTRACTIONS (payload D1 data; one builder for both surfaces) ===
     // Card renderer shared by the hotspot panel list and the inspector tie-in
     // (api.js renderInspectorProposalCard). Payload order is already sorted
@@ -301,11 +315,57 @@
       return `<span class="extraction-risk extraction-risk-${tier}">Risk: ${escapeHtml(risk || '')}</span>`;
     }
 
-    // Five-beat story card (why -> what moves -> what it costs -> who is
-    // affected -> preview): identity head with plan_id chip, the problem
-    // sentence visible in the body, a labeled collateral drop with derived
-    // saving, symbol/header chips, and the reader-worded consumer-TU count.
-    // The preview button markup stays byte-faithful (class, label, attrs).
+    // Summary meta for the collapsed card: the symbol count plus the same
+    // guarded saving text the cost beat shows, so the summary never prints a
+    // number the cost beat would not.
+    function extractionSummaryMeta(p) {
+      const symbolCount = p.total_symbols || 0;
+      const saving = extractionSavingText(p.collateral_load_before || 0, p.collateral_load_after || 0);
+      const savingChip = saving ? `<span class="extraction-summary-saving">${saving}</span>` : '';
+      return `<span class="extraction-summary-meta">${symbolCount} symbols</span>${savingChip}`;
+    }
+
+    // Destination manifest (playbook): one row per suggested target file the
+    // plan already carries, with the symbols it should hold. Paths and
+    // symbol names escape through the shared helpers; the plural chips
+    // wrapper stays composed in the card builder below the head line.
+    // Legacy payloads without the file plan render the honest fallback line,
+    // never a fabricated path.
+    function renderExtractionFilePlan(targetFiles, truncated) {
+      const files = targetFiles || [];
+      const fileRows = files.map(t => {
+        const hiddenSymbols = (t.symbol_count || 0) - (t.symbol_names || []).length;
+        const overflow = hiddenSymbols > 0 ? `<span class="just-more">+${hiddenSymbols} more</span>` : '';
+        return `<div class="extraction-file">` +
+          `<code class="extraction-file-path">${escapeHtml(t.path)}</code>` +
+          extractionChips(t.symbol_names) + overflow + `</div>`;
+      }).join('');
+      const rows = files.length ? fileRows : '<em>no file plan in payload</em>';
+      const moreFiles = truncated ? '<span class="just-more">more files not listed</span>' : '';
+      return `<div class="extraction-row extraction-files"><span class="extraction-label">Files to create (${files.length})</span>${rows}${moreFiles}</div>`;
+    }
+
+    // Honest apply recipe, verbatim verbs from the CLI command surface
+    // (apply and migrate: positional repo root, --plan flag). <repo-root>
+    // stays a literal placeholder token by design (shape P9); the UI states
+    // the command, it never runs anything.
+    function renderExtractionApplyHint(planId) {
+      const safePlanId = escapeHtml(planId || '');
+      return `<div class="extraction-row extraction-apply">` +
+        `<span class="extraction-label">How to apply</span>` +
+        `<code class="extraction-command">tool apply &lt;repo-root&gt; --plan ${safePlanId}</code>` +
+        `<div class="extraction-apply-note">Validates and rolls back on failure; preview first: ` +
+        `tool migrate &lt;repo-root&gt; --plan ${safePlanId} --preview</div></div>`;
+    }
+
+    // Playbook card: an always-visible summary (identity chip, target title,
+    // N symbols, guarded saving, risk badge) over a collapsed detail that
+    // keeps the five story beats in their narrative order and adds the
+    // destination manifest plus the apply recipe. The preview control (E3)
+    // runs against the CURRENTLY selected consumer root, never the planner's
+    // global target - the label says so - and its row stays outside the
+    // detail so it remains discoverable while collapsed; its markup stays
+    // byte-faithful (class, label, attrs).
     function renderExtractionProposalCard(p) {
       const targetLabel = escapeHtml(p.target_file || String(p.target_file_id));
       const before = p.collateral_load_before || 0;
@@ -325,20 +385,30 @@
       const previewBtn = previewable
         ? `<div class="extraction-row"><button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(previewRoot)}" data-preview-source="${escapeHtml(String(p.target_file_id))}">Preview drop from selected file</button></div>`
         : '';
+      const filePlan = renderExtractionFilePlan(p.target_files || [], p.target_files_truncated);
+      const applyHint = renderExtractionApplyHint(p.plan_id || '');
       return `
         <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${targetLabel}">
-          <div class="extraction-head">
-            <span class="extraction-plan-id">${escapeHtml(p.plan_id || '')}</span>
-            <span class="extraction-title">${targetLabel}</span>
+          <button type="button" class="extraction-disclosure" aria-expanded="false" onclick="toggleExtractionCard(event, this)">
+            <span class="extraction-head">
+              <span class="extraction-plan-id">${escapeHtml(p.plan_id || '')}</span>
+              <span class="extraction-title">${targetLabel}</span>
+            </span>
+            ${extractionSummaryMeta(p)}
+            ${renderExtractionRiskTag(p.risk)}
+          </button>
+          <div class="extraction-details" hidden>
+            <div class="extraction-problem"><span class="extraction-label">Why</span>${escapeHtml(p.problem || '')}</div>
+            <div class="extraction-cost">
+              <span class="extraction-label">Collateral drop</span>
+              <span class="extraction-delta">${before} &rarr; ${after}</span>${saving}
+            </div>
+            <div class="extraction-row"><span class="extraction-label">Extract (${p.total_symbols || 0})</span><span class="extraction-chips">${symbolChips}</span></div>
+            <div class="extraction-row"><span class="extraction-label">extracted symbols need</span><span class="extraction-chips">${headerChips}</span></div>
+            <div class="extraction-row"><span class="extraction-label">Impact</span><span class="extraction-tu">${p.consumer_tu_count || 0} consumer TU(s) need re-validation</span>${renderExtractionRiskTag(p.risk)}</div>
+            ${filePlan}
+            ${applyHint}
           </div>
-          <div class="extraction-problem"><span class="extraction-label">Why</span>${escapeHtml(p.problem || '')}</div>
-          <div class="extraction-cost">
-            <span class="extraction-label">Collateral drop</span>
-            <span class="extraction-delta">${before} &rarr; ${after}</span>${saving}
-          </div>
-          <div class="extraction-row"><span class="extraction-label">Extract (${p.total_symbols || 0})</span><span class="extraction-chips">${symbolChips}</span></div>
-          <div class="extraction-row"><span class="extraction-label">extracted symbols need</span><span class="extraction-chips">${headerChips}</span></div>
-          <div class="extraction-row"><span class="extraction-label">Impact</span><span class="extraction-tu">${p.consumer_tu_count || 0} consumer TU(s) need re-validation</span>${renderExtractionRiskTag(p.risk)}</div>
           ${previewBtn}
         </div>`;
     }
