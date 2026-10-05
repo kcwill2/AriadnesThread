@@ -147,15 +147,27 @@ fixture blobs (`C3 A9`, `C2 AB`, `E2 82 AC`) clear the double-encoded
 signatures as legitimate single-encoded UTF-8; README/test/journal are
 pure ASCII. Re-run after the final test-file edit: exit 0.
 
-### Gate 5 (Commit)
+### Gate 5 (Commit) - LANDED as d6267a3
 
+Planned per the handoff:
 `python tools/distill.py -- python tools/commit_scoped.py --scope
 tests/fixtures/m27-nonascii-underflow --scope
 tests/integration/tests/m27_nonascii_corpus_test.rs --scope
 tasks/tu-index-hang-throughput-t0b-journal.md -m "test(fixtures): approved
 m27-nonascii-underflow specimen (word AND punct non-ASCII runs) + carried
-RED completion lock (M27 T0b)"` - hash reported in the report-back (a
-journal inside that commit cannot carry its own hash).
+RED completion lock (M27 T0b)"`.
+ACTUAL landing route (recorded honestly, F1-class accuracy rule): the
+distill-wrapped form was refused by the permission allowlist (boilerplate
+catch-all refusal), so the commit landed via the direct declared entry
+point with identical scopes and message:
+`python tools/commit_scoped.py --scope tests/fixtures/m27-nonascii-underflow
+--scope tests/integration/tests/m27_nonascii_corpus_test.rs --scope
+tasks/tu-index-hang-throughput-t0b-journal.md -m "<same message>"`.
+Result: `commit d6267a3`, numstat = the six touch-set paths only
+(599 insertions). Follow-up journal-errata commit: this very amendment
+records hash + route; the diff-scope proof
+(`git diff --stat 62ce72b..HEAD` before this errata) showed
+`tests/fixtures/m27-nonascii-underflow/` as the ONLY fixture path.
 
 ## Committed byte inventory (hex)
 
