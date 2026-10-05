@@ -23,7 +23,20 @@ pub fn compute_file_hash(path: &Path) -> Result<String> {
 
 /// Recursively discovers source and header files in the given root directory.
 pub fn discover_repository_files(root: &Path) -> Result<Vec<FileRecord>> {
+    discover_repository_files_with_progress(root, &mut |_hashed, _discovered| {})
+}
+
+/// Walk and hash analyzable files, firing `on_hashed` after each
+/// successful `compute_file_hash` with `(hashed_so_far, discovered_so_far)`.
+/// On this single-pass walk both counts are equal; the pair is spelled as
+/// two arguments so a future 2-pass walk can split them. The hook fires in
+/// WALK order; the returned records keep the path-sorted order.
+pub(crate) fn discover_repository_files_with_progress(
+    root: &Path,
+    on_hashed: &mut dyn FnMut(usize, usize),
+) -> Result<Vec<FileRecord>> {
     let mut files = Vec::new();
+    let mut hashed_so_far = 0usize;
     let mut stack = vec![root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
@@ -75,6 +88,8 @@ pub fn discover_repository_files(root: &Path) -> Result<Vec<FileRecord>> {
                         optimization_policy: policy,
                         language: SourceLanguage::from_file_kind(kind),
                     });
+                    hashed_so_far += 1;
+                    on_hashed(hashed_so_far, files.len());
                 }
             }
         }
@@ -229,5 +244,172 @@ mod tests {
         let scala = scala.expect("c.scala is recorded as an analyzable ScalaSource");
         assert_eq!(scala.kind, crate::types::FileKind::ScalaSource);
         assert_eq!(scala.language, crate::types::SourceLanguage::Scala);
+    }
+}
+
+#[cfg(test)]
+mod progress_hook_tests {
+    use super::*;
+    use crate::Repository;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Creates `rel` under `root`, building parent dirs as needed.
+    fn create_tree_file(root: &Path, rel: &str, body: &[u8]) {
+        let full = root.join(rel);
+        fs::create_dir_all(full.parent().expect("relative path has a parent")).unwrap();
+        fs::write(&full, body).unwrap();
+    }
+
+    /// The contract lock: with_progress yields exactly what discover()
+    /// yields - same records, same ids/paths/hashes, same order, same
+    /// summaries.
+    #[test]
+    fn test_discover_with_progress_result_identical_to_discover() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        create_tree_file(root, "include/thing.h", b"#pragma once\nvoid foo();");
+        create_tree_file(root, "src/main.cpp", b"int main() { return 0; }");
+        create_tree_file(root, "src/nested/deep.scala", b"object Deep {}");
+        create_tree_file(root, "target/out.cpp", b"out");
+        create_tree_file(root, "notes.md", b"# notes");
+
+        let repo = Repository::locate(root).unwrap();
+        let plain_result = repo.discover().unwrap();
+        let hooked_result = repo
+            .discover_with_progress(&mut |_hashed, _discovered| {})
+            .unwrap();
+
+        assert!(
+            !plain_result.files.is_empty(),
+            "fixture must actually record files"
+        );
+        assert_eq!(plain_result.root, hooked_result.root);
+        assert_eq!(
+            plain_result.files, hooked_result.files,
+            "records (ids, paths, hashes, order) must be identical"
+        );
+        assert_eq!(
+            plain_result.ownership_summary,
+            hooked_result.ownership_summary
+        );
+        assert_eq!(plain_result.policy_summary, hooked_result.policy_summary);
+    }
+
+    /// Hook fires exactly once per analyzable file; the first argument
+    /// counts 1,2,3 in call order and equals the second argument at every
+    /// call (single-pass walk per the contract).
+    #[test]
+    fn test_hook_fires_once_per_analyzable_file_with_monotone_counts() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        create_tree_file(root, "src/first.cpp", b"int first() {}");
+        create_tree_file(root, "src/second.h", b"void second();");
+        create_tree_file(root, "src/third.scala", b"object Third {}");
+        create_tree_file(root, "node_modules/skipped.cpp", b"skipped");
+        create_tree_file(root, "readme.md", b"# readme");
+
+        let repo = Repository::locate(root).unwrap();
+        let mut hook_calls: Vec<(usize, usize)> = Vec::new();
+        let discovery_result = repo
+            .discover_with_progress(&mut |hashed, discovered| {
+                hook_calls.push((hashed, discovered));
+            })
+            .unwrap();
+
+        assert_eq!(
+            hook_calls.len(),
+            3,
+            "hook fires once per analyzable file"
+        );
+        let hashed_counts: Vec<usize> = hook_calls.iter().map(|call| call.0).collect();
+        assert_eq!(hashed_counts, vec![1, 2, 3], "first argument runs 1,2,3");
+        for call in &hook_calls {
+            assert_eq!(
+                call.0, call.1,
+                "single-pass walk: hashed_so_far == discovered_so_far"
+            );
+        }
+        assert_eq!(discovery_result.files.len(), 3);
+    }
+
+    /// Hook call count equals the recorded-file count on a tree with five
+    /// analyzable files across three dirs plus the whole skip list present.
+    #[test]
+    fn test_hook_count_matches_result_len_on_mixed_tree() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        create_tree_file(root, "src/one.cpp", b"int one() {}");
+        create_tree_file(root, "src/two.h", b"void two();");
+        create_tree_file(root, "lib/three.cpp", b"int three() {}");
+        create_tree_file(root, "lib/four.c", b"int four() {}");
+        create_tree_file(root, "apps/five.scala", b"object Five {}");
+        create_tree_file(root, "target/skip.cpp", b"skip");
+        create_tree_file(root, "artifacts/skip.c", b"skip");
+        create_tree_file(root, "node_modules/skip.cpp", b"skip");
+        create_tree_file(root, ".hidden/skip.h", b"skip");
+
+        let repo = Repository::locate(root).unwrap();
+        let mut hook_call_count = 0usize;
+        let discovery_result = repo
+            .discover_with_progress(&mut |_hashed, _discovered| {
+                hook_call_count += 1;
+            })
+            .unwrap();
+
+        assert_eq!(
+            hook_call_count,
+            discovery_result.files.len(),
+            "hook count must match recorded files"
+        );
+        assert_eq!(
+            hook_call_count, 5,
+            "five analyzable files across three dirs, skip list inert"
+        );
+    }
+
+    /// Shipped as the Windows fallback for
+    /// test_hook_surfaces_hash_error_propagation (unreadable files are not
+    /// cheaply expressible via std::fs on Windows; journal records this).
+    /// Locks: the hook fires while walking (once per analyzable file) while
+    /// the returned records stay path-sorted - hook order is walk order,
+    /// never asserted to equal path order.
+    #[test]
+    fn test_hook_order_independent_of_path_sort() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        create_tree_file(root, "aardvark.cpp", b"int a() {}");
+        create_tree_file(root, "sub/zulu.h", b"void z();");
+        create_tree_file(root, "sub/yankee.h", b"void y();");
+        create_tree_file(root, "zzz.cpp", b"int z() {}");
+
+        let repo = Repository::locate(root).unwrap();
+        let mut hook_call_count = 0usize;
+        let discovery_result = repo
+            .discover_with_progress(&mut |_hashed, _discovered| {
+                hook_call_count += 1;
+            })
+            .unwrap();
+
+        assert_eq!(
+            hook_call_count, 4,
+            "hook fires while walking, once per analyzable file"
+        );
+        assert_eq!(
+            hook_call_count,
+            discovery_result.files.len(),
+            "hook count matches the sorted result length"
+        );
+        let result_paths: Vec<String> = discovery_result
+            .files
+            .iter()
+            .map(|record| record.path.to_string_lossy().to_string())
+            .collect();
+        let mut sorted_paths = result_paths.clone();
+        sorted_paths.sort();
+        assert_eq!(
+            result_paths, sorted_paths,
+            "returned records stay path-sorted regardless of hook timing"
+        );
     }
 }

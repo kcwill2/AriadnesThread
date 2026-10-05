@@ -29,7 +29,16 @@ impl Repository {
     }
 
     pub fn discover(&self) -> Result<RepositoryDiscoveryResult> {
-        let files = discover_repository_files(&self.root)?;
+        self.discover_with_progress(&mut |_hashed, _discovered| {})
+    }
+
+    /// Additive; per hashed file, (hashed_so_far, discovered_so_far).
+    /// discover() delegates no-op. Record ORDER unchanged.
+    pub fn discover_with_progress(
+        &self,
+        on_hashed: &mut dyn FnMut(usize, usize),
+    ) -> Result<RepositoryDiscoveryResult> {
+        let files = discovery::discover_repository_files_with_progress(&self.root, on_hashed)?;
         Ok(build_discovery_result(self.root.clone(), files))
     }
 }
