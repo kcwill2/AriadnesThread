@@ -87,3 +87,16 @@ fn api_cpp_line155_reproduction_lexes_without_brace_leak() {
         ],
     );
 }
+
+#[test]
+fn closing_paren_inside_raw_content_requires_delim_quote_terminator() {
+    // Reviewer Finding 1: a `)` in raw content must NOT terminate the
+    // literal - only `)` + delimiter + `"` does (spec 4.1). Without the
+    // closing-quote check the empty-delimiter slice equality is trivially
+    // true and the first content `)` consumes the raw early, leaking the
+    // `}` that follows it.
+    expect_token_kinds("a R\"(f(x) } )\" b", &["word:a", "word:b"]);
+    // Delimited variant: content carries `)` immediately followed by
+    // delimiter chars (`)d` in `close)done`), which must not fake a match.
+    expect_token_kinds("a R\"d(close)done{ )d\" b", &["word:a", "word:b"]);
+}

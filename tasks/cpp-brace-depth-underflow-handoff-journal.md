@@ -100,5 +100,62 @@ Then: hygiene_check exit 0, encoding_guard --staged exit 0, scoped commit
   PowerShell `>` redirect. `distill.py -- git status --porcelain`,
   `distill.py -- python target/<script>`, and the four ritual tools all work.
 
+## Verdict round 1 - Finding 1 (blocker) + Finding 2 (G4)
+
+Verdict `tasks/cpp-brace-depth-underflow-t1-verdict.md` REJECTED: the
+terminator match in `scan_raw_string` omitted `chars[closing_quote] == '"'`.
+With an empty delimiter the delimiter-slice equality is trivially true, so
+the first `)` inside raw content terminated the literal early and leaked its
+braces - turning balanced TUs underflowing (probe `R"(f(x) } g)" h(); {}`:
+committed min=-1). Accepted; contract breach vs spec 4.1 confirmed by reading
+the match arm.
+
+- Red (verdict fixture, verbatim):
+  `expect_token_kinds("a R\"(f(x) } )\" b", &["word:a", "word:b"])` +
+  delimited `)`-followed-by-delimiter-chars variant
+  `"a R\"d(close)done{ )d\" b"`, added as
+  `closing_paren_inside_raw_content_requires_delim_quote_terminator`.
+  Gate line: `147 passed / 1 failed / 0 ignored / 1 suites` - leaked
+  `punct:}` assertion diff exactly as the verdict predicted.
+- Green: added `&& chars[closing_quote] == '"'` to the match arm.
+  Gate line: `148 passed / 0 failed / 0 ignored / 2 suites`, exit 0.
+- G4 re-verification. Reviewer's `.kilo/plans/rv_g4_corpus_scan.py` re-run
+  UNMODIFIED first (import-exec via `python -m unittest discover -s
+  .kilo/plans -p rv_g4_corpus_scan.py`): reproduced the verdict numbers
+  verbatim (pre 18, committed 28, newly_negative 13, balanced digest diff 824)
+  - its "committed" mirror is statically pinned to the reviewed pre-guard code
+  and CANNOT converge to the fix by re-running; editing it would also violate
+  "do not fix the reviewer's scan script".
+- Method-identical throwaway copy at `target/g4_post_fix_scan.py` (target/,
+  NEVER committed; sanctioned throwaway route per the handoff's G4 note):
+  sole difference is that its `committed` mirror tracks the NOW-COMMITTED
+  guarded `scan_raw_string` (verified condition-for-condition against
+  tokenizer.rs), plus an explicit committed-vs-faithful comparison block.
+  Target lines (post-fix, 9224 files / 2482395 lines):
+  - `mode=pre files_below_zero=18 files_nonzero_final=98`
+    first_underflow=`AggregateFunctionNull.cpp:174` (pin stable)
+  - `mode=faithful files_below_zero=14 files_nonzero_final=71`
+  - `mode=committed files_below_zero=14 files_nonzero_final=71`
+    - committed == faithful: target `files_below_zero=14` MET.
+  - `FINDING2 committed_vs_faithful digest_diff_count=0 state_diff_count=0`
+  - `newly_negative_post_committed_vs_pre=0` - target MET.
+  - `fixed_by_fix(pre_neg->post_ok)=4`, `still_negative_both=14` - the
+    verdict's Finding 3 undecidable residual (absorbed by the parser floor).
+  - balanced-set digest diff vs PRE: 17 of 9125 (all-files 44). All 17 are
+    TUs containing raw literals whose brace emission the Layer-1 fix is
+    MEANT to change (pre/post min/final identical `(0,0)`; only emission
+    sequence differs). Reported for reviewer adjudication - not a
+    committed-vs-faithful divergence, which is the verdict's acceptance axis.
+- Deviation: the target/ copy deviates from "re-run the reviewer's scan"
+  literally because the reviewer's mirror is pinned to reviewed code; the
+  reviewer's file was left untouched and its output reproduced verbatim
+  first. Copy + reviewer file differ ONLY in the mirror sync + report block
+  (both files kept next to each other for the reviewer's diff).
+- Gates round 1: testrun Red, testrun Green, reviewer scan re-run,
+  target-scan, hygiene exit 0 (zero R1/R2; R3 warns all pre-existing),
+  `encoding_guard.py --staged` exit 0, scoped commit via
+  `commit_scoped.py` on the handoff globs.
+
+
 
 

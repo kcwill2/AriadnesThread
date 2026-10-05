@@ -275,6 +275,7 @@ fn scan_raw_string(
         let closing_quote = cursor + 1 + delimiter_len;
         if chars[cursor] == ')'
             && closing_quote < chars.len()
+            && chars[closing_quote] == '"'
             && chars[cursor + 1..closing_quote] == chars[delimiter_start..content_start]
         {
             // Commit: consume from the opening quote through the terminator's
