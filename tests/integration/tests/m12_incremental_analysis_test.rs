@@ -90,9 +90,11 @@ fn test_m12_incremental_analysis_cold_run() {
             .is_empty(),
         "index manifest must carry an input fingerprint"
     );
-    // Pinned epoch (M18.10 bump 1.0.0 → 2.0.0: symbols.bin bincode layout +
-    // fingerprint language/plugin inputs): a bump must fail this assert.
-    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "2.0.0");
+    // Pinned epoch (M18.10 bump 1.0.0 -> 2.0.0: symbols.bin bincode layout +
+    // fingerprint language/plugin inputs; M27 T2 bump 2.0.0 -> 2.1.0 per user
+    // DP-6: invalidate release-built shards carrying silently-wrapped token
+    // columns): a bump must fail this assert.
+    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "2.1.0");
 }
 
 #[test]
@@ -191,8 +193,9 @@ fn test_m12_incremental_analysis_version_mismatch() {
     result1.save_artifacts(&repo).unwrap();
 
     // Second run with a version distinct from CURRENT_ANALYSIS_VERSION
-    // ("2.0.0" since the M18.10 epoch bump, so the old sentinel value is
-    // stale here — any never-current version keeps the mismatch semantics).
+    // ("2.1.0" since the M27 T2 DP-6 epoch bump - itself following the
+    // M18.10 1.0.0 -> 2.0.0 bump - so any older sentinel value is stale
+    // here; any never-current version keeps the mismatch semantics).
     let mut analyzer2 =
         IncrementalAnalyzer::new(&repo, &repo_discovery, &build_discovery, &cpp_plugin)
             .with_analysis_version("9.9.9");

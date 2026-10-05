@@ -13,7 +13,12 @@ use std::path::PathBuf;
 /// bincode) AND `TuCacheFingerprint` gained the language/plugin inputs below.
 /// `ArtifactManager::check_manifest` rejects the stale epoch before any blob
 /// deserialization, forcing a fresh rebuild.
-pub const CURRENT_ANALYSIS_VERSION: &str = "2.0.0";
+/// M27 T2 epoch bump 2.0.0 -> 2.1.0 (user DP-6, 2026-10-05): the tokenizer
+/// column-underflow class - shards written by RELEASE builds over non-ASCII
+/// corpora carry silently-wrapped token columns, and the fingerprint chain
+/// hashes CONTENT, not analyzer code, so this version bump is the
+/// invalidation that forces those shards to rebuild.
+pub const CURRENT_ANALYSIS_VERSION: &str = "2.1.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TuCacheFingerprint {
@@ -328,7 +333,7 @@ mod tests {
     fn test_epoch_bumped_for_m18() {
         // §9 M18.10: bincode symbols.bin layout change (M18.9) + fingerprint
         // input change (this milestone) force cache-wide regeneration.
-        assert_eq!(CURRENT_ANALYSIS_VERSION, "2.0.0");
+        assert_eq!(CURRENT_ANALYSIS_VERSION, "2.1.0");
     }
 
     #[test]

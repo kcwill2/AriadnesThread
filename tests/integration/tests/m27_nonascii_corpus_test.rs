@@ -140,7 +140,6 @@ fn test_specimen_bytes_are_single_encoded_utf8() {
 }
 
 #[test]
-#[ignore = "M27 T0b lands this RED for T2: cold index panics in DEBUG at tokenizer.rs:311/:331 (E3 class); the T2 fix commit removes this #[ignore] line as its single-line rider (I12)"]
 fn test_m27_nonascii_corpus_cold_index_completes() {
     let (_fixture_temp, repo_path) = setup_isolated_repo();
     write_synthetic_compile_db(&repo_path);
