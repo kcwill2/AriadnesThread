@@ -170,11 +170,38 @@ compile-coupled exception: pipeline + cli). V1 landed `f325bee`, V2 landed
 - 3 Red: the two FAIL lines above (exit 1 each; re-run at resume with
   identical results - see Red section note).
 - 4 Green: the two PASS lines above (exit 0 each).
-- 5 `python tools/hygiene_check.py`: recorded below at commit time.
-- 6 `python tools/encoding_guard.py --staged` (per commit): recorded below.
-- 7 commit 2: landed as recorded below.
+- 5 `python tools/hygiene_check.py`: exit 0 - R3 warn-only rows, every one
+  pre-existing, zero on lines this hop changed.
+- 6 `python tools/encoding_guard.py --staged`: exit 0 (silent) before each
+  of the two event commits.
+- 7 commit 2: `8eedb05` "feat(pipeline,cli): BootMilestone + TuStarted boot
+  events, new_with_progress, honest stage-1 mapping
+  (boot-progress-visibility V3b)" - stat lists exactly the staged scopes
+  (index.rs 6/1, ui.rs 26/5, progress_contract_tests.rs 137/0,
+  stage_spans.rs 28/1, lib.rs 100/3, stage_index.rs 13/1,
+  boot_events_test.rs 244/0, journal 76/8).
 - Captures: `target/testrun-capture.txt` per digest (the capture file is
   shared; the digest lines quoted here are the verbatim evidence).
+
+## Landing proofs (reviewer-reference)
+
+- Touch-set-only diff (`git diff 5c81881..HEAD --numstat`, 9 files):
+  index.rs, ui.rs, progress_contract_tests.rs, stage_spans.rs, lib.rs,
+  stage_index.rs, stage_load.rs, boot_events_test.rs, this journal.
+  `progress.rs` (I3), the five frozen V1 test modules (incl.
+  first_frame/boot_panic/boot_progress/builder), `crates/{ui,graph,repo,
+  scheduler}/**`, `tests/golden/**`, `tests/fixtures/**`, `tools/**`:
+  all ABSENT from the diff (byte-identical).
+- Append-only (`progress_contract_tests.rs`): 137 added / 0 deleted vs the
+  start rev - the existing 305 lines (incl. the top `use super::{...}` block
+  and `emitted_milestones()`) are byte-identical; the new tests arrive as
+  appended fns with their own `use` blocks.
+- Enum append-only: `BootMilestone`/`TuStarted` variants follow the three
+  existing variants in `ProgressEvent`; existing variant order/lines
+  untouched.
+- Line counts at landing: `lib.rs` 634 (R2 ceiling 1000),
+  `stage_index.rs` 288, `stage_load.rs` 210, `stage_spans.rs` 144,
+  `ui.rs` 853.
 
 ## Behavioral no-op proof line (G1-5 exemption basis)
 
@@ -218,6 +245,23 @@ compile-coupled exception: pipeline + cli). V1 landed `f325bee`, V2 landed
 - Green-mode distill shapes differ from fail-mode (`5 suites` vs `1 suites`,
   ignored shown only when green) - digests quoted verbatim per shape; the
   counts reconcile (108 + 2 = 110; 22 + 3 = 25).
+- Commit-2 scope line gained `--scope crates/pipeline/src/stage_index.rs`
+  beyond the handoff gate 7 list: after the commit-1 verbatim move,
+  `rebuild_index_single_threaded` (the R7 emission point the handoff
+  located at lib.rs ~508) lives in `stage_index.rs` - still a touch-set
+  file (named in the handoff's own touch-set), the gate 7 list simply
+  predates its own commit-1 move.
+- Named target `lib.rs <= ~550` (commit 1's hygiene framing) holds at
+  commit 1 (537) but the commit-2 boot seam necessarily lands there too
+  (`build_with_progress`/`compute_inputs_with_progress`/`IncludeScan`
+  notifies - construction, input computation, and the kept include stage
+  are all `lib.rs` items; a third module would be a boundary the touch-set
+  does not name): 634 at landing, R2 (< 1000) with wide margin.
+- Handoff target `ui.rs ~700` was already unmet at V1 landing (832); this
+  hop's mandated arms + wiring land it at 853 (net +21), R2 with margin.
+- Final journal bookkeeping lands as a separate journal-only docs commit
+  (V2 precedent `5c81881`), keeping the two event commits byte-exactly at
+  their gate scopes.
 
 ## Out-of-scope observations (report-only)
 
