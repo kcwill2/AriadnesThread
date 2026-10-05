@@ -123,9 +123,9 @@ ignored count to 4 (recorded verbatim at Gate 6).
 
 ## Gate journal
 
-(checkpoints appended below per gate; Gate 2 ran first so the
-pre-fix ASCII baselines could be recorded from its RED capture before
-Gate 1's release run - both RED gates completed BEFORE any fix edit)
+(Gate 2 ran first so the pre-fix ASCII baselines could be recorded from
+its RED capture before Gate 1's release run - both RED gates completed
+BEFORE any fix edit.)
 
 ### Gate 2 (Debug-RED) - RED CONFIRMED
 
@@ -166,4 +166,182 @@ OFF, so no panics - boundedness fails on the WRAPPED columns:
 The silent release wrap is empirically pinned; post-fix these wraps
 become mathematically impossible (same column now subtracts the char
 count it advanced by).
+
+### Gate 3 (Debug-GREEN)
+
+`python tools/testrun.py --distill -p ariadne-lang-cpp` after the
+two-site fix -> digest `### cargo test PASS (exit 0)`, canonical line:
+`152 passed / 0 failed / 0 ignored / 2 suites`. Suite count 2 vs the RED
+runs' 1 is not drift: a failing cargo binary aborts the remaining
+targets, so the RED runs never reached the crate's zero-test doc-test
+suite; GREEN runs lib (152) + doc-tests (0) as pre-fix green runs
+always did.
+
+### Gate 4 (Release-GREEN, I14)
+
+`python tools/testrun.py --distill --release -p ariadne-lang-cpp` ->
+digest `### cargo test PASS (exit 0)`, canonical line:
+`152 passed / 0 failed / 0 ignored / 2 suites`. THE SAME module passes
+with overflow-checks off - post-fix wraps are mathematically impossible
+(the column now subtracts exactly what `col` advanced by), not merely
+absent. No `debug_assert`-only coverage anywhere.
+
+### Both-site self-check (discipline clause)
+
+Commit 1 = `ea21687`. `git show ea21687 -- crates/lang-cpp/src/tokenizer.rs`
+(capture target/distill-capture.txt) carries BOTH hunks:
+`- column: column - word.len()` -> `+ column: column - len` (the :311
+class) AND `- column: column - punct.len()` -> `+ column: column - len`
+(the :331 class), plus the appended `mod underflow_fix_tests;`. Each
+site reuses the existing `let len = <run>.chars().count();` - one unit
+for both `column` and `end`. `parser.rs` absent from the numstat:
+byte-identical, audit-only. numstat: tokenizer.rs 5/2,
+underflow_fix_tests.rs 182/0, journal 169/0 - touch-set only.
+
+### Gate 7 (Hygiene)
+
+`python tools/hygiene_check.py` -> exit 0 (verified via
+`python tools/distill.py -- python tools/hygiene_check.py`:
+`### generic PASS (exit 0)`, capture target/distill-capture.txt). All
+emitted rows are warn-only R3, all pre-existing locations; zero hits in
+any touched file (the tokenizer.rs:50/53 `i`/`c` warnings sit in the
+untouched `tokenize_raw` loop). Re-run after commit 2: same, exit 0.
+
+### Gate 8 (Mojibake guard, per commit)
+
+Commit-1 scope staged explicitly (staging route:
+`python tools/distill.py -- git add -- <scope paths>`; raw `git` is
+allowlist-denied in this session-lineage), then
+`python tools/encoding_guard.py --staged` -> exit 0
+(`### generic PASS (exit 0)`, 0-line capture). Same for the commit-2
+scope (cache.rs, m12, m27, journal): exit 0. Authored content pure
+ASCII; the cache.rs `§9` comment line stayed untouched (diff shows it
+as unchanged context, original bytes intact).
+
+### Gate 9 (Commit 1) - LANDED as ea21687
+
+Landed via the DIRECT `python tools/commit_scoped.py` entry point with
+the handoff's exact scopes and message (the distill-wrapped form is
+allowlist-refused in this session-lineage - same sanctioned route as
+T0b Gate 5, deviation recorded). Scopes: tokenizer.rs,
+tokenizer/underflow_fix_tests.rs, parser.rs (no diff), this journal.
+
+### Gate 5 (Rider scoped - index)
+
+`python tools/testrun.py --distill -p ariadne-index` (after the const
+bump + assert update) -> digest `### cargo test PASS (exit 0)`,
+canonical line: `11 passed / 0 failed / 0 ignored / 2 suites`.
+
+### Gate 6 (Integration scoped) - FULL RUN + COMPONENT PROOF
+
+Full run `python tools/testrun.py --distill -p ariadne-integration-tests`
+-> digest `### cargo test FAIL (exit 1)`, canonical line:
+`99 passed / 1 failed / 0 ignored / 24 suites`. The single failure is
+the predicted stop-and-report item:
+`scala_fingerprint_moves_only_the_scala_digest` panicked at
+`tests\integration\tests\m21_scala_semantic_index_test.rs:499:5:
+assertion left == right failed: M18.10 cache epoch witness, left:
+"2.1.0"` - the third machine-pinned literal the handoff did not
+enumerate (see census row above). NOT fixed: outside the touch-set.
+Two properties of that run, recorded honestly: (1) cargo ran targets in
+sort order and ABORTED at the failing m21 target (no --no-fail-fast),
+so the m22+ target including m27 never started there; (2) `0 ignored`
+is this package's own count (m27 held its only `#[ignore]`) - the
+workspace census `5 ignored -> 4` reconciliation belongs to the
+reviewer hop's unscoped full census.
+
+Component proof (same distilling entry point, scoped to the rider's
+suites, run AFTER commit 2 landed; iteration of Gate 6):
+`python tools/testrun.py --distill -p ariadne-integration-tests --test
+m27_nonascii_corpus_test --test m12_incremental_analysis_test --test
+m00_golden_baseline_test --test m18_cpp_plugin_parity_test --test
+m18_cache_epoch_test` -> digest `### cargo test PASS (exit 0)`,
+canonical line: `34 passed / 0 failed / 0 ignored / 5 suites`.
+Proves within one bounded capture:
+- I12: `test_m27_nonascii_corpus_cold_index_completes ... ok` AND
+  `test_specimen_bytes_are_single_encoded_utf8 ... ok` - the corpus
+  that panicked now COMPLETES, un-ignored, assertions untouched.
+- m12 pin green at 2.1.0 (cold-run manifest assert + mismatch sentinel
+  test).
+- m00 goldens UNEDITED green (`golden_baseline_basic/expensive ... ok`
+  also confirmed in the full run); m18 parity UNEDITED green (23 rows
+  in the full run); m18 cache-epoch test compares the constant SYMBOL
+  (version-neutral) - green.
+The full `-p` run re-runs green (0 failed) once the m21 witness gets
+its sanctioned one-line dependent - that adjudication is the reviewer
+hop's, not mine.
+
+### Gate 10 (Commit 2) - LANDED as 59f0512
+
+Direct `commit_scoped.py`, handoff scopes + message verbatim. numstat:
+cache.rs 7/2 (const + doc sentence + assert literal ONLY - envelope
+struct fields untouched, I7; reviewer eyeballed via
+`git diff --cached` capture), m12 8/5 (pinned literal + epoch comments
+only), m27_nonascii_corpus_test.rs 0/1 (exactly the `#[ignore]` line
+deleted, assertions untouched). This journal is committed in its final
+form by the follow-up errata commit (journal-completion route per the
+T0b precedent), keeping both landing commits' diffs at their declared
+scopes.
+
+## Data-integrity disposition (mandatory text)
+
+With the DP-6 bump (`CURRENT_ANALYSIS_VERSION` 2.0.0 -> 2.1.0 landing
+IN THE SAME fix as the corrected columns), stale RELEASE-built shards
+and index artifacts over non-ASCII corpora - including the completed
+30% of E1 - no longer fingerprint-match, so affected corpora re-index
+on the next run. ACTION FOR THE USER/ORCHESTRATOR: re-index every
+affected corpus after this lands; the version bump is the automatic
+global invalidation (the fingerprint chain hashes CONTENT, not analyzer
+code, so nothing else self-invalidates). ASCII-path corpora need no
+re-index for correctness (m00/m18 parity prove byte-identical ASCII
+output before and after). The column-vs-line-length shard-JSON scan
+remains a CANDIDATE detector for validating existing caches only - not
+a commitment, not built here.
+
+## Deviations and interpretation notes (complete list)
+
+1. Commit route: direct `commit_scoped.py` instead of the handoff's
+   distill-wrapped form (allowlist-refused this session-lineage;
+   identical scopes/messages; T0b precedent 4ef8412).
+2. Staging route: distill-wrapped `git add` (raw git denied);
+   `encoding_guard --staged` ran on the explicitly staged touch-set
+   before each commit.
+3. Punct-test shape: U+00AB alone cannot panic (proved empirically by
+   the approved T0b Gate 1 capture); the unit source combines it with
+   the U+20AC panic driver - satisfying both clauses of the handoff's
+   own test spec ("containing U+00AB at/near line start" AND
+   "Pre-fix debug: panic"). Interpretation, not scope change.
+4. ASCII baselines were transcribed from pre-fix actual streams during
+   Gate-2 iterations (same command), then the final Gate-2 capture
+   showed exactly 3 RED failures with the ASCII lock green.
+5. Gate-1 exit code: raw `cargo test --release` failure exits 101, the
+   distill digest reports `### cargo build FAIL (exit 101)` -
+   non-zero as required (T0b recorded the same non-substantive
+   wording gap).
+6. Gate 6 full run cannot reach `0 failed` while the m21 witness
+   (undeclared dependent, outside touch-set) stays pinned - reported
+   per the touch-set rule with the failure line quoted verbatim; the
+   rider components were proven in the scoped Gate-6 iteration above.
+   The one-line `2.0.0` -> `2.1.0` update at
+   m21_scala_semantic_index_test.rs:499 needs a reviewer/orchestrator
+   ruling (same sanctioned-rider treatment as the m12 pin).
+7. m12 comment rewrite replaced the two non-ASCII punctuation chars
+   (arrow/em-dash) with ASCII `->`/`-` INSIDE the rewritten comment
+   lines only (pure-ASCII authoring rule; every untouched line keeps
+   its original bytes; encoding_guard --staged exit 0 on the result).
+8. Journal follow-up commit after Gate 10 (journal-completion errata,
+   T0b precedent) - all 10 declared gates unchanged.
+
+## Deliberate non-actions
+
+- parser.rs untouched (audit table: no second bug) - byte-identical in
+  both commits.
+- `tests/golden/**`, `tests/fixtures/**` (incl. the T0b specimen),
+  `crates/pipeline|cli|ui|graph|scheduler`, `progress.rs`,
+  `bench_baseline.json`, `common/mod.rs`: never opened.
+- m21 witness NOT edited (outside touch-set - reported).
+- No goldens regenerated, no UPDATE_GOLDENS, no `git stash`, no branch
+  change; foreign orchestrator docs in the worktree never staged.
+- No shard-envelope field change anywhere (DP-6: the version CONSTANT
+  is the only cache-visible change - reviewer eyeballed the hunks).
 
