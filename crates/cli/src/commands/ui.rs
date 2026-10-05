@@ -500,10 +500,54 @@ fn proposal_delta(plan: &ariadne_cluster::plan::OptimizationPlan) -> usize {
         .saturating_sub(plan.collateral_load_after)
 }
 
+/// Pure per-file grouping of the plan's symbol -> `target_header` mapping
+/// (shape C2): a `BTreeMap` keyed by `target_header` gives path-ascending
+/// determinism; each group's symbols are sorted by `symbol_id`, mirroring
+/// the `symbol_names` sort in `extraction_proposal_dto`. Names per file are
+/// capped at `EXTRACTION_PROPOSAL_MAX_NAMES` (with `symbol_count` keeping
+/// the uncapped total, same semantics as `total_symbols`); file rows are
+/// capped at `EXTRACTION_PROPOSAL_MAX_TARGET_FILES` and `truncated` is set
+/// iff the group count exceeds that cap. No planner, no I/O.
+fn target_file_groups(
+    extractions: &[ariadne_cluster::plan::ProposedExtraction],
+) -> (Vec<ariadne_ui::ProposedTargetFileDto>, bool) {
+    let mut groups: std::collections::BTreeMap<
+        std::path::PathBuf,
+        Vec<&ariadne_cluster::plan::ProposedExtraction>,
+    > = std::collections::BTreeMap::new();
+    for extraction in extractions {
+        groups
+            .entry(extraction.target_header.clone())
+            .or_default()
+            .push(extraction);
+    }
+    let truncated = groups.len() > ariadne_ui::EXTRACTION_PROPOSAL_MAX_TARGET_FILES;
+    let rows = groups
+        .into_iter()
+        .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX_TARGET_FILES)
+        .map(|(path, mut members)| {
+            members.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
+            let symbol_count = members.len();
+            let symbol_names = members
+                .into_iter()
+                .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX_NAMES)
+                .map(|e| e.symbol_name.clone())
+                .collect();
+            ariadne_ui::ProposedTargetFileDto {
+                path: path.to_string_lossy().to_string(),
+                symbol_names,
+                symbol_count,
+            }
+        })
+        .collect();
+    (rows, truncated)
+}
+
 fn extraction_proposal_dto(
     plan: &ariadne_cluster::plan::OptimizationPlan,
 ) -> ariadne_ui::ExtractionProposalDto {
     let total_symbols = plan.proposed_extractions.len();
+    let (target_files, target_files_truncated) = target_file_groups(&plan.proposed_extractions);
     let mut extractions: Vec<&ariadne_cluster::plan::ProposedExtraction> =
         plan.proposed_extractions.iter().collect();
     extractions.sort_by(|a, b| a.symbol_id.cmp(&b.symbol_id));
@@ -533,6 +577,8 @@ fn extraction_proposal_dto(
         required_headers,
         consumer_tu_count: plan.validation_required_tus.len(),
         risk: plan.risk.to_string(),
+        target_files,
+        target_files_truncated,
     }
 }
 
@@ -788,3 +834,6 @@ mod builder_tests;
 
 #[cfg(test)]
 mod boot_progress_tests;
+
+#[cfg(test)]
+mod target_files_tests;
