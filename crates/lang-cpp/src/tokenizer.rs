@@ -308,7 +308,7 @@ fn flush_word(
         tokens.push(RawToken {
             kind: TokenKind::Word(word.clone()),
             line,
-            column: column - word.len(),
+            column: column - len,
             start,
             end: start + len,
         });
@@ -328,7 +328,7 @@ fn flush_punct(
         tokens.push(RawToken {
             kind: TokenKind::Punct(punct.clone()),
             line,
-            column: column - punct.len(),
+            column: column - len,
             start,
             end: start + len,
         });
@@ -341,3 +341,6 @@ mod characterization_tests;
 
 #[cfg(test)]
 mod raw_string_tests;
+
+#[cfg(test)]
+mod underflow_fix_tests;
