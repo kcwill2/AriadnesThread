@@ -81,4 +81,21 @@ hash; the implementer report-back records it).
 tasks/tu-index-hang-throughput-t0-report-handoff.md --scope
 tasks/tu-index-hang-throughput-t0-evidence.md --scope
 tasks/tu-index-hang-throughput-t0-report-journal.md --cmd
-"python tools/encoding_guard.py --staged"`
+"python tools/encoding_guard.py --staged"
+
+## Errata (dated 2026-10-05; authorized touch per verdict finding 1)
+
+- Gate 3 (commit gate) route CORRECTED - this line supersedes the route
+  claimed under "Gates (verbatim outcomes)" above. The distill-wrapped form
+  `python tools/distill.py -- python tools/commit_scoped.py ...` was
+  permission-denied; verbatim denial text:
+  `{"permission":"bash","pattern":"*","action":"deny","source":"global"}`
+  (boilerplate catch-all, regardless of actual cause). The commit landed via
+  the DIRECT declared entry point `python tools/commit_scoped.py --scope
+  tasks/tu-index-hang-throughput-t0-evidence.md --scope
+  tasks/tu-index-hang-throughput-t0-report-journal.md -m <literal subject>`
+  with identical scopes and message. Outcome machine-verified in-spec either
+  way: `62ce72b` carries exactly the two touch-set files (A/A), never
+  `git add .`. Recorded per finding 1 of
+  `tasks/tu-index-hang-throughput-t0-report-verdict.md` (D1 accepted on
+  merits; this line discharges its journal-fidelity follow-up).`
