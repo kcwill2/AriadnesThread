@@ -184,3 +184,37 @@ pre-rounded display - 869,547 is the full-precision product
    pre-fix warm method, 3 medians on final code) instead of 3, because the
    negative-anchor bug invalidated the first Green run. Handoff ceiling of
    <= 10 gate invocations held (total implementer distill invocations: 10).
+
+## (e) Post-flag release cost (T5, 2026-10-05)
+
+Method (one line): ONE release run of the T1a bench under the newly landed
+`[profile.release] overflow-checks = true` (workspace root, same commit),
+same invocation as T1a handoff gate 1
+(`python tools/distill.py -- cargo test --release -p ariadne-pipeline
+--test boot_stages_bench -- boot_stages_release_timing --ignored
+--nocapture --test-threads=1`), machine header identical to sec. (a),
+single-run values transcribed from the fresh capture
+`target/distill-capture.txt` per the sec. (a) overwrite convention.
+
+| label                                     | post-flag ms | T1a median | delta % |
+|-------------------------------------------|--------------|------------|---------|
+| discover+hash total (release)             |        232.3 |      224.6 |   +3.4% |
+| build discovery (contexts) total (release)|          1.0 |        1.0 |    0.0% |
+| stage fingerprints total (release)        |          0.7 |        0.7 |    0.0% |
+| include-graph cold total (release)        |       1240.3 |      464.3 | +167.1% |
+| include-graph warm load total (release)   |         46.1 |       44.3 |   +4.1% |
+| tu-index cold total (W=1, release)        |      58389.0 |    60553.4 |   -3.6% |
+| tu-index cold total (W=N, release)        |      86201.9 |    85681.1 |   +0.6% |
+| tu-index warm reuse total (release)       |       3082.6 |     3176.2 |   -3.0% |
+
+STOP-bar outcome: NOT A TRIP under the handoff adjudication rule. The
+include-graph cold single value exceeded the +10% bar on the first run
+(1240.3 ms, which was also the first run of the freshly rebuilt release
+binaries under the new profile); the ONE confirming re-run printed
+478.3 ms - INSIDE the sec. (a) recorded run spread for that stage
+(460.9-491.2). Both numbers recorded; proceeding. Re-run context values
+(non-gating): discover+hash 217.2, build discovery 1.0, fingerprints 0.7,
+warm load 42.0, W=1 61274.2, W=N 78005.8, warm reuse 2718.9. The other
+seven first-run labels sit within -3.6%..+4.1% of their medians; the
+flag cost is uniform and within bar. Final flag acceptance is the
+reviewer's call per the T5 handoff.

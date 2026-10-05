@@ -78,8 +78,12 @@ User selects symbol → Extension fetches symbol info → VS Code opens file
 
 1. **Start the Analysis Server**:
    ```bash
-   cargo run --bin cli -- features server
+   cargo build --release --features server
+   cargo run --release --bin cli --features server
    ```
+   Quick debug alternative (debug indexing measured ~20x slower than
+   release at TU scale - M27 T1a launch-profile finding, 2026-10-05):
+   `cargo run --bin cli -- features server`
 
 2. **Install the Extension**:
    - Run `code .` in this directory

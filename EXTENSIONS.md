@@ -19,8 +19,12 @@ This is a C++ dependency analysis and visualization platform. It consists of:
 1. **Start the Analysis Server**:
    ```bash
    cd crates/ui
-   cargo run --bin cli --features server
+   cargo build --release --features server
+   cargo run --release --bin cli --features server
    ```
+   Quick debug alternative (debug indexing measured ~20x slower than
+   release at TU scale - M27 T1a launch-profile finding, 2026-10-05):
+   `cargo run --bin cli --features server`
 
 2. **Build the VS Code Extension**:
    ```bash
@@ -110,11 +114,16 @@ The local-first approach means the server and editor must be on the same machine
 
 ```bash
 # Check if server is running
-cargo run --bin cli --features server
+cargo build --release --features server
+cargo run --release --bin cli --features server
 
 # Test server health
 curl http://localhost:8080/api/repo-info
 ```
+
+Quick debug alternative (debug indexing measured ~20x slower than release
+at TU scale - M27 T1a launch-profile finding, 2026-10-05):
+`cargo run --bin cli --features server`
 
 ### Path Mismatch
 

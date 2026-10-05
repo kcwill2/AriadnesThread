@@ -75,6 +75,10 @@ This is a Rust workspace for C++ dependency analysis:
 
 - Use `cargo build` to build the project
 - Use `cargo build --release` for release builds
+- Normal human launch uses the RELEASE build (`cargo build --release`
+  first, or add `--release` to any documented `cargo run` line): debug
+  indexing measured ~20x slower than release at TU scale (M27 T1a
+  launch-profile finding 2026-10-05; E1's ~3.1 s/TU was the debug profile)
 - Load-perf regression check (local gate): `python tools/bench_compare.py` (median-of-3 stage-5 tail vs per-machine baseline)
 
 ### Process Tooling (deterministic rituals; reference, don't re-author)
