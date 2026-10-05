@@ -9,9 +9,22 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+// Re-exported into this namespace after the verbatim move to
+// `ui/stage_spans.rs`: EXACTLY the names the frozen test modules import via
+// `use super::{...}` (progress_contract_tests / boot_progress_tests, I2),
+// plus every name production code here still calls. Child modules see
+// parent-private `use` bindings, so the frozen import lines stay UNEDITED.
+use stage_spans::{
+    collateral_file_percent, stage_end_percent, stage_start_percent, step_percent,
+    tu_index_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT, CALL_GRAPH_PHASE,
+    COLLATERAL_FILE_SPAN_END, COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT,
+    JUSTIFYING_SYMBOLS_PERCENT, PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT,
+    REDUCTION_PHASE, RUN_PHASES, STAGES_PER_RUN, SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
+};
 
 mod boot_progress;
 mod node_maps;
+mod stage_spans;
 
 pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
@@ -85,107 +98,6 @@ fn stage_report(
         phase,
         message: message.to_string(),
     }
-}
-
-const ARTIFACTS_PHASE: &str = "[1/5] Loading artifacts...";
-const TU_INDEX_PHASE: &str = "[2/5] Indexing translation units...";
-const REDUCTION_PHASE: &str = "[3/5] Reducing semantic model...";
-const CALL_GRAPH_PHASE: &str = "[4/5] Building call graph...";
-const COLLATERAL_PHASE: &str = "[5/5] Analyzing collateral...";
-const STAGES_PER_RUN: usize = 5;
-
-/// The five `[k/5]` phase labels in stage order: the boot-seed input for
-/// `BootStepSnapshot::seeded` (run_ui) and the boot closure's own snapshot.
-const RUN_PHASES: [&'static str; STAGES_PER_RUN] = [
-    ARTIFACTS_PHASE,
-    TU_INDEX_PHASE,
-    REDUCTION_PHASE,
-    CALL_GRAPH_PHASE,
-    COLLATERAL_PHASE,
-];
-
-// ---------------------------------------------------------------------------
-// A4: calibrated stage-5 sub-spans, replacing the old fixed [80,95] lie that
-// burned 75% of the stage on the ~75 ms file loop while the real tail ran
-// with a frozen bar. Calibration = the tail bench on the 520-header/40-TU
-// fixture (crates/cli/tests/payload_tail_bench.rs), post-A4 re-run table of
-// 2026-09-29: symbol_pass+prep 301ms · file_pass 75.4ms ·
-// save_load_artifacts+cache 1417.8ms · ensure_load total 1794.2ms (vs the
-// post-A6 runs 1893/1743 — milestone notifies cost nothing measurable) ·
-// generate_report+detect_cycles 4.7ms · build_include_elements 5.1ms ·
-// path_to_id+file_collateral 28.9ms · planner facts+closures 232.4ms ·
-// build_file_justification_with_memo 5313.4ms (DOMINANT) · conservative
-// 0.0ms. The stage-5 window totals ~7.38 s over the 20-point global span
-// [80,100], so 1 point ~= 0.37 s.
-// Every milestone sits at the nearest integer point of its CUMULATIVE
-// measured time (milestone boundaries within ~0.2 pt of measured reality).
-// The largest forward error is <=1 pt mid-file-loop, where the loop-end
-// rounding leads briefly and the save milestone reclaims the slack.
-// ---------------------------------------------------------------------------
-/// Symbol pass + analyzer prep (~301ms -> 0.8 pt, nearest integer 81): the
-/// bar leaves the stage-start tick only once the symbol pass has really
-/// collected.
-const SYMBOLS_ANALYZED_PERCENT: usize = 81;
-/// File loop upper bound (~75ms of events, rounded up to 1 pt; the loop is
-/// a fast pass since A2 — the old [80,95] span it owned is what made the
-/// bar look frozen everywhere else).
-const COLLATERAL_FILE_SPAN_END: usize = 82;
-/// `save_load_artifacts` + cache wrap complete (~1418ms; cumulative
-/// ~1794ms -> 84.9 pt). Emitted by the pipeline milestone only when the
-/// bytes are on disk.
-const ARTIFACTS_SAVED_PERCENT: usize = 85;
-/// Emitted right before `build_extraction_proposals`: the maps before the
-/// planner are ~39ms, so cumulative stays ~85.0 pt.
-const PLANNING_EXTRACTIONS_PERCENT: usize = 85;
-/// Emitted right before `build_file_justification_with_memo`: the planner
-/// facts+closures run just before (~232ms; cumulative ~2066ms -> 85.6).
-const JUSTIFYING_SYMBOLS_PERCENT: usize = 86;
-/// Emitted after the justification memo returns: the dominant tail
-/// (~5313ms ~= 14.4 of the 15 points left after the save) would run past
-/// 100 exactly, so it is capped one point short — the terminal 100% frame
-/// is reserved for "Payload assembled" (progress.rs finalizes only a
-/// step-5 100% frame, so the run must end on that milestone).
-const JUSTIFICATION_COMPLETE_PERCENT: usize = 99;
-/// Terminal milestone after payload assembly, before the build returns.
-/// `swap_into_state` separately marks the web state "Ready".
-const PAYLOAD_ASSEMBLED_PERCENT: usize = 100;
-
-/// Stage k of 5 owns the percent span `[(k-1)*20, k*20]`.
-fn stage_start_percent(stage: usize) -> usize {
-    (stage - 1) * 20
-}
-
-fn stage_end_percent(stage: usize) -> usize {
-    stage * 20
-}
-
-/// Project a global pipeline percent onto the step's own 0..=100 scale for
-/// per-step terminal bars. Clamped at both ends.
-fn step_percent(stage: usize, global_percent: usize) -> usize {
-    let lower = stage_start_percent(stage);
-    let span = stage_end_percent(stage) - lower;
-    let within = global_percent.saturating_sub(lower);
-    (within * 100 / span).min(100)
-}
-
-fn mapped_span_percent(lower: usize, upper: usize, done: usize, total: usize) -> usize {
-    if total == 0 {
-        return lower;
-    }
-    (lower + (upper - lower) * done / total).min(upper)
-}
-
-fn tu_index_percent(done: usize, total: usize) -> usize {
-    mapped_span_percent(stage_start_percent(2), stage_end_percent(2), done, total)
-}
-
-fn collateral_file_percent(done: usize, total: usize) -> usize {
-    mapped_span_percent(
-        SYMBOLS_ANALYZED_PERCENT,
-        COLLATERAL_FILE_SPAN_END,
-        done,
-        total,
-    )
 }
 
 /// Drive the five artifact-backed stages, emitting start/end milestones that
