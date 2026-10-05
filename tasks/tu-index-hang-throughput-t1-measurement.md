@@ -138,7 +138,39 @@ Q3/Q7 proposals (ratify at review):
 - Auto-workers cap N: keep the `min(8, available_parallelism)` cap only as
   an explicit opt-in escape hatch (`--workers`); the DEFAULT boot stays
   single-threaded (`None`) on this evidence. Q7's exact cap matters only
-  if a fixed workers path ever ships.
+   if a fixed workers path ever ships.
+
+### (d-final) FORMAL RATIFICATION - orchestrator finalization append, 2026-10-05
+
+Source: `tasks/tu-index-hang-throughput-t1a-verdict.md` (VERDICT: APPROVED;
+FORMAL SUFFICIENCY-GATE section; the ACCEPT line quoted verbatim from its
+lines 52-55; ratification owned by the reviewer hop per handoff lines
+193-195; landing commit `bd4fb1a`, start `42d4a6e`).
+
+Ratified bar: release-profile single-thread cold stage-2 wall at the
+5744-TU corpus scale must be minutes-to-tens-of-minutes - an order of
+magnitude below the multi-hour DEBUG boot that motivated the milestone -
+with warm-boot reuse in seconds. Bar MET with ~an order of magnitude
+margin (cross-session projection 13.6-16.4 min; warm ~3.2 s; reviewer
+fresh independent run 15.2 min).
+
+    SUFFICIENCY-GATE: ACCEPT - release+single-thread meets the ratified
+      wall-time bar at corpus scale (T3 NOT dispatched)
+
+Rider ratifications: K = 1.0 ACCEPTED (future throughput gates take the T1
+W=1 medians as baseline, parity at best); the min(8, available_parallelism)
+cap stays an explicit opt-in `--workers` escape hatch ONLY - default boot
+stays single-threaded (`None`); Q7 exact cap moot (T3 not fired); Q5/DP-4
+and the T4 stub EVIDENCE-CLOSED (stage-1 = 1.2% of measured boot work;
+repo-hash parallelism cannot move the wall); the DP-4 lang-cpp parse-scope
+limb stays the reserved sub-bar analyzer-throughput route, moot at the
+ratified bar.
+
+Arithmetic errata (verdict finding 1; display-only, no re-run, results
+unchanged): the printed ":110" line "151.4 * 5744 = 869,547" above is
+pre-rounded display - 869,547 is the full-precision product
+151.3835 x 5744 = 869,546.8 (the rounded factor 151.4 alone evaluates to
+869,641.6); and the ":48-49" "~61.5 s measured stage total" is 61.29 s.
 
 ## Deviations recorded
 

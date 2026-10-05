@@ -297,3 +297,125 @@ recurrence +1; `--distill` substitute quoted).
   arithmetic + the T0b hop's independent RED reproduction.
 - Anything mutating git: reviewer is read-only; riders are implementer/
   orchestrator duties pinned verbatim in the verdict.
+
+---
+
+# Addendum 4 - T1a reviewer hop (RELEASE bench + sufficiency gate), 2026-10-05
+
+Reviewer hop for `tasks/tu-index-hang-throughput-t1a-handoff.md`; single
+commit `bd4fb1a`, start `42d4a6e` (M26 CLOSED anchor). Verdict: **APPROVED**;
+SUFFICIENCY-GATE formally **ACCEPT** (T3 NOT dispatched) -
+`tasks/tu-index-hang-throughput-t1a-verdict.md`.
+
+## Acceptance criteria vs evidence (each with its evidence line)
+
+1. Gate 1 prints exactly the eight labels; medians >= 3 runs. Evidence:
+   reviewer-fresh run `python tools/distill.py -- cargo test --release -p
+   ariadne-pipeline --test boot_stages_bench -- boot_stages_release_timing
+   --ignored --nocapture --test-threads=1` -> `ok (exit 0, 0 warnings
+   emitted)`; capture (read before overwrite): all eight labels byte-exact,
+   `test result: ok. 1 passed; 0 failed; ... finished in 179.88s`, header
+   `headers=2000 tus=400 workers_n=8 profile=release debug_assertions=false`.
+   All eight table medians re-derived as the exact middle of their three
+   rows; ms/TU 60553.4/400 = 151.3835 -> 151.4; projection full-precision
+   869,546.8 ms = 14.49 min (finding 1: the doc's printed product "151.4 *
+   5744" = 869,641.6 differs from its 869,547 result - unrounded math, minor);
+   speedup 60553.4/85681.1 = 0.7067 -> 0.71, inverse 1.41x SLOWER.
+2. W=N-slower claim reproduced / direction stable. Evidence: reviewer run
+   rows `tu-index cold total (W=1, release) | 63428.2` and `tu-index cold
+   total (W=N, release) | 86912.5` - W=N slower 4/4 across two independent
+   sessions (implementer 85681.1>60553.4, 83850.5>56563.2, 101597.2>68494.9;
+   reviewer 86912.5>63428.2), reviewer rows inside the implementer run
+   spread; reviewer ratio 0.73 consistent with 0.71.
+3. Debug context row (gate 2, non-gate). Evidence: `python tools/distill.py
+   -- cargo test -p ariadne-pipeline --test boot_stages_bench --
+   boot_stages_debug_context_timing --ignored --nocapture` -> `ok (exit 0,
+   0 warnings emitted)`; capture `BOOT_STAGES_DEBUG profile=debug
+   debug_assertions=true`, row `tu-index non-ASCII repro TU (debug,
+   panic-pre-T2 / done-post-T2) | 10.6` (implementer 12.6; noise). Done-
+   post-T2 branch: T2 landed APPROVED, so the pre-T2 exit-1 capture is moot;
+   authoritative panic text verified present at
+   `tasks/tu-index-hang-throughput-t0-evidence.md:32` (site
+   `tokenizer.rs:331:21`). Label byte-exact vs shape :305; in NO gate tuple.
+4. Launch-profile record (obligation b). Evidence: verified against the live
+   tree - AGENTS.md `Use cargo build to build the project` / `--release` as
+   special case; `tools/ui_smoke.py` `cargo build --bin tool` (no profile
+   flag) + `target/debug` default; extension docs `cargo run` (DEBUG
+   default); no Makefile/justfile/.cargo build aliases. DEBUG de-facto
+   finding CONFIRMED; E3 DEBUG proof at t0-evidence :32/:76-78.
+5. Touch-set exact. Evidence: `git diff --name-only 42d4a6e..bd4fb1a` ->
+   the four declared paths; `git show --stat "bd4fb1a"` ->
+   `4 files changed, 755 insertions(+)`, zero deletions.
+6. Frozen locks. Evidence: per-path `git diff --stat "42d4a6e..bd4fb1a" --`
+   EMPTY for `crates/pipeline/src`, `crates/pipeline/tests/load_perf_bench.rs`
+   (still 866 lines), `pipeline_test.rs`, `crates/cli`, `tools`
+   (incl. bench_baseline.json), `tests/golden`, `tests/fixtures`.
+   `common/mod.rs` verified a faithful parameterized COPY of
+   `load_perf_bench.rs:40-141` (consts 10/4/103/5 identical).
+   Suite UNEDITED proof: scoped passed-count identical to V3 anchor
+   (25 -> 25); +2 ignored = the two new `#[ignore]` benches; +1 suite = the
+   new binary.
+7. Report-evidence check (distillation contract). Evidence: journal +
+   measurement doc digest-shaped - `ok (exit 0, ...)` digests, capture paths
+   cited, `1 passed; 0 failed` harness lines, per-run transcription promise
+   under the documented overwrite convention, zero raw dumps, all commands
+   via distilling entry points. PASS.
+8. Hygiene/encoding. Evidence: `python tools/hygiene_check.py` ->
+   `### generic PASS (exit 0)` (distill attestation; R3 warn-only rows,
+   ZERO rows in either new bench file); `python tools/encoding_guard.py
+   --all` -> `### generic PASS (exit 0)`, 0-line capture.
+9. File/function ceilings. Evidence: `common/mod.rs` 142 <= ~180;
+   `boot_stages_bench.rs` 330 <= ~450; largest fn `boot_stages_release_
+   timing` ~83 lines < 100.
+
+## Canonical summary lines (quoted verbatim)
+
+- Scoped pipeline (gate 3 re-run): `25 passed / 0 failed / 4 ignored /
+  6 suites` (`### cargo test PASS (exit 0)`). Matches the declared line
+  exactly.
+- Workspace census substitute (`python tools/testrun.py --distill`):
+  `1235 passed / 0 failed / 6 ignored / 88 suites` (exit 0, `[capture:
+  ...target\testrun-capture.txt, 2177 lines]`). Reconciles EXACTLY against
+  the anchor `1235 / 0 / 4 / 87` @ `1e81d7e`: +2 ignored (the two new
+  benches), +1 suite (new test binary), passed/failed unchanged - the bench
+  ignored rows fully account for the delta. New M27 census anchor:
+  `1235 passed / 0 failed / 6 ignored / 88 suites` @ `bd4fb1a`.
+- Tool suites (`python -m unittest discover -s tools -p "*_tests.py"`):
+  `Ran 188 tests in 22.517s` / `OK`.
+- `ui_smoke` (distill route): `boot+route checks clean (cold fixture,
+  attempt 1, 0.6s)` / `ui_smoke: PASS`.
+- Literal `python tools/testrun.py --baseline`: NOT RUNNABLE (FILE-value
+  flag; open ledger errata line 59, 5th encounter) - the dispatch's own
+  form for this hop was the `--distill` census above, reconciled to the
+  anchor arithmetically.
+
+## Gate reachability log (per-gate attempt discipline)
+
+Ran successfully: `checkpoint_guard.py status`; scoped + workspace
+`testrun.py --distill`; release bench + debug row via `distill.py` (the
+handoff's exact invocation forms); `unittest discover`; `hygiene_check.py`
+(direct + distill attestation); `encoding_guard.py --all` (direct + distill
+attestation); `ui_smoke.py` via distill; `git status/log/show/diff/
+--name-only/--stat` forms; Read-tool capture reads before overwrite.
+Refused by the global catch-all (`{"permission":"bash","pattern":"*","action":
+"deny","source":"global"}` boilerplate - each attempted, then routed around;
+no gate skipped): compound multi-pathspec `git diff ... -- a b c ; git ...`
+(-> per-path single invocations, all empty), `python -c` arithmetic/
+line-count one-liners (-> hand-verified arithmetic + Read-tool line counts),
+PowerShell `Get-Content` line count (-> Read tool reports 866 lines).
+
+## Explicitly NOT run at this hop
+
+- `python tools/bench_compare.py`: NOT RUN by design and by handoff -
+  the `--bench boot-stages` gate is T1b's file and PR-2-bound (operator
+  `--update-baseline` on a VERIFIED-IDLE machine precedes T1b's live gate;
+  baseline stale for boot-stages by definition until T1b lands, handoff
+  lines 7-9, 224-226). The raw release bench WAS run fresh above; the
+  compare-gate itself would measure against a baseline that does not yet
+  contain boot-stages rows. Exemption stated, not silent.
+- Literal `--baseline` run: unrunnable (above); `--distill` substitute
+  quoted and reconciled.
+- Pre-T2 debug panic re-capture: intentionally moot (T2 landed APPROVED);
+  the authoritative capture is cited at t0-evidence sec. 1, verified present.
+- Anything mutating git: reviewer is read-only; verdict + this addendum are
+  the only writes.
