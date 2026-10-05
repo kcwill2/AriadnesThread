@@ -31,17 +31,17 @@ module's Green gate, per the handoff's discipline clauses.
 
 (Red A / Green A checkpoints appended below.)
 
-- Red A: `134 passed / 5 failed / 0 ignored / 1 suites` — all 5 failures are
+- Red A: `134 passed / 5 failed / 0 ignored / 1 suites` -- all 5 failures are
   assertion diffs in `tokenizer::raw_string_tests`. `api_cpp_line155_...` leaks
   `word:R` + `punct:}` + `punct:)` (the predicted brace leak); the other four
   fixtures fail with the extra `word:R` (raw not consumed as a unit; the
   handoff's "leaked punct" wording applies verbatim only to the quoted-content
-  fixtures — semantic reason holds). The fallback-lock fixture passed pre-fix
+  fixtures -- semantic reason holds). The fallback-lock fixture passed pre-fix
   as documented. Capture: `target/testrun-capture.txt`.
 - Green A: `139 passed / 0 failed / 0 ignored / 2 suites`, exit 0, commit
   pending (single implementation commit per handoff). `S suites` reads 2 here
   and 1 during Red: the second suite is `Doc-tests ariadne_lang_cpp` (0 tests),
-  which cargo skips once unit tests fail — failure-abort artifact, the pre-fix
+  which cargo skips once unit tests fail -- failure-abort artifact, the pre-fix
   suite structure is unchanged (verified in capture lines "Running unittests
   src\lib.rs" + "Doc-tests ariadne_lang_cpp").
 - Module A finding: unterminated raw with a legal header must still drop the
