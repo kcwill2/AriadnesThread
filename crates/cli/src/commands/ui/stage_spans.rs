@@ -29,6 +29,7 @@ pub const RUN_PHASES: [&'static str; STAGES_PER_RUN] = [
 // graph walk. Declared here so V3 grows this file, not `ui.rs`.
 // TODO(calibrate M27 T1): replace 10 with the measured stage-1 split
 // point from the boot_stages release table (A4 precedent).
+#[allow(dead_code)] // first consumer is the V3 handoff, by design
 pub const DISCOVERY_HASHED_SPAN_END: usize = 10;
 
 // ---------------------------------------------------------------------------
