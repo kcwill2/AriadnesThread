@@ -137,4 +137,25 @@ Handoff: `tasks/stage5-collateral-memory-ceiling-t3-handoff.md`
 
 ## Post-commit (added after gate 5 lands)
 
-(landing hash + `git show --stat` scope proof to be appended)
+- Landing commit: `9385acf` "feat(tools): ui_smoke --release launch route
+  (M28 T3 profile-lever rider)". `commit_scoped.py` numstat shows exactly
+  the four touch-set paths (AGENTS.md 1+, journal 140+, ui_smoke.py
+  +32/-8, ui_smoke_tests.py 90+); `git diff --name-only 5169483..HEAD` =
+  the touch-set exactly. Foreign dirty paths (M28 planning docs, ledger,
+  unrelated plans) verified still dirty/untracked, never committed.
+- Census anchor preservation: zero `crates/**` paths in the range diff,
+  therefore zero cargo-test delta against `1235 passed / 0 failed /
+  6 ignored / 88 suites @ bd4fb1a` - the reviewer census proves the
+  equality; here it follows from diff scope.
+- Frozen locks by diff scope: `Cargo.toml`, `crates/**`, `tests/**`,
+  fixtures/goldens, `tools/bench_compare.py`, `bench_baseline.json`,
+  `tasks/milestone_ledger.md` all zero-diff.
+- Landed-tree witness: gate 1 substitute re-run on `9385acf` ->
+  `### generic PASS (exit 0)`, `Ran 29 tests in 4.575s` / `OK`.
+- Second commit (journal finalization only): this addendum lands as a
+  journal-scoped `commit_scoped.py` commit (precedent `4900e04`); its
+  hash is the child of `9385acf` in `git log`.
+- Deliberately NOT done (reviewer/planner obligations): live
+  `ui_smoke --release` boot witness, default-route live smoke re-run,
+  full tools discover, census run, `encoding_guard --all`, ledger row-67
+  discharge relay (handoff "REVIEWER hop obligations").
