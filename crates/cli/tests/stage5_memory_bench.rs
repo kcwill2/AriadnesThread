@@ -740,28 +740,30 @@ fn emit_child_table_rows(text: &str) {
     );
 }
 
-fn parse_peak_row(text: &str, scale: usize) -> Option<f64> {
+/// Echo the child's peak RSS row verbatim (T0a verdict finding 1a: ratio
+/// rows must be decomposable into their operands) and return its MiB value.
+/// The body doubles as the row-contract assertion: one pipe, verbatim label
+/// match, finite positive value.
+fn emit_and_parse_peak_row(text: &str, scale: usize) -> f64 {
     let wanted = format!("stage5 peak RSS ({}, N={scale})", profile_label());
-    text.lines()
-        .filter(|line| line.matches('|').count() == 1)
-        .find_map(|line| {
-            let (label, value) = line.split_once('|')?;
-            if label.trim() == wanted {
-                value.trim().parse::<f64>().ok()
-            } else {
-                None
-            }
-        })
+    for line in text.lines() {
+        if line.matches('|').count() != 1 {
+            continue;
+        }
+        let (label, value) = line.split_once('|').unwrap_or(("", ""));
+        if label.trim() != wanted {
+            continue;
+        }
+        let peak_mib = value.trim().parse::<f64>().unwrap_or_else(|err| panic!("peak row value unparseable at N={scale}: {err}"));
+        assert!(peak_mib.is_finite() && peak_mib > 0.0, "peak row must be finite and positive, got {peak_mib}");
+        println!("{line}");
+        return peak_mib;
+    }
+    panic!("isolated child at N={scale} printed no peak RSS row:\n{}", tail_lines(text, 12));
 }
 
 fn isolated_peak_mib(scale_files: usize) -> f64 {
-    let text = run_isolated_runner_child(scale_files);
-    parse_peak_row(&text, scale_files).unwrap_or_else(|| {
-        panic!(
-            "isolated child at N={scale_files} printed no peak RSS row:\n{}",
-            tail_lines(&text, 12)
-        )
-    })
+    emit_and_parse_peak_row(&run_isolated_runner_child(scale_files), scale_files)
 }
 
 fn half_scale_files() -> usize {
@@ -815,9 +817,13 @@ fn stage5_rss_curve_full_scale() {
 }
 
 /// I7b growth cap input: `RSS(N0)/RSS(N0/2)`, both peaks measured by their
-/// own isolated runner processes. The children's full tables are consumed
-/// here (only the ratio row is printed) - the scale rows come from the
-/// scale tests' own children, so every label appears exactly once per run.
+/// own isolated runner processes. T0a verdict finding 1a: the two operand
+/// peak rows are re-emitted verbatim before the ratio row, so EVERY ratio
+/// measurement is decomposable against the very rows it computed from.
+/// In the full-suite `--ignored` run the peak label now appears twice per
+/// scale (the scale test's child + the ratio test's child): two honest
+/// samples of the same quantity per invocation - T0b should parse peak
+/// rows as a multiset per label.
 #[test]
 #[ignore = "spawns two isolated full boots; M28 T0a growth-ratio row"]
 fn stage5_rss_growth_ratio() {
@@ -826,12 +832,7 @@ fn stage5_rss_growth_ratio() {
     let half_peak_mib = isolated_peak_mib(half);
     let full_peak_mib = isolated_peak_mib(n0);
     print_row(
-        &format!(
-            "stage5 RSS growth ratio ({}, N={}->{})",
-            profile_label(),
-            half,
-            n0
-        ),
+        &format!("stage5 RSS growth ratio ({}, N={}->{})", profile_label(), half, n0),
         full_peak_mib / half_peak_mib,
     );
 }
