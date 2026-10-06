@@ -181,10 +181,24 @@ Implementation in `tools/bench_compare.py` (additive + parameterized):
 
 - Gate 3: `python tools/hygiene_check.py` and distill form ->
   `### generic PASS (exit 0)` (capture: target/distill-capture.txt).
-- Gate 4: `python tools/encoding_guard.py --staged` -> see commit digests
-  below.
-- Gate 1 final: `### generic PASS (exit 0)` / `Ran 45 tests ... OK`.
+- Gate 4: `python tools/encoding_guard.py --staged` (distill form) ->
+  `### generic PASS (exit 0)` (capture empty: no findings).
+- Gate 1 final (committed tree, content-identical to the GREEN run):
+  `### generic PASS (exit 0)` / `Ran 45 tests in 0.325s` / `OK`.
+- Gate 2: `python tools/distill.py --kind generic -- python tools/bench_compare.py --help`
+  -> `### generic PASS (exit 0)`, first usage line shows
+  `--bench {stage5-timing,stage5-memory}`.
+- CI-form workspace discover (`-p "*_tests.py"`, reviewer form, run on the
+  landing tree): `### generic PASS (exit 0)` / `Ran 218 tests in 20.830s`
+  / `OK` -- 194 prior workspace cases + 24 new = 218.
+- Scope proofs: `git show --stat ac0eb7e` = exactly the three touch-set
+  files (journal 190/0, bench_compare.py 495/56, bench_compare_tests.py
+  475/0 -- ZERO deleted test lines proves the 21 existing cases are
+  UNEDITED); `git diff ac0eb7e^..ac0eb7e -- tools/bench_baseline.json` is
+  empty (exit 0, no output).
 - Commits (via `tools/commit_scoped.py`, scopes = touch-set):
-  - `<pending>` - mode + tests + journal (single logical step; RED->GREEN
-    lands as one unit since the handoff's acceptance is the paired file
-    set).
+  - `ac0eb7e` - `feat(tools): bench_compare --bench stage5-memory gate
+    mode + unit-locked ratio math (M28 T0b)` -- mode + 24 tests + this
+    journal (RED->GREEN lands as one unit; the handoff's acceptance is the
+    paired file set).
+  - `<this commit>` - journal records the landing hash (this file, alone).
