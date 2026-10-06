@@ -330,5 +330,480 @@ class MachineClassTests(unittest.TestCase):
         self.assertEqual(bench_compare.sanitize_processor("  !! "), "cpu")
 
 
+STAGE5_MEMORY_BENCH_SOURCE = (
+    Path(__file__).resolve().parents[1]
+    / "crates" / "cli" / "tests" / "stage5_memory_bench.rs")
+STAGE5_MEMORY_SUFFIX_LABEL_PATTERN = re.compile(r'format!\("([^"]*) \{suffix\}"')
+STAGE5_MEMORY_RATIO_TEMPLATE_GREP = (
+    'format!("stage5 RSS growth ratio ({}, N={}->{})"')
+HALF_PEAK_LABEL = "stage5 peak RSS (debug, N=640)"
+FULL_PEAK_LABEL = "stage5 peak RSS (debug, N=1280)"
+GROWTH_RATIO_LABEL = "stage5 RSS growth ratio (debug, N=640->1280)"
+
+
+def stage5_memory_canonical_values():
+    """One canonical value per documented stage5-memory row (MiB /
+    seconds / counts as labelled). The peak pair (1350/2600) sits under
+    the ratified 5200 MiB bar and its 1.93 quotient agrees with the 1.9
+    ratio row under the ratified gate G = 2.0, so the canonical set
+    passes every check; tests move single rows across a boundary. The
+    bench prints every value at 1-decimal precision, so ratio rows move
+    on the 0.1 grid the bench's own `print_row` uses."""
+    values = {}
+    for row_label in bench_compare.DOCUMENTED_PHASES_STAGE5_MEMORY:
+        if row_label.startswith("stage5 peak RSS ("):
+            values[row_label] = 1350.0 if row_label.endswith("N=640)") else 2600.0
+        elif row_label.startswith("stage5 RSS growth ratio ("):
+            values[row_label] = 1.9
+        else:
+            values[row_label] = 42.0
+    return values
+
+
+def render_stage5_memory_text(value_overrides=None, omit_rows=(),
+                              strip_pipe_of=(), peak_extra_samples=None,
+                              extra_rows=()):
+    """Render one full-suite stage5_memory_bench stdout: every tuple row
+    once (the curve children), then the growth-ratio child's two
+    re-emitted peak operand rows (T0a verdict finding 1a), then any
+    extra untracked rows. `peak_extra_samples` overrides a re-emitted
+    operand value; the re-emit otherwise duplicates the child's row
+    verbatim, as the bench does."""
+    values = stage5_memory_canonical_values()
+    values.update(value_overrides or {})
+    reemitted = dict(peak_extra_samples or {})
+    lines = ["running 8 tests",
+             "STAGE5_BENCH profile=debug files=640 symbols=900 "
+             "file_metrics=860",
+             "-" * 79]
+    for row_label in bench_compare.DOCUMENTED_PHASES_STAGE5_MEMORY:
+        if row_label in omit_rows:
+            continue
+        if row_label in strip_pipe_of:
+            lines.append(f"{row_label:<64} {values[row_label]:>12.1f}")
+            continue
+        lines.append(f"{row_label:<64} | {values[row_label]:>12.1f}")
+    for row_label in (HALF_PEAK_LABEL, FULL_PEAK_LABEL):
+        if row_label in omit_rows or row_label in strip_pipe_of:
+            continue
+        sample = reemitted.get(row_label, values[row_label])
+        lines.append(f"{row_label:<64} | {sample:>12.1f}")
+    for row_label, row_value in extra_rows:
+        lines.append(f"{row_label:<64} | {row_value:>12.1f}")
+    lines.append("test result: ok. 8 passed; 0 failed; 0 ignored; "
+                 "0 measured")
+    return "\n".join(lines) + "\n"
+
+
+def memory_texts(count, per_index=None, uniform=None):
+    """`count` invocation texts; `uniform` moves a row across a boundary
+    in EVERY invocation (so it moves the median), `per_index` overrides
+    single invocations (divergence-rejection scenarios)."""
+    texts = [render_stage5_memory_text(**(uniform or {}))
+             for _ in range(count)]
+    for index, render_kwargs in (per_index or {}).items():
+        texts[index] = render_stage5_memory_text(**render_kwargs)
+    return texts
+
+
+def stage5_memory_table_line(row_label, median_value):
+    return f"{row_label:<64} | {median_value:>10.1f}"
+
+
+def make_fake_memory_runner(run_texts):
+    texts = [run_texts] if isinstance(run_texts, str) else list(run_texts)
+    calls = {"run_requests": []}
+
+    def fake_runner(requested_runs, timeout_seconds, repo_root):
+        calls["run_requests"].append({
+            "requested_runs": requested_runs,
+            "timeout_seconds": timeout_seconds,
+        })
+        return [bench_compare.parse_bench_table_multiset(text)
+                for text in texts]
+
+    return fake_runner, calls
+
+
+def invoke_memory_main(arguments, run_texts):
+    fake_runner, calls = make_fake_memory_runner(run_texts)
+    stream = io.StringIO()
+    with redirect_stdout(stream):
+        exit_code = bench_compare.main(
+            ["--bench", "stage5-memory", *arguments],
+            run_bench_impl=fake_runner)
+    return exit_code, stream.getvalue(), calls
+
+
+def memory_baseline_key_from_tool():
+    return bench_compare.stage5_memory_baseline_key()
+
+
+def stage5_memory_canonical_phases(overrides=None):
+    phases = stage5_memory_canonical_values()
+    phases.update(overrides or {})
+    return phases
+
+
+def stage5_memory_baseline_entry(overrides=None, runs=5):
+    return {"phases": stage5_memory_canonical_phases(overrides),
+            "recorded": "2026-10-06", "runs": runs}
+
+
+def memory_baseline_with_entry(overrides=None):
+    return {memory_baseline_key_from_tool():
+            stage5_memory_baseline_entry(overrides)}
+
+
+class Stage5MemoryParseTests(unittest.TestCase):
+    def test_memory_mode_parses_every_documented_label_as_multiset(self):
+        parsed = bench_compare.parse_bench_table_multiset(
+            render_stage5_memory_text())
+        self.assertEqual(
+            set(parsed), set(bench_compare.DOCUMENTED_PHASES_STAGE5_MEMORY))
+        self.assertEqual(len(parsed), 46)
+        for peak_label in (HALF_PEAK_LABEL, FULL_PEAK_LABEL):
+            self.assertIsInstance(parsed[peak_label], list)
+            self.assertEqual(len(parsed[peak_label]), 2)
+        for samples in parsed.values():
+            for sample in samples:
+                self.assertIsInstance(sample, float)
+
+    def test_peak_label_duplicate_within_one_run_keeps_both_samples(self):
+        parsed = bench_compare.parse_bench_table_multiset(
+            render_stage5_memory_text(
+                peak_extra_samples={FULL_PEAK_LABEL: 4321.0}))
+        self.assertEqual(parsed[FULL_PEAK_LABEL], [2600.0, 4321.0])
+        self.assertEqual(parsed[HALF_PEAK_LABEL], [1350.0, 1350.0])
+
+    def test_default_parse_keeps_strict_last_write_wins_contract(self):
+        duplicated = (run_bench_text_from()
+                      + f"{MISSING_PHASE:<48} | {1.0:>8.1f}\n")
+        parsed = bench_compare.parse_bench_table(duplicated)
+        self.assertEqual(len(parsed), 14)
+        self.assertEqual(parsed[MISSING_PHASE], 1.0)
+
+    def test_stage5_row_missing_pipe_is_parse_format_drift_exit_2(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(
+                scratch, memory_baseline_with_entry())
+            text = render_stage5_memory_text(strip_pipe_of=[HALF_PEAK_LABEL])
+            exit_code, output, _ = invoke_memory_main(
+                ["--baseline", str(path), "--runs", "5"], [text])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("parse format drift", output)
+            self.assertIn(HALF_PEAK_LABEL, output)
+
+
+class Stage5MemoryTupleExactnessTests(unittest.TestCase):
+    def test_tuple_equals_labels_grepped_from_bench_source(self):
+        documented = bench_compare.DOCUMENTED_PHASES_STAGE5_MEMORY
+        source = STAGE5_MEMORY_BENCH_SOURCE.read_text(encoding="utf-8")
+        stems_from_source = {
+            stem.rstrip() for stem
+            in STAGE5_MEMORY_SUFFIX_LABEL_PATTERN.findall(source)}
+        self.assertEqual(len(stems_from_source), 25)
+        self.assertIn(STAGE5_MEMORY_RATIO_TEMPLATE_GREP, source)
+
+        scale_rows = [row for row in documented
+                      if re.search(r" \(debug, N=(640|1280)\)$", row)]
+        warm_rows = [row for row in documented
+                     if row.endswith(" (debug)")]
+        ratio_rows = [row for row in documented
+                      if row.startswith("stage5 RSS growth ratio (")]
+        self.assertEqual(len(documented), 46)
+        self.assertEqual(len(scale_rows), 40)
+        self.assertEqual(len(warm_rows), 5)
+        self.assertEqual(ratio_rows, [GROWTH_RATIO_LABEL])
+
+        scale_stems = {re.sub(r" \(debug, N=(640|1280)\)$", "", row)
+                       for row in scale_rows}
+        warm_stems = {row[:-len(" (debug)")] for row in warm_rows}
+        self.assertEqual(scale_stems | warm_stems, stems_from_source)
+        self.assertEqual(len(scale_stems), 20)
+        for stem in scale_stems:
+            both_scales = sorted(row for row in scale_rows
+                                 if row.startswith(stem + " (debug, N="))
+            self.assertEqual(
+                both_scales,
+                [f"{stem} (debug, N=1280)", f"{stem} (debug, N=640)"])
+        self.assertEqual([row for row in documented if "release" in row], [])
+
+
+class Stage5MemoryThresholdDecisionTests(unittest.TestCase):
+    def _run_against_baseline(self, baseline, texts, arguments=()):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, baseline)
+            return invoke_memory_main(
+                ["--baseline", str(path), *arguments], texts)
+
+    def test_peak_row_at_chosen_ratio_boundary_passes_and_past_it_regresses(self):
+        ratio = bench_compare.STAGE5_MEMORY_REGRESSION_RATIO
+        boundary = 2600.0 * ratio
+        exit_code, passes_output, _ = self._run_against_baseline(
+            memory_baseline_with_entry(),
+            memory_texts(5, uniform={"value_overrides":
+                                     {FULL_PEAK_LABEL: boundary}}))
+        self.assertEqual(exit_code, 0, passes_output)
+        self.assertNotIn("WARN", passes_output)
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry(),
+            memory_texts(5, uniform={"value_overrides":
+                                     {FULL_PEAK_LABEL: boundary + 0.1}}))
+        self.assertEqual(exit_code, 1)
+        self.assertRegex(
+            output,
+            r"WARN stage5 peak RSS \(debug, N=1280\): \d+\.\d MiB vs "
+            r"baseline 2600\.0 MiB \(\+\d+%\)")
+
+    def test_phase_delta_row_at_ratio_boundary_passes_and_past_it_regresses(self):
+        delta_label = "symbol-pass RSS delta (debug, N=1280)"
+        ratio = bench_compare.STAGE5_MEMORY_REGRESSION_RATIO
+        baseline_value = 100.0
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({delta_label: baseline_value}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {delta_label: baseline_value * ratio}}))
+        self.assertEqual(exit_code, 0, output)
+        self.assertNotIn("WARN", output)
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({delta_label: baseline_value}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {delta_label:
+                                      baseline_value * ratio + 0.1}}))
+        self.assertEqual(exit_code, 1)
+        self.assertIn(f"WARN {delta_label}", output)
+
+    def test_growth_ratio_row_regression_is_first_class(self):
+        ratio = bench_compare.STAGE5_MEMORY_REGRESSION_RATIO
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({GROWTH_RATIO_LABEL: 1.0}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {GROWTH_RATIO_LABEL: 1.0 * ratio}}))
+        self.assertEqual(exit_code, 0, output)
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({GROWTH_RATIO_LABEL: 1.0}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {GROWTH_RATIO_LABEL: 1.6}}))
+        self.assertEqual(exit_code, 1)
+        self.assertIn(f"WARN {GROWTH_RATIO_LABEL}", output)
+
+    def test_rated_peak_bar_boundary_passes_and_exceeding_regresses(self):
+        peak_bar = bench_compare.STAGE5_MEMORY_PEAK_BAR_MIB
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({FULL_PEAK_LABEL: peak_bar}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {FULL_PEAK_LABEL: peak_bar}}))
+        self.assertEqual(exit_code, 0, output)
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({FULL_PEAK_LABEL: peak_bar}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {FULL_PEAK_LABEL: peak_bar + 0.1}}))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("RATIFIED", output)
+        self.assertIn(FULL_PEAK_LABEL, output)
+
+    def test_rated_growth_gate_boundary_passes_and_exceeding_regresses(self):
+        gate = bench_compare.STAGE5_MEMORY_GROWTH_GATE_RATIO
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({GROWTH_RATIO_LABEL: gate / 1.4}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {GROWTH_RATIO_LABEL: gate}}))
+        self.assertEqual(exit_code, 0, output)
+        exit_code, output, _ = self._run_against_baseline(
+            memory_baseline_with_entry({GROWTH_RATIO_LABEL: gate / 1.4}),
+            memory_texts(5, uniform={"value_overrides":
+                                     {GROWTH_RATIO_LABEL: 2.1}}))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("RATIFIED", output)
+        self.assertIn(GROWTH_RATIO_LABEL, output)
+
+
+class Stage5MemorySamplingProtocolTests(unittest.TestCase):
+    def _baseline_arguments(self, scratch, runs=None):
+        path = write_baseline_file(scratch, memory_baseline_with_entry())
+        arguments = ["--baseline", str(path)]
+        if runs is not None:
+            arguments += ["--runs", str(runs)]
+        return arguments
+
+    def test_operand_divergence_rejects_invocation_in_all_four_quadrants(self):
+        quadrants = [
+            (HALF_PEAK_LABEL, 1525.5),
+            (HALF_PEAK_LABEL, 1161.0),
+            (FULL_PEAK_LABEL, 2990.0),
+            (FULL_PEAK_LABEL, 2236.0),
+        ]
+        for label, outlier_sample in quadrants:
+            with self.subTest(label=label, sample=outlier_sample):
+                texts = memory_texts(6, {4: {"peak_extra_samples":
+                                             {label: outlier_sample}}})
+                with tempfile.TemporaryDirectory() as scratch:
+                    arguments = self._baseline_arguments(scratch, runs=6)
+                    exit_code, output, _ = invoke_memory_main(arguments, texts)
+                    self.assertEqual(exit_code, 0, output)
+                    self.assertIn("REJECT invocation 5", output)
+                    self.assertIn(label, output)
+                    self.assertIn("accepted 5 of 6", output)
+                    self.assertIn(
+                        stage5_memory_table_line(
+                            label, stage5_memory_canonical_values()[label]),
+                        output)
+
+    def test_operand_divergence_of_exactly_eight_percent_is_accepted(self):
+        limit = bench_compare.STAGE5_MEMORY_DIVERGENCE_FRACTION
+        boundary_sample = 2600.0 * (1.0 + limit)
+        texts = memory_texts(6, {3: {"peak_extra_samples":
+                                     {FULL_PEAK_LABEL: boundary_sample}}})
+        with tempfile.TemporaryDirectory() as scratch:
+            arguments = self._baseline_arguments(scratch, runs=6)
+            exit_code, output, _ = invoke_memory_main(arguments, texts)
+            self.assertEqual(exit_code, 0, output)
+            self.assertNotIn("REJECT", output)
+            self.assertIn("accepted 6 of 6", output)
+
+    def test_fewer_than_five_accepted_invocations_exits_2(self):
+        texts = memory_texts(5, {
+            1: {"peak_extra_samples": {FULL_PEAK_LABEL: 2990.0}},
+            3: {"peak_extra_samples": {HALF_PEAK_LABEL: 1525.5}},
+        })
+        with tempfile.TemporaryDirectory() as scratch:
+            arguments = self._baseline_arguments(scratch)
+            exit_code, output, _ = invoke_memory_main(arguments, texts)
+            self.assertEqual(exit_code, 2)
+            self.assertIn("insufficient samples", output)
+            self.assertIn("accepted 3 of 5", output)
+            self.assertNotIn("no baseline for machine class", output)
+            self.assertNotIn("no regressions past", output)
+
+    def test_requested_runs_below_five_cannot_reach_a_verdict(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            arguments = self._baseline_arguments(scratch) + ["--runs", "3"]
+            exit_code, output, calls = invoke_memory_main(
+                arguments, memory_texts(3))
+            self.assertEqual(exit_code, 2)
+            self.assertIn("insufficient samples", output)
+            self.assertEqual(calls["run_requests"][0]["requested_runs"], 3)
+
+    def test_memory_mode_defaults_to_five_invocations(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            arguments = self._baseline_arguments(scratch)
+            exit_code, output, calls = invoke_memory_main(
+                arguments, memory_texts(5))
+            self.assertEqual(exit_code, 0, output)
+            self.assertEqual(calls["run_requests"][0]["requested_runs"], 5)
+
+
+class Stage5MemoryBaselineKeyTests(unittest.TestCase):
+    def test_absent_memory_baseline_exits_0_with_hint_and_namespaced_snapshot(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, {
+                "Linux-x86_64-UnknownCpu": baseline_from_canonical()})
+            exit_code, output, _ = invoke_memory_main(
+                ["--baseline", str(path)], memory_texts(5))
+            self.assertEqual(exit_code, 0)
+            self.assertIn("no baseline for machine class", output)
+            self.assertIn(memory_baseline_key_from_tool(), output)
+            snapshot = json.loads(output[output.index("{"):])
+            entry = snapshot[memory_baseline_key_from_tool()]
+            self.assertEqual(entry["phases"][FULL_PEAK_LABEL], 2600.0)
+            self.assertEqual(entry["runs"], 5)
+            self.assertRegex(entry["recorded"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_memory_rows_never_read_the_ms_machine_class_entry(self):
+        poisoned_ms_entry = {
+            "phases": stage5_memory_canonical_phases(
+                {FULL_PEAK_LABEL: 100.0}),
+            "recorded": "2026-10-06", "runs": 5}
+        baseline = {bench_compare.machine_class(): poisoned_ms_entry}
+        baseline.update(memory_baseline_with_entry())
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, baseline)
+            exit_code, output, _ = invoke_memory_main(
+                ["--baseline", str(path)], memory_texts(5))
+            self.assertEqual(exit_code, 0, output)
+        key = memory_baseline_key_from_tool()
+        self.assertNotEqual(key, bench_compare.machine_class())
+        self.assertRegex(
+            key, "^" + re.escape(bench_compare.machine_class())
+            + r"::stage5-memory$")
+
+    def test_update_baseline_writes_only_the_memory_namespace(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, {
+                bench_compare.machine_class(): baseline_from_canonical()})
+            exit_code, output, _ = invoke_memory_main(
+                ["--baseline", str(path), "--update-baseline"],
+                memory_texts(5))
+            self.assertEqual(exit_code, 0, output)
+            merged = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(merged[bench_compare.machine_class()]["phases"],
+                             CANONICAL_MS)
+            entry = merged[memory_baseline_key_from_tool()]
+            self.assertEqual(entry["phases"][FULL_PEAK_LABEL], 2600.0)
+            self.assertEqual(entry["phases"][GROWTH_RATIO_LABEL], 1.9)
+            self.assertEqual(entry["runs"], 5)
+
+
+class Stage5MemoryModeIsolationTests(unittest.TestCase):
+    def test_default_mode_never_gates_on_memory_rows(self):
+        exit_code, output, _ = invoke_main(
+            [], render_stage5_memory_text())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("parse format drift", output)
+        self.assertIn("symbol_pass+prep (combined, <= first event)", output)
+        self.assertNotIn("median ms", output)
+
+    def test_memory_mode_never_gates_on_ms_rows(self):
+        exit_code, output, _ = invoke_memory_main([], run_bench_text_from())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("parse format drift", output)
+        self.assertIn(FULL_PEAK_LABEL, output)
+        self.assertNotIn("no regressions past", output)
+
+    def test_unknown_probe_row_is_reported_not_fatal(self):
+        probe_row = ("save-span transient probe (debug, N=1280)", 4096.0)
+        texts = memory_texts(5, {0: {"extra_rows": [probe_row]}})
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(
+                scratch, memory_baseline_with_entry())
+            exit_code, output, _ = invoke_memory_main(
+                ["--baseline", str(path)], texts)
+            self.assertEqual(exit_code, 0, output)
+            self.assertIn("WARN untracked phase", output)
+            self.assertIn(probe_row[0], output)
+
+
+class BenchChoiceSurfaceTests(unittest.TestCase):
+    def test_help_exits_zero_and_lists_both_bench_choices(self):
+        finished = subprocess.run(
+            [sys.executable, BENCH_TOOL_PATH, "--help"],
+            capture_output=True, text=True, errors="replace")
+        self.assertEqual(finished.returncode, 0)
+        self.assertIn("--bench {stage5-timing,stage5-memory}",
+                      finished.stdout)
+
+    def test_explicit_timing_choice_behaves_as_the_default_mode(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, {
+                bench_compare.machine_class(): baseline_from_canonical()})
+            fake_runner, _ = make_fake_runner(run_bench_text_from())
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                exit_code = bench_compare.main(
+                    ["--bench", "stage5-timing", "--baseline", str(path)],
+                    run_bench_impl=fake_runner)
+            self.assertEqual(exit_code, 0, stream.getvalue())
+            self.assertIn("no regressions past 1.25x baseline",
+                          stream.getvalue())
+
+    def test_unknown_bench_choice_is_usage_error_exit_2(self):
+        finished = subprocess.run(
+            [sys.executable, BENCH_TOOL_PATH, "--bench", "boot-stages"],
+            capture_output=True, text=True, errors="replace")
+        self.assertEqual(finished.returncode, 2)
+        self.assertIn("unknown --bench choice", finished.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
