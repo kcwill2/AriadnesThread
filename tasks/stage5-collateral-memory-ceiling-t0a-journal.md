@@ -168,4 +168,9 @@ notes on `stage5_rss_scale_runner` / `stage5_warm_measure`.
 
 ## Commits (this hop, via commit_scoped.py)
 
-- (recorded below after creation)
+- `7c4ddf4` -- bench file only (994 lines, one file).
+- `13162f1` -- evidence table + this journal.
+- `python tools/encoding_guard.py --staged` ran clean (exit 0) after staging
+  and before both commits. Staging was scoped to exactly the three touch-set
+  paths; foreign working-tree files (ledger, plans, other handoffs) confirmed
+  untouched via `git status --porcelain` routed through the distiller.
