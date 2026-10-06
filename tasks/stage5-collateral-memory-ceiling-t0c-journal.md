@@ -232,7 +232,46 @@ overshoot is itemized here per the M28 T0b-finding-1 law.
 
 - `f312dba` route + helper + feature chain (gate 11).
 - `60c88c7` helper parse fix (D5 `strip_harness_prefix`, scoped single file).
-- (gate-12 commit records the measurement doc + this journal; the landing
-  hop records its own hash here after landing, T0a precedent.)
+- `bf23e84` measurement doc + this journal (gate 12).
+- (this next landing commit records the three hashes; its own hash is the
+  HEAD after it, T0a precedent - the journal cannot contain its own hash.)
 
 ## Frozen-lock proof commands (run post-commit-2; results in D7)
+
+## D7 (frozen-lock proofs, post-landing, distill-routed)
+
+- `git diff --name-only dc294bb..HEAD` -> EXACTLY the seven touch-set paths:
+  `crates/cli/Cargo.toml`, `crates/pipeline/Cargo.toml`,
+  `crates/pipeline/src/stage_load.rs`,
+  `crates/pipeline/src/stage_load_tests.rs`,
+  `tasks/stage5-collateral-memory-ceiling-t0c-journal.md`,
+  `tasks/stage5-collateral-memory-ceiling-t0c-measurement.md`,
+  `tasks/t0c_run_invocation.py`.
+  Consequences proven simultaneously: `crates/cli/tests/stage5_memory_bench.rs`
+  UNEDITED (bench mechanism measured untouched); `crates/graph/**` incl.
+  `load_caches.rs` + I5 file diff-EMPTY; `tools/**` incl.
+  `bench_compare*.py` diff-EMPTY; `tools/bench_baseline.json` diff-EMPTY AND
+  untouched (no PR-2 usurpation); `Cargo.lock` diff-EMPTY (the
+  empty-or-dev-dep-edge acceptance branch reads EMPTY); `tests/**`,
+  `tasks/milestone_ledger.md`, m00/m18, `progress.rs`, boot contract
+  diff-EMPTY.
+- `git show --stat` per commit = touch-set exactly (verified per commit:
+  f312dba 6 paths, 60c88c7 1 path, bf23e84 2 paths).
+- Gate 3 (the plain-suite line `32 passed / 0 failed / 4 ignored / 7
+  suites` EXACT, exit 0, run AFTER the route landed) IS the
+  production-invariance witness; the instrumented gate 2 line
+  `35 passed / 0 failed / 4 ignored / 7 suites` proves the +3 route tests.
+- D6 count addendum: the landing commit itself adds 3 support invocations
+  (stage, `encoding_guard --staged`, commit_scoped) -> final declared total
+  47 distill/testrun/commit-routed invocations, itemized above (D3/D6).
+
+## NOT run / NOT done (measurement-hop boundary)
+
+No `--update-baseline`, no gate verdict, no debug ablation (D4), no N>1280,
+no T4/DP-2 work, no ledger touches, no fixture touches. Reviewer-hop
+obligations (fresh census incl. the +3-or-+0 unification note, one group's
+medians recomputed independently, one release invocation re-run, G3
+witness-line audit, bench_compare default-mode run expecting the stale-
+baseline exit-1 class per relays row 62, `ui_smoke`, `encoding_guard
+--all`, commit-vs-touch-set, ledger relays) are the reviewer's, not
+implementer gates.

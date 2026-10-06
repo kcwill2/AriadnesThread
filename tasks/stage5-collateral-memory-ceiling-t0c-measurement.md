@@ -50,10 +50,12 @@ t0c peak bar gap (release, N=1280 vs 5200)      | 3269.5
 ## 1. Provenance
 
 - Start rev: `dc294bb` (T0b landing; T1 `d6640a2` and T2 `e52a9e9` verified
-  ancestors). Route/helper commit: `f312dba`. This document's own landing
-  hash is recorded in `tasks/stage5-collateral-memory-ceiling-t0c-journal.md`
-  (a document cannot contain its own commit hash; journal practice per the
-  T0a precedent).
+  ancestors). Hop commits: `f312dba` (route + helper + feature chain),
+  `60c88c7` (medians-parse fix, journal D5), `bf23e84` (this document +
+  journal). The document's own landing record commit follows `bf23e84` and
+  is enumerated in `tasks/stage5-collateral-memory-ceiling-t0c-journal.md`
+  (a document cannot contain the hash of its own commit; journal practice
+  per the T0a precedent).
 - Gate 0 disk witness (verbatim, exit 0, run before any cargo):
   `DISK C: free 161 GiB of 1862 GiB - PASS`
 - STAGE5_BENCH context lines (per group, from each capture; all invocations
