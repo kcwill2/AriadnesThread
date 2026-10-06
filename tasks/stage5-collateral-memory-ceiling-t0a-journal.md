@@ -131,11 +131,19 @@ line de-duplication in the child re-emitter. Scoped re-run clean.
 
 ## Label set emitted (verbatim; T0b row contract)
 
+**26 table-row labels** (T0a verdict finding 3: the evidence doc's first pass
+said 25; the erratum corrects it; the label SET was always byte-correct).
 `{p}` is `debug` or `release`; `{n}` is the actual file scale (defaults 640, 1280).
 RSS and size rows are MiB; wall rows are seconds; memo rows are counts.
+Since the finding-1 rework, `stage5 peak RSS ({p}, N={n})` appears TWICE per
+scale in the full-suite run (the scale test's child + the ratio test's
+re-emitted operand); T0b must parse peak rows as a multiset per label.
 
 - `stage5 peak RSS ({p}, N={n})`
-- `stage5 RSS growth ratio ({p}, N=640->1280)`
+- `stage5 RSS growth ratio ({p}, N=640->1280)` (the code prints a
+  parameterized `N={half}->{n0}`; the literal above is the byte form only at
+  the default scale -- parenthetical added per T0a verdict finding 3, for
+  T0b's tuple-exactness grep)
 - `RSS checkpoint prep ({p}, N={n})`
 - `RSS checkpoint symbol-pass end ({p}, N={n})`
 - `RSS checkpoint file-pass tail ({p}, N={n})`
@@ -174,3 +182,130 @@ notes on `stage5_rss_scale_runner` / `stage5_warm_measure`.
   and before both commits. Staging was scoped to exactly the three touch-set
   paths; foreign working-tree files (ledger, plans, other handoffs) confirmed
   untouched via `git status --porcelain` routed through the distiller.
+- `8d34a3c` -- journal records the first two commit hashes.
+
+## REWORK after T0a verdict REJECTED (finding-by-finding)
+
+### Finding 1 (BLOCKER) -- decomposable growth-ratio row + mechanism
+
+Behavior change, RED-first per the rework brief. The row-contract assertion
+(one pipe, verbatim label, finite positive value) now lives in
+`emit_and_parse_peak_row`, which the ratio test calls for BOTH operands; it
+echoes each child's peak row verbatim before printing the ratio. The ratio
+test previously consumed and discarded the child tables (no operands on the
+page). Scope: only `stage5_rss_growth_ratio`, its doc comment, and the
+`isolated_peak_mib` helper; `run_isolated_runner_child` and the children are
+byte-identical, so the operands are measured under identical conditions by
+construction (verdict 1c "identify which side diverges" answered below).
+
+Fresh measurements (fixed code), each capture read immediately after its run
+because `target/distill-capture.txt` is single-slot and shared (the D3-class
+overwrite hazard -- this is the practice that finding 5 codifies; the paths
+cited are live-during-run, read-after-run, overwritten by the next distill):
+
+- release standalone ratio: capture `target/distill-capture.txt` (read after
+  run; 45.64 s suite-line) -- `stage5 peak RSS (release, N=640) | 2257.5`,
+  `stage5 peak RSS (release, N=1280) | 9033.8`,
+  `stage5 RSS growth ratio (release, N=640->1280) | 4.0`.
+- release suite invocation 1: same capture path (103.69 s line) -- ratio
+  operands 2256.7 / 9042.0, ratio 4.0.
+- release suite invocation 2: operands 2255.9 / 9040.2, ratio 4.0.
+- release suite invocation 3: operands 2259.3 / 9029.5, ratio 4.0.
+- debug control, suite form: operands 2258.6 / 9048.7, ratio 4.0 (no debug
+  reading moved; no debug erratum).
+
+Mechanism (verdict 1c: OS working-set behaviour, NOT a bench artefact): the
+diverging side is the HALF-scale operand. During the original observation
+window (2026-10-05 23:55Z to 2026-10-06 01:55Z, concurrent with parallel build
+sessions on this box) the ratio test's N=640 child read ~2511 MiB (+11-12%)
+while its full-scale operand stayed in band; 9040/2511 prints as 3.6.
+Discriminating experiment (scratch, NOT committed -- reverted in the same
+session before any commit): a temporary non-emitting clone of the OLD ratio
+path (`silent_peak_mib`, scratch diff below) was rebuilt and run against today
+conditions: standalone release ratio -> `| 4.0` (old code now agrees with its
+operands), and in its suite run the +12% inflation attached to the CURVE
+half-scale child (2531.4, out of band) while that run's ratio read 4.0. The
+inflation therefore follows whichever short (~1.6 s) release N=640 boot lands
+inside a memory-pressure window, not the spawning test. `PeakWorkingSetSize`
+is a working-set high-water; a brief process's recorded peak is sensitive to
+trim/standby timing under external pressure, while the longer full-scale boot
+always settled in band (~9030-9048 across every reading in and out of the
+window). This also explains the release invocation-4 +13% outlier and the
+debug window's single mild instance (invocation 2 ratio 3.9 vs its curve
+quotient 4.00). The printed ratio rows were arithmetically TRUE for the
+peaks their children measured; what was missing was the operands -- emitted
+now, so every invocation is self-auditing.
+
+Scratch-experiment disposition: `silent_peak_mib` clone + two-line ratio-body
+swap; ran two build/run cycles (standalone + suite); fully reverted
+(`grep silent_peak_mib` = zero matches at commit time); never staged, never
+committed.
+
+Corrected gate-relevant facts (all still PROPOSED): release ratio is 4.0 on
+clean conditions (median of 4 decomposed invocations + variant-A control),
+not 3.6. The proposed growth cap G (2.0) stands; the proposed protocol gains
+one line: release half-scale peak must be taken as median-of->=5 invocations
+until the bimodality is characterized (T0b rider), and ratio-operand
+divergence beyond ~8% from the per-slot median should reject the invocation.
+Wall rows are context-only: the debug control moved `ensure_load` to 71.3 s
+(from a 75-113 s band) within one afternoon with RSS rows unchanged -- wall
+time is environment-velocity, RSS is not.
+
+### Finding 2 -- D6 (undeclared filename deviation, now declared)
+
+- **D6**: the evidence doc landed as
+  `tasks/stage5-collateral-memory-ceiling-t0a-evidence.md`; the handoff
+  literal is `...t0-evidence.md`. Per the rework brief the landed file is NOT
+  renamed; the canonical path is recorded in the evidence-doc header; the
+  planner updates the T0b supplier pointer (`t0b-handoff.md:16`) in parallel.
+  Reviewer's finding-2 disposition ("resolve at evidence review") selects the
+  pointer-correction branch.
+
+### Finding 3 -- label count
+
+Corrected to **26** in both docs (verified label-by-label against the code
+format strings at `stage5_memory_bench.rs:449-486,497-501,569-603` and the
+ratio/warm rows; also confirmed by the emitted tables transcribed above).
+Journal parenthetical added under the growth-ratio label for the
+`N={half}->{n0}` parameterization.
+
+### Finding 4 -- exemplar + 4096 pair set
+
+Erratum E2 recomputes the transient from pairs with BOTH operands transcribed
+in the same capture (fixed-code debug control 9047.2-4951.1=4096.1; fixed-code
+release suite 9035.7-4939.7=4096.0; earlier debug 9034.4-4938.4=4096.0 and
+9033.7-4937.6=4096.1); the untranscribed citations and the partial-invocation
+peak are withdrawn; "invocations 1-3" -> fully-read set 1/2/4; the block-2
+release exemplar is replaced by fixed-code invocation 1 (in band). The
+~4096.0 +/- 0.1 MiB law stands (5th confirmation: debug control this session).
+
+### Finding 5 -- capture-path citations
+
+Adopted going forward (and used throughout this rework): every digest above
+cites its capture path; `target/distill-capture.txt` and
+`target/testrun-capture.txt` are single-slot and overwritten by the next run,
+so the reading discipline is read-immediately-after-run (this rework never
+queued a second distill before reading the previous capture -- the exact
+omission that caused D3 in the first pass).
+
+### Rework gate digests (verbatim, with capture paths)
+
+- bench compile + probe (`testrun.py --distill -p ariadne-cli --test
+  stage5_memory_bench`): `1 passed / 0 failed / 7 ignored / 1 suites`;
+  capture `target/testrun-capture.txt` (16 lines).
+- scoped cli census (`testrun.py --distill -p ariadne-cli`):
+  `111 passed / 0 failed / 8 ignored / 6 suites`; capture
+  `target/testrun-capture.txt`.
+- release/debug curve forms: five distiller invocations, all
+  `ok (exit 0, 0 warnings emitted)`; captures as cited inline.
+- `python tools/hygiene_check.py` via `python tools/distill.py --kind generic`
+  -> `### generic PASS (exit 0)`; zero rows for
+  `crates/cli/tests/stage5_memory_bench.rs`; capture
+  `target/distill-capture.txt` (152 lines, all foreign R3 warnings).
+
+### Rework commits (via commit_scoped.py)
+
+- `407fe66` -- bench rework (finding 1a), +28/-27, one file.
+- (docs commit recorded after creation; `encoding_guard.py --staged` exit 0
+  verified before both, capture paths cited inline in the digests above)
+

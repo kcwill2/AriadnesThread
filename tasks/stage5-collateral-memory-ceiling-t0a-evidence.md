@@ -1,5 +1,9 @@
 # stage5 collateral memory ceiling -- T0a evidence table
 
+Canonical path: `tasks/stage5-collateral-memory-ceiling-t0a-evidence.md`
+(T0a verdict finding 2: the T0b handoff supplier pointer is being corrected
+in parallel by the planner; see journal deviation D6).
+
 Milestone `stage5-collateral-memory-ceiling` (M28), task T0a (`t0a-rss-bench`).
 Producer: implementer, 2026-10-06 UTC. Bench: `crates/cli/tests/stage5_memory_bench.rs`.
 Status of every constant here: MEASURED or PROPOSED. Nothing in this document is
@@ -168,3 +172,109 @@ As enumerated in `tasks/stage5-collateral-memory-ceiling-t0a-journal.md`
 ("Label set emitted", 25 table-row labels); every table row carries exactly
 one pipe and one finite float value, every context line carries no pipe, and
 the profile is embedded in every label.
+
+---
+
+## ERRATUM (append-only; appended after T0a verdict REJECTED at HEAD `8d34a3c`)
+
+### E1 (verdict finding 1, BLOCKER) -- corrected release growth-ratio reading
+
+The `stage5 RSS growth ratio (release, N=640->1280)` row above read 3.6 in the
+first work session. That reading was wrong for the gate (I7b). The ratio test
+has been made DECOMPOSABLE: `stage5_rss_growth_ratio` now re-emits both
+children's `stage5 peak RSS` operand rows verbatim before the ratio row (code:
+`crates/cli/tests/stage5_memory_bench.rs` `emit_and_parse_peak_row`), so every
+ratio measurement is auditable against the rows it computed from. The ratio row
+label itself is unchanged (T0b label contract intact). The peak label now
+appears twice per scale in the full-suite run (scale test's child + ratio
+test's child): two honest samples of one quantity; T0b must parse peak rows as
+a multiset per label.
+
+Corrected release readings (fixed code, >= 3 fully-read isolated invocations,
+each capture read immediately after its run):
+
+| invocation (capture: `target/distill-capture.txt`) | half operand | full operand | ratio |
+| --- | --- | --- | --- |
+| standalone `--exact stage5_rss_growth_ratio` | 2257.5 | 9033.8 | 4.0 |
+| suite form, release invocation 1 | 2256.7 | 9042.0 | 4.0 |
+| suite form, release invocation 2 | 2255.9 | 9040.2 | 4.0 |
+| suite form, release invocation 3 | 2259.3 | 9029.5 | 4.0 |
+
+CORRECTED release growth ratio = **4.0** (median of four). Debug control, fixed
+code, suite form: half 2258.6 / full 9048.7 / ratio 4.0 -- debug unchanged and
+still consistent with its peaks, so no debug erratum. The proposed growth gate
+(`ratio <= 2.0`) and the PROPOSED bars are UNAFFECTED: the corrected value is
+4.0, a clean quadratic that still fails a pre-fix gate with a wide margin.
+
+Erratum against the 3.6 rows above: they implied release grew only 3.6x per
+2x scale-up while release grew ~4.0x per the peak rows. The 4.0x reading is
+correct. The divergent side was the HALF-scale (numerator) operand: the ratio
+test's isolated N=640 child read ~2511 MiB (~+12%) in the session that produced
+3.6, while its full-scale (denominator) operand stayed at ~9040. All four
+corrected half operands land in the in-band ~2256-2259, and the ratio is 4.0.
+
+Mechanism (reviewer finding 1b -- OS working-set behaviour, not a bench
+artefact): the anomaly is ambient machine-memory pressure during the very
+short (~1.6 s) release N=640 boot, not a code path. Evidence:
+
+- Rebuilt old code (pre-fix, non-emitting parse), same machine minutes later:
+  standalone ratio read 4.0 (half 2257.5 / full 9033.8) -- in band. The 3.6
+  did not reproduce once memory pressure cleared.
+- In that same old-code suite run, the anomaly attached to the HALF-scale
+  CURVE test child (peak 2531.4, out of band) while that run's ratio read 4.0
+  -- i.e. the inflation follows whichever N=640 child boots under the
+  pressured window, NOT the test that spawned it. The reviewer's
+  "depends-on-spawning-test" framing is thus refined: it depends on ambient
+  pressure at boot time, and the short half-scale boot is the exposed one.
+- Full-scale operands never diverged (~9030-9048 across every reading in band):
+  the longer full boot lets its working set settle below the transient before
+  the final peak read, so trimming does not shave the reported high-water.
+
+Consequence for the printed gate row: with operands now emitted, a pressure-
+inflated half operand is visible in the same invocation, and the T0b median-
+of->=3 protocol (Block 6) is robust to the rare inflated sample. Nothing here
+changes any measured peak; it corrects one derived ratio and its interpretation.
+
+### E2 (verdict finding 4) -- block-2 exemplar and the 4096 transient, recomputed
+
+Block 2 above used debug invocation 4 / release invocation 4 as exemplars; the
+release invocation 4 is the same run excluded as the +13% peak outlier, and the
+fully-read set is debug invocations 1/2/4 (not "1-3"). In-band, fully-read
+exemplars are now available (fixed-code release suite invocation 1: full peak
+9035.7, save tail 4939.7; fixed-code debug control: peak 9047.2, save tail
+4951.1). The 4096 transient is recomputed using ONLY pairs whose peak AND
+save-tail were both transcribed in the same capture, dropping the partial-
+invocation peak 9043.3 and any untranscribed save-tail:
+
+| run (both operands transcribed same capture) | peak | save tail | transient |
+| --- | --- | --- | --- |
+| fixed-code debug control | 9047.2 | 4951.1 | 4096.1 |
+| fixed-code release suite 1 | 9035.7 | 4939.7 | 4096.0 |
+| earlier fully-read debug | 9034.4 | 4938.4 | 4096.0 |
+| earlier fully-read debug | 9033.7 | 4937.6 | 4096.1 |
+
+The constant ~4096.0 +/- 0.1 MiB save-span transient finding STANDS on the
+corrected, fully-transcribed pair set. The 4096-rider probe remains PROPOSED.
+
+### E3 (verdict finding 3) -- label count
+
+The line above says "25 table-row labels"; the correct count is **26** (the
+journal's "Label set emitted" enumerates 26 and the code emits exactly those).
+The label SET was always verbatim-correct; only the count was misstated. For
+T0b's tuple-exactness grep: the growth-ratio label is printed with a
+parameterized scale `N={half}->{n0}`, which reads `N=640->1280` only at the
+default scale.
+
+### E4 (verdict finding 2) -- canonical path and the T0b supplier pointer
+
+This file's canonical path is `tasks/stage5-collateral-memory-ceiling-t0a-
+evidence.md` (recorded in the header above). It was NOT renamed. The T0b
+supplier pointer at `tasks/stage5-collateral-memory-ceiling-t0b-handoff.md:16`
+(citing the non-existent `...t0-evidence.md`) is being corrected by the planner
+in parallel; deviation D6 in the journal declares the name mismatch.
+
+### Net status of proposed constants after the rework
+
+N0 (1280), bars (5200 MiB/profile), growth gate G (2.0), tolerance (1.15x) and
+the 4096-rider remain PROPOSED only. Zero RATIFIED lines; DP-4 holds.
+
