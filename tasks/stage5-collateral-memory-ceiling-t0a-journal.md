@@ -306,6 +306,7 @@ omission that caused D3 in the first pass).
 ### Rework commits (via commit_scoped.py)
 
 - `407fe66` -- bench rework (finding 1a), +28/-27, one file.
-- (docs commit recorded after creation; `encoding_guard.py --staged` exit 0
-  verified before both, capture paths cited inline in the digests above)
+- `eec5646` -- evidence errata + this journal rework append.
+- (this hash-record line lands in the follow-up scoped commit; no other code
+  or doc changed after `eec5646`)
 
