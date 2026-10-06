@@ -280,3 +280,38 @@ remains inside the sizing law; recorded per "journal, don't hide"
 (single scoped commit, T1-D5 precedent - the Red proof is the R1/R2/R3
 capture pair over the identical frozen test files, D8)
 
+`python tools/commit_scoped.py --scope crates/pipeline/src/stage_load.rs
+--scope crates/pipeline/src/lib.rs --scope
+crates/pipeline/src/stage_load_tests.rs --scope crates/pipeline/tests
+--scope tasks/stage5-collateral-memory-ceiling-t2-journal.md -m
+"perf(pipeline): single-copy stage-5 lifecycle, pre-stage-5 index
+release, bounded passes (M28 T2)"`
+
+- Landed: `e52a9e99d86a758688b28a8584472ebccf8c5c1d`. `git show --stat`
+  carries EXACTLY the touch-set: lib.rs +66, stage_load.rs +225/-72 (363
+  lines final), stage_load_tests.rs +163 (NEW),
+  load_stage_lifecycle_test.rs +203 (NEW), journal +282. Zero
+  internal_tests.rs content in the diff (3.3 budget unspent); zero
+  progress-family, cli, graph, report, tools, fixtures files in any diff.
+  Scope note: the in-crate test file rides the touch-set's own "src
+  internal_tests.rs adjacency if in-crate visibility requires it" clause
+  and is named as an explicit --scope (the handoff gate-6 literal lists
+  the four outer scopes; the adjacency clause budgets this fifth path).
+- Gate 5 `python tools/encoding_guard.py --staged` after staging: silent,
+  exit 0. Reinforced: `python tools/distill.py -- python tools/
+  encoding_guard.py --all` -> `generic PASS (exit 0)`, zero mojibake.
+- A second journal-only commit records this proof block.
+
+### Pointer for the T0b/closure hops
+
+Cite THIS commit (`e52a9e99d86a758688b28a8584472ebccf8c5c1d`) as the T2
+landing. Cap wiring consumes T1's landed literals from `d6640a2`
+(`SEMANTIC_CLOSURE_BOOT_CAP`/`PHYSICAL_EXPANSION_BOOT_CAP`, hop-fixed,
+reviewer adjudicates). The I7c-style boot-counter witness at N-scale and
+the G-C discrimination run remain T0b/operator local-gate duties (DP-3);
+the save-span serialization transient itself (A7, `crates/report`) stays
+conditional on DP-2/T4 - this hop removed its RESIDENCY base (index
+result, memo table, deep clones) from the save span and shipped the
+capped boot memo.
+
+
