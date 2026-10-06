@@ -310,3 +310,45 @@ omission that caused D3 in the first pass).
 - (this hash-record line lands in the follow-up scoped commit; no other code
   or doc changed after `eec5646`)
 
+## RATIFICATION landing + round-2 erratum (2026-10-06, authorized landing hop)
+
+- Event: the DP-4 evidence review concluded **RATIFY as tabled** (user
+  decision, 2026-10-06, orchestrator-recorded). Ratified into the evidence
+  doc's appended RATIFICATION section: N0 = 1280 files with scales {640,
+  1280}; peak-RSS bars <= 5200 MiB per profile at N=1280; growth gate
+  G: ratio <= 2.0; gate protocol median-of->=5 isolated invocations with
+  >8% operand-divergence REJECTION binding on both operands at both scales
+  (round-2 reviewer's condition, binding per the verdict's paper-relay); the
+  ~4096 MiB save-span transient probe as a T0b/T1 rider probe.
+- Still PROPOSED (stated explicitly in the same section): the 1.15x
+  cross-machine tolerance (owned by T0b gate design, pending PR-2);
+  everything else untouched.
+- ERRATUM 1 (against my E1): the "Full-scale operands never diverged"
+  sentence is REFUTED by the round-2 witness (release operands 2260.2 /
+  7720.5 -> ratio 3.4; full operand -14%; outlier frequency ~1/7; witness
+  capture `target/distill-capture.txt` [round-2 reviewer run; transient
+  single-slot file, read during the round-2 review], recorded in
+  `tasks/stage5-collateral-memory-ceiling-t0a-verdict.md`). Corrected law:
+  trimming can inflate OR deflate either operand at either scale under
+  ambient pressure; the decomposable row + the now-RATIFIED rejection
+  protocol is the standing defense. Amended rationale: ratio 4.0 rests on
+  six clean decomposed readings (all quotients 4.00, max deviation +0.19%)
+  and is trim-proof in both directions (trimmed full 7720.5 still fails the
+  5200 bar; worst trimming pair still reads ~3.07 vs the 2.0 gate).
+- ERRATUM 2 (against my E2): table row 4's label "earlier fully-read debug"
+  for 9033.7/4937.6 is wrong -- it is RELEASE invocation 3 (partial capture,
+  N=1280 rows transcribed); the journal's earlier "(5th confirmation ...)"
+  overstates: the correct claim is the FOUR-pair table (4096.0/4096.1/
+  4096.0/4096.1, arithmetic exact, law unchanged).
+- Capture-path note (review-gate step 8): this landing hop performed NO new
+  measurement runs, so it produced no new captures; all cited captures are
+  the runs' own `target/distill-capture.txt` transcriptions recorded in the
+  journal and verdict sections above (this hop's gate commands' captures:
+  `encoding_guard.py --staged` run below -> clean, exit 0;
+  `testrun.py --distill` verification -> `target/testrun-capture.txt`).
+- Scope of this hop: ONLY `tasks/stage5-collateral-memory-ceiling-t0a-
+  evidence.md` + this journal. Zero bench-code, zero handoff, zero
+  `tasks/milestone_ledger.md` changes.
+- Landing commits (via commit_scoped.py): (recorded below after creation)
+
+

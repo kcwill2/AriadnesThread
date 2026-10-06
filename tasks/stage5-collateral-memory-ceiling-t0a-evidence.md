@@ -278,3 +278,75 @@ in parallel; deviation D6 in the journal declares the name mismatch.
 N0 (1280), bars (5200 MiB/profile), growth gate G (2.0), tolerance (1.15x) and
 the 4096-rider remain PROPOSED only. Zero RATIFIED lines; DP-4 holds.
 
+---
+
+## RATIFICATION + ROUND-2 ERRATUM (2026-10-06; appended after the DP-4
+## evidence review; append-only -- nothing above is rewritten)
+
+Authority for this section: user decision at the DP-4 evidence review,
+**RATIFY as tabled** (2026-10-06, orchestrator-recorded). This section
+SUPERSEDES the "Zero RATIFIED lines" sentence above (append-only discipline:
+the earlier sentence records the pre-review state, which was correct when
+written).
+
+### RATIFIED
+
+- `RATIFIED:` (2026-10-06, authority: user decision DP-4 evidence review,
+  orchestrator-recorded) **N0 = 1280 fixture files; scales {640, 1280}.**
+- `RATIFIED:` (same date/authority) **peak-RSS bars: `stage5 peak RSS`
+  <= 5200 MiB per profile at N=1280.**
+- `RATIFIED:` (same date/authority) **growth gate G: `stage5 RSS growth
+  ratio` <= 2.0.**
+- `RATIFIED:` (same date/authority) **gate protocol: median-of->=5 isolated
+  invocations; ANY invocation whose operands diverge >8% from the per-slot
+  median is REJECTED -- binding on BOTH operands at BOTH scales** (the
+  round-2 reviewer's condition, carried in as binding per the verdict's
+  paper-relay).
+- `RATIFIED:` (same date/authority) **the ~4096 MiB save-span transient probe
+  as a T0b/T1 rider probe.**
+
+### Remain PROPOSED (explicitly not ratified here)
+
+- The **1.15x cross-machine tolerance** stays PROPOSED: it is owned by T0b
+  gate design, pending PR-2.
+- Everything else in this document is untouched by this section and remains
+  PROPOSED or MEASURED as previously marked.
+
+### ERRATUM to E1 -- the full-scale side DOES diverge too
+
+E1's third mechanism bullet says "Full-scale operands never diverged
+(~9030-9048 across every reading in band)". That sentence is **REFUTED** by
+the round-2 reviewer's fresh witness: release operands `2260.2 / 7720.5` ->
+ratio `3.4` (full operand **-14%**, outlier frequency ~1/7; capture
+`target/distill-capture.txt`; recorded in
+`tasks/stage5-collateral-memory-ceiling-t0a-verdict.md`). The same claim's
+weaker form in E1's "3.6 rows" paragraph (that window's full operand staying
+at ~9040) was true for those readings only.
+
+Corrected law: **working-set trimming can inflate OR deflate either operand
+at either scale under ambient memory pressure.** The standing defense is not
+a claim about which side is safe -- it is the decomposable self-auditing row
+plus the now-RATIFIED >8% operand-rejection protocol at both scales.
+
+Amended ratio-gate rationale: the corrected ratio of 4.0 stands on **six
+clean decomposed readings** (the four E1-table release operand pairs, the
+debug-control pair 2258.6/9048.7, and the debug-control curve pair
+9047.2/2263.3): every quotient is 4.00, maximum deviation +0.19%. The value
+is unaffected by trimming in either direction: a trimmed full operand
+(7720.5) still fails the RATIFIED 5200 MiB bar, and the worst observed
+trimming pair (full -14%, half +12%) can pull an apparent ratio from a
+genuinely quadratic run down to ~3.07 -- still a wide fail against the
+RATIFIED gate G = 2.0.
+
+### ERRATUM to E2 -- table row 4 mislabel and the confirmation count
+
+E2's table row labelled "earlier fully-read debug" for 9033.7 / 4937.6 is a
+**mislabel: that pair is release invocation 3** (its N=1280 rows were
+transcribed from the partial capture; the row's arithmetic 4937.6 -> 4096.1
+is unchanged). The journal's "(5th confirmation ...)" count **overstates the
+evidence: the correct statement is the four-pair table**
+(4096.0 / 4096.1 / 4096.0 / 4096.1, exact arithmetic, law unchanged). The
+row-3 label "earlier fully-read debug" for 9034.4 / 4938.4 is correct
+(debug invocation 4).
+
+
