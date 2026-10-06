@@ -99,6 +99,20 @@ def report_disk_witness(min_free_gib):
     return 0 if sufficient else 1
 
 
+def strip_harness_prefix(label):
+    """Normalize cargo's --nocapture interleaving: the harness prints
+    `test <name> ... ` without a newline, so a test's FIRST printed table
+    row arrives prefixed (the growth-ratio test's re-emitted operand
+    rows). The bench labels never contain ` ... `, so the prefix is safe
+    to peel."""
+    if label.startswith("test "):
+        head, separator, tail = label.partition(" ... ")
+        test_name = head[len("test "):]
+        if separator and test_name and " " not in test_name:
+            return tail.strip()
+    return label
+
+
 def parse_table_rows(capture_path):
     """`label | value` rows of one capture as [(label, value)] (multiset)."""
     rows = []
@@ -107,7 +121,7 @@ def parse_table_rows(capture_path):
             if line.count("|") != 1:
                 continue
             label, _, raw_value = line.partition("|")
-            label = label.strip()
+            label = strip_harness_prefix(label.strip())
             try:
                 value = float(raw_value.strip())
             except ValueError:
