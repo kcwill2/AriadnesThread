@@ -43,25 +43,37 @@ pub struct LoadMemo {
     /// call site — after which every BFS reads a plain `&`, no guard, no
     /// rebuild. The modeled after-state overrides stay per-call.
     file_adjacency: OnceLock<HashMap<FileId, Vec<FileId>>>,
-    /// Append-only memo of single-seed semantic closures, keyed by seed.
+    /// Memo of single-seed semantic closures, keyed by seed, admitted up
+    /// to `semantic_closure_cap` entries (see `with_closures_and_capacity`).
     /// Neither the memo's owner nor any shared handle ever mutates `model`
     /// or `include_graph` after construction, so a closure computed once can
-    /// never go stale: entries are permanent and NO invalidation logic is
-    /// required. Memory grows by one `Arc<HashSet<SymbolId>>` per distinct
-    /// seed ever queried; the Arc makes concurrent cache hits a refcount bump
+    /// never go stale: an admitted entry is permanent and NO invalidation
+    /// logic is required; past the cap, misses recompute fresh and are not
+    /// stored. Memory therefore grows by at most one
+    /// `Arc<HashSet<SymbolId>>` per admitted seed instead of one per seed
+    /// ever queried; the Arc makes concurrent cache hits a refcount bump
     /// instead of a full `HashSet` clone.
     semantic_closure_cache: Mutex<HashMap<SymbolId, Arc<HashSet<SymbolId>>>>,
-    /// Append-only memo of the physical symbol expansion of a SINGLE
-    /// def-file — the union of `model.file_symbols` over the file's
-    /// transitive includes (seed included). Like the semantic memo, the
-    /// inputs (include closures, reduced model) are immutable after
-    /// construction, so entries are permanent and need no invalidation;
+    /// Memo of the physical symbol expansion of a SINGLE def-file — the
+    /// union of `model.file_symbols` over the file's transitive includes
+    /// (seed included). Like the semantic memo, the inputs (include
+    /// closures, reduced model) are immutable after construction, so an
+    /// admitted entry is permanent and needs no invalidation;
     /// `compute_load`'s `def_files.len() == 1` fast path borrows the `Arc`
-    /// instead of re-cloning thousands of `SymbolId`s per call. Multi-file
-    /// def-file sets (none in practice) use the non-memoized path. Memory
-    /// grows by one `Arc<HashSet<SymbolId>>` per distinct def-file ever
-    /// queried, mirroring the semantic memo's per-seed growth.
+    /// instead of re-cloning thousands of `SymbolId`s per call. Admitted up
+    /// to `physical_expansion_cap` entries; past the cap, misses expand
+    /// fresh and are not stored. Multi-file def-file sets (none in practice)
+    /// use the non-memoized path. Memory growth mirrors the semantic memo:
+    /// one `Arc<HashSet<SymbolId>>` per admitted def-file, bounded by the
+    /// cap.
     physical_expansion_cache: Mutex<HashMap<FileId, Arc<HashSet<SymbolId>>>>,
+    /// Entry-count bound of `semantic_closure_cache` (policy documented on
+    /// `with_closures_and_capacity`); `usize::MAX` = uncapped, the behavior
+    /// every pre-M28 constructor keeps.
+    semantic_closure_cap: usize,
+    /// Entry-count bound of `physical_expansion_cache`; `usize::MAX` =
+    /// uncapped (see `semantic_closure_cap`).
+    physical_expansion_cap: usize,
     /// Test-only tally of full include-closure table computations
     /// (`IncludeGraph::compute_closures`) executed by this memo; the OnceLock
     /// caps it at one per memo. The ui C1 route lock (plan 1790608181551)
@@ -93,36 +105,89 @@ pub struct LoadMemo {
 }
 
 impl LoadMemo {
+    /// Hop-fixed boot cap for `semantic_closure_cache` (M28 T1, hop
+    /// `t1-bounded-memo`): the recommended entry bound for the PIPELINE
+    /// BOOT memo, which queries each seed exactly once (shape sec. 0 A1),
+    /// so retention past the first query is pure bloat. 512 = ~10.2% of
+    /// the measured N=1280 uncapped entry count (Block 4 of
+    /// `tasks/stage5-collateral-memory-ceiling-t0a-evidence.md`: 5024
+    /// entries x 621.5 sampled size). NOT review-ratified - hop-fixed
+    /// literal with the journal justification; the landing reviewer
+    /// adjudicates.
+    pub const SEMANTIC_CLOSURE_BOOT_CAP: usize = 512;
+
+    /// Hop-fixed boot cap for `physical_expansion_cache` (M28 T1). 128 =
+    /// 10.0% of the measured N=1280 uncapped entry count (Block 4: 1280
+    /// entries x 4944.0 sampled size, ~6.33M aggregate refs - the LARGER
+    /// aggregate, hence the tighter relative cut; Block 4 names this memo
+    /// "the first eviction candidate"). NOT review-ratified - hop-fixed
+    /// literal, journal justification, reviewer adjudicates.
+    pub const PHYSICAL_EXPANSION_BOOT_CAP: usize = 128;
+
+    /// Hop-fixed I7c CI pin (M28 T1): the committed deterministic test
+    /// asserts both cache-length counters stay `<=` this value after a
+    /// full pipeline-scale query sweep, at hop caps or beyond. The pin
+    /// equals the largest hop cap, so it holds on every machine purely by
+    /// the admission invariant (counters `<=` caps), independent of
+    /// demand. NOT review-ratified - hop-fixed literal, reviewer
+    /// adjudicates.
+    pub const I7C_CACHE_LEN_PIN: usize = 512;
+
     /// Fully cold memo — the state every `LoadAnalyzer::new` construction
-    /// gets (unchanged pre-B1 behavior).
+    /// gets (unchanged pre-B1 behavior). Both caches are uncapped
+    /// (`usize::MAX`), byte-identical to the pre-M28 append-only behavior.
     pub fn new() -> Self {
-        Self {
-            closures: OnceLock::new(),
-            symbol_adjacency: OnceLock::new(),
-            file_adjacency: OnceLock::new(),
-            semantic_closure_cache: Mutex::new(HashMap::new()),
-            physical_expansion_cache: Mutex::new(HashMap::new()),
-            #[cfg(any(test, feature = "test-instrument"))]
-            closure_computations: AtomicUsize::new(0),
-            #[cfg(any(test, feature = "test-instrument"))]
-            physical_expansions: AtomicUsize::new(0),
-            #[cfg(any(test, feature = "test-instrument"))]
-            semantic_bfs_traversals: AtomicUsize::new(0),
-            #[cfg(any(test, feature = "test-instrument"))]
-            include_adjacency_builds: AtomicUsize::new(0),
-        }
+        Self::with_memo_capacity(OnceLock::new(), usize::MAX, usize::MAX)
     }
 
     /// Reuse include closures already computed elsewhere (e.g. by
     /// `build_include_graph`) instead of recomputing them lazily on the
-    /// first query.
+    /// first query. Both caches are uncapped (`usize::MAX`), unchanged
+    /// pre-M28 behavior.
     pub fn with_closures(closures: HashMap<FileId, IncludeClosure>) -> Self {
+        Self::with_memo_capacity(OnceLock::from(closures), usize::MAX, usize::MAX)
+    }
+
+    /// Memo with entry-count caps for the two append-only caches.
+    /// `0` disables memoization for that cache (pure recompute).
+    /// Query RESULTS are identical for every capacity - eviction may trade
+    /// time, never bytes (I5). Entry bound is per cache, not global.
+    ///
+    /// Eviction policy (implementer's own, M28 T1): first-N admission —
+    /// while a cache holds fewer than its cap every miss is memoized; at
+    /// the cap later misses recompute fresh and are never stored, so an
+    /// admitted entry is permanent (nothing is ever replaced or evicted)
+    /// and only recomputation time is traded away.
+    pub fn with_closures_and_capacity(
+        closures: HashMap<FileId, IncludeClosure>,
+        semantic_closure_cap: usize,
+        physical_expansion_cap: usize,
+    ) -> Self {
+        Self::with_memo_capacity(
+            OnceLock::from(closures),
+            semantic_closure_cap,
+            physical_expansion_cap,
+        )
+    }
+
+    /// Single construction path: takes the closure table in its `OnceLock`
+    /// shape (unset = lazy, `from(table)` = pre-seeded) and fixes both
+    /// cache bounds for the memo's whole lifetime. Every public constructor
+    /// delegates here, so the uncapped ones cannot drift from the capped
+    /// one except in the two cap values.
+    fn with_memo_capacity(
+        closures: OnceLock<HashMap<FileId, IncludeClosure>>,
+        semantic_closure_cap: usize,
+        physical_expansion_cap: usize,
+    ) -> Self {
         Self {
-            closures: OnceLock::from(closures),
+            closures,
             symbol_adjacency: OnceLock::new(),
             file_adjacency: OnceLock::new(),
             semantic_closure_cache: Mutex::new(HashMap::new()),
             physical_expansion_cache: Mutex::new(HashMap::new()),
+            semantic_closure_cap,
+            physical_expansion_cap,
             #[cfg(any(test, feature = "test-instrument"))]
             closure_computations: AtomicUsize::new(0),
             #[cfg(any(test, feature = "test-instrument"))]
@@ -182,10 +247,12 @@ impl LoadMemo {
         visited
     }
 
-    /// Single-seed semantic closure, memoized in `semantic_closure_cache`:
-    /// the cache `lock()` guard ends at the end of the lookup statement, so
-    /// the miss-path insert lock never overlaps another lock. Hits clone
-    /// only the `Arc` (refcount bump), never the closure set itself.
+    /// Single-seed semantic closure, memoized in `semantic_closure_cache`
+    /// under the first-N admission policy: the cache `lock()` guard ends at
+    /// the end of the lookup statement, so the miss-path admit lock never
+    /// overlaps another lock. Hits clone only the `Arc` (refcount bump),
+    /// never the closure set itself; a rejected admit (cap reached) simply
+    /// leaves the freshly computed closure to the caller.
     pub fn cached_single_seed_closure(
         &self,
         model: &ReducedSemanticModel,
@@ -201,10 +268,12 @@ impl LoadMemo {
             return closure;
         }
         let closure = Arc::new(self.compute_single_seed_closure(model, seed));
-        self.semantic_closure_cache
-            .lock()
-            .unwrap()
-            .insert(seed.clone(), Arc::clone(&closure));
+        Self::admit_entry(
+            &self.semantic_closure_cache,
+            self.semantic_closure_cap,
+            seed.clone(),
+            Arc::clone(&closure),
+        );
         closure
     }
 
@@ -370,11 +439,12 @@ impl LoadMemo {
     }
 
     /// Single-def-file physical expansion, memoized in
-    /// `physical_expansion_cache`: the `lock()` guard ends at the end of the
-    /// lookup statement, and the miss-path expansion (which touches the
-    /// `closures` OnceLock) runs outside every guard — the same append-only
-    /// pattern as `cached_single_seed_closure`, so cache hits are an `Arc`
-    /// refcount bump and the caches cannot deadlock.
+    /// `physical_expansion_cache` under the first-N admission policy: the
+    /// `lock()` guard ends at the end of the lookup statement, and the
+    /// miss-path expansion (which touches the `closures` OnceLock) runs
+    /// outside every guard — the same append-only pattern as
+    /// `cached_single_seed_closure`, so cache hits are an `Arc` refcount
+    /// bump and the caches cannot deadlock.
     pub fn cached_physical_expansion(
         &self,
         include_graph: &IncludeGraph,
@@ -395,11 +465,31 @@ impl LoadMemo {
             model,
             &HashSet::from([file_id]),
         ));
-        self.physical_expansion_cache
-            .lock()
-            .unwrap()
-            .insert(file_id, Arc::clone(&expansion));
+        Self::admit_entry(
+            &self.physical_expansion_cache,
+            self.physical_expansion_cap,
+            file_id,
+            Arc::clone(&expansion),
+        );
         expansion
+    }
+
+    /// First-N admission insert (policy documented on
+    /// `with_closures_and_capacity`): memoize `value` under `key` only
+    /// while the cache holds fewer than `cap` entries, so the entry bound
+    /// holds at all times even under concurrent misses. The one guard covers
+    /// the `len` test and the `insert` alone — it never spans another lock
+    /// acquisition, a BFS/expansion, or a rayon job boundary, keeping this
+    /// module's header lock discipline (I4) verbatim true.
+    fn admit_entry<K, V>(cache: &Mutex<HashMap<K, V>>, cap: usize, key: K, value: V)
+    where
+        K: Eq + std::hash::Hash,
+    {
+        let mut entries = cache.lock().unwrap();
+        if entries.len() >= cap {
+            return;
+        }
+        entries.insert(key, value);
     }
 }
 
