@@ -48,3 +48,8 @@ axum = { version = "0.7", features = ["tokio"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# M28 T0c cap-0 ablation: the stage5_memory_bench release build links the
+# pipeline with the cfg-gated caps-override route so
+# ARIADNE_LOAD_MEM_CAPS reaches the bench children (the ui/graph
+# duplicate-dev-dep feature pattern at `crates/ui/Cargo.toml:26`).
+ariadne-pipeline = { path = "../pipeline", features = ["test-instrument"] }

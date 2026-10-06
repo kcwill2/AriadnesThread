@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[features]
+# M28 T0c ablation lever: chains the graph LoadMemo counters so the
+# feature-gated route tests in `stage_load_tests.rs` can assert cache
+# lengths, and exposes the cfg-gated caps-override route. Production and
+# plain-test builds never enable it (ui graph test-instrument precedent,
+# `crates/ui/Cargo.toml:26`).
+test-instrument = ["ariadne-graph/test-instrument"]
+
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true

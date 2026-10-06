@@ -211,6 +211,50 @@ impl Pipeline {
     }
 }
 
+/// Env name of the M28 T0c ablation lever: value `a,b` where each token is
+/// a non-negative integer or `max` (-> `usize::MAX`, the uncapped control).
+/// Read ONLY under `feature = "test-instrument"`; production builds do not
+/// even read it, and the default path stays the landed T1 boot consts.
+#[cfg(feature = "test-instrument")]
+const CAPS_OVERRIDE_ENV: &str = "ARIADNE_LOAD_MEM_CAPS";
+
+#[cfg(feature = "test-instrument")]
+fn caps_override_usage_panic(raw_value: &str) -> ! {
+    panic!(
+        "{CAPS_OVERRIDE_ENV} must be '<non-negative integer|max>,<non-negative \
+         integer|max>', got {raw_value:?} (no silent zeros, no silent defaults)"
+    )
+}
+
+#[cfg(feature = "test-instrument")]
+fn parse_caps_token(token: &str, raw_value: &str) -> usize {
+    if token == "max" {
+        return usize::MAX;
+    }
+    match token.parse::<usize>() {
+        Ok(cap) => cap,
+        Err(_) => caps_override_usage_panic(raw_value),
+    }
+}
+
+/// Parse of the ablation env: `Some((semantic_cap, physical_cap))` when set,
+/// `None` when unset (default path). Malformed values PANIC loudly, in bench
+/// env style.
+#[cfg(feature = "test-instrument")]
+fn caps_override_from_env() -> Option<(usize, usize)> {
+    let raw_value = std::env::var(CAPS_OVERRIDE_ENV).ok()?;
+    let mut tokens = raw_value.split(',').map(str::trim);
+    let semantic_token = tokens.next().unwrap_or("");
+    let physical_token = tokens.next().unwrap_or("");
+    if tokens.next().is_some() {
+        caps_override_usage_panic(&raw_value);
+    }
+    Some((
+        parse_caps_token(semantic_token, &raw_value),
+        parse_caps_token(physical_token, &raw_value),
+    ))
+}
+
 /// Single-copy stage-5 analyzer, wired to the T1 boot memo caps (M28 T2
 /// cap wiring - the boot memo instance lives here). The cap literals are
 /// T1's LANDED choices from commit `d6640a2` (`hop-fixed`, not review-
@@ -231,11 +275,35 @@ impl Pipeline {
 /// `take_include_graph` after stage 5, `ui.rs:250`). The graph and the
 /// reduced model, which the pre-M28-T2 code deep-cloned here too, arrive
 /// by move and are only borrowed.
-fn build_stage5_analyzer<'a>(
+// `pub(crate)` is the M28 T0c route-test seam: the feature-gated caps tests
+// in `stage_load_tests.rs` call the route directly (journal D1, the
+// `collect_file_metrics` pub(crate)-raise precedent). The module is private,
+// so the production surface is unchanged.
+pub(crate) fn build_stage5_analyzer<'a>(
     graph: &'a IncludeGraph,
     reduced: &'a ReducedSemanticModel,
     closures: &'a HashMap<FileId, IncludeClosure>,
 ) -> LoadAnalyzer<'a> {
+    // M28 T0c cap-0 ablation lever: with the env set (instrumented builds
+    // only) the boot memo takes the env caps - `0,0` is the pure-recompute
+    // ablation whose RSS separates memo retention from the save-span
+    // transient. The witness line prints exactly once per process (loud
+    // anti-fabrication marker: every cap-0 capture must carry it, no
+    // landed-curve capture may). With the feature off this whole branch
+    // compiles out and the default below is byte-identical to the landed
+    // path.
+    #[cfg(feature = "test-instrument")]
+    if let Some((semantic_cap, physical_cap)) = caps_override_from_env() {
+        static CAPS_WITNESS: std::sync::Once = std::sync::Once::new();
+        CAPS_WITNESS.call_once(|| {
+            eprintln!(
+                "load-memo caps override active: semantic={semantic_cap} physical={physical_cap}"
+            );
+        });
+        let memo =
+            LoadMemo::with_closures_and_capacity(closures.clone(), semantic_cap, physical_cap);
+        return LoadAnalyzer::with_memo(graph, reduced, Arc::new(memo));
+    }
     let memo = LoadMemo::with_closures_and_capacity(
         closures.clone(),
         LoadMemo::SEMANTIC_CLOSURE_BOOT_CAP,

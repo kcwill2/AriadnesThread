@@ -161,3 +161,203 @@ fn test_warm_ensure_load_releases_index_result() {
         "warm ensure_load must release the loaded-from-disk index result too: stage 5 loaded its artifacts from disk and never reads the IndexResult (A5), so the resident copy is dead weight through the warm span"
     );
 }
+
+// ---------------------------------------------------------------------------
+// M28 T0c cap-0 ablation route locks (feature-gated). `ARIADNE_LOAD_MEM_CAPS`
+// (value `a,b`, each token a non-negative integer or `max`) makes
+// `build_stage5_analyzer` build the boot memo with the given caps - cap 0 is
+// the pure-recompute ablation the T0c ranking measures (T1 verdict: cap 0 =
+// ablation lever, LOCKED). With the feature off (every production build) the
+// route compiles out and the env is not even read; these tests exist only in
+// the instrumented build.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "test-instrument")]
+mod caps_env_ablation {
+    use super::setup_repo;
+    use crate::stage_load::build_stage5_analyzer;
+    use crate::Pipeline;
+    use ariadne_graph::LoadMemo;
+    use std::panic::AssertUnwindSafe;
+    use std::sync::{Mutex, MutexGuard};
+
+    const CAPS_ENV: &str = "ARIADNE_LOAD_MEM_CAPS";
+
+    /// Env discipline: `std::env` is process-global and this harness runs
+    /// tests in parallel, so all three tests take ONE shared mutex around
+    /// every set/run/unset section (poison-safe) and restore the unset
+    /// state on every exit path via the Drop guard - including the
+    /// malformed-value panic test and any failed assertion.
+    static CAPS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct CapsEnvGuard {
+        _env_lock: MutexGuard<'static, ()>,
+    }
+
+    impl CapsEnvGuard {
+        fn with(value: Option<&str>) -> Self {
+            let env_lock = CAPS_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match value {
+                Some(raw) => std::env::set_var(CAPS_ENV, raw),
+                None => std::env::remove_var(CAPS_ENV),
+            }
+            CapsEnvGuard { _env_lock: env_lock }
+        }
+    }
+
+    impl Drop for CapsEnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(CAPS_ENV);
+        }
+    }
+
+    /// Warm the graph/reduced/closures trio through the public boot stages
+    /// and hand the trio out through the (pub(crate)) stage-5 input seam -
+    /// the same isolated trio `ensure_load` feeds the analyzer.
+    fn stage_inputs(
+        dir: &tempfile::TempDir,
+    ) -> (
+        ariadne_graph::IncludeGraph,
+        std::collections::HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+        ariadne_graph::ReducedSemanticModel,
+    ) {
+        let mut pipeline = Pipeline::new(dir.path(), None).unwrap();
+        pipeline.ensure_include_graph().unwrap();
+        pipeline.ensure_reduced().unwrap();
+        pipeline
+            .take_graph_and_reduced_for_load()
+            .expect("the seam hands out the populated trio after both stages")
+    }
+
+    /// (a) the caps env reaches BOTH boot caches: at `0,0` the memo admits
+    /// nothing (pure recompute) while queries keep returning results.
+    #[test]
+    fn caps_env_override_bounds_both_boot_caches() {
+        let dir = setup_repo();
+        let (graph, closures, reduced) = stage_inputs(&dir);
+        let _env_guard = CapsEnvGuard::with(Some("0,0"));
+
+        let analyzer = build_stage5_analyzer(&graph, &reduced, &closures);
+        let memo = analyzer.memo();
+        let mut seeds_queried = 0usize;
+        for seed in reduced.symbols.keys().take(3) {
+            let closure = memo.cached_single_seed_closure(&reduced, seed);
+            assert!(
+                !closure.is_empty(),
+                "cap-0 recompute must still return the closure for every seed"
+            );
+            seeds_queried += 1;
+        }
+        let mut files_queried = 0usize;
+        for file_id in reduced.file_symbols.keys().take(2) {
+            let expansion = memo.cached_physical_expansion(&graph, &reduced, *file_id);
+            assert!(
+                !expansion.is_empty(),
+                "cap-0 recompute must still return the expansion for every file"
+            );
+            files_queried += 1;
+        }
+        assert!(
+            seeds_queried >= 1 && files_queried >= 1,
+            "the shared fixture must offer queryable seeds and files, got {} seeds {} files",
+            seeds_queried,
+            files_queried
+        );
+
+        assert_eq!(
+            memo.semantic_closure_cache_len(),
+            0,
+            "ARIADNE_LOAD_MEM_CAPS=0,0 must reach the semantic-closure cache; \
+             actual cache lengths semantic={} physical={}",
+            memo.semantic_closure_cache_len(),
+            memo.physical_expansion_cache_len()
+        );
+        assert_eq!(
+            memo.physical_expansion_cache_len(),
+            0,
+            "ARIADNE_LOAD_MEM_CAPS=0,0 must reach the physical-expansion cache; \
+             actual cache lengths semantic={} physical={}",
+            memo.semantic_closure_cache_len(),
+            memo.physical_expansion_cache_len()
+        );
+    }
+
+    /// (b) default-inertness pin: with the env UNSET the memo behaves as the
+    /// landed consts (512/128 boot caps) - every demanded entry is admitted
+    /// at bench-fixture demand levels (all demand stays below both caps), so
+    /// retention tracks demand exactly and nothing reads the env.
+    /// Green-by-design at Red (journal D2): the pin that the route cannot
+    /// alter the default path.
+    #[test]
+    fn caps_env_absent_keeps_landed_const_caps() {
+        let dir = setup_repo();
+        let (graph, closures, reduced) = stage_inputs(&dir);
+        let _env_guard = CapsEnvGuard::with(None);
+
+        let analyzer = build_stage5_analyzer(&graph, &reduced, &closures);
+        let memo = analyzer.memo();
+        assert_eq!(
+            LoadMemo::SEMANTIC_CLOSURE_BOOT_CAP,
+            512,
+            "the landed semantic-closure boot cap is 512 (T1 hop-fixed, d6640a2)"
+        );
+        assert_eq!(
+            LoadMemo::PHYSICAL_EXPANSION_BOOT_CAP,
+            128,
+            "the landed physical-expansion boot cap is 128 (T1 hop-fixed, d6640a2)"
+        );
+
+        let mut seeds_queried = 0usize;
+        for seed in reduced.symbols.keys().take(3) {
+            memo.cached_single_seed_closure(&reduced, seed);
+            seeds_queried += 1;
+        }
+        let mut files_queried = 0usize;
+        for file_id in reduced.file_symbols.keys().take(2) {
+            memo.cached_physical_expansion(&graph, &reduced, *file_id);
+            files_queried += 1;
+        }
+
+        assert_eq!(
+            memo.semantic_closure_cache_len(),
+            seeds_queried,
+            "env unset must keep memoization active under the landed caps: every \
+             queried seed is below the cap and must be admitted"
+        );
+        assert_eq!(
+            memo.physical_expansion_cache_len(),
+            files_queried,
+            "env unset must keep memoization active under the landed caps: every \
+             queried file is below the cap and must be admitted"
+        );
+        assert!(
+            memo.semantic_closure_cache_len() <= LoadMemo::SEMANTIC_CLOSURE_BOOT_CAP
+                && memo.physical_expansion_cache_len()
+                    <= LoadMemo::PHYSICAL_EXPANSION_BOOT_CAP,
+            "cache lengths must stay within the landed caps"
+        );
+    }
+
+    /// (c) a malformed value must PANIC loudly - no silent zeros, bench env
+    /// style (a typo'd ablation env that quietly read as cap 0, or as the
+    /// default, would poison the whole ranking table).
+    #[test]
+    fn caps_env_malformed_panics_loudly() {
+        let dir = setup_repo();
+        let (graph, closures, reduced) = stage_inputs(&dir);
+        let _env_guard = CapsEnvGuard::with(Some("3,x"));
+
+        let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            build_stage5_analyzer(&graph, &reduced, &closures)
+        }));
+
+        assert!(
+            outcome.is_err(),
+            "malformed {} must panic loudly (no silent zeros, no silent \
+             defaults); the route returned Ok - no panic occurred",
+            CAPS_ENV
+        );
+    }
+}
