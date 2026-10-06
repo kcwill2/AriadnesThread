@@ -349,6 +349,9 @@ omission that caused D3 in the first pass).
 - Scope of this hop: ONLY `tasks/stage5-collateral-memory-ceiling-t0a-
   evidence.md` + this journal. Zero bench-code, zero handoff, zero
   `tasks/milestone_ledger.md` changes.
-- Landing commits (via commit_scoped.py): (recorded below after creation)
+- Landing commits (via commit_scoped.py): `39da2e9` -- evidence RATIFICATION
+  + round-2 errata (+72) and this journal's landing record (+42); the
+  follow-up journal-only commit records this hash. Zero other paths touched
+  by the hop (verified: commit touches exactly the two doc paths).
 
 
