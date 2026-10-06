@@ -109,3 +109,130 @@ stderr witness line; default path untouched):
 5. gate 3 feature-off testrun - 1
 6. hygiene (2 invocations: report + exit-code confirmation),
    encoding_guard --help - 3
+
+## Commit 1 (gate 11): `f312dba`
+
+`git show --stat` = exactly the six scoped paths (journal, helper,
+stage_load.rs, stage_load_tests.rs, pipeline/cli Cargo.toml); `Cargo.lock`
+absent; `tools/**` absent. Staged scoped via distill-routed `git add`,
+`encoding_guard --staged` exit 0 before the commit.
+
+## Measurement groups (commit-2 data; every run isolated, foreground,
+sequential, distill-routed, capture fully read immediately after the run)
+
+Gate 4 preflight (`target/t0c-preflight.txt`, exit 0): release N=1280
+`--exact` boot: peak 8476.0, save tail 4380.0 (transient 4096.0),
+ensure_load 16.4 s, no os error 112; recompiled graph+pipeline in the
+release bench build - direct empirical proof the new dev-dep feature edge
+reaches the bench link graph.
+
+G1 release curve, 6 invocations (`target/t0c-g1-release-k.txt`, k=1..6,
+all exit 0, 57.98-60.74 s suite wall):
+- k1 peaks 8469.3/8471.2 @1280, 2092.1/2089.2 @640; ratio 4.1. ACCEPTED.
+- k2 peaks 8465.9/8469.0, 2093.2/2088.1; ratio 4.1. ACCEPTED.
+- k3 peaks 8465.7/8465.4, 2086.9/2363.9; ratio 3.6 - the ratio-child half
+  operand +13.2% (E1 half-scale inflation class, post-fix recurrence,
+  exactly the working-set-pressure mechanism the ratified law exists for).
+  REJECTED at gate 8: `REJECT invocation 3: stage5 peak RSS (release,
+  N=640) sample 2363.9 vs slot median 2088.8 = 13.2%`.
+- k4 8464.9/8471.0, 2087.6/2088.2; ratio 4.1. ACCEPTED.
+- k5 8469.6/8467.7, 2089.9/2089.0; ratio 4.1. ACCEPTED.
+- k6 8471.3/8473.7, 2088.5/2086.6; ratio 4.1. ACCEPTED.
+- Gate 8 G1: `accepted 5 of 6` (`target/t0c-g1-medians.txt`). Medians:
+  peak@1280 8469.5, peak@640 2088.8, save tail@1280 4371.5, ratio 4.1,
+  ensure_load 13.6 s.
+
+Gate 8 helper bug + fix (D5): the FIRST gate-8 G1 pass read
+`accepted 6 of 6` - invalid. Cause: cargo `--nocapture` prints
+`test <name> ... ` without a newline, so a test's FIRST printed table row
+carries a harness prefix (the growth-ratio test's re-emitted half-operand
+row); my parse treated it as a non-peak label, hiding the +13.2% outlier
+from the peak-slot rejection. Fixed in the helper (in touch-set) via
+`strip_harness_prefix`; gate 8 G1 re-run produced the `accepted 5 of 6`
+above; the first pass is void/superseded (counted in D6). G2/G3 parses ran
+with the fixed helper (their prefixed first rows are STAGE5_BENCH context
+lines - no pipe - so no median values were affected in those groups).
+
+G2 debug curve, 5 invocations (`target/t0c-g2-debug-k.txt`, all exit 0;
+k1 208.56 s incl. the debug rebuild, k2-5 209.59-210.56 s - well under the
+T0a 361-389 s class post-T2):
+- k1 8468.9/8458.5, 2088.6/2089.2; ratio 4.0. ACCEPTED.
+- k2 8471.6/8464.1, 2092.0/2091.7; ratio 4.0. ACCEPTED.
+- k3 8470.2/8473.1, 2091.2/2088.4; ratio 4.1. ACCEPTED.
+- k4 8471.6/8467.0, 2093.1/2091.3; ratio 4.0. ACCEPTED.
+- k5 8474.9/8473.4, 2093.9/2090.1; ratio 4.1. ACCEPTED.
+- Gate 8 G2: `accepted 5 of 5` (`target/t0c-g2-medians.txt`). Medians:
+  peak@1280 8470.9 (release parity: profile-independence reproduced),
+  peak@640 2091.2, save tail 4375.6, ratio 4.0, ensure_load 61.1 s
+  (T0a was 112.8 s - wall rows for ledger rows 69/72).
+
+G3 release cap-0 ablation, 5 invocations (`target/t0c-g3-cap0-k.txt`, all
+exit 0, 65.65-73.29 s; every capture carries the loud witness line
+`load-memo caps override active: semantic=0 physical=0` at line 68 - the
+harness-process boot; children's witnesses are swallowed by `.output()` as
+designed, child-side liveness proven by the ensure_load CPU rows):
+- k1 8479.0/8472.3, 2087.3/2086.7; ensure_load 17.1 s (vs G1 13.8).
+- k2 8477.1/8479.5, 2087.4/2087.5; ensure_load 16.2 s.
+- k3 8485.0/8496.2, 2087.5/2086.7; ensure_load 19.2 s.
+- k4 8472.5/8494.7, 2085.1/2086.7; ensure_load 14.2 s.
+- k5 8476.4/8488.3, 2083.1/2086.7; ensure_load 15.0 s.
+- Gate 8 G3: `accepted 5 of 5` (`target/t0c-g3-medians.txt`). Medians:
+  peak@1280 8479.2, peak@640 2086.7, save tail@1280 4381.0, ratio 4.1,
+  ensure_load 16.2 s (+2.6 s recompute tax vs G1).
+- Witness discipline verified by grep over `target/t0c-*.txt`: present in
+  all five G3 captures, absent in every G1/G2/preflight capture.
+
+STOP conditions: none hit. No os error 112 anywhere; no group needed more
+than 8 attempts; no padding (k=3 G1 rejection kept loud in the table).
+
+## D5 (helper parse fix): `strip_harness_prefix` added to
+`tasks/t0c_run_invocation.py` after commit 1 (post-measurement tooling
+fix; measurement captures untouched - the same captures re-parsed); landed
+as its own scoped commit between `f312dba` and the gate-12 doc commit.
+
+## D6 final declared gate-invocation count (T0b finding 1 law)
+
+Pre-measurement / support (distill- or testrun-routed):
+1-4. ground-truth git probes - 4
+5. gate 0 disk witness - 1
+6. gate 1 RED testrun - 1
+7. gate 2 instrumented testrun - 1
+8. gate 3 feature-off testrun - 1
+9-10. hygiene_check (report + exit-code confirm) - 2
+11. encoding_guard --help (interface probe) - 1
+12. git status Cargo.lock - 1
+13. git add (scoped staging, commit 1) - 1
+14. encoding_guard --staged (pre commit 1) - 1
+15. commit_scoped gate 11 (`f312dba`) - 1
+Measurement:
+16. gate 4 preflight - 1
+17-22. G1 invocations k=1..6 - 6
+23. gate 8 G1 FIRST pass (void: helper prefix bug; superseded by 24) - 1
+24. gate 8 G1 re-run (valid) - 1
+25-29. G2 invocations k=1..5 - 5
+30. gate 8 G2 - 1
+31-35. G3 invocations k=1..5 - 5
+36. gate 8 G3 - 1
+Closeout:
+37. git add (helper-fix staging) - 1
+38. encoding_guard --staged (pre helper-fix commit) - 1
+39. commit_scoped (helper fix) - 1
+40. hygiene_check final (gate 9 rerun) - 1
+41. git add (doc+journal staging) - 1
+42. encoding_guard --staged (pre gate 12) - 1
+43. commit_scoped gate 12 - 1
+44. frozen-lock proof probes post-landing (`git diff --name-only` range) - 1+
+TOTAL ~44 invocations vs the ~25-30 protocol estimate. Declared overshoot
+sources: the G1 rejection demanded a 6th invocation; the helper prefix bug
+cost one void + one re-run pass; git probes/staging routed through the
+distiller add 12 support invocations. Silence would be the violation; the
+overshoot is itemized here per the M28 T0b-finding-1 law.
+
+## Commits (this hop, via commit_scoped.py)
+
+- `f312dba` route + helper + feature chain (gate 11).
+- `60c88c7` helper parse fix (D5 `strip_harness_prefix`, scoped single file).
+- (gate-12 commit records the measurement doc + this journal; the landing
+  hop records its own hash here after landing, T0a precedent.)
+
+## Frozen-lock proof commands (run post-commit-2; results in D7)
