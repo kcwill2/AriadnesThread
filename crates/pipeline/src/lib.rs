@@ -474,6 +474,69 @@ impl Pipeline {
             .context("include stage cache must exist after ensure_include_graph")
     }
 
+    /// M28 T2 (a) seam: MOVE the three stage-5 inputs (include graph,
+    /// include closures, reduced model) out of the stage caches so
+    /// `ensure_load` runs on the single owned copy of each. The pre-M28-T2
+    /// path deep-cloned the graph/closures pair and the reduced model at
+    /// `stage_load.rs:43-44` while the caches still held the originals
+    /// (A4 double residency); this seam replaces both clones.
+    ///
+    /// SAFETY PRECONDITION: `restore_stage5_inputs` must run before
+    /// `ensure_load` returns - boot's `take_include_graph` after stage 5
+    /// (`ui.rs:250`) and the warm-reuse tests read these caches after the
+    /// load stage. Same documented missing-cache errors as the clone
+    /// accessors when a stage has not run.
+    pub(crate) fn take_graph_and_reduced_for_load(
+        &mut self,
+    ) -> Result<(
+        IncludeGraph,
+        HashMap<ariadne_repo::FileId, IncludeClosure>,
+        ReducedSemanticModel,
+    )> {
+        let (graph, closures) = self
+            .include_cache
+            .take()
+            .context("include stage cache must exist after ensure_include_graph")?;
+        let reduced = self
+            .reduced_cache
+            .take()
+            .context("reduced stage cache must exist after ensure_reduced")?;
+        Ok((graph, closures, reduced))
+    }
+
+    /// Inverse of `take_graph_and_reduced_for_load`: the taken tables go
+    /// back into the stage caches by move (no deep copy) before
+    /// `ensure_load` returns, keeping the post-stage-5 state contract that
+    /// boot's `take_include_graph` and the warm-reuse tests depend on.
+    pub(crate) fn restore_stage5_inputs(
+        &mut self,
+        graph: IncludeGraph,
+        closures: HashMap<ariadne_repo::FileId, IncludeClosure>,
+        reduced: ReducedSemanticModel,
+    ) {
+        self.include_cache = Some((graph, closures));
+        self.reduced_cache = Some(reduced);
+    }
+
+    /// M28 T2 (b): drop the index result before the stage-5 span runs (A5).
+    /// Stage 5 reads include-graph and reduced-model data only
+    /// (`stage_load.rs`), so the full `IndexResult` sitting through the
+    /// passes and the save span is dead weight at corpus scale.
+    ///
+    /// RELOAD CONTRACT: after a release, `ensure_index` takes the
+    /// fingerprint-fresh disk branch - the index artifacts were saved (or
+    /// verified fresh) by the earlier stage-2 run - so every later
+    /// consumer (`ensure_callgraph`, `get_or_build_index`) behaves exactly
+    /// as a fresh pipeline's warm stage 2, only paying the documented
+    /// reload. Boot runs the callgraph BEFORE the load stage and pays zero
+    /// reloads. A `--lang`-filtered run has no persisted full-index
+    /// artifact; its consumers rebuild through the shard store
+    /// (TU-level reuse intact) - correct results, extra CPU on that
+    /// filtered-view edge only (T2 journal D6).
+    pub(crate) fn release_index_result_for_load(&mut self) {
+        self.index_cache = None;
+    }
+
     // ------------------------------------------------------------------
     // Reduced stage
     // ------------------------------------------------------------------
@@ -632,3 +695,6 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 mod internal_tests;
+
+#[cfg(test)]
+mod stage_load_tests;
