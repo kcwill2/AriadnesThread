@@ -349,4 +349,30 @@ evidence: the correct statement is the four-pair table**
 row-3 label "earlier fully-read debug" for 9034.4 / 4938.4 is correct
 (debug invocation 4).
 
+### SUPERSEDED: growth gate G demoted to a tripwire (2026-10-06 user decision, landed 2026-10-07 by M28 T4b)
+
+The `RATIFIED:` line "**growth gate G: `stage5 RSS growth ratio` <= 2.0**"
+(sec. RATIFICATION, above) is **SUPERSEDED**: on 2026-10-06, at the evidence
+review, the user decided (decision 3) that G is **DEMOTED to a tripwire**.
+Acceptance for the memory gate is the **absolute 5200 MiB peak bars (both
+profiles) plus the Corpora field boot**; the growth ratio keeps being
+computed and printed -- above 2.0 it prints a `TRIPWIRE` line and **never
+fails a gate**. Grounding (`tasks/stage5-collateral-memory-ceiling-t0c-verdict.md`
+sec. 7): the fixture is Theta(N^2) in aggregate retained closure by
+construction (memo est aggregate refs 742896 -> 3122416 = 4.20 per 2x scale,
+save-tail growth 4.10x, ratio rows 4.0-4.1 byte-stable) -- the 4.0-4.1
+reading **is the payload shape**, identical under cap-0 ablation; RSS
+scaling in response to workload is not a regression, and G <= 2.0 was
+unclosable against this fixture by design. Nothing measured or ratified
+elsewhere is touched: the 5200 MiB peak bars stand, the >8% rejection and
+median-of->=5 protocol stand, the 4.0-4.1 ratio stays on record as MEASURED,
+and the constant 2.0 survives as the tripwire threshold
+(`STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO`). The original RATIFIED line above is
+kept verbatim (append-only discipline: it records the pre-decision state,
+which was correct when written). Landed by
+`tasks/stage5-collateral-memory-ceiling-t4b-handoff.md` (implementation
+`tools/bench_compare.py`, RED-first in `tools/bench_compare_tests.py`;
+journal `tasks/stage5-collateral-memory-ceiling-t4b-journal.md`).
+
+
 
