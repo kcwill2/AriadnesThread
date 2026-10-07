@@ -73,8 +73,10 @@ shape, not a regression).
   permission law): PASS exit 0; 160-line census is the pre-existing
   R3-warn population; ZERO lines mention bench_compare.py or any touched
   file. Same capture path.
-- Gate 5 `python tools/encoding_guard.py --staged`: (filled after run).
-- Gate 6 `python tools/commit_scoped.py ...`: (filled after run).
+- Gate 5 `python tools/encoding_guard.py --staged`: PASS (exit 0, silent)
+  over the staged 4-path set.
+- Gate 6 `python tools/commit_scoped.py ...`: landed as `1df4ce4` (code)
+  and `777653f` (docs).
 
 ## RED evidence (quoted before touching bench_compare.py)
 
@@ -120,8 +122,43 @@ assertions fail at the first assertion of the exceeding arm:
   handoff; old name `STAGE5_MEMORY_GROWTH_GATE_RATIO` now appears only
   in the historical demotion comment).
 - Gate 5 `encoding_guard.py --staged`: PASS (exit 0, silent capture).
-- Gate 6 `commit_scoped.py`: (filled after run)
+- Gate 6 `commit_scoped.py`: landed as `1df4ce4` (code) and `777653f`
+  (docs); landing numstat: evidence doc `26 0` (zero deletions),
+  bench_compare.py `35 21`, tests `31 7`, journal `127 0`.
+
+## Tripwire output-shape witness
+
+- The line is composed as `f"TRIPWIRE {STAGE5_MEMORY_RATIO_ROW_LABEL}:
+  {growth_ratio:.2f} exceeds the demoted growth gate 2.0 - tripwire only,
+  never a gate (user decision 2026-10-06; ...)"`, and the ratio label
+  constant is the tuple-identical `stage5 RSS growth ratio (debug,
+  N=640->1280)`, so the printed line begins
+  `TRIPWIRE stage5 RSS growth ratio (debug, N=640->1280): <median> ...`.
+- Witness = the passing assertions (gate 2 OK): both tripwire tests
+  `assertIn("TRIPWIRE " + GROWTH_RATIO_LABEL, output)`; the boundary test
+  `assertNotIn("TRIPWIRE", output)` (strict->, same strictness as the old
+  gate). Unit-suite witnesses stand in for a live cargo run because the
+  gate mode spawns the real bench (heavy); the live-shape check belongs
+  to the next bench_compare invocation on this machine.
+
+## Deliberate deviations
+
+- Constant rename `STAGE5_MEMORY_GROWTH_GATE_RATIO` ->
+  `STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO` (handoff explicitly permits;
+  value 2.0 kept; old name survives only inside the historical demotion
+  comment).
+- Commit split code/docs into two scoped commits (repo convention:
+  `feat(tools)` vs `docs(tasks)`, per T0b `ac0eb7e` + `dc294bb`).
+- One self-caught append-only violation pre-commit: first evidence-doc
+  write added a stray leading space to "(debug invocation 4)." (diff
+  `27 1`); fixed before staging, landed shape `26 0`. Recorded here per
+  the errata-on-sight law.
 
 ## Commits
 
-- (filled after gate 6)
+- `1df4ce4` feat(tools): demote stage5 growth gate G to tripwire in
+  bench_compare (M28 T4b; user decision 2026-10-06)
+- `777653f` docs(tasks): evidence doc supersedes G-RATIFIED line
+  (append-only) + T4b journal with RED and gate digests (M28 T4b)
+- (hash-recording commit for this section follows, per precedent
+  `dc294bb`)
