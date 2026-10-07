@@ -18,7 +18,16 @@ use std::path::PathBuf;
 /// corpora carry silently-wrapped token columns, and the fingerprint chain
 /// hashes CONTENT, not analyzer code, so this version bump is the
 /// invalidation that forces those shards to rebuild.
-pub const CURRENT_ANALYSIS_VERSION: &str = "2.1.0";
+/// M28 T4 epoch bump 2.1.0 -> 2.2.0 (user decision 2026-10-06, the
+/// registered DP-2 exception to the 2.1.0 freeze): the load-artifact
+/// payload reshape dropped the never-consumed per-symbol detail from
+/// `load/report.json`/`report.bin` (bincode layout changed; bincode is
+/// strict and `#[serde(default)]` cannot rescue it), so this bump is the
+/// explicit invalidation - `check_manifest` sends 2.1.0-era artifacts to
+/// `StaleArtifact` (rebuild) before any blob deserialization. The fingerprint
+/// chain hashes content, not code (the standing M27 lesson), so the epoch is
+/// the only lever.
+pub const CURRENT_ANALYSIS_VERSION: &str = "2.2.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TuCacheFingerprint {
@@ -333,7 +342,9 @@ mod tests {
     fn test_epoch_bumped_for_m18() {
         // §9 M18.10: bincode symbols.bin layout change (M18.9) + fingerprint
         // input change (this milestone) force cache-wide regeneration.
-        assert_eq!(CURRENT_ANALYSIS_VERSION, "2.1.0");
+        // M27 T2 raised this pin to 2.1.0 (tokenizer shards); M28 T4 raises
+        // it to 2.2.0 (load-artifact payload reshape, registered DP-2).
+        assert_eq!(CURRENT_ANALYSIS_VERSION, "2.2.0");
     }
 
     #[test]

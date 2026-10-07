@@ -496,7 +496,11 @@ fn scala_fingerprint_moves_only_the_scala_digest() -> Result<()> {
         "the C++ digest recomputes IDENTICAL while Scala's fingerprint varies — the \
          languages are digest-decoupled (D19 blast radius)"
     );
-    assert_eq!(CURRENT_ANALYSIS_VERSION, "2.1.0", "M18.10 cache epoch witness");
+    assert_eq!(
+        CURRENT_ANALYSIS_VERSION, "2.2.0",
+        "M18.10 cache epoch witness (raised by the M27 T2 2.1.0 and M28 T4 \
+         2.2.0 bumps - the latter the registered DP-2 payload invalidation)"
+    );
     Ok(())
 }
 

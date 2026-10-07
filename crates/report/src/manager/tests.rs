@@ -278,6 +278,12 @@ fn test_save_and_load_load_artifacts() {
     let repo = Repository::locate(root).unwrap();
     let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
 
+    // The symbol row carries non-empty detail vectors on purpose: the
+    // absence asserts below must be falsifiable (Red carrier 3 of the M28 T4
+    // payload reshape - the old pin asserted the detail SURVIVED; the new
+    // contract is that only the scalars persist).
+    let detail_source =
+        fixture_contributing_source("include/thing.h", "Thing::", &["value"]);
     let report = LoadReport {
         repository_root: repo.root.clone(),
         symbol_metrics: vec![ariadne_graph::LoadMetric {
@@ -287,13 +293,25 @@ fn test_save_and_load_load_artifacts() {
             include_load: 20,
             collateral_load: 10,
             total_load: 20,
+            semantic_symbols: vec![ariadne_index::types::SymbolId::new("TestSymbol")],
+            collateral_symbols: vec![ariadne_index::types::SymbolId::new("TestDep")],
+            collateral_sources: vec![detail_source.clone()],
+            largest_collateral_source: Some(detail_source.clone()),
+            semantic_sources: vec![detail_source],
+        }],
+        file_metrics: vec![ariadne_graph::LoadMetric {
+            target_name: "test.cpp".to_string(),
+            target_file: Some(PathBuf::from("test.cpp")),
+            semantic_load: 1,
+            include_load: 2,
+            collateral_load: 1,
+            total_load: 3,
             semantic_symbols: vec![],
             collateral_symbols: vec![],
             collateral_sources: vec![],
             largest_collateral_source: None,
             semantic_sources: vec![],
         }],
-        file_metrics: vec![],
     };
 
     let load_dir = mgr.save_load_artifacts(&report, FP).unwrap();
@@ -307,6 +325,44 @@ fn test_save_and_load_load_artifacts() {
         report.symbol_metrics[0].target_name,
         loaded.symbol_metrics[0].target_name
     );
+    // M28 T4 DP-2 round-trip contract: the persisted form carries the
+    // per-symbol scalars; the never-consumed detail vectors do not.
+    let loaded_symbol = &loaded.symbol_metrics[0];
+    assert_eq!(
+        report.symbol_metrics[0].semantic_load,
+        loaded_symbol.semantic_load
+    );
+    assert_eq!(
+        report.symbol_metrics[0].include_load,
+        loaded_symbol.include_load
+    );
+    assert_eq!(
+        report.symbol_metrics[0].collateral_load,
+        loaded_symbol.collateral_load
+    );
+    assert_eq!(report.symbol_metrics[0].total_load, loaded_symbol.total_load);
+    assert!(
+        loaded_symbol.semantic_symbols.is_empty(),
+        "loaded rows must not carry semantic_symbols detail (payload reshape)"
+    );
+    assert!(
+        loaded_symbol.collateral_symbols.is_empty(),
+        "loaded rows must not carry collateral_symbols detail (payload reshape)"
+    );
+    assert!(
+        loaded_symbol.collateral_sources.is_empty(),
+        "loaded rows must not carry collateral_sources detail (payload reshape)"
+    );
+    assert!(
+        loaded_symbol.semantic_sources.is_empty(),
+        "loaded rows must not carry semantic_sources detail (payload reshape)"
+    );
+    assert!(
+        loaded_symbol.largest_collateral_source.is_none(),
+        "loaded rows must not carry largest_collateral_source detail (payload reshape)"
+    );
+    // The UI-consumed file detail survives whole through the reshape.
+    assert_eq!(report.file_metrics, loaded.file_metrics);
 }
 
 #[test]
@@ -591,14 +647,27 @@ fn test_save_load_callgraph_artifacts() {
 
 // --- Task E1: load-artifact byte-stability lock (I2) ---------------------
 
-const LOCK_REPORT_JSON_HASH: u64 = 0x70c9_1d07_9946_f7d9;
-const LOCK_REPORT_BIN_HASH: u64 = 0x7a12_1e91_0cbf_2e00;
+// Resynced for the M28 T4 DP-2 load-artifact payload reshape (user decision
+// 2026-10-06): report.json drops the never-consumed `symbol_metrics` detail
+// array (scalar summary + full file_metrics instead, streamed), report.bin
+// switches to scalar summary rows + full file_metrics. Both writers stream
+// (no whole-payload byte strings) - the UNEDITED determinism/threading suite
+// below re-locks byte-stability of the new writers. Prior values:
+// json 0x70c9_1d07_9946_f7d9, bin 0x7a12_1e91_0cbf_2e00 (full-report
+// payloads, pinned through the M27 T2 epoch).
+const LOCK_REPORT_JSON_HASH: u64 = 0x1d65_6f6d_e2a1_343f;
+const LOCK_REPORT_BIN_HASH: u64 = 0xffe6_0b93_421f_7d14;
 // Resynced for the M27 T2 DP-6 epoch bump ("2.0.0" -> "2.1.0"): the load
 // manifest embeds `analysis_version`, so its bytes legitimately shift
 // while the report json/bin locks stay pinned (they carry no version).
 // Prior value 0xddc3_f9ee_566b_5ea6 recorded the M18.10 bump
 // ("1.0.0" -> "2.0.0").
-const LOCK_MANIFEST_JSON_HASH: u64 = 0xbee9_1e36_1bbe_1e4b;
+// Resynced again for the M28 T4 epoch bump ("2.1.0" -> "2.2.0", registered
+// DP-2): same mechanism - the manifest embeds `analysis_version` and no
+// other field moved (locked UNEDITED-style by
+// `load_manifest_json_fields_are_exactly_totals_plus_current_version`).
+// Prior value 0xbee9_1e36_1bbe_1e4b recorded the M27 T2 epoch.
+const LOCK_MANIFEST_JSON_HASH: u64 = 0x1e97_c740_50b7_0c58;
 
 fn fnv1a64_hash(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

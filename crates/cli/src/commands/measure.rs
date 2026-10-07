@@ -19,6 +19,12 @@ pub fn measure_build_performance(repo_path: &PathBuf) -> Result<ariadne_build::B
     }
     let build_result = build_discoverer.discover()?;
 
+    // M28 T4 DP-2: the load artifact persists the per-symbol SCALAR summary
+    // rows only (the never-consumed detail vectors are gone). Summing the
+    // loaded rows' `collateral_load` therefore reads the persisted scalar
+    // summary directly - the printed number is identical to the pre-reshape
+    // value by construction. Cross-check pinned in the report crate:
+    // `manager::payload_reshape_tests::manifest_totals_equal_summary_derived_totals`.
     let load_report = artifacts.load_load_artifacts().ok();
     let collateral_load = load_report.map(|lr| {
         lr.symbol_metrics

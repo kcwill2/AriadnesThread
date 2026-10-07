@@ -93,8 +93,10 @@ fn test_m12_incremental_analysis_cold_run() {
     // Pinned epoch (M18.10 bump 1.0.0 -> 2.0.0: symbols.bin bincode layout +
     // fingerprint language/plugin inputs; M27 T2 bump 2.0.0 -> 2.1.0 per user
     // DP-6: invalidate release-built shards carrying silently-wrapped token
-    // columns): a bump must fail this assert.
-    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "2.1.0");
+    // columns; M28 T4 bump 2.1.0 -> 2.2.0 per the registered DP-2 payload
+    // decision: the reshaped load report.bin layout is invalidated by the
+    // epoch): a bump must fail this assert.
+    assert_eq!(manifest["analysis_version"].as_str().unwrap(), "2.2.0");
 }
 
 #[test]

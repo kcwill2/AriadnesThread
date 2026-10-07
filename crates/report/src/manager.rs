@@ -14,6 +14,8 @@ mod transform_io;
 #[cfg(test)]
 mod m22_manifest_languages_tests;
 #[cfg(test)]
+mod payload_reshape_tests;
+#[cfg(test)]
 mod tests;
 
 /// An artifact that cannot be trusted: missing manifest, mismatched input
