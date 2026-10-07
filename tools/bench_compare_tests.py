@@ -345,8 +345,9 @@ def stage5_memory_canonical_values():
     """One canonical value per documented stage5-memory row (MiB /
     seconds / counts as labelled). The peak pair (1350/2600) sits under
     the ratified 5200 MiB bar and its 1.93 quotient agrees with the 1.9
-    ratio row under the ratified gate G = 2.0, so the canonical set
-    passes every check; tests move single rows across a boundary. The
+    ratio row under the 2.0 growth tripwire threshold (demoted from a
+    gate by user decision 2026-10-06), so the canonical set passes every
+    check; tests move single rows across a boundary. The
     bench prints every value at 1-decimal precision, so ratio rows move
     on the 0.1 grid the bench's own `print_row` uses."""
     values = {}
@@ -603,20 +604,43 @@ class Stage5MemoryThresholdDecisionTests(unittest.TestCase):
         self.assertIn("RATIFIED", output)
         self.assertIn(FULL_PEAK_LABEL, output)
 
-    def test_rated_growth_gate_boundary_passes_and_exceeding_regresses(self):
-        gate = bench_compare.STAGE5_MEMORY_GROWTH_GATE_RATIO
+    def test_growth_tripwire_boundary_passes_and_exceeding_trips_without_failing(
+            self):
+        """G demoted to a tripwire by user decision 2026-10-06 (M28 T4b):
+        a median exactly at 2.0 passes with NO tripwire line (strict
+        exceed, same strictness as the old gate); a median above 2.0
+        prints the TRIPWIRE line with the tuple-identical ratio label and
+        does NOT fail the gate - the exit code is driven by the baseline
+        comparison only (this fixture's baseline passes at 2.1)."""
+        gate = bench_compare.STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO
         exit_code, output, _ = self._run_against_baseline(
             memory_baseline_with_entry({GROWTH_RATIO_LABEL: gate / 1.4}),
             memory_texts(5, uniform={"value_overrides":
                                      {GROWTH_RATIO_LABEL: gate}}))
         self.assertEqual(exit_code, 0, output)
+        self.assertNotIn("TRIPWIRE", output)
         exit_code, output, _ = self._run_against_baseline(
             memory_baseline_with_entry({GROWTH_RATIO_LABEL: gate / 1.4}),
             memory_texts(5, uniform={"value_overrides":
                                      {GROWTH_RATIO_LABEL: 2.1}}))
-        self.assertEqual(exit_code, 1)
-        self.assertIn("RATIFIED", output)
-        self.assertIn(GROWTH_RATIO_LABEL, output)
+        self.assertEqual(exit_code, 0, output)
+        self.assertIn("TRIPWIRE " + GROWTH_RATIO_LABEL, output)
+
+    def test_growth_tripwire_fires_independently_of_baseline_presence(self):
+        """The tripwire speaks even when the ratio row has no baseline
+        entry (bars/tripwire fire independently of baseline values, per
+        the T0b verdict semantics): exit stays 0 (baseline rules govern
+        the code), the TRIPWIRE line is present."""
+        phases = stage5_memory_canonical_phases()
+        phases.pop(GROWTH_RATIO_LABEL)
+        baseline = {memory_baseline_key_from_tool():
+                    {"phases": phases, "recorded": "2026-10-06", "runs": 5}}
+        exit_code, output, _ = self._run_against_baseline(
+            baseline,
+            memory_texts(5, uniform={"value_overrides":
+                                     {GROWTH_RATIO_LABEL: 2.1}}))
+        self.assertEqual(exit_code, 0, output)
+        self.assertIn("TRIPWIRE " + GROWTH_RATIO_LABEL, output)
 
 
 class Stage5MemorySamplingProtocolTests(unittest.TestCase):

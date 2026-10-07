@@ -23,16 +23,19 @@ Modes, selected with --bench (default stage5-timing):
     at both scales, in either direction), takes per-label medians over
     >= 5 ACCEPTED invocations, and compares each row against its own
     baseline key namespace using STAGE5_MEMORY_REGRESSION_RATIO plus the
-    RATIFIED absolute bars. UNITS: RSS/size rows are MiB, wall rows
-    seconds, memo rows counts. LOCAL gate only (DP-3): no wall-time or
-    RSS number ever runs in CI.
+    RATIFIED absolute peak bar and the growth tripwire (demoted from a
+    gate by user decision 2026-10-06). UNITS: RSS/size rows are MiB,
+    wall rows seconds, memo rows counts. LOCAL gate only (DP-3): no
+    wall-time or RSS number ever runs in CI.
 
 Exit codes:
   0 clean, or no baseline entry exists for this machine class.
   1 some row median regressed past the mode's regression ratio x
-    baseline, or a stage5-memory median exceeds a RATIFIED bar (peak
-    5200 MiB at N=1280, growth ratio 2.0).
-  2 parse format drift, failed/timed-out bench run, bad CLI usage, an
+    baseline, or a stage5-memory median exceeds the RATIFIED PEAK bar
+    (5200 MiB at N=1280). The stage5 growth ratio is a TRIPWIRE (user
+    decision 2026-10-06): it is computed and printed and NEVER fails a
+    gate.
+  2 parse format drift, failed bench run, bad CLI usage, an
     internal error (never substitute zeros for missing rows), or
     stage5-memory accepting fewer than 5 invocations (not a verdict).
 
@@ -182,8 +185,13 @@ STAGE5_MEMORY_RATIO_ROW_LABEL = (
 # <= 5200 MiB per profile at N=1280; this machine gate observes the
 # debug profile label.
 STAGE5_MEMORY_PEAK_BAR_MIB = 5200.0
-# RATIFIED (same source): growth gate G: `stage5 RSS growth ratio` <= 2.0.
-STAGE5_MEMORY_GROWTH_GATE_RATIO = 2.0
+# DEMOTED to a tripwire by user decision 2026-10-06 (M28 T4b) from the
+# 2026-10-06 DP-4 RATIFIED growth gate G: `stage5 RSS growth ratio`
+# <= 2.0. The value 2.0 is the demoted ratified constant; it is now a
+# tripwire threshold only (computed, printed, never gate-failing) because
+# the fixture is Theta(N^2) in aggregate retained closure by construction
+# (t0c-verdict sec. 7): the 4.0-4.1 reading IS the payload shape.
+STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO = 2.0
 # RATIFIED (same source): gate protocol is median-of->=5 isolated
 # invocations; ANY invocation whose operands diverge > 8% from the
 # per-slot median is REJECTED, binding on both operands at both scales,
@@ -226,7 +234,9 @@ USAGE_TEXT = (
     "    count is 5 (the RATIFIED minimum of accepted invocations); values\n"
     "    are MiB (wall rows seconds, memo rows counts).\n"
     "exit: 0 clean or no baseline entry for this machine class;\n"
-    "      1 regression or ratified-bar exceedance;\n"
+    "      1 regression past the mode ratio, or (stage5-memory) a\n"
+    "        RATIFIED peak-bar exceedance; the growth tripwire prints\n"
+    "        but never fails the exit code;\n"
     "      2 parse drift, failed bench run, bad usage, or (stage5-memory)\n"
     "        fewer than 5 accepted invocations."
 )
@@ -395,9 +405,11 @@ def stage5_memory_medians(accepted_runs) -> dict:
 
 
 def stage5_memory_bar_verdict(medians: dict):
-    """The two RATIFIED absolute gates checked on the medians (baseline
-    comparison alone cannot encode absolute bars). Returns
-    (warnings, regressed)."""
+    """The RATIFIED absolute peak bar plus the growth tripwire, checked
+    on the medians (baseline comparison alone cannot encode absolute
+    bars). The growth ratio keeps being computed and printed but NEVER
+    sets `regressed` (user decision 2026-10-06; t0c-verdict sec. 7).
+    Returns (warnings, regressed)."""
     warnings: list = []
     regressed = False
     peak_full = medians.get(STAGE5_MEMORY_PEAK_FULL_LABEL)
@@ -409,12 +421,13 @@ def stage5_memory_bar_verdict(medians: dict):
             f"peak bar (N=1280)")
     growth_ratio = medians.get(STAGE5_MEMORY_RATIO_ROW_LABEL)
     if (growth_ratio is not None
-            and growth_ratio > STAGE5_MEMORY_GROWTH_GATE_RATIO):
-        regressed = True
+            and growth_ratio > STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO):
         warnings.append(
-            f"WARN {STAGE5_MEMORY_RATIO_ROW_LABEL}: {growth_ratio:.2f} "
-            f"exceeds the RATIFIED growth gate "
-            f"{STAGE5_MEMORY_GROWTH_GATE_RATIO:.1f}")
+            f"TRIPWIRE {STAGE5_MEMORY_RATIO_ROW_LABEL}: {growth_ratio:.2f} "
+            f"exceeds the demoted growth gate "
+            f"{STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO:.1f} - tripwire only, never "
+            f"a gate (user decision 2026-10-06; the fixture is Theta(N^2) "
+            f"by construction, see t0c-verdict sec. 7)")
     return warnings, regressed
 
 
@@ -721,7 +734,8 @@ def _run_timing_gate(runs: int, timeout_seconds: float, baseline_path: Path,
 
 
 # stage5-memory gate flow: multiset parse -> RATIFIED rejection ->
-# insufficient-samples guard -> medians -> bars + baseline verdict.
+# insufficient-samples guard -> medians -> peak bar + growth tripwire +
+# baseline verdict.
 def _run_stage5_memory_gate(runs: int, timeout_seconds: float,
                             baseline_path: Path, update_baseline: bool,
                             repo_root: Path, run_bench_impl) -> int:
@@ -758,9 +772,9 @@ def _run_stage5_memory_gate(runs: int, timeout_seconds: float,
         medians, len(accepted), baseline_path, class_key,
         ratio=STAGE5_MEMORY_REGRESSION_RATIO,
         value_formatter=format_stage5_memory_value,
-        verdict_tail=" and the RATIFIED bars (peak "
-                     f"{STAGE5_MEMORY_PEAK_BAR_MIB:.0f} MiB, growth "
-                     f"{STAGE5_MEMORY_GROWTH_GATE_RATIO:.1f})",
+        verdict_tail=" and the RATIFIED peak bar "
+                     f"({STAGE5_MEMORY_PEAK_BAR_MIB:.0f} MiB), growth "
+                     f"tripwire {STAGE5_MEMORY_GROWTH_TRIPWIRE_RATIO:.1f}",
         extra_verdict=stage5_memory_bar_verdict)
 
 
