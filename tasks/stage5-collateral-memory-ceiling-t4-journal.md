@@ -277,8 +277,26 @@ the persisted form inside `crates/report/src/manager/metrics_io.rs`:
   --only keeps shared-worktree foreign staging out, per the tool's own E5
   doctrine). Future multi-paragraph messages MUST embed newlines in ONE
   `-m` argument; a repeated `-m` through commit_scoped is a silent data-loss
-  path. Post-amend proof in the verdict: `git diff d43571a HEAD` is empty
-  and `git show --stat HEAD` lists the same 11 paths.
+   path. Post-amend proof in the verdict: `git diff d43571a HEAD` is empty
+   and `git show --stat HEAD` lists the same 11 paths.
+- E1 ERRATUM (2026-10-08) correcting D7's letter-claims, append-only (D7's
+  text stands unrewritten; T4 verdict finding 1,
+  `tasks/stage5-collateral-memory-ceiling-t4-verdict.md`, APPROVED): D7
+  claimed "tree byte-identical" and `git diff d43571a HEAD` "is empty" -
+  both false at letter. The true delta is
+  `git diff d43571a fd7c1ec` = +12 insertions, JOURNAL-ONLY (this very D7
+  row folded into the amended commit itself); the ten non-journal paths
+  (all code, tests, and goldens) ARE byte-identical - reviewer-proved in
+  finding 1: the delta is confined to one touch-set tasks file and
+  `git show --stat fd7c1ec` lists the same 11 paths. A record correction,
+  not a rework: the message fix stands in substance and no gate is
+  re-run by this row.
+- R1 (2026-10-08) landing-hash record: the final T4 landing commit is
+  `fd7c1ec` "feat(report): load-artifact payload reshape + streaming
+  save/load + epoch 2.2.0 (M28 T4 DP-2)", superseding the dangling first
+  landing attempt `d43571a` (message-defective, kept readable as the D7
+  defect story). The T4 verdict adjudicated `fd7c1ec` APPROVED; this
+  erratum + hash record is the follow-up that finding 1 required.
 
 ## Explicitly NOT done (scope honesty)
 
