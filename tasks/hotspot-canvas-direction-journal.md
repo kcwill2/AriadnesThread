@@ -154,6 +154,34 @@ non-canonical form refused; plain form re-run as gate 19).
   per-commit `git show` adjudication.
 - Did not split commits: the amendment lists a single seven-scope command.
 
+## Closeout relay (hop 3, 2026-10-08)
+
+Planner prepared the track closeout (its role lacks commit rights); routed
+through this implementer session verbatim. Pre-commit verification all
+green: HEAD at `c17d182`; index empty; `tasks/milestone_ledger.md` unstaged
+delta exactly +3/-2 (track-row flip to CLOSED/APPROVED @ c17d182 at :35,
+`--baseline` errata 5TH-encounter append at :63, deferred :215-lock
+relocation row at :79/80 area — all `-`/`+` lines hotspot-closeout content,
+foreign ledger rows context-only); the six closeout docs present untracked
+(plan digest 69, execution-results 84, kickoff 131, shape 323, t1-handoff
+430, t1-verdict 214 lines); gate 4 `encoding_guard --staged` silent exit 0
+after staging the seven explicit paths.
+
+- Closeout commit: `b4e2bb5a935e779c928ea69dd2a3128d1c17b046`
+  (`git show --stat`: exactly the seven planner scopes, 1254 insertions /
+  2 deletions; nothing from foreign/M28/clarity/boot-overlay artifact sets).
+- This rider commit records the closeout hash per the repo 3-commit
+  convention (code / docs / hash-record) named in the ledger template-
+  collision row.
+- Hop-3 invocation itemization (8): rev-parse HEAD; status census (one path-
+  scoped variant denied, non-canonical form, re-run plain); diff --numstat
+  ledger; diff -U2 ledger (hunk content proof); diff --cached --name-only;
+  ls-files --others (untracked proof); git add (seven explicit paths);
+  encoding_guard --staged; commit_scoped; git show --stat. Cumulative track
+  count carried under the D3 declaration (amended hops each re-authorized
+  their own gate surface; this rider commit adds staging + guard + commit +
+  show per the convention above).
+
 Manual smoke line (acceptance (e)): clicking a burden row shows the toolbar
 reading "Consumers (<-)" with consumer cards badged with their payments, not
 faded. (Code-path verified deterministically: `selectHotspotRow` sets
