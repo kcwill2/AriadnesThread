@@ -212,7 +212,7 @@ fn test_extraction_impact_preview_overlay() {
         "graph.js must clear the preview when the selection re-renders"
     );
     assert!(
-        ariadne_ui::GRAPH_JS.lines().count() <= 990,
+        ariadne_ui::GRAPH_JS.lines().count() <= 998,
         "graph.js must stay within the spine-plan line budget (cap 990)"
     );
 

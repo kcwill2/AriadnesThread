@@ -1,5 +1,23 @@
 // Include-tab side panels split from index.html: directory quick-open navigation and hotspots triage.
-    document.getElementById('dirSelect').onchange = () => filterAndExpandSubgraph();
+    // Inbound-heat lens: selection PROVENANCE, never the toolbar value. A hotspot
+    // row or extraction-card click arms pendingHeatLens; selectNode consumes it
+    // into hotspotHeatLens as its first act, so no other selection path inherits.
+    let hotspotHeatLens = null;    // null | 'in' - provenance of current selection
+    let pendingHeatLens = null;    // set by hotspot clicks, consumed by selectNode
+
+    document.getElementById('dirSelect').onchange = () => {
+      hotspotHeatLens = null;
+      pendingHeatLens = null;
+      filterAndExpandSubgraph();
+    };
+
+    // Metric-to-direction mapping (D1/D3): inbound aggregates expand consumers,
+    // outbound aggregates expand dependencies; cycle is a bidirectional rank.
+    function hotspotMetricDirection(metric) {
+      if (metric === 'burden' || metric === 'fanin') return 'in';
+      if (metric === 'fanout' || metric === 'closure') return 'out';
+      return null; // cycle: bidirectional rank - toolbar keeps the user's pick
+    }
 
     // === DIRECTORY QUICK-OPEN NAVIGATION (Include tab) ===
     function buildDirTree(nodes) {
@@ -264,8 +282,135 @@
       }).join('');
     }
 
+    // Row / extraction-card entry point (I2): auto-set the toolbar Direction to
+    // the metric's natural direction, arm the inbound lens via pendingHeatLens
+    // (never as a selectNode argument - the bare selectNode(id) literal stays),
+    // then select as before. Cycle metrics keep the user's Direction (D3).
     function selectHotspotRow(id) {
+      const dir = hotspotMetricDirection(document.getElementById('hotspotMetric').value);
+      if (dir) document.getElementById('dirSelect').value = dir;
+      pendingHeatLens = dir === 'in' ? 'in' : null;
       selectNode(id);
+    }
+
+    // Reverse BFS over the full (unfiltered) edge dataset: every transitive
+    // consumer of nodeId, mirroring the forward heat BFS with the direction
+    // flipped. Same full-dataset scan semantics, not the degree-limited canvas.
+    function computeFullConsumers(nodeId) {
+      const payers = new Set();
+      const queue = [nodeId];
+      while (queue.length > 0) {
+        const curr = queue.shift();
+        tabAllEdges.forEach(e => {
+          if (e.target === curr && !payers.has(e.source)) {
+            payers.add(e.source);
+            queue.push(e.source);
+          }
+        });
+      }
+      return payers;
+    }
+
+    // Inbound heat view: the payer-side mirror of the include-graph heat pass,
+    // run only when the selection came from a hotspot click under an inbound
+    // metric (hotspotHeatLens === 'in'). Badges read what EACH consumer pays
+    // toward the selected file - consumer-first, never the root-side map.
+    // Degradation: absent justification entry -> neutral tier, '+N col' badge,
+    // no spine, no tip; a true-zero payer shows '+0 col' (outbound parity).
+    function renderInboundHeatView(nodesLayer, edgesLayer) {
+      const payers = computeFullConsumers(selectedNodeId);
+      const paid = nid => ((graphData.file_collateral || {})[nid] || {})[selectedNodeId] || 0;
+      const just = nid => ((graphData.file_justification || {})[nid] || {})[selectedNodeId];
+      const payerIds = [...payers];
+      const paidValues = payerIds.map(paid);
+      const maxCollateral = paidValues.length > 0 ? Math.max(...paidValues) : 0;
+      const total = paidValues.reduce((sum, value) => sum + value, 0);
+      const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+      const rootLabel = rootNode ? rootNode.label : selectedNodeId;
+      const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
+
+      nodesLayer.querySelectorAll('.node-group').forEach(el => {
+        const nid = el.dataset.nodeId;
+        if (nid === selectedNodeId) {
+          el.classList.add('heat-root');
+          const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          badge.setAttribute('class', 'heat-badge');
+          badge.setAttribute('x', '32');
+          badge.setAttribute('y', '36');
+          badge.setAttribute('fill', 'var(--cyan)');
+          badge.textContent = '[ROOT]';
+          el.appendChild(badge);
+        } else if (payers.has(nid)) {
+          const c = paid(nid);
+          const j = just(nid);
+          const tier = classifyDependency(nid, c, j);
+          const hc = styleDependencyCard(el, tier, c, maxCollateral);
+          const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          badge.setAttribute('class', 'heat-badge');
+          badge.setAttribute('x', '32');
+          badge.setAttribute('y', '36');
+          badge.setAttribute('fill', verdictBadgeColor(tier, hc.border));
+          badge.textContent = tier === 'neutral' ? `+${c} col` : verdictBadgeText(tier, j);
+          el.appendChild(badge);
+          const verdict = classifyEdgeVerdict(j);
+          if (verdict) appendVerdictTip(el, nodeLabel(nid), rootLabel, verdict, j);
+        } else {
+          el.classList.add('faded');
+        }
+      });
+
+      edgesLayer.querySelectorAll('.edge-path').forEach(el => {
+        const src = el.dataset.edgeSource;
+        const dst = el.dataset.edgeTarget;
+        if (dst !== selectedNodeId && !payers.has(dst)) {
+          el.classList.add('faded');
+        } else if (dst === selectedNodeId && src !== dst && !el.classList.contains('cycle-edge')) {
+          const entry = just(src);
+          const verdict = classifyEdgeVerdict(entry);
+          if (verdict === 'justified') {
+            el.classList.add('edge-justified');
+            el.setAttribute('marker-end', 'url(#arrow-entering)');
+          } else if (verdict === 'partial') {
+            el.classList.add('edge-partial');
+          } else if (verdict === 'unused') {
+            el.classList.add('edge-unused');
+            el.setAttribute('marker-end', 'url(#arrow-unused)');
+            appendVerdictTip(el, nodeLabel(src), rootLabel, 'unused', entry);
+          }
+        }
+      });
+
+      document.getElementById('legendViewLabel').textContent = 'Heat Map';
+      const verdictTiers = new Set(payerIds.map(nid => classifyEdgeVerdict(just(nid))));
+      const hasJustifiedVerdict = verdictTiers.has('justified');
+      const hasUnusedVerdict = verdictTiers.has('unused');
+      const summary = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">`
+        + `${payers.size} payer(s) - ${total} symbols paid</div>`;
+      const greenRow = hasJustifiedVerdict ? `
+        <div class="legend-row">
+          <div class="legend-line edge-style-justified"></div>
+          <span>Payer fully needs it</span>
+        </div>` : '';
+      const amberRow = `
+        <div class="legend-row">
+          <div class="legend-line edge-style-partial"></div>
+          <span>Payer partly needs it or no verdict data</span>
+        </div>`;
+      const redRow = hasUnusedVerdict ? `
+        <div class="legend-row">
+          <div class="legend-line edge-style-unused"></div>
+          <span>Payer uses none of it - include can go</span>
+        </div>` : '';
+      const heatHeader = `<div style="font-size:10px;color:var(--text-muted);margin-top:6px;">`
+        + `Card fill = collateral paid to the selected file</div>`;
+      document.getElementById('legendItems').innerHTML = summary + greenRow + amberRow + redRow
+        + verdictCardLegendRows(hasJustifiedVerdict, hasUnusedVerdict)
+        + heatHeader + HEAT_LEGEND.map(item => `
+        <div class="legend-row">
+          <div class="legend-color" style="background:${item.color};"></div>
+          <span>${item.label}</span>
+        </div>
+      `).join('');
     }
 
     // Disclosure DOM-walk contract (shape C5): locate the detail div inside

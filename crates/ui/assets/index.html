@@ -508,6 +508,10 @@
           <ul>
             <li>The 🔥 Hotspots panel (opened from the Hotspots tab on the left edge of the canvas) ranks the worst-offender files by a switchable metric (Collateral burden, Fan-in, Fan-out, Closure burden, Cycle participation).</li>
             <li>Clicking a row selects the file and renders its heat map live beside the open list.</li>
+            <li>Clicking a row follows the metric's natural direction: Collateral burden and
+Fan-in switch the canvas to Consumers (&larr;) and badge each paying file with
+what it pays; Fan-out and Closure burden switch to Dependencies (&rarr;);
+Cycle participation keeps your current Direction.</li>
             <li>The 💡 Proposed extractions section below the ranking offers one-click slim-header plans that turn a hotspot into a concrete extraction.</li>
             <li>Collateral is the extra symbols every consumer drags along by including a header; each card shows the drop as before &rarr; after plus the saving it buys.</li>
             <li>Risk tiers (Conservative, Moderate, Aggressive) order plans by safety only; every plan the planner emits today is Conservative.</li>

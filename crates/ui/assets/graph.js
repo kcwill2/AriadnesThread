@@ -324,7 +324,10 @@
       });
 
       // Apply include-graph fading, heat colors, and legend when a node is selected
-      if (currentTab === 'include' && selectedNodeId) {
+      // Provenance-first: an inbound hotspot selection paints the payer-side view.
+      if (currentTab === 'include' && hotspotHeatLens === 'in' && selectedNodeId) {
+        renderInboundHeatView(nodesLayer, edgesLayer);
+      } else if (currentTab === 'include' && selectedNodeId) {
         const reachableDependencies = computeFullDependencies(selectedNodeId);
         const collateralMap = (graphData.file_collateral || {})[selectedNodeId] || {};
         const justificationMap = (graphData.file_justification || {})[selectedNodeId] || {};
@@ -467,6 +470,9 @@
     }
 
     function selectNode(id, skipFilter = false, skipCrumb = false) {
+      // Consume the pending inbound lens FIRST: manual selections inherit nothing.
+      hotspotHeatLens = pendingHeatLens;
+      pendingHeatLens = null;
       selectedNodeId = id;
       const node = activeNodes.find(n => n.id === id) || tabAllNodes.find(n => n.id === id);
       if (!node) { renderThreadBar(); return; }
