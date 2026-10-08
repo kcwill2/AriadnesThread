@@ -554,10 +554,12 @@ fn test_ui_loading_overlay_and_progress() {
     assert!(html.contains("Math.floor(20 * percent / 100)"));
     assert!(html.contains("total_stages"));
 
-    // Block glyphs exist as ASCII escape sequences in the bundle source,
-    // never as raw non-UTF-8-safe bytes (authored content is pure ASCII).
-    assert!(html.contains("\\u2588"));
-    assert!(html.contains("\\u2591"));
+    // Clean-track revision: solid \u2588 escapes only (dithered \u2591 never
+    // returns); the remainder run rides a builder-made step-bar-remainder span.
+    assert!(html.contains("\\u2588") && !html.contains("\\u2591"));
+    let bar_builder = body_slice(html.as_str(), "function buildStepBarNodes");
+    assert!(bar_builder.contains("step-bar-remainder")
+        && bar_builder.contains("createElement('span')"));
 
     // I8: the appended step-row CSS block paints with var() tokens only.
     let step_css = step_row_css_block(ariadne_ui::STYLES_CSS);

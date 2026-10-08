@@ -282,14 +282,23 @@
 
     // 20-cell block-glyph bar with the CLI's own integer arithmetic (the
     // format_step_bar look): clamped percent, Math.floor fill, remainder
-    // always completing 20 cells, the whole bar wrapped in brackets. The
-    // block glyphs exist only as the \u2588 (fill) / \u2591 (remainder)
-    // escapes below, so this authored file stays pure ASCII.
-    function buildStepBarCells(percent) {
+    // always completing 20 cells, the whole bar wrapped in brackets. Both
+    // runs paint the solid full-block glyph via its \u2588 escape (authored
+    // content stays pure ASCII): the fill inherits the per-state text
+    // color, while the remainder lives in a dedicated .step-bar-remainder
+    // span so CSS paints it as a quiet solid track (no dithered dots).
+    function buildStepBarNodes(percent) {
       percent = Math.min(percent, 100);
       var filled = Math.floor(20 * percent / 100);
       var remainder = 20 - filled;
-      return '[' + "\u2588".repeat(filled) + "\u2591".repeat(remainder) + ']';
+      const nodes = [document.createTextNode('[')];
+      nodes.push(document.createTextNode("\u2588".repeat(filled)));
+      const track = document.createElement('span');
+      track.className = 'step-bar-remainder';
+      track.textContent = "\u2588".repeat(remainder);
+      nodes.push(track);
+      nodes.push(document.createTextNode(']'));
+      return nodes;
     }
 
     // One renderer for both boot paths (ui-progress-parity T3). With step
@@ -322,7 +331,7 @@
         label.textContent = step.label;
         const bar = document.createElement('span');
         bar.className = 'step-bar';
-        bar.textContent = buildStepBarCells(step.percent);
+        buildStepBarNodes(step.percent).forEach(node => bar.appendChild(node));
         const percentCell = document.createElement('span');
         percentCell.className = 'step-percent';
         percentCell.textContent = Math.min(step.percent, 100) + '%';

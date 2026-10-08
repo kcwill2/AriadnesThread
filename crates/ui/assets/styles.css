@@ -1795,4 +1795,13 @@
     .step-done .step-percent {
       color: var(--cyan);
     }
+    /* Boot-overlay clean track: the bar remainder paints a solid muted
+       track over the canvas (no dithered dot glyph). text-shadow resets
+       here because it inherits and the .step-active .step-bar cyan glow
+       would otherwise bloom across the track; this element-direct color
+       keeps the track quiet on active and done rows too. */
+    .step-bar-remainder {
+      color: var(--progress-track);
+      text-shadow: none;
+    }
 
