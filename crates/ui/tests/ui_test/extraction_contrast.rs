@@ -4,9 +4,13 @@
 // registry. I13: the pair table loops the parsed registry, so a fifth
 // theme is forced into the same rows automatically and a registry id
 // without a themes.css block panics here (missing row = test bug by
-// construction). The private parsing helpers are COPIED from
-// theme_dark_grey_palette.rs per house idiom (no imports across test
-// modules); only strip_css_comments is shared via crate::common.
+// construction). Registry parsing, block extraction, declared_value (with
+// the rider finding 1 duplicate rejection), nibble decoding and the WCAG
+// math all live in crate::common (T-A review rider findings 2-3). The
+// rgba-aware first_color_run family stays HERE on purpose: the contrast
+// feed must PANIC on malformed colors and must honor alpha, while the
+// grey-palette oracle skips malformed runs and ignores alpha - unifying
+// the parsers would weaken one shipped oracle (rider semantics lock).
 //
 // COMPOSITE CONVENTION (C4): a translucent token declaration composites
 // over --bg-surface (the hotspot panel the cards sit on) per channel as
@@ -15,7 +19,10 @@
 // composite arm is the documented fallback for a future translucent
 // declaration, never a silent rescue for a current one.
 
-use crate::common::strip_css_comments;
+use crate::common::{
+    contrast_ratio, css_block_body, declared_value, nibble_pair, strip_css_comments,
+    theme_registry,
+};
 
 /// One C4 pair row: `token` must clear `floor` against every surface in
 /// `against`. WCAG contrast ratio is symmetric, so the mass/border
@@ -87,66 +94,9 @@ const CONTRAST_ROWS: &[ContrastRow] = &[
     },
 ];
 
-/// Parse `const <NAME> = ['a', 'b', ...]` from theme.js. Copied from
-/// theme_dark_grey_palette.rs: the registry is parsed, never hardcoded,
-/// so this oracle cannot drift from the surface it locks.
-fn parse_js_string_array(js: &str, name: &str) -> Vec<String> {
-    let marker = format!("const {name} = [");
-    let at = js.find(&marker).unwrap_or_else(|| {
-        panic!("theme.js must declare `const {name} = [...]` as the single source of truth")
-    });
-    let rest = &js[at + marker.len()..];
-    let close = rest
-        .find(']')
-        .unwrap_or_else(|| panic!("`const {name}` array must close"));
-    rest[..close]
-        .split(',')
-        .map(|item| item.trim().trim_matches('\'').trim_matches('"').to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn theme_registry() -> Vec<String> {
-    let themes = parse_js_string_array(ariadne_ui::THEME_JS, "THEMES");
-    assert!(!themes.is_empty(), "THEMES must list at least one theme");
-    themes
-}
-
 /// The themes.css selector that carries a registry id's block.
 fn theme_selector(registry_id: &str) -> String {
     format!("[data-theme=\"{registry_id}\"]")
-}
-
-/// Body text (inside the braces) of the first block whose selector
-/// contains `selector`. Copied from theme_dark_grey_palette.rs; comments
-/// must already be stripped by the caller so a commented fake selector
-/// cannot hijack the search.
-fn css_block_body<'a>(css: &'a str, selector: &str) -> &'a str {
-    let at = css
-        .find(selector)
-        .unwrap_or_else(|| panic!("themes.css must contain a block for {selector}"));
-    let open = at + css[at..].find('{').expect("block must open with {");
-    let close = open + css[open..].find('}').expect("block must close with }");
-    &css[open + 1..close]
-}
-
-/// The declared value of `token` in a block body, trimmed of whitespace
-/// and the trailing semicolon. Copied from theme_dark_grey_palette.rs.
-fn declared_value(block: &str, token: &str) -> String {
-    for line in block.lines() {
-        if let Some((name, value)) = line.trim().split_once(':') {
-            if name.trim() == token {
-                return value.trim().trim_end_matches(';').trim().to_string();
-            }
-        }
-    }
-    panic!("token {token} must be declared in the theme block")
-}
-
-fn nibble_pair(high: char, low: char) -> u8 {
-    let high_digit = high.to_digit(16).expect("first hex digit");
-    let low_digit = low.to_digit(16).expect("second hex digit");
-    (high_digit * 16 + low_digit) as u8
 }
 
 /// One rgba channel divided by its scale (255 for rgb, 1 for alpha).
@@ -249,31 +199,8 @@ fn opaque_color(block: &str, token: &str) -> (f64, f64, f64) {
     (red, green, blue)
 }
 
-/// WCAG relative luminance over channels scaled 0..1: linearize each
-/// sRGB channel, then weight (same formula as the grey-palette oracle).
-fn relative_luminance(color: (f64, f64, f64)) -> f64 {
-    let linearize = |channel: f64| -> f64 {
-        if channel <= 0.04045 {
-            channel / 12.92
-        } else {
-            ((channel + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linearize(color.0) + 0.7152 * linearize(color.1) + 0.0722 * linearize(color.2)
-}
-
-/// WCAG contrast ratio between two colors, lighter first by
-/// construction so callers may pass either order.
-fn contrast_ratio(first: (f64, f64, f64), second: (f64, f64, f64)) -> f64 {
-    let first_lum = relative_luminance(first);
-    let second_lum = relative_luminance(second);
-    let (brighter, dimmer) = if first_lum >= second_lum {
-        (first_lum, second_lum)
-    } else {
-        (second_lum, first_lum)
-    };
-    (brighter + 0.05) / (dimmer + 0.05)
-}
+/// WCAG luminance/contrast math is the shared canonical one in
+/// crate::common (rider finding 2) - both theme oracles call it there.
 
 /// Evaluate every pair row of `group` across the whole registry; each
 /// failure names theme, pair, measured ratio, and floor.
@@ -302,6 +229,21 @@ fn assert_group_floors(group: &str) {
         failures.is_empty(),
         "[{group}] contrast floors violated:\n{}",
         failures.join("\n")
+    );
+}
+
+#[test]
+fn test_declared_value_rejects_duplicate_declaration() {
+    // FINDING 1 (review of 8a254ef): inside one block the CSS cascade paints
+    // the LAST declaration; a first-wins reader would guard the un-painted
+    // value and let the painted one run unchecked (silent false pass). The
+    // helper must reject a duplicated declaration loudly. Both values are
+    // shipped palette hexes - the fixture invents no new colors.
+    let synthetic_block = "  --green: #4ade80;\n  --green: #166534;\n";
+    let outcome = std::panic::catch_unwind(|| declared_value(synthetic_block, "--green"));
+    assert!(
+        outcome.is_err(),
+        "a duplicated in-block declaration must panic the helper instead of first-wins"
     );
 }
 

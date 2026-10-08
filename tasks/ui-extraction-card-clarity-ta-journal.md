@@ -295,3 +295,113 @@ No oracle code was authored, no themes.css edit was made, no landing commit exis
 6. `python tools/commit_scoped.py --scope crates/ui/tests/ui_test/extraction_contrast.rs --scope crates/ui/tests/ui_test/main.rs --scope crates/ui/assets/themes.css --scope tasks/ui-extraction-card-clarity-ta-journal.md -m "test(ui): four-theme contrast oracle for extraction token pairs + oracle-driven value fixes"` - single landing commit.
 7. `python tools/encoding_guard.py --all` - post-commit, exit reported in the
    return report.
+
+## Review rider (2026-10-08) - review findings 1-3 on 8a254ef
+
+- Review verdict APPROVE WITH SUGGESTIONS; user explicitly chose "Fix all
+  three", authorizing this scoped FIX RIDER as ONE additional commit on the
+  same branch (the rider supersedes the handoff's "exactly one commit" rule
+  - recorded as the D6-adjacent approval basis).
+- Start rev: `8a254ef` (tree clean, 1 ahead of local main).
+- User-approved touch-set extension beyond the original: the three test
+  modules named in the findings plus the common module plus main.rs "if a
+  common re-export needs it". `main.rs` was NOT needed (common is already
+  declared as a mod) and stays untouched.
+
+### Baseline (rider start rev, verbatim)
+
+- `python tools/testrun.py --distill -p ariadne-ui` exit 0:
+  `224 passed / 0 failed / 0 ignored / 3 suites` (capture 243 lines).
+
+### Finding 1 (WARNING, first-wins declared_value) - FIXED, TDD
+
+- Red (new test FIRST; compiles, fails semantically), verbatim digest:
+
+  ```
+  ### cargo test FAIL (exit 1) [capture: ...\target\testrun-capture.txt, 252 lines]
+  224 passed / 1 failed / 0 ignored / 2 suites
+  ---- extraction_contrast::test_declared_value_rejects_duplicate_declaration ----
+  thread 'extraction_contrast::test_declared_value_rejects_duplicate_declaration' (14684) panicked at crates\ui\tests\ui_test\extraction_contrast.rs:317:5:
+  a duplicated in-block declaration must panic the helper instead of first-wins
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+  224 passed / 1 failed / 0 ignored / 2 suites
+  ```
+
+  Fixture: synthetic one-token block declaring `--green` twice, both values
+  shipped palette hexes (`#4ade80`, `#166534`) - no new colors invented,
+  assets untouched.
+- Green, verbatim: `225 passed / 0 failed / 0 ignored / 3 suites` (exit 0).
+- Disposition: ADJUDICATION = REJECT-LOUDLY (the review's first sanctioned
+  option), not pick-last: a duplicate is a themes.css bug either way, and a
+  last-wins read would silently bless the bug. Shipped blocks declare every
+  token exactly once (full-file inspection), so tightening changes zero row
+  outcomes; the duplicate rejection rides into the shared helper, so grey's
+  byte-equality oracle gains the same guard.
+
+### Finding 2 (SUGGESTION, duplicated WCAG math) - CONSOLIDATED
+
+- Family A re-run, verbatim: `225 passed / 0 failed / 0 ignored / 3 suites`.
+- Disposition: ONE canonical f64 0..1-channel `relative_luminance` +
+  `contrast_ratio` in common (the extraction form, since compositing needs
+  fractional channels); `channels_scaled` bridges the grey oracle's 8-bit
+  colors with the same byte/255.0 expression its removed u8 copy used, so
+  the floor math is arithmetically identical and every outcome stands.
+
+### Finding 3 (SUGGESTION, third copy of parsing helpers) - CONSOLIDATED, divergent parts stay
+
+- Family B re-run, verbatim: `225 passed / 0 failed / 0 ignored / 3 suites`.
+- SHARED into common (textually identical in all shipped copies):
+  `parse_js_string_array`, `theme_registry`, `css_block_body`,
+  `nibble_pair`, plus the now-canonical duplicate-rejecting
+  `declared_value`. All three modules (theme_contract,
+  theme_dark_grey_palette, extraction_contrast) consume them from common.
+- REMAINS per-module, WITH REASON (rider semantics lock - unifying any of
+  these would weaken a shipped oracle's panic/skip contract):
+  - grey `hex_channel_runs` / `rgba_channel_runs`: lenient neutrality
+    scanners - SKIP malformed hex runs and treat alpha as exempt; the
+    achromatic bound must judge live declarations without panicking.
+  - extraction `first_color_run` family (`parse_hex_run`,
+    `parse_rgba_run`, `parse_rgba_channel`): PANIC on malformed colors and
+    honor alpha - the contrast feed must never silently skip a color it is
+    supposed to measure.
+  - contract `first_hex_color` (entity-aware `&#...;` carve-out, returns
+    text not channels), `declared_tokens`, `data_theme_ids`,
+    `bootstrap_theme_ids`: contract-surface scanners, no second caller.
+
+### Rider final state
+
+- Final suite, verbatim: `225 passed / 0 failed / 0 ignored / 3 suites` =
+  rider baseline 224 + 1 new test; no floor weakened, no test amended or
+  removed (this rider ADDS only, like the parent hand).
+- File sizes: common.rs 353, extraction_contrast.rs 329,
+  theme_dark_grey_palette.rs 246, theme_contract.rs 449 (all < 1000; every
+  helper well under 100 lines; hygiene exit 0 with zero new findings).
+- Mid-work repair note: the first contract-module edit clipped
+  `declared_tokens`' signature (dangling-body state); caught by immediate
+  re-read and repaired BEFORE any staging - no committed state ever carried
+  it. Declared as D8.
+- Gates (rider ledger): testrun x5 (baseline / F1 Red / F1 Green / family A
+  / family B), hygiene x1 (distill exit-code confirmation), theme_token_check
+  --check-added --base 55a85d9 x1 (silent - assets untouched), then
+  distill-git-add of the five paths, encoding_guard --staged, single scoped
+  rider commit, encoding_guard --all (results in the return report).
+
+### Rider deviations (numbering continues)
+
+1. D6: the approved extension names `crates/ui/tests/ui_test/common/`; the
+   existing shared module is the FILE `crates/ui/tests/ui_test/common.rs`
+   (no directory form exists). Approval read as covering the common module
+   in its actual file form - converting to `common/` would be a structural
+   change nobody asked for.
+2. D7: rider gate invocations total 11 distill-entry-point calls (testrun
+   x5 mandated by per-family re-runs; hygiene, theme_token_check, add,
+   encoding --staged, commit_scoped, encoding --all once each) - over the
+   parent handoff's ~7 budget by design of the rider procedure; declared
+   per the M28 T0b finding-1 dated-D-row law.
+3. D8: mid-work edit slip on theme_contract.rs (`declared_tokens` signature
+   clipped), repaired pre-staging; no commit carried the broken state.
+4. D9: the Green run prints one EXPECTED panic message to stderr (the
+   duplicate-rejection catch_unwind test); capture noise, not a failure.
+5. The single rider commit carries extraction_contrast.rs, common.rs,
+   theme_dark_grey_palette.rs, theme_contract.rs and this journal; its hash
+   returns via the report (D4 precedent - no self-hash append).

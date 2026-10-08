@@ -5,7 +5,7 @@
 // the anti-flash bootstrap, and the 3-way (N-way) token parity test.
 
 use crate::common;
-use crate::common::{strip_css_comments, strip_html_comments};
+use crate::common::{css_block_body, strip_css_comments, strip_html_comments, theme_registry};
 
 #[test]
 fn test_theme_stylesheet_is_linked_before_rule_stylesheet() {
@@ -176,43 +176,10 @@ fn test_index_html_styling_carries_no_color_literals() {
     }
 }
 
-/// Parse `const <NAME> = ['a', 'b', …]` from theme.js. The array is the
-/// single source of truth every other site (select options, CSS blocks,
-/// the inline bootstrap) must mirror — so the tests parse it instead of
-/// hardcoding a fourth copy of the ids.
-fn parse_js_string_array(js: &str, name: &str) -> Vec<String> {
-    let marker = format!("const {name} = [");
-    let at = js.find(&marker).unwrap_or_else(|| {
-        panic!("theme.js must declare `const {name} = [...]` as the single source of truth")
-    });
-    let rest = &js[at + marker.len()..];
-    let close = rest
-        .find(']')
-        .unwrap_or_else(|| panic!("`const {name}` array must close"));
-    rest[..close]
-        .split(',')
-        .map(|item| item.trim().trim_matches('\'').trim_matches('"').to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn theme_registry() -> Vec<String> {
-    let themes = parse_js_string_array(ariadne_ui::THEME_JS, "THEMES");
-    assert!(!themes.is_empty(), "THEMES must list at least one theme");
-    themes
-}
-
-/// Body text (inside the braces) of the first block whose selector contains
-/// `selector`. CSS comments must already be stripped by the caller: a
-/// commented-out selector would otherwise hijack the search.
-fn css_block_body<'a>(css: &'a str, selector: &str) -> &'a str {
-    let at = css
-        .find(selector)
-        .unwrap_or_else(|| panic!("themes.css must contain a block for {selector}"));
-    let open = at + css[at..].find('{').expect("block must open with {");
-    let close = open + css[open..].find('}').expect("block must close with }");
-    &css[open + 1..close]
-}
+// parse_js_string_array / theme_registry / css_block_body are consumed from
+// crate::common (T-A review rider, finding 3) - this module keeps only the
+// contract-specific scanners (entity-aware hex sweep, token-name sets,
+// data-theme id scan, bootstrap literal parse).
 
 fn declared_tokens(block: &str) -> std::collections::HashSet<String> {
     block
