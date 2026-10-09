@@ -22,15 +22,15 @@ fn css_rule_body(css: &str, selector: &str) -> String {
 fn test_graph_js_builds_spine_and_flat_tiers() {
     let graph = ariadne_ui::GRAPH_JS;
     assert!(
-        graph.contains("appendVerdictSpine("),
+        ariadne_ui::MAIN_JS.contains("appendVerdictSpine("), // relocated with appendVerdictSpine to main.js (T-R 2026-10-09)
         "graph.js must build the verdict spine via appendVerdictSpine"
     );
     assert!(
-        graph.contains("verdict-spine"),
+        ariadne_ui::MAIN_JS.contains("verdict-spine"), // relocated with appendVerdictSpine to main.js (T-R 2026-10-09)
         "graph.js must emit the verdict-spine class"
     );
     assert!(
-        graph.contains("heat-tier-"),
+        ariadne_ui::MAIN_JS.contains("heat-tier-"), // relocated with styleDependencyCard to main.js (T-R 2026-10-09)
         "graph.js must apply heat-tier-<tier> classes"
     );
     assert!(

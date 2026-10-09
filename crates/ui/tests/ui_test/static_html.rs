@@ -235,15 +235,15 @@ fn test_ui_heat_map_tri_state_justification() {
 
     // Classification must be a named predicate helper (plan refactor requirement).
     assert!(
-        ariadne_ui::GRAPH_JS.contains("function classifyDependency("),
-        "missing classifyDependency predicate helper"
+        ariadne_ui::MAIN_JS.contains("function classifyDependency("),
+        "missing classifyDependency predicate helper (main.js after T-R move)"
     );
 
     // Tri-state verdicts render as the left verdict spine on reachable
     // dependencies (plan 1790573049166; replaces the old outline overrides).
     assert!(
-        ariadne_ui::GRAPH_JS.contains("appendVerdictSpine("),
-        "missing verdict spine class application"
+        ariadne_ui::MAIN_JS.contains("appendVerdictSpine("),
+        "missing verdict spine class application (main.js after T-R move)"
     );
 
     // CSS rules for the spine verdict colors exist in the page.
@@ -364,8 +364,8 @@ fn test_ui_inspector_justification_breakdown() {
         .find("function selectNode(")
         .expect("selectNode function");
     let body_end = graph
-        .find("function recordCrumb(")
-        .expect("recordCrumb function");
+        .find("function clearInspector(")
+        .expect("clearInspector function");
     assert!(sel_start < body_end);
     let body = &graph[sel_start..body_end];
     assert!(

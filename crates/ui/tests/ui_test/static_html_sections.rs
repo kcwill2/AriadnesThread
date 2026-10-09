@@ -204,22 +204,29 @@ fn test_extraction_impact_preview_overlay() {
         "proposal cards need the selection-aware preview control"
     );
 
-    // graph.js gained the clear-on-rerender hook (E-I6) plus the verdict-spine
-    // machinery (plan 1790573049166); the cap keeps real headroom under the
-    // 1000-line hygiene ceiling so future features still fit.
+    // graph.js gained the clear-on-rerender hook (E-I6).
     assert!(
         ariadne_ui::GRAPH_JS.contains("ariadnePreview.clearPreview()"),
         "graph.js must clear the preview when the selection re-renders"
-    );
-    assert!(
-        ariadne_ui::GRAPH_JS.lines().count() <= 998,
-        "graph.js must stay within the spine-plan line budget (cap 990)"
     );
 
     // Help text describes the overlay in the heat map legend region.
     assert!(
         ariadne_ui::INDEX_HTML.contains("Preview after extraction"),
         "heat map help text must mention the Preview after extraction overlay"
+    );
+}
+
+#[test]
+fn test_graph_js_line_budget() {
+    // Relocated 2026-10-09 out of test_extraction_impact_preview_overlay
+    // (it was a hidden lock in an unrelatedly-named test whose message
+    // disagreed with its own number - deferred-ledger-row discharge,
+    // ui-degree-opacity-ramp T-R). Cap 990: R2 hygiene wall is 1000 lines
+    // for .js; this in-suite cap keeps headroom for the ramp feature.
+    assert!(
+        ariadne_ui::GRAPH_JS.lines().count() <= 990,
+        "graph.js must stay within its line budget (cap 990; R2 hygiene wall is 1000)"
     );
 }
 
@@ -307,11 +314,11 @@ fn test_ui_heat_tier_outlines_are_flat() {
 
     // The class must be applied at render time, and I5: heat-critical stays.
     assert!(
-        ariadne_ui::GRAPH_JS.contains("heat-tier-"),
+        ariadne_ui::MAIN_JS.contains("heat-tier-"), // relocated with styleDependencyCard to main.js (T-R 2026-10-09)
         "graph.js must apply the heat-tier-<tier> class on collateral nodes"
     );
     assert!(
-        ariadne_ui::GRAPH_JS.contains("heat-critical"),
+        ariadne_ui::MAIN_JS.contains("heat-critical"), // relocated with styleDependencyCard to main.js (T-R 2026-10-09)
         "heat-critical must keep being applied (I5)"
     );
 

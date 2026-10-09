@@ -127,7 +127,7 @@ fn test_edge_verdict_graph_wiring() {
         "neutral +N col badge must remain intact"
     );
     assert!(
-        graph.contains("appendVerdictSpine("),
+        ariadne_ui::MAIN_JS.contains("appendVerdictSpine("), // relocated with appendVerdictSpine to main.js (T-R 2026-10-09)
         "node verdicts must be applied via the verdict spine"
     );
 }
