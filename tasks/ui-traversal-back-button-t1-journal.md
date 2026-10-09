@@ -147,11 +147,28 @@ worsened).
 Gate invocation itemization (ledger law): Gate 1 baseline testrun x1;
 Gate 2 Red testrun x1; Gate 3 Green testrun x1; Gate 4 refactor testrun x1;
 Gate 5 hygiene x2 (1 direct output capture + 1 distill rerun for the exit
-code); Gate 6 theme_token_check x1; Gate 7 encoding_guard --staged see
-landing below; Gate 8 commit_scoped x1 (+1 journal rider). D-row
-2026-10-09: gate-command overshoot 11 > ~10 - extra hygiene invocation ran
-through the distiller solely to surface its exit code in a digest header
-(the direct invocation prints findings without a verdict line).
+code); Gate 6 theme_token_check x1; Gate 7 encoding_guard x4 (2 direct runs
++ 2 distill reruns for verdict lines); Gate 8 commit_scoped x1 (+1 journal
+rider). D-row 2026-10-09: gate-command overshoot 13 > ~10 - the extra
+invocations ran through the distiller solely to surface exit codes in
+digest headers (direct gate invocations print findings without a verdict
+line). Supporting zero-diff/rev proofs and the Gate 6 hex-attribution probe
+(4 distill calls, read-only) are evidence captures, not gates.
+
+### Landing
+
+Commit `9c0cd0c` feat(ui): traversal Back control returns to origin tab
+(numstat: hotspots.js 1/1, index.html 2/2, styles.css 4/2, traversal.js
+14/4, ui_test/main.rs +1, traversal_back.rs +128 new, this journal +165).
+Gate 7 post-commit: `encoding_guard.py --staged` exit 0 (index clean,
+vacuous per the atomic-staging note above); `encoding_guard.py --all`
+exit 0 (non-vacuous byte-level evidence over all tracked content
+including every committed touch-set file). Both via
+`python tools/distill.py -- python tools/encoding_guard.py ...` ->
+`### generic PASS (exit 0)`. Second rider commit (journal only) records
+this hash; landing parent for the reviewer's theme_token/hygiene re-runs
+is `20e3fb8` (TRACK_BASE) with the landing commit `9c0cd0c`.
+
 
 Encoding-guard form note (Gate 7): `commit_scoped.py` stages atomically
 (`git add` + `git commit --only` in one invocation), leaving no seam for a
