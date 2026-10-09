@@ -86,9 +86,24 @@ helpers keep every function well under 100 lines. Re-runs stayed green.
 - Error text uses anyhow `.context()` so the "rolled back N files" line
   leads the message and the original cause stays in the chain.
 
-## Gates (as run)
+## Gates (verbatim results)
 
 - `python tools/testrun.py --distill -- -p ariadne-validate` ->
-  `16 passed / 0 failed / 0 ignored / 5 suites` (PASS)
-- `python tools/hygiene_check.py` -> recorded in commit transcript below.
-- `python tools/encoding_guard.py --staged` -> recorded in commit transcript below.
+  `16 passed / 0 failed / 0 ignored / 5 suites` (PASS, final state; capture
+  `target/testrun-capture.txt`)
+- `python tools/hygiene_check.py` -> ran; zero R1/R2 hits in the touch set.
+  All reported R1/R2 hits are pre-existing `crates/ui` violations outside
+  this handoff's scope; the only validate-crate line is a pre-existing
+  warn-only R3 at `crates/validate/src/lib.rs:104` (untouched
+  `FileSnapshot::capture`). The new test file has no findings.
+- `python tools/encoding_guard.py --staged` -> exit 0, no findings, after
+  staging exactly the three touch-set files (staged via the distilling
+  entry point `python tools/distill.py -- git add ...`).
+
+## Commits
+
+- `8209a7e` `fix(validate): rollback on mid-apply failure (T1)` via
+  `python tools/commit_scoped.py` with per-file scopes:
+  `crates/validate/src/lib.rs` (+65/-4),
+  `crates/validate/tests/mid_apply_rollback_test.rs` (+233),
+  `tasks/ar-04-handoff-journal.md` (+94).
