@@ -5,6 +5,7 @@ use ariadne_index::{IncrementalStats, CURRENT_ANALYSIS_VERSION};
 use std::fs;
 use std::path::PathBuf;
 
+use super::bincode_options::deserialize_bounded;
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::IndexManifest;
 
@@ -65,7 +66,7 @@ impl ArtifactManager {
         let tu_analyses_bin = fs::read(&tu_analyses_path)
             .with_context(|| format!("Failed to read tu_analyses.bin at {:?}", tu_analyses_path))?;
         let tu_analyses: Vec<ariadne_index::TuAnalysis> =
-            bincode::deserialize(&tu_analyses_bin).context("Failed to deserialize tu analyses")?;
+            deserialize_bounded(&tu_analyses_bin).context("Failed to deserialize tu analyses")?;
         Ok(ariadne_index::IndexResult::new(
             self.repo_root(),
             tu_analyses,

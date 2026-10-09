@@ -7,6 +7,7 @@ use ariadne_repo::{build_discovery_result, FileRecord, RepositoryDiscoveryResult
 use std::fs;
 use std::path::PathBuf;
 
+use super::bincode_options::deserialize_bounded;
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{
     collect_stage_languages, BuildContextManifest, RepositoryManifest,
@@ -59,7 +60,7 @@ impl ArtifactManager {
         let content = fs::read(&bin_path)
             .with_context(|| format!("Failed to read files.bin at {:?}", bin_path))?;
         let records =
-            bincode::deserialize(&content).context("Failed to deserialize file records")?;
+            deserialize_bounded(&content).context("Failed to deserialize file records")?;
         Ok(records)
     }
 
@@ -153,7 +154,7 @@ impl ArtifactManager {
         let tus_bin = fs::read(&tus_path)
             .with_context(|| format!("Failed to read translation-units.bin at {:?}", tus_path))?;
         let translation_units =
-            bincode::deserialize(&tus_bin).context("Failed to deserialize translation units")?;
+            deserialize_bounded(&tus_bin).context("Failed to deserialize translation units")?;
 
         Ok(BuildDiscoveryResult {
             repo_root: self.repo_root(),

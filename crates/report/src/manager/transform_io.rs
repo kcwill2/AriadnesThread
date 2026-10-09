@@ -5,6 +5,7 @@ use ariadne_index::CURRENT_ANALYSIS_VERSION;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::bincode_options::deserialize_bounded;
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{ExtractionManifest, MigrationManifest};
 
@@ -80,7 +81,7 @@ impl ArtifactManager {
         let bin_path = self.artifact_root.join("migration").join("preview.bin");
         let bin_content = fs::read(&bin_path)
             .with_context(|| format!("Failed to read preview.bin at {:?}", bin_path))?;
-        let preview: ariadne_transform::MigrationPreview = bincode::deserialize(&bin_content)
+        let preview: ariadne_transform::MigrationPreview = deserialize_bounded(&bin_content)
             .context("Failed to deserialize migration preview")?;
         Ok(preview)
     }

@@ -5,6 +5,7 @@ use ariadne_index::CURRENT_ANALYSIS_VERSION;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::bincode_options::deserialize_bounded;
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{MeasureManifest, TransactionManifest};
 
@@ -92,7 +93,7 @@ impl ArtifactManager {
 
         if bin_path.exists() && bin_path.extension().and_then(|s| s.to_str()) == Some("bin") {
             let binary_payload = fs::read(&bin_path)?;
-            if let Ok(m) = bincode::deserialize(&binary_payload) {
+            if let Ok(m) = deserialize_bounded(&binary_payload) {
                 return Ok(m);
             }
         }

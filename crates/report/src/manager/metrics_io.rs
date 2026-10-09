@@ -8,6 +8,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use super::bincode_options::{deserialize_bounded, deserialize_bounded_reader};
 use super::{unique_tmp, write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{collect_stage_languages, LoadManifest, LoadReport, PlanManifest};
 
@@ -311,9 +312,10 @@ impl ArtifactManager {
         let report_bin_path = self.artifact_root.join("load").join("report.bin");
         let report_file = fs::File::open(&report_bin_path)
             .with_context(|| format!("Failed to read report.bin at {:?}", report_bin_path))?;
-        let persisted: PersistedLoadReport =
-            bincode::deserialize_from(std::io::BufReader::new(report_file))
-                .context("Failed to deserialize load report")?;
+        let persisted: PersistedLoadReport = deserialize_bounded_reader(
+            std::io::BufReader::new(report_file),
+        )
+        .context("Failed to deserialize load report")?;
         Ok(persisted.into_load_report())
     }
 
@@ -370,7 +372,7 @@ impl ArtifactManager {
         let bin_content = fs::read(&bin_path)
             .with_context(|| format!("Failed to read plans.bin at {:?}", bin_path))?;
         let plans: Vec<ariadne_cluster::plan::OptimizationPlan> =
-            bincode::deserialize(&bin_content).context("Failed to deserialize plans")?;
+            deserialize_bounded(&bin_content).context("Failed to deserialize plans")?;
         Ok(plans)
     }
 

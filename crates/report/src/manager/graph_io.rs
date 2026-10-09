@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use super::bincode_options::deserialize_bounded;
 use super::{write_atomic, write_json_atomic, ArtifactManager};
 use crate::manifests::{
     collect_stage_languages, CallGraphManifest, IncludeManifest, ReducedManifest,
@@ -88,12 +89,12 @@ impl ArtifactManager {
         let edges_bin = fs::read(&edges_path)
             .with_context(|| format!("Failed to read edges.bin at {:?}", edges_path))?;
         let edges: Vec<ariadne_graph::IncludeEdge> =
-            bincode::deserialize(&edges_bin).context("Failed to deserialize include edges")?;
+            deserialize_bounded(&edges_bin).context("Failed to deserialize include edges")?;
 
         let closures_path = includes_artifact_dir.join("closures.bin");
         let closures_bin = fs::read(&closures_path)
             .with_context(|| format!("Failed to read closures.bin at {:?}", closures_path))?;
-        let closures = bincode::deserialize(&closures_bin)
+        let closures = deserialize_bounded(&closures_bin)
             .context("Failed to deserialize include closures")?;
 
         let mut graph = ariadne_graph::IncludeGraph::new();
@@ -188,24 +189,24 @@ impl ArtifactManager {
         let symbols_bin = fs::read(&symbols_path)
             .with_context(|| format!("Failed to read symbols.bin at {:?}", symbols_path))?;
         let symbols =
-            bincode::deserialize(&symbols_bin).context("Failed to deserialize symbols")?;
+            deserialize_bounded(&symbols_bin).context("Failed to deserialize symbols")?;
 
         let edges_path = reduced_artifact_dir.join("edges.bin");
         let edges_bin = fs::read(&edges_path)
             .with_context(|| format!("Failed to read edges.bin at {:?}", edges_path))?;
-        let edges = bincode::deserialize(&edges_bin).context("Failed to deserialize edges")?;
+        let edges = deserialize_bounded(&edges_bin).context("Failed to deserialize edges")?;
 
         let tu_usage_path = reduced_artifact_dir.join("tu-usage.bin");
         let tu_usage_bin = fs::read(&tu_usage_path)
             .with_context(|| format!("Failed to read tu-usage.bin at {:?}", tu_usage_path))?;
         let tu_usage =
-            bincode::deserialize(&tu_usage_bin).context("Failed to deserialize tu usage")?;
+            deserialize_bounded(&tu_usage_bin).context("Failed to deserialize tu usage")?;
 
         let file_symbols_path = reduced_artifact_dir.join("file-symbols.bin");
         let file_symbols_bin = fs::read(&file_symbols_path).with_context(|| {
             format!("Failed to read file-symbols.bin at {:?}", file_symbols_path)
         })?;
-        let file_symbols = bincode::deserialize(&file_symbols_bin)
+        let file_symbols = deserialize_bounded(&file_symbols_bin)
             .context("Failed to deserialize file symbols")?;
 
         // D-M23-8 side channels: absent side file => empty channel, so a
@@ -213,13 +214,13 @@ impl ArtifactManager {
         // channel, never mis-read into shifted bytes.
         let extends_bytes = read_optional_bin(&reduced_artifact_dir, "extends-edges.bin")?;
         let extends_edges = match extends_bytes {
-            Some(bytes) => bincode::deserialize(&bytes)
+            Some(bytes) => deserialize_bounded(&bytes)
                 .context("Failed to deserialize extends edges")?,
             None => Vec::new(),
         };
         let sealed_bytes = read_optional_bin(&reduced_artifact_dir, "sealed-symbols.bin")?;
         let sealed_symbols = match sealed_bytes {
-            Some(bytes) => bincode::deserialize(&bytes)
+            Some(bytes) => deserialize_bounded(&bytes)
                 .context("Failed to deserialize sealed symbols")?,
             None => Vec::new(),
         };
@@ -279,7 +280,7 @@ impl ArtifactManager {
         let bin_path = self.artifact_root.join("callgraph").join("callgraph.bin");
         let binary_payload = fs::read(&bin_path)
             .with_context(|| format!("Failed to read callgraph.bin at {:?}", bin_path))?;
-        Ok(bincode::deserialize(&binary_payload)?)
+        Ok(deserialize_bounded(&binary_payload)?)
     }
 
     pub fn load_callgraph_checked(

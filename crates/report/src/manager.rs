@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod apply_io;
+mod bincode_options;
 mod discovery_io;
 mod graph_io;
 mod index_io;
