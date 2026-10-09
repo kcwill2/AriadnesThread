@@ -220,6 +220,17 @@
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // Attribute-safe escaper (AR-01 / S4-partial): for repo-derived values
+    // interpolated into quoted HTML attributes. Covers all five
+    // markup-significant characters; text-node rendering keeps using
+    // escapeHtml. The full call-site sweep (inline onclick removal, quote
+    // extension everywhere) is AR-11.
+    function escapeAttribute(value) {
+      return String(value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     // Rank ALL files (not just the capped active view), optionally filtered by dirScope.
     function computeHotspots(metric) {
       let nodes = metric === 'cycle' ? tabAllNodes.filter(n => n.is_cycle) : tabAllNodes.slice();
@@ -537,7 +548,7 @@
       const previewable = previewRoot !== null && window.ariadnePreview
         && window.ariadnePreview.hasImpact(previewRoot, String(p.target_file_id));
       const previewBtn = previewable
-        ? `<div class="extraction-row"><button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(previewRoot)}" data-preview-source="${escapeHtml(String(p.target_file_id))}">Preview drop from selected file</button></div>`
+          ? `<div class="extraction-row"><button type="button" class="just-preview-btn" data-preview-root="${escapeAttribute(previewRoot)}" data-preview-source="${escapeAttribute(String(p.target_file_id))}">Preview drop from selected file</button></div>`
         : '';
       const filePlan = renderExtractionFilePlan(p.target_files || [], p.target_files_truncated);
       const applyHint = renderExtractionApplyHint(p.plan_id || '');

@@ -48,8 +48,23 @@ pub fn export_standalone_html(
         Cow::Borrowed(template)
     };
     let json_data = serde_json::to_string(payload)?;
-    let script = format!("window.__ARIADNE_DATA__ = {};", json_data);
+    let script = format!(
+        "window.__ARIADNE_DATA__ = {};",
+        escape_json_for_script(&json_data)
+    );
     let output = tpl.replace("/*__ARIADNE_DATA__*/", &script);
     std::fs::write(output_path, output)?;
     Ok(())
+}
+
+/// Script-context JSON escape (S3/S4, AR-01): the payload is embedded inside
+/// a script block of the standalone page, where a raw `<` lets a hostile
+/// string close the tag and U+2028/U+2029 act as line terminators inside the
+/// JS object literal. Re-encoding them as JSON escape sequences is
+/// parse-identical: none of the three can appear in JSON structural syntax,
+/// only inside string values, so the substitution is total and safe.
+fn escape_json_for_script(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }

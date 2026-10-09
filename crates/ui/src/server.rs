@@ -298,8 +298,10 @@ async fn api_source(
     State(state): State<Arc<UiState>>,
     Query(query): Query<SourceQuery>,
 ) -> Result<String, axum::http::StatusCode> {
-    let path = if let Some(prefix) = &query.local_prefix {
-        // Cross-environment navigation: strip server repo_root, apply local prefix.
+    let candidate = if let Some(prefix) = &query.local_prefix {
+        // Cross-environment navigation: strip server repo_root, apply local
+        // prefix. The containment below sandboxes the result INTO the repo:
+        // an escaping prefix is rejected, never followed.
         let server_root = &state.repo_root;
         let requested = std::path::Path::new(&query.file);
         let relative = requested.strip_prefix(server_root).unwrap_or(requested);
@@ -309,7 +311,22 @@ async fn api_source(
     } else {
         state.repo_root.join(&query.file)
     };
-    tokio::fs::read_to_string(path)
+    // S1 containment (AR-01): canonicalize BOTH ends and require
+    // `starts_with`, so absolute `file=` values, `..` traversal, escaping
+    // `local_prefix=`, and in-repo symlinks that resolve outside all land
+    // outside the canonical root and are rejected. Canonicalization failure
+    // means a missing path: the same 404 the read produced before. Contained
+    // reads keep the exact pre-fix bytes (locked by source_containment).
+    let canonical_root = tokio::fs::canonicalize(&state.repo_root)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    let contained_path = tokio::fs::canonicalize(&candidate)
+        .await
+        .map_err(|_| axum::http::StatusCode::NOT_FOUND)?;
+    if !contained_path.starts_with(&canonical_root) {
+        return Err(axum::http::StatusCode::FORBIDDEN);
+    }
+    tokio::fs::read_to_string(contained_path)
         .await
         .map_err(|_| axum::http::StatusCode::NOT_FOUND)
 }
