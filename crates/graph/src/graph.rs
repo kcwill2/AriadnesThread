@@ -8,11 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-// Only the test-only scan counter touches atomics; the import stays
-// `cfg(test)` so release builds emit no unused-import warning.
+// Only the test-only scan counter touches atomics; the atomic import stays
+// `cfg(test)` so release builds emit no unused-import warning. `Arc` is
+// permanent since AR-06: the `seen_edges` dedup index is copy-on-write so
+// cloning a graph stays as cheap as cloning the edge Vec alone.
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(test)]
 use std::sync::Arc;
 
 /// Central include graph model managing dependency edges, closures, and analysis.
@@ -28,6 +29,20 @@ pub struct IncludeGraph {
     #[cfg(test)]
     #[serde(skip)]
     find_file_id_scans: Arc<AtomicUsize>,
+    /// AR-06 (plan audit P2): O(1) edge-dedup index kept in lockstep with
+    /// `edges` by [`Self::add_edge`]. Keyed on the FULL edge (the
+    /// `IncludeEdge` derives carry `Hash + Eq` over every field), so dedup
+    /// semantics are byte-identical to the retired O(E) `Vec::contains`
+    /// scan: same-endpoint edges with differing metadata (e.g. two include
+    /// directives on different lines) stay distinct. `Arc` keeps the
+    /// existing `Clone` derive cheap: a clone shares the set and the first
+    /// `add_edge` on it forks one via copy-on-write. `#[serde(skip)]` keeps
+    /// artifact bytes unchanged; every load path (e.g.
+    /// `report::manager::graph_io::load_include_checked`) rebuilds graphs
+    /// through `add_edge`, so `Deserialize` reconstructing an empty set is
+    /// exactly right. `Default` derive yields an empty set.
+    #[serde(skip)]
+    seen_edges: Arc<HashSet<IncludeEdge>>,
 }
 
 impl IncludeGraph {
@@ -39,8 +54,14 @@ impl IncludeGraph {
         self.file_paths.insert(file_id, path);
     }
 
+    /// Appends an edge unless the full-struct value is already present,
+    /// preserving first-occurrence Vec order. The `seen_edges` set makes the
+    /// duplicate check O(1) (AR-06: build went O(E^2) -> O(E)); semantics
+    /// are exactly the legacy `Vec::contains` full-struct equality. The
+    /// `make_mut` is free while the graph is the set's sole owner; only a
+    /// graph cloned from a shared set pays one copy-on-write fork.
     pub fn add_edge(&mut self, edge: IncludeEdge) {
-        if !self.edges.contains(&edge) {
+        if Arc::make_mut(&mut self.seen_edges).insert(edge.clone()) {
             self.edges.push(edge);
         }
     }
