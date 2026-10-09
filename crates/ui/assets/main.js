@@ -515,7 +515,7 @@
     // === NODE INSPECTOR SHOW/HIDE (mirrors the hotspots pattern) ===
     function collapseInspector() {
       inspectorOpen = false;
-      const panel = document.getElementById('sidebarPanelInspector');
+      const panel = document.getElementById('inspectorPanel');
       if (panel) panel.style.display = 'none';
       const restoreTab = document.getElementById('inspectorRestoreTab');
       if (restoreTab) restoreTab.hidden = false;
@@ -523,7 +523,7 @@
 
     function expandInspector() {
       inspectorOpen = true;
-      const panel = document.getElementById('sidebarPanelInspector');
+      const panel = document.getElementById('inspectorPanel');
       if (panel) panel.style.display = 'flex';
       const restoreTab = document.getElementById('inspectorRestoreTab');
       if (restoreTab) restoreTab.hidden = true;
