@@ -133,7 +133,11 @@ impl TransactionApplier {
     /// headers through `extractor` (the plugin owns every generated-file
     /// byte, plan M23 I3) and consumer rewrites through `rewriter` (which
     /// owns every directive spelling), and return the snapshot plus created
-    /// paths.
+    /// paths. AR-04: the snapshot is captured before any mutation, and any
+    /// error from the write/rewriter/strip phases rolls every written target
+    /// back through [`TransactionApplier::rollback`] before propagating, so
+    /// an `Err` never leaves a partial mutation on disk (mirrors the
+    /// caller-side tier-failure rollback in cli `optimize`/`transform`).
     ///
     /// T7b move-removal (D-M23-5, I5): when a rewrite points at moved
     /// symbols generated into new files, the symbols' existing source files
@@ -173,7 +177,45 @@ impl TransactionApplier {
 
         let snapshot = FileSnapshot::capture(&paths_to_snapshot)?;
 
-        fs::create_dir_all(&gen_dir)?;
+        // AR-04 (audit T1): the tier-failure rollback pattern the callers
+        // apply around this function (`if fail { rollback(&snapshot,
+        // &new_paths) }`) is enforced INSIDE it too: any error from the
+        // write/rewriter/strip phases restores every written target before
+        // the error propagates, so an `Err` return can never leak a partial
+        // mutation. Success-path behavior is unchanged (phases moved
+        // verbatim into `write_all_targets`).
+        if let Err(cause) = Self::write_all_targets(
+            repo_root,
+            &gen_dir,
+            extraction,
+            migration,
+            rewriter,
+            extractor,
+            &move_removals,
+            &mut new_paths,
+        ) {
+            return Err(Self::rolled_back_error(cause, &snapshot, &new_paths));
+        }
+
+        Ok((snapshot, new_paths))
+    }
+
+    /// The write/rewriter/strip phases of `apply_with`, moved verbatim:
+    /// stage the generated dir, render+write each unit through `extractor`,
+    /// rewrite each consumer through `rewriter`, then offer the move-removal
+    /// strip. Any `Err` here means the tree is partially mutated; the caller
+    /// owns the rollback (AR-04).
+    fn write_all_targets(
+        repo_root: &Path,
+        gen_dir: &Path,
+        extraction: &ExtractionResult,
+        migration: &MigrationPreview,
+        rewriter: &dyn DependencyRewriter,
+        extractor: &dyn SourceExtractor,
+        move_removals: &BTreeSet<(PathBuf, Vec<String>)>,
+        new_paths: &mut Vec<PathBuf>,
+    ) -> Result<()> {
+        fs::create_dir_all(gen_dir)?;
 
         for unit in &extraction.headers {
             let path = gen_dir.join(&unit.path);
@@ -228,9 +270,28 @@ impl TransactionApplier {
             fs::write(&path, content)?;
         }
 
-        strip_moved_symbols(repo_root, &move_removals, rewriter)?;
+        strip_moved_symbols(repo_root, move_removals, rewriter)
+    }
 
-        Ok((snapshot, new_paths))
+    /// AR-04 error decoration: run the same rollback the tier-failure path
+    /// runs, then rethrow the original cause with a "rolled back N files"
+    /// line, where N counts every path the rollback pass processes (each
+    /// snapshot entry restored/removed, each created path removed). If the
+    /// rollback itself fails, that failure is propagated with the original
+    /// cause as context: an unrestored tree must never be reported as
+    /// rolled back.
+    fn rolled_back_error(
+        cause: anyhow::Error,
+        snapshot: &FileSnapshot,
+        new_paths: &[PathBuf],
+    ) -> anyhow::Error {
+        let processed_paths = snapshot.entries.len() + new_paths.len();
+        match TransactionApplier::rollback(snapshot, new_paths) {
+            Ok(()) => cause.context(format!("rolled back {processed_paths} files")),
+            Err(rollback_err) => {
+                rollback_err.context(format!("rollback incomplete after: {cause}"))
+            }
+        }
     }
 
     pub fn rollback(snapshot: &FileSnapshot, new_paths: &[PathBuf]) -> Result<()> {
