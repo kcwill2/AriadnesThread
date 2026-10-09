@@ -8,7 +8,7 @@
 
     function switchTab(tab) {
       currentTab = tab;
-      ['include', 'symbol', 'call'].forEach(t => {
+      ['include', 'symbol', 'call', 'traversal'].forEach(t => {
         const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
         if (btn) {
           if (t === tab) btn.classList.add('active');
@@ -22,16 +22,51 @@
       const hsRestoreTab = document.getElementById('hotspotRestoreTab');
       if (hsRestoreTab) hsRestoreTab.hidden = !(tab === 'include' && !hotspotOpen);
 
+      // Traversal panel replaces inspector when active
+      const travPanel = document.getElementById('traversalPanel');
+      const inspPanel = document.getElementById('inspectorPanel');
+      if (tab === 'traversal') {
+        if (travPanel) travPanel.style.display = 'flex';
+        if (inspPanel) inspPanel.style.display = 'none';
+        initTraversalPanel();
+      } else {
+        if (travPanel) travPanel.style.display = 'none';
+        if (inspPanel) inspPanel.style.display = 'flex';
+      }
+
       // Update legend
-      document.getElementById('legendViewLabel').textContent = 
-        tab === 'include' ? 'Include Graph' : (tab === 'symbol' ? 'Symbol Dependency' : 'Call Graph');
+      document.getElementById('legendViewLabel').textContent = tab === 'include' ? 'Include Graph' : (tab === 'symbol' ? 'Symbol Dependency' : (tab === 'call' ? 'Call Graph' : 'Collateral Traversal'));
       const legendList = document.getElementById('legendItems');
-      legendList.innerHTML = (legends[tab] || []).map(item => `
-        <div class="legend-row">
-          <div class="legend-color" style="background:${item.color};"></div>
-          <span>${item.label}</span>
-        </div>
-      `).join('');
+      if (tab === 'traversal') {
+        if (typeof window.renderTraversalLegend === 'function') {
+          window.renderTraversalLegend();
+        } else {
+          // Fallback if traversal.js hasn't loaded yet
+          legendList.innerHTML = `
+            <div class="legend-row">
+              <div class="legend-color" style="background:var(--green);"></div>
+              <span>Necessary (required headers)</span>
+            </div>
+            <div class="legend-row">
+              <div class="legend-color" style="background:var(--cyan);"></div>
+              <span>Actual (full dependency closure)</span>
+            </div>
+            <div class="legend-row">
+              <div class="legend-color" style="background:var(--red);"></div>
+              <span>Collateral Delta (eliminable)</span>
+            </div>
+            <div class="legend-row">
+              <div class="legend-color" style="background:var(--amber);"></div>
+              <span>Decoy (still reachable via other paths)</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">
+              Click a file to select it in the main graph
+            </div>
+          `;
+        }
+      } else {
+        legendList.innerHTML = (legends[tab] || []).map(item => `<div class="legend-row"><div class="legend-color" style="background:${item.color};"></div><span>${item.label}</span></div>`).join('');
+      }
 
       // Load elements for active tab
       showProgress('Switching tab...', 20);
@@ -41,7 +76,18 @@
         if (tab === 'include') rawElements = graphData.include_graph || [];
         else if (tab === 'symbol') rawElements = graphData.symbol_graph || [];
         else if (tab === 'call') rawElements = graphData.call_graph || [];
-
+        else if (tab === 'traversal') {
+          // Traversal tab uses the already-loaded include graph data
+          // Parse include graph elements and apply degree filter to main canvas
+          rawElements = graphData.include_graph || [];
+          parseAndRenderElements(rawElements);
+          initTraversalPanel();
+          filterAndExpandSubgraph();
+          renderSvg();
+          updateProgress(100, 'Done');
+          hideProgress();
+          return;
+        }
         parseAndRenderElements(rawElements);
         updateProgress(100, 'Done');
         hideProgress();
@@ -51,7 +97,7 @@
     function parseAndRenderElements(rawElements) {
       tabAllNodes = [];
       tabAllEdges = [];
-      selectedNodeId = null;
+      // Preserve selectedNodeId across tab switches
       threadHistory = [];
       renderThreadBar();
       dirScope = null;
@@ -477,6 +523,17 @@
       const node = activeNodes.find(n => n.id === id) || tabAllNodes.find(n => n.id === id);
       if (!node) { renderThreadBar(); return; }
       if (!skipCrumb) recordCrumb(id, node.label);
+
+      // In traversal tab, don't rebuild the filter - the canvas shows the degree-filtered
+      // include graph; the traversal panel is a separate view. Just update visual selection.
+      if (currentTab !== 'traversal' && !skipFilter) {
+        filterAndExpandSubgraph();
+      } else if (currentTab === 'traversal') {
+        // Ensure selected node is in active set for rendering
+        if (!activeNodes.some(n => n.id === id) && tabAllNodes.some(n => n.id === id)) {
+          activeNodes = [...activeNodes, tabAllNodes.find(n => n.id === id)];
+        }
+      }
 
       // Update Inspector
       document.getElementById('inspLabel').textContent = node.label;
@@ -940,6 +997,11 @@
         }
       }
 
+      // Ensure selected node is always in the active set, even if filtered by degree
+      if (selectedNodeId && tabAllNodes.some(n => n.id === selectedNodeId)) {
+        includedNodes.add(selectedNodeId);
+      }
+
       activeNodes = tabAllNodes.filter(n => includedNodes.has(n.id));
       activeEdges = tabAllEdges.filter(e => includedNodes.has(e.source) && includedNodes.has(e.target));
 
@@ -967,7 +1029,6 @@
       document.getElementById('hopAllCap').classList.remove('active');
       filterAndExpandSubgraph();
     }
-
     function toggleAllCapped() {
       isAllCapped = !isAllCapped;
       const btn = document.getElementById('hopAllCap');
@@ -975,12 +1036,10 @@
       else btn.classList.remove('active');
       filterAndExpandSubgraph();
     }
-
     function setNodeCap(cap) {
       nodeCap = cap;
       filterAndExpandSubgraph();
     }
-
     function clearFilter() {
       document.getElementById('searchInput').value = '';
       currentDegree = 1;
@@ -989,8 +1048,4 @@
       document.getElementById('hopAllCap').classList.remove('active');
       filterAndExpandSubgraph();
     }
-
-    function clearSearch() {
-      document.getElementById('searchInput').value = '';
-      filterAndExpandSubgraph();
-    }
+    function clearSearch() { clearFilter(); }

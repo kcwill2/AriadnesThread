@@ -18,7 +18,7 @@
     let tabAllEdges = [];
     let nodeCap = 50;
     let currentDegree = 1;
-    let isAllCapped = false;
+    let isAllCapped = true;
     let selectedNodeId = null;
     let threadHistory = [];
     let hopDepth = 0;
@@ -371,7 +371,7 @@
     // === NODE INSPECTOR SHOW/HIDE (mirrors the hotspots pattern) ===
     function collapseInspector() {
       inspectorOpen = false;
-      const panel = document.getElementById('inspectorPanel');
+      const panel = document.getElementById('sidebarPanelInspector');
       if (panel) panel.style.display = 'none';
       const restoreTab = document.getElementById('inspectorRestoreTab');
       if (restoreTab) restoreTab.hidden = false;
@@ -379,8 +379,8 @@
 
     function expandInspector() {
       inspectorOpen = true;
-      const panel = document.getElementById('inspectorPanel');
-      if (panel) panel.style.display = '';
+      const panel = document.getElementById('sidebarPanelInspector');
+      if (panel) panel.style.display = 'flex';
       const restoreTab = document.getElementById('inspectorRestoreTab');
       if (restoreTab) restoreTab.hidden = true;
     }

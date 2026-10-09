@@ -276,6 +276,17 @@
       findPath();
     }
     function clientGetEntrypoints() { showEntrypoints(); }
+
+    // Traversal API
+    async function fetchTraversalData(rootId, depId, symbolIds = []) {
+      const params = new URLSearchParams({ root: rootId, dep: depId });
+      if (symbolIds.length > 0) {
+        params.append('symbols', symbolIds.join(','));
+      }
+      const res = await fetch(`/api/graph/traversal?${params.toString()}`);
+      if (!res.ok) throw new Error(`Traversal fetch failed: ${res.status}`);
+      return res.json();
+    }
     function closeModals() {
       document.getElementById('pathfinderModal').style.display='none';
       document.getElementById('entrypointsModal').style.display='none';

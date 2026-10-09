@@ -61,6 +61,66 @@ pub struct SearchQuery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalQuery {
+    pub root_file_id: String,
+    pub dep_file_id: String,
+    /// Optional specific symbol IDs to analyze; if empty, analyzes all symbols
+    /// the root uses from this dependency (from justification data).
+    #[serde(default)]
+    pub symbol_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalSubtreeNode {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+    pub kind: String,
+    pub is_necessary: bool,
+    pub is_collateral: bool,
+    pub is_decoy: bool,
+    pub symbol_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalSubtreeEdge {
+    pub source: String,
+    pub target: String,
+    pub is_necessary: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalSubtree {
+    pub nodes: Vec<TraversalSubtreeNode>,
+    pub edges: Vec<TraversalSubtreeEdge>,
+    pub total_symbols: usize,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalResponse {
+    pub root_file_id: String,
+    pub dep_file_id: String,
+    pub analyzed_symbol_ids: Vec<String>,
+    pub necessary_subtree: TraversalSubtree,
+    pub actual_subtree: TraversalSubtree,
+    pub collateral_delta: TraversalSubtree,
+    pub summary: TraversalSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraversalSummary {
+    pub necessary_files: usize,
+    pub actual_files: usize,
+    pub collateral_files: usize,
+    pub necessary_symbols: usize,
+    pub actual_symbols: usize,
+    pub collateral_symbols: usize,
+    pub decoy_files: usize,
+    pub decoy_symbols: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResultItem {
     pub id: String,
     pub label: String,

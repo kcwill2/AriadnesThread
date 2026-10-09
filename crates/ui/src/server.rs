@@ -1,6 +1,7 @@
 use crate::dto::{
     CollateralResponse, CytoscapeElement, EntrypointsResponse, FileJustificationResponse,
     GraphExportPayload, PathQuery, SearchQuery, SearchResultItem, TraverseQuery,
+    TraversalQuery, TraversalResponse, TraversalSubtree, TraversalSubtreeNode, TraversalSubtreeEdge, TraversalSummary,
 };
 use ariadne_graph::traversal::TraversalDirection;
 use ariadne_index::SymbolId;
@@ -132,6 +133,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/themes.css", get(asset_themes_css))
         .route("/app/api.js", get(asset_api_js))
         .route("/app/graph.js", get(asset_graph_js))
+        .route("/app/traversal.js", get(asset_traversal_js))
         .route("/app/file-view.js", get(asset_file_view_js))
         .route("/app/hotspots.js", get(asset_hotspots_js))
         .route("/app/preview.js", get(asset_preview_js))
@@ -148,6 +150,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/graph/entrypoints", get(api_graph_entrypoints))
         .route("/api/graph/search", get(api_graph_search))
         .route("/api/graph/collateral", get(api_graph_collateral))
+        .route("/api/graph/traversal", get(api_graph_traversal))
         .route("/api/justification", get(api_justification))
         .route("/api/source", get(api_source))
         .route("/api/export", get(api_export))
@@ -193,6 +196,10 @@ async fn asset_api_js() -> axum::response::Response {
 
 async fn asset_graph_js() -> axum::response::Response {
     ui_asset(crate::GRAPH_JS, "text/javascript; charset=utf-8")
+}
+
+async fn asset_traversal_js() -> axum::response::Response {
+    ui_asset(crate::TRAVERSAL_JS, "text/javascript; charset=utf-8")
 }
 
 async fn asset_file_view_js() -> axum::response::Response {
@@ -738,6 +745,327 @@ pub async fn api_graph_collateral(
         direct_collateral,
         transitive_collateral,
     }))
+}
+
+/// Query for the traversal view: given a root file and a direct dependency,
+/// show the necessary vs actual import subtree and the collateral delta.
+#[derive(Deserialize)]
+pub struct TraversalApiQuery {
+    pub root: String,
+    pub dep: String,
+    /// Optional specific symbol IDs to analyze (comma-separated); if empty, uses all justified
+    /// symbols from the root->dep edge.
+    #[serde(default)]
+    pub symbols: String,
+}
+
+/// Live-mode traversal analysis: computes what the dependency actually pulls in
+/// versus what's strictly needed for the symbols the root uses from it.
+pub async fn api_graph_traversal(
+    State(state): State<Arc<UiState>>,
+    Query(query): Query<TraversalApiQuery>,
+) -> Result<Json<TraversalResponse>, axum::http::StatusCode> {
+    let root_id = query.root.parse::<u64>().map(ariadne_repo::FileId);
+    let dep_id = query.dep.parse::<u64>().map(ariadne_repo::FileId);
+    let (root_id, dep_id) = match (root_id, dep_id) {
+        (Ok(r), Ok(d)) => (r, d),
+        _ => return Err(axum::http::StatusCode::BAD_REQUEST),
+    };
+
+    let gen = state
+        .analysis()
+        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+
+    // Verify both files exist in the graph
+    if !gen.include_graph.file_paths.contains_key(&root_id)
+        || !gen.include_graph.file_paths.contains_key(&dep_id)
+    {
+        return Err(axum::http::StatusCode::NOT_FOUND);
+    }
+
+    // Verify dep is a direct dependency of root
+    let direct_includes = gen.include_graph.direct_includes(root_id);
+    if !direct_includes.contains(&dep_id) {
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+        &gen.include_graph,
+        &gen.reduced_model,
+        Arc::clone(&gen.memo),
+    );
+
+    // Get justification data to find which symbols root uses from dep
+    let root_metric = match analyzer.analyze_file_load_by_id(root_id) {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(Json(TraversalResponse {
+                root_file_id: root_id.0.to_string(),
+                dep_file_id: dep_id.0.to_string(),
+                analyzed_symbol_ids: vec![],
+                necessary_subtree: TraversalSubtree::empty(),
+                actual_subtree: TraversalSubtree::empty(),
+                collateral_delta: TraversalSubtree::empty(),
+                summary: TraversalSummary::empty(),
+            }));
+        }
+    };
+    let justification_detail = crate::dto::build_file_justification_detail(
+        &root_id.0.to_string(),
+        root_id,
+        &root_metric,
+        &analyzer,
+        &gen.reduced_model,
+    );
+
+    // Find the justification entry for this specific dep
+    let dep_str = dep_id.0.to_string();
+    let dep_entry = justification_detail.entries.iter().find(|e| e.source_id == dep_str);
+
+    // Determine which symbols to analyze
+    let symbol_ids: Vec<ariadne_index::SymbolId> = if query.symbols.is_empty() {
+        // Use all justified symbols from this edge
+        dep_entry
+            .map(|e| e.entry.justified_symbols.iter().map(|s| ariadne_index::SymbolId(s.clone())).collect())
+            .unwrap_or_default()
+    } else {
+        // Use explicitly provided symbol IDs (comma-separated)
+        query.symbols.split(',').filter(|s| !s.is_empty()).map(|s| ariadne_index::SymbolId(s.trim().to_string())).collect()
+    };
+
+    if symbol_ids.is_empty() {
+        // No symbols to analyze - return empty response
+        return Ok(Json(TraversalResponse {
+            root_file_id: root_id.0.to_string(),
+            dep_file_id: dep_id.0.to_string(),
+            analyzed_symbol_ids: vec![],
+            necessary_subtree: TraversalSubtree::empty(),
+            actual_subtree: TraversalSubtree::empty(),
+            collateral_delta: TraversalSubtree::empty(),
+            summary: TraversalSummary::empty(),
+        }));
+    }
+
+    // Compute extraction impact for these symbols
+    let impact = analyzer.extraction_impact(root_id, dep_id, &symbol_ids);
+
+    let (necessary_subtree, actual_subtree, collateral_delta, summary) = if let Some(impact) = impact {
+        // Build necessary subtree from required_headers
+        let necessary_nodes = build_subtree_nodes(&impact.required_headers, true, false, &gen);
+        let necessary_edges = build_subtree_edges(&impact.required_headers, &gen);
+        let necessary_symbols: usize = impact.required_headers.iter().map(|h| h.symbol_count).sum();
+        let necessary_subtree = TraversalSubtree {
+            nodes: necessary_nodes,
+            edges: necessary_edges,
+            total_symbols: necessary_symbols,
+            file_count: impact.required_headers.len(),
+        };
+
+        // Build actual subtree from full closure of dep (excluding dep itself)
+        let dep_closure = gen.memo.strict_closure(&gen.include_graph, dep_id);
+        let actual_nodes = build_subtree_nodes_from_closure(&dep_closure, &gen, dep_id);
+        let actual_edges = build_subtree_edges_from_closure(&dep_closure, &gen);
+        let actual_symbols: usize = actual_nodes.iter().map(|n| n.symbol_count).sum();
+        let actual_subtree = TraversalSubtree {
+            nodes: actual_nodes,
+            edges: actual_edges,
+            total_symbols: actual_symbols,
+            file_count: dep_closure.len().saturating_sub(1),
+        };
+
+        // Build collateral delta from dropped_from_root
+        let delta_nodes = build_subtree_nodes(&impact.dropped_from_root, false, true, &gen);
+        let delta_edges = build_subtree_edges(&impact.dropped_from_root, &gen);
+        let delta_symbols: usize = impact.dropped_from_root.iter().map(|h| h.symbol_count).sum();
+        let collateral_delta = TraversalSubtree {
+            nodes: delta_nodes,
+            edges: delta_edges,
+            total_symbols: delta_symbols,
+            file_count: impact.dropped_from_root.len(),
+        };
+
+        // Decoy headers are in still_reachable
+        let decoy_files = impact.still_reachable.len();
+        let decoy_symbols: usize = impact.still_reachable.iter().map(|h| h.symbol_count).sum();
+
+        let summary = TraversalSummary {
+            necessary_files: necessary_subtree.file_count,
+            actual_files: actual_subtree.file_count,
+            collateral_files: collateral_delta.file_count,
+            necessary_symbols: necessary_subtree.total_symbols,
+            actual_symbols: actual_subtree.total_symbols,
+            collateral_symbols: collateral_delta.total_symbols,
+            decoy_files,
+            decoy_symbols,
+        };
+
+        (necessary_subtree, actual_subtree, collateral_delta, summary)
+    } else {
+        // No impact (e.g., root == dep or no justified symbols)
+        (
+            TraversalSubtree::empty(),
+            TraversalSubtree::empty(),
+            TraversalSubtree::empty(),
+            TraversalSummary::empty(),
+        )
+    };
+
+    let analyzed_symbol_ids: Vec<String> = symbol_ids.iter().map(|s| s.0.clone()).collect();
+
+    Ok(Json(TraversalResponse {
+        root_file_id: root_id.0.to_string(),
+        dep_file_id: dep_id.0.to_string(),
+        analyzed_symbol_ids,
+        necessary_subtree,
+        actual_subtree,
+        collateral_delta,
+        summary,
+    }))
+}
+
+// Helper functions for building subtree representations
+
+fn build_subtree_nodes(
+    headers: &[ariadne_graph::ImpactHeader],
+    is_necessary: bool,
+    is_collateral: bool,
+    gen: &crate::AnalysisGeneration,
+) -> Vec<TraversalSubtreeNode> {
+    headers
+        .iter()
+        .map(|h| {
+            let path_str = h.path.to_string_lossy().to_string();
+            let fname = h
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&path_str);
+            let kind = if fname.ends_with(".h") || fname.ends_with(".hpp") || fname.ends_with(".hxx") {
+                "HEADER"
+            } else {
+                "SOURCE"
+            };
+            TraversalSubtreeNode {
+                id: h.file_id.0.to_string(),
+                label: fname.to_string(),
+                path: path_str,
+                kind: kind.to_string(),
+                is_necessary,
+                is_collateral,
+                is_decoy: false,
+                symbol_count: h.symbol_count,
+            }
+        })
+        .collect()
+}
+
+fn build_subtree_nodes_from_closure(
+    closure: &std::collections::HashSet<ariadne_repo::FileId>,
+    gen: &crate::AnalysisGeneration,
+    exclude: ariadne_repo::FileId,
+) -> Vec<TraversalSubtreeNode> {
+    closure
+        .iter()
+        .filter(|&&id| id != exclude)
+        .filter_map(|id| gen.include_graph.file_paths.get(id).map(|p| (id, p)))
+        .map(|(id, path)| {
+            let path_str = path.to_string_lossy().to_string();
+            let fname = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&path_str);
+            let kind = if fname.ends_with(".h") || fname.ends_with(".hpp") || fname.ends_with(".hxx") {
+                "HEADER"
+            } else {
+                "SOURCE"
+            };
+            let symbol_count = gen
+                .reduced_model
+                .file_symbols
+                .get(id)
+                .map(|s| s.len())
+                .unwrap_or(0);
+            TraversalSubtreeNode {
+                id: id.0.to_string(),
+                label: fname.to_string(),
+                path: path_str,
+                kind: kind.to_string(),
+                is_necessary: false,
+                is_collateral: false,
+                is_decoy: false,
+                symbol_count,
+            }
+        })
+        .collect()
+}
+
+fn build_subtree_edges(
+    headers: &[ariadne_graph::ImpactHeader],
+    gen: &crate::AnalysisGeneration,
+) -> Vec<TraversalSubtreeEdge> {
+    let mut edges = Vec::new();
+    let header_ids: std::collections::HashSet<_> = headers.iter().map(|h| h.file_id).collect();
+    for h in headers {
+        // Find edges between headers in the set
+        let direct_includes = gen.include_graph.direct_includes(h.file_id);
+        for target in direct_includes {
+            if header_ids.contains(&target) {
+                edges.push(TraversalSubtreeEdge {
+                    source: h.file_id.0.to_string(),
+                    target: target.0.to_string(),
+                    is_necessary: true,
+                });
+            }
+        }
+    }
+    edges
+}
+
+fn build_subtree_edges_from_closure(
+    closure: &std::collections::HashSet<ariadne_repo::FileId>,
+    gen: &crate::AnalysisGeneration,
+) -> Vec<TraversalSubtreeEdge> {
+    let mut edges = Vec::new();
+    let closure_set: std::collections::HashSet<_> = closure.iter().copied().collect();
+    for &source in closure {
+        let direct_includes = gen.include_graph.direct_includes(source);
+        for target in direct_includes {
+            if closure_set.contains(&target) {
+                edges.push(TraversalSubtreeEdge {
+                    source: source.0.to_string(),
+                    target: target.0.to_string(),
+                    is_necessary: false,
+                });
+            }
+        }
+    }
+    edges
+}
+
+impl TraversalSubtree {
+    fn empty() -> Self {
+        Self {
+            nodes: vec![],
+            edges: vec![],
+            total_symbols: 0,
+            file_count: 0,
+        }
+    }
+}
+
+impl TraversalSummary {
+    fn empty() -> Self {
+        Self {
+            necessary_files: 0,
+            actual_files: 0,
+            collateral_files: 0,
+            necessary_symbols: 0,
+            actual_symbols: 0,
+            collateral_symbols: 0,
+            decoy_files: 0,
+            decoy_symbols: 0,
+        }
+    }
 }
 
 #[derive(Deserialize)]

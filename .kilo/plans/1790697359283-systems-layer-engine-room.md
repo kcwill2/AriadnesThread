@@ -1,124 +1,150 @@
-# Systems Layer — Architecture ("Engine Room") View for AriadnesThread
+# Systems Layer — Concepts, Relations & Lenses ("Engine Room") for AriadnesThread
 
-**Emphasis: smooth, intuitive, and fun user experience.** Every feature below is judged first on feel: continuous camera motion, always-know-where-you-are wayfinding, and delight animation driven by *real analysis metrics* (no fake gimmicks).
+**Emphasis: smooth, fluid, intuitive graph navigation and view-editing.** The Experience section below states the strategies and measurable gates that make this real — treat them as acceptance criteria, not aspirations.
 
-Add a zoomable architectural layer over the existing graph UI: 30,000-foot view of user-defined **components** rendered as an animated engine room, zooming down into the existing include/symbol graph and source drawer. Deep search spans symbols, files, components, and notes. Components + markdown notes are user-authored, git-tracked files; the live server can create/edit them via new POST endpoints.
+The user authors a **conceptual model** of the analyzed repo: concepts (subsystems containing components, mapped to code), relations between concepts whose *meaning the user decides*, notes, and named processes. The tool renders this as a zoomable engine room over the existing graph UI and reconciles it against real code — declared vs evidenced vs leaked. Five default **lenses** (structure, boundaries, dependency, flow, process) are configurations of one renderer; **user-defined views** are first-class saved lens configs.
 
 ## Confirmed decisions (interview)
 
-1. **Integrated semantic zoom** — same canvas/camera; Systems layer ↔ existing graph crossfade on zoom threshold / double-click; selection opens existing inspector + source drawer.
-2. **Storage**: git-tracked `architecture/` dir at the analyzed repo root (never under `artifacts/`, which is fingerprint-invalidated cache). One markdown file per component with **TOML frontmatter** (`+++` fences) + body = attached doc.
-3. **Auto-mapping v1 = heuristics only** (label-propagation communities + directory seeds). Schema leaves room for future LLM-generated suggestions; no LLM in v1.
-4. **Visuals**: engine-room language (gear glyphs, pipe edges, heat) rendered **exclusively with the existing configured token palette** (`--bg-*`, `--cyan`, `--indigo`, `--amber`, `--red`…). No new palette, no new render library.
-5. **Authoring**: in-browser via new POST endpoints; the `.md` files remain the single source of truth (read-modify-write preserves note bodies). Standalone exported HTML stays read-only.
+1. **Integrated semantic zoom** — one canvas/camera; Systems layer ↔ node graph crossfade on zoom threshold / dbl-click; selection opens existing inspector + source drawer.
+2. **Concepts, not components**: user-defined nodes mapped to code (file/symbol globs). A **subsystem is just a concept with children** (`parent =`) — composition comes from the hierarchy, not a special type.
+3. **User-defined relations**: authored concept→concept; kind = curated seed vocabulary + free text (user determines meaning); evidence reconciliation against real code edges is the Boundaries/Flow payoff.
+4. **No extractor work in v1**: derived channels consumed read-only (`includes`, semantic `Complete|Incomplete`, `calls`, `extends_edges`). Known gap, documented: C++ emits no `extends_edges` (`crates/lang-cpp/src/analyzer.rs:52`; only the Scala path fills it) — C++ `inherits` is declared-only in v1. Deriving C++ base classes or field-type composition is a separate pipeline milestone (bincode edge layout frozen, `crates/lang-api/src/types.rs:13-19`; additive parallel-channel discipline required).
+5. **Processes = named code traces**: root (entry symbol/file) + relation (calls|includes) + optional depth, saved as markdown; selecting animates a glowing thread through the concepts the trace passes. Candidates seeded from the existing `/api/graph/entrypoints`.
+6. **Heuristic suggestions v1, AI later**: include-graph community detection seeds concept suggestions; schema carries `source = heuristic | llm`.
+7. **Visuals**: engine-room language, **tokens only** — three themes exist (`themes.css`, `data-theme` dark/light/dark-steampunk); `systems.css` uses `var(--token)` exclusively so it inherits all themes; reduced-motion respected.
+8. **Authoring in-browser** via POST; git-tracked markdown is the single source of truth (read-modify-write preserves bodies). Standalone export stays read-only.
 
-## Experience contract (Smooth · Intuitive · Fun)
+## Navigation fluidity & view-editing strategies (concrete)
 
-Concrete, verifiable requirements — each maps to acceptance checks in the task list.
+### Navigation — engineering guarantees
 
-**Smooth**
-- One camera for both layers. All zoom/pan/layer changes route through a tiny `tweenCamera()` helper in `systems.js` (easeInOutCubic, 220–300 ms) — no instant jumps, ever. Wheel zoom keeps existing direct manipulation (no tween fight; tweens are for programmatic moves only).
-- Layer switch = 250 ms opacity crossfade + gear→file "unfurl": component's member nodes scale 0.9→1 with ≤50 ms stagger (cap 8 staggered, rest instant). Crossfade is one-way per gesture — no flicker on threshold hover (10 % hysteresis band on zoom scale).
-- Animate only compositor-cheap properties: `transform`, `opacity`, `stroke-dashoffset`, CSS vars. Gears spin via CSS `animation`, **zero JS timers/rAF loops for ambience**; one rAF is permitted solely inside `tweenCamera`. Animations `animation-play-state: paused` when their layer is hidden.
-- `prefers-reduced-motion: reduce` → all transitions become instant cuts, gears render static with a "static engine" badge. Target: no dropped frames with 150 gears + 400 pipes (fade gears past 150).
+- **S1 Retained-mode layers.** `graph.js` wipe-rebuilds all SVG per state change; the Systems layer must NOT copy this. `systems.js` builds its SVG once per data change; camera moves and layer crossfades only ever mutate the `viewportGroup` transform and layer `opacity`/`pointer-events`. Crossfade starts only when the target layer is `ready` (built); until then a skeleton placeholder renders — **no blank frames, ever**.
+- **S2 Camera service.** One rAF driver; primitives `focusOn(box)` / `focusNode(id)` / `setZoomAt(point, k)`, easeInOutCubic 220–300 ms, **interruptible**: a new gesture captures the current interpolated transform (never snap). Wheel zoom stays direct-manipulation (untweened) to preserve feel; tweens are for programmatic moves (dive, Esc, search-focus, gear dbl-click). 10 % zoom hysteresis around the layer threshold kills thrash.
+- **S3 Continuity invariants.** Selection id + breadcrumb survive every layer/tab switch; gear↔member correspondence is bidirectional and live: selecting a concept highlights its mapped files in the node layer, selecting a file highlights owning gears. Zoom round-trip restores camera within 2 px / 2 %.
+- **S4 Input polish.** 4 px click-vs-drag threshold; invisible hit-pad (+8 px) around gear glyphs; `pointer-events` gated by active layer; keyboard map identical on both layers: `←/→` cycle concepts, `Enter` dive, `Esc` step out, `/` search, `v` view picker, visible focus rings.
+- **S5 Perf budgets.** Ambient motion uses only `transform`/`opacity`/`stroke-dashoffset`; gears spin via CSS, single rAF (S2 only); ≤150 animated gears (past cap: static + dim, never paused-then-pop); layer transition ≤300 ms; `prefers-reduced-motion` → instant cuts, static gears + badge.
+- **S6 Unfurl & Thread moments.** Dive = target members scale 0.9→1 (≤50 ms stagger, cap 8) + one cyan `stroke-dashoffset` thread drawn (~400 ms) from gear center into the graph; gear select = 90 ms scale pulse; RPM ∝ fan-in/closure load, steam on hottest decile, ghost belts (dashed) for declared-without-evidence relations.
 
-**Intuitive**
-- Location is never ambiguous: breadcrumb extends to `Systems ▸ <Component> ▸ <File>` (reuses thread bar pattern); Esc steps *out* one level (file → component → Systems), matching existing Esc semantics.
-- Affordances telegraph: gear hover = 2 px lift + `--cyan-glow` + tooltip (name, member count, load, note-exists dot); `zoom-in` cursor + pulsing pinion-hole hint on dbl-clickability; pipes glow their source gear on component hover to show "what drives what".
-- Selection actions: with file(s) selected anywhere, an **Assign to component…** action (existing/new) appears in the inspector — no hidden gestures.
-- Empty Systems state teaches by doing: 3-step micro-guide ("select files → name it → watch it spin") + one-click **Generate starter engine from suggestions** (top suggestions, cap 10). Hooks into the existing tour/help-center welcome pattern.
-- Search groups results by type with badges `SYS | DOC | SYM | FILE`, systems/docs ranked first; quick-open covers components + notes with the same keyboard flow as files.
+### View editing — trust & fluidity model
 
-**Fun (data-driven, no gimmicks)**
-- Engine start-up: first entry into Systems ramps gear rotation 0→metric speed over ~1.2 s, once per session.
-- Gear RPM ∝ real fan-in/closure load; hottest decile puffs a few steam sprites; pipe dash-flow speed ∝ coupling edge count — the machine visibly "works harder" where the build hurts.
-- **Ariadne's Thread moment**: on zoom-into-component, one cyan thread stroke draws (~400 ms, `stroke-dashoffset`) from the clicked gear's center into the emerging file graph — the product metaphor made literal. Selecting a gear gives a 90 ms scale pulse ("clunk").
-- Out of scope: sound (browser autoplay hostility + noise), mascot, confetti.
+- **S7 Optimistic writes + one-step undo.** UI updates immediately from the POST response (no refetch round-trip); every mutation response returns `{ ok, file, prior }`; the write layer keeps the prior file content in-process and `POST /api/architecture/undo` restores it byte-exactly. Undo chip ("Concept created — Undo") for 10 s after every mutation. Deeper history is git's job — say so in UI copy; no CRDT.
+- **S8 Never author blind.** Debounced `GET /api/architecture/preview?glob=` returns match count + sample paths while the user types membership globs; the relation composer shows live evidence counts ("3 include edges / 12 calls will back this"); view parameter controls apply **live** to the canvas — "Save view" only persists what is already on screen (WYSIWYG) and is disabled when equal to the base lens.
+- **S9 Direct manipulation.** Shift-click accumulate selection → "New concept from selection"; drag a file node onto a gear = add member (drop-hover shows gear lift + `+N` badge); drag gear→gear = relation composer popover (kind chips from registry, free-text with autocomplete over in-use kinds, detail field, evidence preview); inline rename changes `name` only — `id`/slug are frozen forever (identity stability, loader-tested), so renames never break relations, notes, or processes.
+- **S10 One validation vocabulary.** The loader's validation table (unknown fields, unresolved globs, dangling relation targets, parent cycles) is the same code the POST validators and form error strings use — an error the UI can report is an error the loader can report.
+- **S11 Inspector mounting without touching graph.js.** Systems/inspector sections mount via the proven `provenance.js` pattern (`#inspLabel` mutation mount, `provenance.js:1-5`) so the frozen `graph.js` (990 lines) stays untouched beyond registration hooks.
+- **S12 Process traces computed client-side** by one BFS over payload edges (call/symbol/include as configured), used identically in live and standalone mode (payload is embedded both ways); no per-trace API. Depth default 4 (calls) / 2 (includes), cap 6.
 
-## Ground facts (verified)
+### Measurable UX acceptance (verified in Task 5–9 walkthroughs)
 
-- API is axum, currently **GET-only** (`crates/ui/src/server.rs:124-149`); assets embedded via `include_str!` (`crates/ui/src/lib.rs:9-16`), served `no-store`.
-- `SymbolId(pub String)` is a plain symbol-name string (`crates/index/src/types.rs:6`); `FileId` re-derives from a relative path (`crates/repo/src/types.rs`) → stable keys for user files.
-- No component/subsystem concept exists anywhere; no user-writable persistence today. Atomic tmp+rename write pattern to copy: `crates/scheduler/src/tu_store.rs:26-63`.
-- Server boot/watcher: `run_ui` → `build_ui_payload` → `UiState::install_analysis` generation-swap (`server.rs:102`); watcher loop in `crates/cli/src/commands/ui.rs` (`spawn_watcher`).
-- Client search is payload-local (`graph.js:794-955`, `hotspots.js:5-178`); `/api/graph/search` (`server.rs:573-666`) serves the VS Code extension.
-- Hygiene: files < 1000, functions < 100 lines. `server.rs` = 773, `graph.js` = 990 (no room), `styles.css` = 1422 (already over — do NOT grow). CI gate: `tools/hygiene_check.py`.
-- New deps needed (none in workspace): `toml`, `pulldown-cmark` — local pin in `crates/ui/Cargo.toml`, matching `regex = "1.10"` style.
-- Export payload is byte-stable with pinned LF fixtures (commit 085a74b) → payload schema changes need a fixture-regeneration commit.
+- Zoom round-trip within 2 px / 2 %; selection + breadcrumb intact after every transition; zero blank intermediate states.
+- Transition at ~60 fps on AT's own repo; ≤2 consecutive dropped frames; budgets of S5 held.
+- Every mutation reflected ≤100 ms; undo restores prior bytes in one request; failed writes roll back with the exact field-level reason.
+- Cold empty Systems view → selected concept ≤5 keystrokes; concept search ≤2 actions; glob typing → live match count within 300 ms after pause.
 
-## File formats (precise)
+## Experience language (unchanged highlights)
+
+Engine start-up ramp ~1.2 s once/session; breadcrumb `Systems ▸ <Lens> ▸ <Concept ▸ …> ▸ <File>`; gear hover = 2 px lift + `--cyan-glow` + tooltip (members, load, leak/relation counts, note dot); restore-tab convention for return paths, **no toolbar toggle buttons** (saved contract); leaks amber, boundary cycles red-glow; no sound/mascot/confetti.
+
+## Storage formats (precise)
+
+Git-tracked at the analyzed repo root (never under `artifacts/`, the fingerprint-invalidated cache):
 
 ```
-<analyzed-repo>/architecture/
-  components/<slug>.md                # slug = kebab-case; stable id = frontmatter id (default: slug)
-  symbols/<sanitized-symbol-id>.md    # optional symbol-attached notes
+architecture/
+  concepts/<slug>.md          concepts/relations (one file per concept)
+  symbols/<sanitized-id>.md   symbol-attached notes
+  processes/<slug>.md         named traces
+  views/<slug>.md             user-defined lenses
 ```
+
+Concept frontmatter (TOML in `+++` fences; body = markdown = concept doc):
 
 ```toml
 +++
-id = "ui-server"
-name = "UI Server"
-files = ["crates/ui/**", "services/gateway/*.h"]   # repo-relative paths or globs
-symbols = ["UiState", "Graph*"]                     # SymbolId-name globs
+id = "gateway"                # stable, default = slug; never rewritten by rename
+name = "API Gateway"
+parent = "edge-tier"          # optional → hierarchy (subsystems are parents)
+files = ["services/gateway/**"]            # repo-relative paths/globs → FileIds
+symbols = ["Gateway*"]                     # SymbolId-name globs (search/notes aid, not edge source)
+[[relations]]
+to = "engine"                 # unresolved → visible 'dangling' warning
+kind = "feeds"                # registry seed or free text
+detail = "pushes decoded jobs onto the queue"
+evidence = "calls"            # optional: derived channel to reconcile against
 +++
 ```
-Body = free markdown = the component's attached doc. `symbols/<id>.md` frontmatter: `symbol = "<exact SymbolId>"`; filename = SymbolId with `[^\w.-]`→`_`, `--<crc32>` suffix on clash.
 
-Semantics: components are **lenses, not partitions** — multi-membership allowed; unassigned files render dimmed. Unresolved patterns are reported, never silently dropped.
+Process: `root`, `relation = calls|includes`, optional `depth`. View: `lens = structure|boundaries|dependency|flow|process`, `level = concept|node`, `edges = declared|derived|both`, `heat = fanin|fanout|closure|collateral|crossings|none`, `filter` globs/concept-ids. Symbol-note filenames: SymbolId with `[^\w.-]`→`_`, `--<crc32>` on clash. Semantics: concepts are **lenses, not partitions** (multi-membership allowed, unmapped files dimmed); deletion re-parents children and orphans others' relations with warnings; `parent` cycle → cycle badge, no crash.
+
+## Relation-kind registry (server + UI single source)
+
+- Derived channels (read-only from artifacts): `includes`, `uses`/`refers` (Complete/Incomplete), `calls`, `inherits` (extends_edges; empty for C++ — documented gap).
+- Declared seeds (free text always allowed, autocomplete over in-use): `inherits, implements, part-of, composes, aggregates, associates` · `calls, drives, feeds, guards` · `owns, mirrors, replaces`.
+- Reconciliation per declared relation with `evidence` bound: evidenced when ≥1 derived edge of that channel crosses resolve(A)→resolve(B) **in the declared direction** (undirected channels: `includes` counted either direction); outcomes: solid pipe (declared+evidenced), ghost belt (declared, no evidence), **leak** (crossing derived edge with no declared relation either way). Registry is a const table feeding composer chips + legend.
+
+## Lenses (defaults + user views, one renderer path)
+
+| Lens | Edges | Layout/motion |
+|---|---|---|
+| Structure | `parent` hierarchy + mapping coverage | parent gear centered, children on concentric rings (deterministic angles by slug order), recursion |
+| Boundaries | derived cross-concept edges | gear graph; leaks amber, ghost belts dashed, cycle badge |
+| Dependency | concept-aggregated + existing node tabs beneath | column layout (existing) |
+| Flow | declared kinds + call evidence | directional dash-flow; pathfinder-aware |
+| Process | BFS trace closure (S12) | glowing thread on both layers; gear lit when trace touches a member |
+
+Include/Symbol/Call tabs stay as-is (Dependency lens at node level). New **Systems tab** hosts the lens picker (5 defaults + user views after a separator) and the concept↔node zoom continuum (lens config `level`). Save-current-view captures lens+params into `views/<slug>.md`.
 
 ## Server-side design
 
-New module `crates/ui/src/architecture/` (keeps `server.rs` under budget):
+New module `crates/ui/src/architecture/` (server.rs = 792 lines — routes go here):
 
-- `model.rs` — `ComponentSpec` (serde TOML), `ResolvedComponent { id, name, file_ids, symbol_ids, unresolved_patterns, stats }`, `SymbolNote`, `ArchitectureSnapshot`.
-- `loader.rs` — scan + parse (per-file isolation: broken file → `Broken` entry with parse error, rest load); resolve globs via path→FileId re-derivation; re-run on boot, analysis swap, POST, and watcher mtime.
-- `render.rs` — notes → HTML via pulldown-cmark with raw HTML disabled (repo content is untrusted in-browser; XSS test required).
-- `write.rs` — create/update/delete `.md`: read-modify-write preserving body, atomic tmp+rename (copy `tu_store`); strict slug/path validation (no `..`, no absolute, stays inside `architecture/`).
-- `routes.rs` — sub-`Router` merged in `build_router`:
-  - `GET /api/architecture` → components + suggestions + symbol notes (`note_html` + `note_markdown`, 64 KiB/note cap with `truncated` flag).
-  - `POST /api/architecture/component` (create from selection or accepted suggestion; prefills glob from LCP directory + file list)
-  - `POST /api/architecture/component/<id>/membership` | `/note` | `/delete`; `POST /api/architecture/symbol-note` (upsert).
-  - Every mutation reloads `UiState`'s `RwLock<ArchitectureSnapshot>`. Standalone export has no POST surface by construction.
-
-DTO additions ride `GraphExportPayload` with `#[serde(default)]` so standalone reports embed architecture + rendered notes (fixture-regeneration commit).
-
-Suggestions (deterministic): `crates/graph/src/community.rs` — label propagation over undirected include adjacency (seed order = FileId order, bounded iterations, stable tie-break), drop communities < 3 files; name = dominant directory prefix; score = internal-edge density. Surfaced as `suggestions[]`; "Accept" = a component POST.
-
-`/api/graph/search` extension: results may be `kind = component | note` with label + note snippet, so the extension and tests get architecture hits; unchanged behavior when `architecture/` is absent.
+- `model.rs` / `loader.rs` — parse (per-file isolation: broken → `Broken` entry, rest load), glob→FileId re-derivation, relation resolution + reconciliation, `ArchitectureSnapshot`; re-run on boot, analysis swap, POST, watcher mtime.
+- `registry.rs` — kind registry + free-text normalization (shared by composer, legend, validation).
+- `render.rs` — markdown → HTML via pulldown-cmark, raw HTML **disabled** (XSS test required).
+- `write.rs` — CRUD for all four file kinds; read-modify-write preserving bodies; atomic tmp+rename (copy `crates/scheduler/src/tu_store.rs`); strict slug/path validation (no `..`/absolute, confined); returns `prior` for undo (S7).
+- `routes.rs` — sub-Router: `GET /api/architecture`; `GET /api/architecture/preview?glob=` (S8); `POST .../concept`, `/concept/<id>/membership|note|relation|delete`, `/process`, `/view`, `/symbol-note` (+ delete variants); `POST /api/architecture/undo` (S7). Mutations reload the `RwLock<ArchitectureSnapshot>`. Standalone export has no POST surface by construction.
+- Snapshot embeds into `GraphExportPayload` with `#[serde(default)]` (pinned-Fixture regen commit; sorted-map serializer keeps byte stability).
+- Suggestions: `crates/graph/src/community.rs` — deterministic label propagation over include adjacency (FileId-order seeds, bounded, stable ties, drop <3 files), name = dominant dir prefix, cap 10, `source` field for future LLM.
+- `/api/graph/search` extension: `kind = concept|note|process|view` + snippet; identical behavior when `architecture/` absent.
+- New deps: `toml`, `pulldown-cmark` (local pin, matches `regex = "1.10"` style).
 
 ## Frontend design (crates/ui/assets)
 
-New files only (existing budget is spent):
+New files only (graph.js 990, styles.css over budget — grow neither; inspector extensions via S11):
 
-- `systems.js` — Systems layer in a second `<g>` inside `#viewportGroup`: gear glyphs (teeth ∝ members clamped, radius ∝ members, spin duration ∝ load), pipe edges aggregating inter-component includes (existing path style + dash-flow), dag-column-style layout (own copy; do not refactor graph.js at 990), `tweenCamera()` helper, threshold crossfade with hysteresis, unfurl animation, thread-draw transition, tooltips/hover states, inspector Systems section (members + jump, unresolved warnings, rendered note, edit/delete/`+file`).
-- `systems.css` — all engine-room styling + keyframes; **only `var(--token)` usage**; reduced-motion block.
-- `main.js` / `graph.js` / `hotspots.js` — minimal hooks only: mode registration, zoom-state callback, search-corpus injection (`SYS`/`DOC` entries into `compileMatcher` + quick-open). Anything beyond a hook lives in `systems.js`.
-- Register in `lib.rs` `include_str!`, `server.rs` `ui_asset` fixed routes, `index.html` tags. Return-to-Systems uses a `#systemsRestoreTab` (restore-tab convention; **no toolbar toggle buttons** — per saved contract).
+- `systems.js` — retained-mode renderer (S1), camera service (S2), unfurl/thread/pulse (S6), lens picker + live view params (S8), relation composer + drag interactions (S9), optimistic mutations + undo chip (S7), process BFS overlay (S12), concept inspector sections.
+- `systems.css` — engine-room styling/keyframes, tokens only (verified by `python tools/theme_token_check.py --check-added`), reduced-motion block.
+- `main.js` / `graph.js` / `hotspots.js` — registration hooks only: Systems tab, zoom-state callback feeding S2, search corpus (`SYS/DOC/PROC/VIEW` badges into `compileMatcher` + quick-open).
+- Register in `lib.rs` `include_str!`, asset routes, `index.html`; `#systemsRestoreTab` per convention.
 
 ## Tasks (ordered, RGB-TDD: failing test first for every Rust task)
 
-1. **Loader + model** (ui): fixtures in `crates/ui/tests/` — frontmatter parse, id/slug defaults, multi-membership, glob→FileId resolution, unresolved reporting, broken-file isolation, missing dir → empty snapshot, symbol-note filename sanitize + collision. Red → `model.rs`/`loader.rs` + `toml` dep → Green.
-2. **Community detection** (graph): `crates/graph/tests/community_proposal.rs` — two cliques + bridge → correct split; determinism (byte-identical repeat); min-size filter; disconnected input. Implement `community.rs`.
-3. **Snapshot DTO + boot wiring + GET route**: contract test (shape, truncation cap, XSS escaped — no HTML passthrough); `UiState` wiring + re-resolve on swap/watcher; export embedding with `#[serde(default)]` back-compat; regenerate pinned export fixture (separate commit).
-4. **Systems layer rendering + motion core**: `systems.js`/`systems.css` — camera tween helper, gear/pipe rendering, layout, heat mapping, crossfade + hysteresis, engine start-up, thread-draw, unfurl, reduced-motion. **UX acceptance:** zoom round-trip feels continuous on AT's own repo; no jank with fixture-scale graphs; reduced-motion = instant, static.
-5. **Wayfinding + component scoping**: breadcrumb levels + Esc step-out, dbl-click → existing include graph filtered to component files + ghosted 1-hop externals, restore tab, inspector Systems section + note panel + gear hover tooltip/lift/pulse. **UX acceptance:** user can state their location at all times mid-navigation; each transition has an obvious back path.
-6. **Search integration**: client corpus + badges + grouped results + quick-open; server-route tests (component hit, note snippet hit, regression parity, absent-dir parity). **UX acceptance:** typing a component name reaches it in ≤2 actions.
-7. **Write endpoints + authoring flows**: `architecture_write.rs` tests (create, membership add/remove, note save preserves untouched body, delete, traversal/absolute/slug rejection); UI: "Create component from selection", "Accept suggestion", empty-state 3-step guide + "Generate starter engine", note edit textarea + save. **UX acceptance:** first component exists within 3 clicks from a cold empty Systems view.
-8. **Hygiene + sweep**: `cargo test`; `cargo clippy` warning-free baseline; `python tools/hygiene_check.py` (allow-list only if fixtures demand); UI empty-state text notes `architecture/` is meant to be committed.
+1. **Model + loader** (ui): fixtures — concepts (tree, globs→FileIds, multi-membership, unresolved/dangling/broken isolation, parent cycle, rename keeps id, missing dir → empty), processes, views, symbol-note sanitize/collision, validation table exported for reuse (S10). `toml` dep.
+2. **Registry + reconciliation** (ui): directed/undirected crossing rules per channel; solid/ghost/leak classification incl. C++-no-inherits; free-text normalization.
+3. **Snapshot DTO + GET + preview + boot/watcher wiring + export embed**: contract tests (shape, 64 KiB note cap + `truncated`, XSS inert, glob preview), serde-default back-compat; pinned export fixture regen in its own commit.
+4. **Community suggestions** (graph): cliques+bridge split, byte-deterministic, min-size, disconnected.
+5. **Camera service + retained-mode renderer** (`systems.js`): S1–S6 mechanics (tween capture, hysteresis, readiness gating, hit-pads, keyboard map, budgets) + Structure and concept-Dependency lenses. **UX gate:** acceptance list items 1–2 on AT's own repo.
+6. **Boundaries + Flow + Process lenses + lens picker + live view params** (S8 WYSIWYG save). **UX gate:** leak count in ≤2 actions; process thread visible on both layers.
+7. **Wayfinding + concept inspector**: breadcrumb, Esc step-out, concept dive scoping (files + ghosted 1-hop externals), restore tab, gear↔file highlight correspondence (S3), hover affordances. **UX gate:** location assertable at every step; round-trip camera within budget.
+8. **Search**: client corpus + badges + quick-open; route tests (concept/note/process hits, regression parity, absent-dir parity). **UX gate:** ≤2 actions; `SYS/DOC/PROC/VIEW` grouping.
+9. **Write path + authoring flows**: tests — CRUD all four file kinds, body preservation, prior/undo byte-exact, traversal/slug rejection, preview endpoint; UI — optimistic mutations, undo chips, shift-select concept creation, file→gear drop membership (live `+N`), gear→gear relation composer with evidence preview, empty-state 3-step guide + "Generate starter from suggestions", note editor. **UX gate:** cold empty → subsystem+2 concepts+1 relation ≤8 clicks; mutation visible ≤100 ms; S9 keyboard path ≤5 keystrokes.
+10. **Hygiene + validation sweep**: `cargo test`; `cargo clippy` warning-free; `hygiene_check.py`; `theme_token_check.py`; Systems-layer manual pass in all three themes (steampunk showcase, light-theme steam/glow contrast); UI copy notes `architecture/` is meant to be committed.
 
 ## Risks / edge cases
 
-- **Stale membership after refactor**: paths are keys → renamed files surface as visible unresolved-pattern warnings, never silent loss.
-- **Payload growth in exports**: per-note 64 KiB cap + sorted-map serializer keeps byte-stability; fixture update commit.
-- **Write races** (user edits while server POSTs): read-modify-write + atomic rename; last-writer-wins acceptable v1 (documented).
-- **XSS**: notes untrusted → server-rendered with HTML disabled; UI inserts only renderer output.
-- **Cycle-heavy repos**: label propagation may yield one mega-community; min-size + suggestion cap 10; hand-authoring always available.
-- **Camera conflict (two layers, one viewportGroup)**: pointer-events toggled by active mode; hysteresis prevents threshold thrash.
+- Renamed files → visible unresolved-glob warnings, never silent loss; dangling relation targets and orphaned relations surfaced (S10).
+- Export payload growth → 64 KiB/note cap + byte-stable fixture regen commit.
+- Write races → read-modify-write + atomic rename; one-step in-process undo is best-effort (lost on server restart — UI says "Undo unavailable after restart"); deeper history = git.
+- XSS → server-rendered, HTML disabled; UI inserts only renderer output.
+- Mega-community repos → suggestion cap 10 + hand-authoring path.
+- Two layers one viewportGroup → readiness gating + pointer-events by active mode; hysteresis.
+- Optimistic-write divergence (watcher reload lands during a pending POST) → reload preserves the last mutation's `prior` and merges by file mtime; mutation response carries post-write mtime to reconcile.
 
 ## Out of scope (v1)
 
-LLM-assisted mapping (`suggestions[].source = heuristic | llm` reserved); VS Code extension surfaces (server route already provides hits); freeform diagram canvas; sound/mascot/confetti; light-theme palette work (owned by the pending token-sweep plan — `systems.css` inherits it for free by consuming only tokens).
+Extractor changes (C++ extends, field composition) — separate pipeline milestone; LLM assistance (`source` reserved); VS Code extension surfaces; freeform diagram canvas; runtime/OS process semantics; sound; multi-step undo history (git covers).
 
 ## Validation summary
 
-`cargo test` green; `cargo clippy` warning-free; `python tools/hygiene_check.py` passes; tests in `crates/ui/tests/architecture_*.rs` + `crates/graph/tests/community_proposal.rs`. Manual UX walkthrough on AT's own repo: seed 3–4 components via the empty-state guide, then — zoom round-trip continuous and jank-free; breadcrumb/Esc always locates; search finds a component in ≤2 actions; note renders (and a `<script>` probe stays inert); create-from-selection round-trips to disk byte-sensibly; standalone `--export` boots offline with read-only Systems layer; reduced-motion path fully usable.
+`cargo test` green; `cargo clippy` warning-free; `hygiene_check.py` + `theme_token_check.py` pass; tests in `crates/ui/tests/architecture_*.rs`, `crates/graph/tests/community_proposal.rs`. Manual walkthrough on AT's own repo in all three themes executing every **UX gate** above; solid/ghost/leak verified against real include/call crossings; `<script>` note probe inert; `--export` standalone boots offline read-only with working process overlays; reduced-motion path fully usable.

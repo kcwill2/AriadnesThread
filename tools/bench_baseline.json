@@ -1,22 +1,22 @@
 {
   "Windows-AMD64-AMD64_Family_26_Model_68_Stepping_0_AuthenticAMD": {
     "phases": {
-      "OptimizationPlanner::plan() facts+closures": 1451.0,
-      "build_file_justification_with_memo": 8807.2,
-      "build_include_elements": 54.9,
+      "OptimizationPlanner::plan() facts+closures": 1651.2,
+      "build_file_justification_with_memo": 8482.0,
+      "build_include_elements": 63.0,
       "conservative filter pass": 0.0,
-      "ensure_load total": 14413.0,
-      "file_pass (event span)": 312.5,
-      "generate_report+detect_cycles (combined)": 75.0,
-      "get_or_build_include_graph clone (cold)": 1.2,
-      "get_or_build_include_graph clone (warm)": 1.2,
+      "ensure_load total": 4573.0,
+      "file_pass (event span)": 612.1,
+      "generate_report+detect_cycles (combined)": 81.2,
+      "get_or_build_include_graph clone (cold)": 1.3,
+      "get_or_build_include_graph clone (warm)": 1.0,
       "get_or_build_load hand-out (cold)": 0.0,
       "get_or_build_load hand-out (warm)": 0.0,
-      "path_to_id+file_collateral maps (combined)": 173.2,
-      "save_load_artifacts+cache (combined)": 12825.1,
-      "symbol_pass+prep (combined, <= first event)": 1276.4
+      "path_to_id+file_collateral maps (combined)": 172.0,
+      "save_load_artifacts+cache (combined)": 2375.4,
+      "symbol_pass+prep (combined, <= first event)": 1585.6
     },
-    "recorded": "2026-10-01",
+    "recorded": "2026-10-07",
     "runs": 3
   }
 }

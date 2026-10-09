@@ -1,7 +1,7 @@
 use crate::dto::GraphExportPayload;
 use crate::{
-API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, PREVIEW_JS, PROVENANCE_JS,
-    STYLES_CSS, THEMES_CSS, THEME_JS,
+    API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, PREVIEW_JS, PROVENANCE_JS,
+    STYLES_CSS, THEMES_CSS, THEME_JS, TRAVERSAL_JS,
 };
 use std::borrow::Cow;
 
@@ -23,6 +23,7 @@ fn standalone_template() -> String {
     for (name, js) in [
         ("api.js", API_JS),
         ("graph.js", GRAPH_JS),
+        ("traversal.js", TRAVERSAL_JS),
         ("file-view.js", FILE_VIEW_JS),
         ("hotspots.js", HOTSPOTS_JS),
         ("preview.js", PREVIEW_JS),

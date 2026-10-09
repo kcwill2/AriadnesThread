@@ -13,6 +13,7 @@ pub const API_JS: &str = include_str!("../assets/api.js");
 pub const GRAPH_JS: &str = include_str!("../assets/graph.js");
 pub const FILE_VIEW_JS: &str = include_str!("../assets/file-view.js");
 pub const HOTSPOTS_JS: &str = include_str!("../assets/hotspots.js");
+pub const TRAVERSAL_JS: &str = include_str!("../assets/traversal.js");
 pub const PREVIEW_JS: &str = include_str!("../assets/preview.js");
 pub const PROVENANCE_JS: &str = include_str!("../assets/provenance.js");
 pub const MAIN_JS: &str = include_str!("../assets/main.js");

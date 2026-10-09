@@ -270,6 +270,10 @@
         if (metric === 'burden') tip = e.affected + ' file(s) pay ' + e.value + ' symbols';
         else if (metric === 'cycle') tip = e.node.in_degree + ' in / ' + e.node.out_degree + ' out';
         const active = e.node.id === selectedNodeId ? ' active' : '';
+        const hasOutgoing = (e.node.out_degree || 0) > 0;
+        const traversalBtn = hasOutgoing
+          ? `<button class="hotspot-traversal-btn" onclick="event.stopPropagation(); openTraversalForRoot('${e.node.id}')" title="Open Traversal view for this root">🔍 Traversal</button>`
+          : '';
         return `
           <div class="hotspot-row${active}" onclick="selectHotspotRow('${e.node.id}')" title="${escapeHtml(tip)}">
             <span class="hotspot-rank">${i + 1}</span>
@@ -277,6 +281,7 @@
             <span class="hotspot-val">${e.value}</span>
             <span class="hotspot-path">${escapeHtml(e.node.path || '')}</span>
             <span class="hotspot-bar"><span class="hotspot-bar-fill" style="width:${pct}%;"></span></span>
+            ${traversalBtn}
           </div>
         `;
       }).join('');
@@ -608,3 +613,20 @@
     document.addEventListener('click', e => {
       if (qoOpen && !e.target.closest('.search-wrap')) closeQuickOpen();
     });
+
+    // Open Traversal tab for a specific root file (called from hotspot row button)
+    function openTraversalForRoot(rootId) {
+      switchTab('traversal');
+      // Wait for traversal panel to initialize, then set the root select
+      const waitForInit = () => {
+        const rootSelect = document.getElementById('traversalRootSelect');
+        const depSearch = document.getElementById('traversalDepSearch');
+        if (rootSelect && depSearch) {
+          rootSelect.value = rootId;
+          loadTraversalForRoot();
+        } else {
+          setTimeout(waitForInit, 30);
+        }
+      };
+      setTimeout(waitForInit, 50);
+    }

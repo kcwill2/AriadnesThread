@@ -69,6 +69,12 @@
         </svg>
         Call Graph
       </button>
+      <button class="tab-btn" id="tabTraversal" onclick="switchTab('traversal')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h16V6H4zm2 2h12v2H6V8zm0 3h12v2H6v-2zm0 3h12v2H6v-2z"/>
+        </svg>
+        Traversal
+      </button>
     </div>
 
     <!-- ACTIONS -->
@@ -284,7 +290,7 @@
       <button class="panel-restore-tab panel-restore-tab-left" id="hotspotRestoreTab" onclick="openHotspots()" hidden>Hotspots</button>
     </div>
 
-    <!-- INSPECTOR SIDEBAR -->
+    <!-- RIGHT SIDEBAR — Inspector by default, Traversal replaces it when active -->
     <aside class="inspector" id="inspectorPanel">
       <div class="inspector-head">
         <h4>
@@ -292,7 +298,7 @@
           Node Inspector
         </h4>
         <span class="tag-pill" id="inspKind">NODE</span>
-        <button class="inspector-collapse" title="Collapse panel" onclick="toggleInspector()">&#10005;</button>
+        <button class="inspector-collapse" title="Collapse panel" onclick="collapseInspector()">&#10005;</button>
       </div>
 
       <div class="inspector-body">
@@ -374,6 +380,29 @@
         </div>
       </div>
     </aside>
+
+    <!-- TRAVERSAL PANEL (replaces inspector when active) -->
+    <div class="traversal-panel" id="traversalPanel" style="display:none;">
+      <div class="traversal-head">
+        <span class="traversal-title">&#128279; Collateral Traversal</span>
+        <button class="traversal-close" onclick="closeTraversal()" title="Close">&#10005;</button>
+      </div>
+      <div class="traversal-root-select">
+        <label>Root file: </label>
+        <select id="traversalRootSelect" class="select-dark" onchange="loadTraversalForRoot()" style="font-size:11px; padding:2px 4px; flex:1;"></select>
+      </div>
+      <div class="traversal-dep-select">
+        <label>Dependency: </label>
+        <select id="traversalDepSelect" class="select-dark" onchange="loadTraversalDetail()" style="font-size:11px; padding:2px 4px; flex:1;"></select>
+      </div>
+      <div class="traversal-symbol-select">
+        <label>Symbols: </label>
+        <select id="traversalSymbolSelect" class="select-dark" multiple onchange="loadTraversalDetail()" style="font-size:11px; padding:2px 4px; flex:1; min-height:60px;"></select>
+        <span class="traversal-symbol-hint" style="font-size:10px;color:var(--text-muted);">Select symbols to analyze (default: all)</span>
+      </div>
+      <div class="traversal-summary" id="traversalSummary"></div>
+      <div class="traversal-subtrees" id="traversalSubtrees"></div>
+    </div>
 
     <!-- SOURCE CODE PANEL (right side, collapsible & resizable) -->
     <div class="drawer" id="sourceDrawer">
@@ -562,6 +591,7 @@ Cycle participation keeps your current Direction.</li>
   <!-- CORE APPLICATION LOGIC -->
   <script src="/app/api.js"></script>
   <script src="/app/graph.js"></script>
+  <script src="/app/traversal.js"></script>
   <script src="/app/file-view.js"></script>
   <script src="/app/hotspots.js"></script>
   <script src="/app/preview.js"></script>
