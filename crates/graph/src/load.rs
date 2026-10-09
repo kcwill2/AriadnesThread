@@ -216,16 +216,25 @@ impl<'a> LoadAnalyzer<'a> {
         Arc::clone(&self.memo)
     }
 
-    fn find_symbol_id(&self, symbol_name_or_id: &str) -> Option<SymbolId> {
-        if let Some((k, _)) = self
-            .model
+    /// Resolves a symbol NAME or id STRING to its `SymbolId`: a query
+    /// matches either the BTreeMap key's string (`id.0`) or the record's
+    /// `name` field, first match in ascending key order wins. This is the
+    /// O(S) string scan the audit (P1 part 1) flags; kept verbatim for the
+    /// legacy name entry so its public behavior is byte-identical. Callers
+    /// that already hold ids should use `analyze_symbol_load_by_id` and
+    /// skip this resolution entirely.
+    pub fn symbol_id_by_name(&self, symbol_name_or_id: &str) -> Option<SymbolId> {
+        self.model
             .symbols
             .iter()
             .find(|(k, v)| k.0 == symbol_name_or_id || v.name == symbol_name_or_id)
-        {
-            return Some(k.clone());
-        }
-        None
+            .map(|(k, _)| k.clone())
+    }
+
+    /// Private alias kept for the `load_explain` child module (out of
+    /// AR-07's touch-set); delegates to the public helper verbatim.
+    fn find_symbol_id(&self, symbol_name_or_id: &str) -> Option<SymbolId> {
+        self.symbol_id_by_name(symbol_name_or_id)
     }
 
     /// Renders the file name for a graph file id, falling back to the
@@ -547,16 +556,30 @@ impl<'a> LoadAnalyzer<'a> {
         })
     }
 
+    /// Name entry: resolve via `symbol_id_by_name`, then delegate. Zero
+    /// behavior change — the metric body lives in `analyze_symbol_load_by_id`
+    /// alone, so the two entries can never drift (mirrors the
+    /// `analyze_file_load` / `analyze_file_load_by_id` precedent).
     pub fn analyze_symbol_load(&self, symbol_name_or_id: &str) -> Result<LoadMetric> {
         let sym_id = self
             .find_symbol_id(symbol_name_or_id)
             .ok_or_else(|| anyhow!("Symbol not found: {}", symbol_name_or_id))?;
+        self.analyze_symbol_load_by_id(&sym_id)
+    }
 
+    /// Symbol load from a pre-resolved `SymbolId`: skips the O(S)
+    /// `symbol_id_by_name` string scan that the name entry pays per call —
+    /// the pipeline's per-symbol pass (the AR-08 consumer of this seam)
+    /// already holds the ids it is iterating. An id unregistered in
+    /// `model.symbols` errors; a registered record without a defining file
+    /// errors with the same `"No defining file for symbol"` message the
+    /// name entry has always produced.
+    pub fn analyze_symbol_load_by_id(&self, symbol_id: &SymbolId) -> Result<LoadMetric> {
         let record = self
             .model
             .symbols
-            .get(&sym_id)
-            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_name_or_id))?;
+            .get(symbol_id)
+            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_id.0))?;
         let def_file = record
             .defining_file
             .ok_or_else(|| anyhow!("No defining file for symbol"))?;
@@ -566,7 +589,9 @@ impl<'a> LoadAnalyzer<'a> {
         // pipeline's per-symbol pass calls this once per symbol, and
         // cloning the whole closure set per call was the dominant
         // cache-hit cost the Arc memo exists to remove.
-        let semantic_closure = self.memo.cached_single_seed_closure(self.model, &sym_id);
+        let semantic_closure = self
+            .memo
+            .cached_single_seed_closure(self.model, symbol_id);
 
         let mut def_files = HashSet::new();
         def_files.insert(def_file);
@@ -671,3 +696,160 @@ mod memo_perf;
 #[cfg(test)]
 #[path = "load_vocabulary_tests.rs"]
 mod vocabulary;
+
+/// AR-07 by-id suite: locks the `analyze_symbol_load_by_id` /
+/// `symbol_id_by_name` seam (audit P1 part 1) — parity with the name entry,
+/// resolution semantics (id-string OR record-name match), and the exact
+/// error strings of every miss path. Inline (not a sibling `#[path]` file)
+/// because the AR-07 touch-set scopes new files to `load.rs` +
+/// `crates/graph/tests/**`.
+#[cfg(test)]
+mod symbol_load_by_id {
+    use super::*;
+    use crate::reduced::ReducedSymbolRecord;
+    use crate::types::{IncludeEdge, IncludeKind, LanguageId, SourceLocation};
+    use ariadne_index::types::SymbolKind;
+    use std::collections::BTreeMap;
+
+    /// Thing.h -> graphics.h -> HugeThirdParty.h with one symbol in Thing.h
+    /// (whose record name deliberately differs from its id string, locking
+    /// the dual-match of the resolution helper) and one collateral symbol in
+    /// HugeThirdParty.h. Mirrors the characterization fixture shape.
+    fn fixture() -> (IncludeGraph, ReducedSemanticModel) {
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(1), PathBuf::from("Thing.h"));
+        ig.register_file(FileId(2), PathBuf::from("graphics.h"));
+        ig.register_file(FileId(3), PathBuf::from("HugeThirdParty.h"));
+        ig.add_edge(IncludeEdge {
+            source: FileId(1),
+            destination: Some(FileId(2)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "graphics.h".to_string(),
+            resolved_path: Some(PathBuf::from("graphics.h")),
+            language: LanguageId::cpp(),
+        });
+        ig.add_edge(IncludeEdge {
+            source: FileId(2),
+            destination: Some(FileId(3)),
+            context_name: "".to_string(),
+            source_location: SourceLocation::new(1, 1),
+            kind: IncludeKind::Local,
+            raw_path: "HugeThirdParty.h".to_string(),
+            resolved_path: Some(PathBuf::from("HugeThirdParty.h")),
+            language: LanguageId::cpp(),
+        });
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
+        };
+
+        let thing_id = SymbolId::new("ns::Thing");
+        model.symbols.insert(
+            thing_id.clone(),
+            ReducedSymbolRecord {
+                id: thing_id.clone(),
+                name: "Thing".to_string(),
+                kind: SymbolKind::Class,
+                defining_file: Some(FileId(1)),
+                declarations: vec![],
+                definition: None,
+                declaring_files: vec![],
+            },
+        );
+        model.file_symbols.insert(FileId(1), vec![thing_id]);
+
+        let ghost_id = SymbolId::new("Ghost");
+        model.symbols.insert(
+            ghost_id.clone(),
+            ReducedSymbolRecord {
+                id: ghost_id,
+                name: "Ghost".to_string(),
+                kind: SymbolKind::Function,
+                defining_file: None,
+                declarations: vec![],
+                definition: None,
+                declaring_files: vec![],
+            },
+        );
+
+        (ig, model)
+    }
+
+    #[test]
+    fn by_id_entry_returns_the_identical_metric_as_the_name_entry() {
+        let (ig, model) = fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        let resolved = analyzer
+            .symbol_id_by_name("Thing")
+            .expect("fixture symbol resolvable by record name");
+
+        let by_id = analyzer
+            .analyze_symbol_load_by_id(&resolved)
+            .expect("by-id analysis failed");
+        let by_name = analyzer
+            .analyze_symbol_load("Thing")
+            .expect("name analysis failed");
+        assert_eq!(by_id, by_name);
+        assert_eq!(by_id.target_name, "Thing");
+        assert_eq!(by_id.target_file, Some(PathBuf::from("Thing.h")));
+    }
+
+    #[test]
+    fn resolution_helper_matches_id_string_or_record_name_and_misses_are_none() {
+        let (ig, model) = fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let by_record_name = analyzer
+            .symbol_id_by_name("Thing")
+            .expect("record-name match");
+        let by_id_string = analyzer
+            .symbol_id_by_name("ns::Thing")
+            .expect("id-string match");
+        assert_eq!(by_record_name, by_id_string);
+        assert_eq!(by_record_name, SymbolId::new("ns::Thing"));
+        assert_eq!(analyzer.symbol_id_by_name("Absent"), None);
+    }
+
+    #[test]
+    fn name_entry_locks_unknown_symbol_error_string() {
+        let (ig, model) = fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        let error = analyzer
+            .analyze_symbol_load("Absent")
+            .expect_err("unknown name must error");
+        assert_eq!(error.to_string(), "Symbol not found: Absent");
+    }
+
+    #[test]
+    fn by_id_entry_locks_unregistered_id_error_string() {
+        let (ig, model) = fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        let error = analyzer
+            .analyze_symbol_load_by_id(&SymbolId::new("Absent"))
+            .expect_err("unregistered id must error");
+        assert_eq!(error.to_string(), "Symbol record not found for: Absent");
+    }
+
+    #[test]
+    fn by_id_entry_locks_missing_defining_file_error_and_parities_with_name_entry() {
+        let (ig, model) = fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        let error = analyzer
+            .analyze_symbol_load_by_id(&SymbolId::new("Ghost"))
+            .expect_err("record without defining file must error");
+        assert_eq!(error.to_string(), "No defining file for symbol");
+
+        let name_error = analyzer
+            .analyze_symbol_load("Ghost")
+            .expect_err("name entry agrees on the same miss");
+        assert_eq!(name_error.to_string(), error.to_string());
+    }
+}
