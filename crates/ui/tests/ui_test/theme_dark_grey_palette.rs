@@ -1,11 +1,19 @@
 // Dark-grey palette oracles (shape 1791105717628, invariants I5-I8): the
 // fourth theme's mirror order, semantic-layer byte-equality with the default
 // block, achromatic neutral chrome, and the repo's first numeric WCAG
-// contrast floors (grey-only to start). The private parsing helpers are
-// COPIED from theme_contract.rs on purpose: that file is held byte-identical
-// apart from its sanctioned export-assertion extension (handoff touch-set).
+// contrast floors (grey-only to start). Shared parsing helpers and the WCAG
+// math come from crate::common (T-A review rider findings 2-3); the
+// NEUTRALITY scanners stay here on purpose: hex_channel_runs SKIPS
+// malformed runs and treats 4/8-digit alphas as exempt, and
+// rgba_channel_runs ignores alpha - the achromatic bound must judge live
+// declarations leniently, the opposite contract from the extraction
+// oracle's panic-on-malformed first_color_run, so the two parsers stay
+// per-module.
 
-use crate::common::strip_css_comments;
+use crate::common::{
+    channels_scaled, contrast_ratio, css_block_body, declared_value, nibble_pair,
+    strip_css_comments, theme_registry,
+};
 
 const GREY_SELECTOR: &str = "[data-theme=\"dark-grey\"]";
 const DEFAULT_SELECTOR: &str = ":root:not([data-theme])";
@@ -42,63 +50,6 @@ const CHROME_TOKENS: &[&str] = &[
     "--tile-bg", "--progress-track", "--edge-neutral", "--edge-incomplete",
     "--code-text",
 ];
-
-/// Parse `const <NAME> = ['a', 'b', ...]` from theme.js. Copied from
-/// theme_contract.rs: the registry is parsed, never hardcoded, so this file
-/// cannot drift from the surface it locks.
-fn parse_js_string_array(js: &str, name: &str) -> Vec<String> {
-    let marker = format!("const {name} = [");
-    let at = js.find(&marker).unwrap_or_else(|| {
-        panic!("theme.js must declare `const {name} = [...]` as the single source of truth")
-    });
-    let rest = &js[at + marker.len()..];
-    let close = rest
-        .find(']')
-        .unwrap_or_else(|| panic!("`const {name}` array must close"));
-    rest[..close]
-        .split(',')
-        .map(|item| item.trim().trim_matches('\'').trim_matches('"').to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn theme_registry() -> Vec<String> {
-    let themes = parse_js_string_array(ariadne_ui::THEME_JS, "THEMES");
-    assert!(!themes.is_empty(), "THEMES must list at least one theme");
-    themes
-}
-
-/// Body text (inside the braces) of the first block whose selector contains
-/// `selector`. Copied from theme_contract.rs; comments must already be
-/// stripped by the caller so a commented fake selector cannot hijack the
-/// search.
-fn css_block_body<'a>(css: &'a str, selector: &str) -> &'a str {
-    let at = css
-        .find(selector)
-        .unwrap_or_else(|| panic!("themes.css must contain a block for {selector}"));
-    let open = at + css[at..].find('{').expect("block must open with {");
-    let close = open + css[open..].find('}').expect("block must close with }");
-    &css[open + 1..close]
-}
-
-/// The declared value of `token` in a block body, trimmed of whitespace and
-/// the trailing semicolon: the byte string compared by the I6 oracle.
-fn declared_value(block: &str, token: &str) -> String {
-    for line in block.lines() {
-        if let Some((name, value)) = line.trim().split_once(':') {
-            if name.trim() == token {
-                return value.trim().trim_end_matches(';').trim().to_string();
-            }
-        }
-    }
-    panic!("token {token} must be declared in the theme block")
-}
-
-fn nibble_pair(high: char, low: char) -> u8 {
-    let high_digit = high.to_digit(16).expect("first hex digit");
-    let low_digit = low.to_digit(16).expect("second hex digit");
-    (high_digit * 16 + low_digit) as u8
-}
 
 /// Every '#' run of exactly 3/4/6/8 hex digits in a value, reduced to its
 /// r,g,b channels (short forms expand; 4/8-digit alphas are trailing and
@@ -157,31 +108,10 @@ fn rgba_channel_runs(value: &str) -> Vec<(i64, i64, i64)> {
     runs
 }
 
-/// WCAG relative luminance: linearize each sRGB channel, then weight.
-fn relative_luminance(channels: (u8, u8, u8)) -> f64 {
-    let linearize = |byte: u8| -> f64 {
-        let scaled = byte as f64 / 255.0;
-        if scaled <= 0.04045 {
-            scaled / 12.92
-        } else {
-            ((scaled + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linearize(channels.0) + 0.7152 * linearize(channels.1) + 0.0722 * linearize(channels.2)
-}
-
-/// WCAG contrast ratio between two opaque colors, lighter first by
-/// construction so callers may pass either order.
-fn contrast_ratio(first: (u8, u8, u8), second: (u8, u8, u8)) -> f64 {
-    let first_lum = relative_luminance(first);
-    let second_lum = relative_luminance(second);
-    let (brighter, dimmer) = if first_lum >= second_lum {
-        (first_lum, second_lum)
-    } else {
-        (second_lum, first_lum)
-    };
-    (brighter + 0.05) / (dimmer + 0.05)
-}
+/// WCAG luminance/contrast math is the shared canonical one in
+/// crate::common (rider finding 2); 8-bit colors reach it through
+/// channels_scaled, which reproduces the byte/255.0 scaling the removed
+/// local copy applied, so every floor outcome is unchanged.
 
 /// The first hex color a token declares (all contrast-relevant tokens are
 /// opaque hexes, never rgba).
@@ -288,18 +218,27 @@ fn test_dark_grey_contrast_floors() {
     let grey = css_block_body(&css, GREY_SELECTOR);
     let text_main = first_hex(grey, "--text-main");
     for background in ["--bg-main", "--bg-canvas", "--bg-surface", "--bg-card"] {
-        let ratio = contrast_ratio(text_main, first_hex(grey, background));
+        let ratio = contrast_ratio(
+            channels_scaled(text_main),
+            channels_scaled(first_hex(grey, background)),
+        );
         assert!(
             ratio >= 7.0,
             "--text-main on {background} is {ratio:.2}:1, below the 7:1 floor"
         );
     }
-    let muted_ratio = contrast_ratio(first_hex(grey, "--text-muted"), first_hex(grey, "--bg-main"));
+    let muted_ratio = contrast_ratio(
+        channels_scaled(first_hex(grey, "--text-muted")),
+        channels_scaled(first_hex(grey, "--bg-main")),
+    );
     assert!(
         muted_ratio >= 4.5,
         "--text-muted on --bg-main is {muted_ratio:.2}:1, below the 4.5:1 floor"
     );
-    let sub_ratio = contrast_ratio(first_hex(grey, "--text-sub"), first_hex(grey, "--bg-main"));
+    let sub_ratio = contrast_ratio(
+        channels_scaled(first_hex(grey, "--text-sub")),
+        channels_scaled(first_hex(grey, "--bg-main")),
+    );
     assert!(
         sub_ratio >= 3.0,
         "--text-sub on --bg-main is {sub_ratio:.2}:1, below the 3:1 floor"
