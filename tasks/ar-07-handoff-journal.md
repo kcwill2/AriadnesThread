@@ -75,3 +75,22 @@ resolution helper, per the handoff's stated fallback.
   commits atomically with no stage-only mode, and `--all` (a superset of the
   scoped bytes) was run clean against the exact committed content.
 - `python tools/hygiene_check.py` - zero new findings from load.rs; all reported R1/R2/R3 rows are pre-existing (ui/server.rs, builder.rs, etc.).
+
+## Commit-scope incident (disclosed)
+
+- Commit `8ea8d0d` carries one foreign file: the handoff-mandated scope glob
+  `crates/graph/tests/**` swept in the AR-06 worker's UNTRACKED in-flight
+  file `crates/graph/tests/ar06_edge_dedup_test.rs` (created in this shared
+  worktree before my commit; I never read or edited it).
+- Disclosure path taken: raw `git reset`/history rewrite is permission-denied
+  by repo rules (correctly - concurrent workers are landing commits into the
+  same branch during this session), `commit_scoped.py` has no unstage mode,
+  and deleting the file would destroy another worker's WIP. So the commit
+  stands and the leak is posted to the board for main + AR-06 disposition.
+- Containment evidence: the retained full-workspace capture shows
+  `Running tests\ar06_edge_dedup_test.rs` passing with zero failed result
+  lines, so the committed bytes compile and are green; the AR-06 worker's
+  working-tree copy is untouched and future edits commit normally.
+- Gate-line provenance: all digest lines above are from my own run stdout
+  per the board ruling that `target/testrun-capture.txt` is clobbered by
+  concurrent runs.
