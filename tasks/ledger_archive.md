@@ -20,6 +20,7 @@ gates.
 | Stale UI/tool process holds `target\debug\tool.exe` (`error: failed to remove file ... Access is denied. (os error 5)`): unscoped census and bench attempts die against the normal target (testrun DRIFT exit 2 / cargo bench exit 101); clean census `1181 passed / 0 failed / 4 ignored / 85 suites` was obtained with `CARGO_TARGET_DIR` redirected to a temp dir (code-equivalent). Close the stale process before the next normal-target build, `bench_compare`, or `--baseline` run | operator environment cleanup, before next bench/census | found during ui-extraction-card-story T1 reviewer hop (verdict finding 2) |
 | M27 profile-lever landing (OPEN obligation, NOT closed by recording): DEBUG is the de-facto launch profile through EVERY documented route (AGENTS.md `cargo build` default; ui_smoke builds AND launches `target/debug`; extension docs `cargo run`) - T1a launch-profile finding verified at `42d4a6e` with E3 DEBUG proof (t0-evidence :32/:76-78); part of E1/E3 slowness was profile, not algorithm. Shipping a release-profile launch route (doc line / smoke or smoke-adjacent flag) is worth more than any plausible T3 win on current data. | named small doc/flag hop or T1b rider, before M27 closeout; RETARGETED 2026-10-05 (M28 planner registration): doc-routes half landed APPROVED at `5b517e6` (M27 T5; verdict `tasks/tu-index-hang-throughput-t5-profile-lever-verdict.md` :198 discharge-readiness - the ledger update was owed); ratified remaining half (DP-1 YES 2026-10-05: ui_smoke release route) = M28 T3 `tasks/stage5-collateral-memory-ceiling-t3-handoff.md` dispatch-ready; row stays OPEN until T3 gates APPROVED, then archived verbatim per the Archive rule | tu-index-hang-throughput T1a verdict (launch-profile record + follow-up dispositions; measurement doc sec. (c)) |
 | OPERATOR disk (2026-10-06): C: free space cannot hold an N=1280 artifact save - `There is not enough space on the disk (os error 112)` killed the release RSS curve twice at the T1 review and precluded any N=1280 witness at T2. FREE DISK BEFORE: T0b's N=1280 curve re-run, the LIVE `--bench stage5-memory` gate, and any post-fix N=1280 witness; combine with the PR-2 `--update-baseline` VERIFIED-IDLE session. (Residual: T1 reviewer's two failed-run temp dirs survive - `Remove-Item` denied to reviewers.) PARTIALLY DISCHARGED 2026-10-06: operator reports disk freed (planner relay at T0c authoring); the fresh >=16 GiB free-space witness is T0c gate 0 (handoff-encoded) - row stays OPEN until that witness lands in the measurement doc. | operator, prerequisite of T0b live duties + post-fix witnesses | M28 T1 verdict sec. 7 + finding 3; T2 verdict sec. 8 + Explicitly-NOT-run |
+| graph.js line-count budget lock `ariadne_ui::GRAPH_JS.lines().count() <= 990` hides inside the unrelatedly-named `test_extraction_impact_preview_overlay` (`static_html_sections.rs:215`): sizing greps miss it and it fired mid-hop 2026-10-08 (hotspot-canvas-direction T1; planner sizing erratum recorded in that track row; discharged via the handoff's AMENDMENT A1 one-line raise to 998). Residual: the assert-message literal still reads "(cap 990)" against the raised 998 bound - kept stale BY A1 AUTHORIZATION. Fix both: move the budget assert to a dedicated, findable lock test (or drop it in favor of the R2 hygiene gate) and correct the message, when the heat/legend extraction handoff (named in `tasks/hotspot-canvas-direction-shape.md` R1: graph.js heat/legend module extraction, planned together with the asset-roster cost) is next authored | heat/legend extraction follow-up handoff (shape R1 named) | hotspot-canvas-direction T1 implementer BLOCKER report-only observation + planner sizing erratum 2026-10-08 |
 
 The first two rows above executed by handoff C (`tasks/tool-distill-c-handoff.md`):
 `f3dc53b` (Red-gated ANSI-strip at parser entry; drift never hidden),
@@ -69,3 +70,18 @@ VERIFIED-IDLE) rides its own dated bench-baseline row and stays OUTSTANDING
 queue class (non-gate): the T1 reviewer's two failed-run temp dirs survive
 (`Remove-Item` denied to reviewers). Cited by key/title ("M28 OPERATOR
 disk"), never by row number.
+
+The graph.js line-budget-lock row (moved verbatim from the live ledger's
+deferred-findings table immediately above) is DISCHARGED 2026-10-09 by the
+ui-degree-opacity-ramp closeout, discharge landing `3c426eb` (gated APPROVED,
+verdict `tasks/ui-degree-opacity-ramp-tr-verdict.md`). Both named defects are
+fixed there: the budget assert moved out of `test_extraction_impact_preview_
+overlay` into a dedicated, findable `test_graph_js_line_budget()` cap 990, and
+the message is honest - it names its own number, retiring the stale
+"(cap 990)"-against-998 mismatch (the 998-assert removal was the only semantic
+relaxation and it LOWERS the bound; handoff C2 audit + verdict blob proof).
+The relocation held: T1 shipped graph.js 961 with the dedicated lock green, 29
+lines of headroom (`tasks/ui-degree-opacity-ramp-t1-verdict.md` own byte-level
+blob count). The heat/legend extraction handoff named in shape R1 no longer
+carries this lock duty. Cited by key/title ("graph.js line-budget lock"),
+never by row number.

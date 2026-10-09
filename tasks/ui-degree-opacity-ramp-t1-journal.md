@@ -212,3 +212,37 @@ PowerShell read-only byte-count fallback. Every expected gate ran.
   raw `git log`/`git status` (rerouted via distill), PC-4 `python -c` recipe
   raw + distill + PowerShell fallback (Read-tool line enumeration used per
   D1), one `--format=none` usage error.
+
+## Closeout (2026-10-09, closeout-only docs hop; zero code changes)
+
+- Ledger row `ui-degree-opacity-ramp` flipped to CLOSED 2026-10-09 in the
+  closeout commit: both handoffs gated APPROVED (T-R `3c426eb` + docs rider
+  `497ac61`; T1 `d97cf90` + this-file rider `7547dea`), fresh gate lines and
+  the operator-residual list carried in the row, wording per the
+  `ui-hotspot-canvas-direction` F4 precedent (that CLOSED row was read as the
+  pattern authority).
+- Deferred row "graph.js line-count budget lock hides inside
+  `test_extraction_impact_preview_overlay`" moved verbatim to
+  `tasks/ledger_archive.md` with a dated discharge note pointing at
+  `3c426eb` (lock relocated to dedicated `test_graph_js_line_budget()`,
+  honest message) - T-R verdict Follow-up 1 discharged.
+- Track docs tracked by the same commit: both verdicts + execution-results
+  (reviewer addenda committed untouched). Foreign `ui-traversal-back-button`
+  docs deliberately left untracked - that closed track's own closeout owns
+  them (T-R Finding 4 / T1 Finding 5).
+- kilo-memory mirror `ledger.milestone.ui-degree-opacity-ramp` updated to the
+  CLOSED state in the same commit (ledger authority rule).
+- Gates re-run by this hop (per handoff adjudication only hygiene/encoding
+  were required): hygiene via distiller = exit 1 carrying ONLY the inherited
+  server.rs F2 pair; `encoding_guard --all` via distiller = exit 0
+  (`--staged` not reproducible pre-commit: commit_scoped owns staging - F4
+  verdict gate-4 precedent). Test gates NOT re-run: facts adjudicated in the
+  two verdicts + execution-results.
+- Worktree census at close (pre-edit `git status --porcelain` +
+  checkpoint-guard lineage): branch `main` @ `7547dea`, zero tracked dirt,
+  no worktree ramp-owned; scan-visible untracked = exactly 5 docs (3
+  ramp-track, tracked by this flip; 2 foreign back-button, not touched).
+  Two self-removed read-only probes ran against ledger bytes (tail +
+  non-ASCII check) and left the tree clean.
+- Rider paradox (D4 precedent): this closeout commit's own hash cannot be
+  named here; the ledger CLOSED row is the authoritative record.
