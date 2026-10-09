@@ -15,6 +15,7 @@ async fn test_m17_dir_nav_markers_in_export() {
         Some(export_file.clone()),
         2,
         true,
+        None, // S6: keep the 127.0.0.1 bind default
     )
     .await;
 

@@ -14,7 +14,25 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+/// S6 (AR-02): same-origin CORS. A cross-origin request is granted only when
+/// its Origin exactly equals the scheme + Host it was sent to; every other
+/// origin gets no Access-Control-Allow-Origin header at all, so a foreign
+/// page cannot read this server's data through a browser.
+fn is_same_origin(origin: &axum::http::HeaderValue, parts: &axum::http::request::Parts) -> bool {
+    let Ok(origin_text) = origin.to_str() else {
+        return false;
+    };
+    let Some(host_text) = parts
+        .headers
+        .get(axum::http::header::HOST)
+        .and_then(|host| host.to_str().ok())
+    else {
+        return false;
+    };
+    origin_text == format!("http://{host_text}") || origin_text == format!("https://{host_text}")
+}
 
 /// Poison recovery: a poisoned lock only means some other thread already
 /// panicked while holding it; the data is still memory-consistent, so the UI
@@ -154,7 +172,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/justification", get(api_justification))
         .route("/api/source", get(api_source))
         .route("/api/export", get(api_export))
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::new().allow_origin(AllowOrigin::predicate(is_same_origin)))
         .with_state(state)
 }
 

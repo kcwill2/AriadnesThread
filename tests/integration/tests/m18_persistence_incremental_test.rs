@@ -311,7 +311,8 @@ async fn test_m18_ui_warm_start_reports_all_stages_loaded() {
 
     let repo_dir = root.clone();
     let server_task = tokio::spawn(async move {
-        let _ = ariadne_cli::run_ui(Some(repo_dir), port, true, None, 2, true).await;
+        // S6: keep the 127.0.0.1 bind default (no --expose).
+        let _ = ariadne_cli::run_ui(Some(repo_dir), port, true, None, 2, true, None).await;
     });
 
     let base = format!("http://127.0.0.1:{}", port);

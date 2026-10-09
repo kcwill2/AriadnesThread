@@ -17,7 +17,9 @@ impl LiveServer {
         let handle = tokio::spawn(async move {
             // Same entrypoint the `tool ui` binary calls: no_open=true, no export,
             // no_watch=true keeps the boot deterministic (no background rehash watcher).
-            let result = ariadne_cli::run_ui(Some(repo_root), port, true, None, 2, true).await;
+            // S6: keep the 127.0.0.1 bind default (no --expose).
+            let result =
+                ariadne_cli::run_ui(Some(repo_root), port, true, None, 2, true, None).await;
             assert!(result.is_ok(), "run_ui server errored: {:?}", result.err());
         });
         Self { handle }

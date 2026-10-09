@@ -17,6 +17,7 @@ async fn test_m15_graph_ui_command() {
         Some(export_file.clone()),
         2,
         true,
+        None, // S6: keep the 127.0.0.1 bind default
     )
     .await;
 
@@ -45,6 +46,7 @@ async fn test_m15_graph_ui_command() {
             None,
             2,
             true, // no watch: keep the test deterministic
+            None, // S6: keep the 127.0.0.1 bind default
         )
         .await;
         assert!(result.is_ok());

@@ -21,6 +21,7 @@ fn spawn_fixture_ui_server() -> (String, tokio::task::JoinHandle<()>) {
             None,
             2,
             true, // no watch
+            None, // S6: keep the 127.0.0.1 bind default
         )
         .await;
         assert!(result.is_ok());
@@ -162,6 +163,7 @@ async fn test_e2e_standalone_html_export_traversal() {
         Some(export_file.clone()),
         2,
         true,
+        None, // S6: keep the 127.0.0.1 bind default
     )
     .await;
 

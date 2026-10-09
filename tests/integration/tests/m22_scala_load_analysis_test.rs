@@ -312,7 +312,9 @@ async fn ui_nodes_carry_language_unit_kind_and_resolved_defining_file() -> Resul
     let client = reqwest::Client::new();
 
     let server = tokio::spawn(async move {
-        let result = ariadne_cli::run_ui(Some(repo.root.clone()), port, true, None, 2, true).await;
+        // S6: keep the 127.0.0.1 bind default (no --expose).
+        let result =
+            ariadne_cli::run_ui(Some(repo.root.clone()), port, true, None, 2, true, None).await;
         assert!(result.is_ok(), "run_ui server errored: {:?}", result.err());
         // `repo` (tempdir) lives as long as this future: aborting the task
         // drops it, keeping the tree alive exactly while the server runs.
