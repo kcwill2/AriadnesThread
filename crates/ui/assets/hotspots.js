@@ -333,6 +333,7 @@
       const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
       const rootLabel = rootNode ? rootNode.label : selectedNodeId;
       const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
+      const hops = computeHopDistances(selectedNodeId);
 
       nodesLayer.querySelectorAll('.node-group').forEach(el => {
         const nid = el.dataset.nodeId;
@@ -361,6 +362,7 @@
           if (verdict) appendVerdictTip(el, nodeLabel(nid), rootLabel, verdict, j);
         } else {
           el.classList.add('faded');
+          el.style.setProperty('--fade-opacity', hopFadeOpacity(hops.get(nid)));
         }
       });
 
@@ -369,6 +371,8 @@
         const dst = el.dataset.edgeTarget;
         if (dst !== selectedNodeId && !payers.has(dst)) {
           el.classList.add('faded');
+          el.style.setProperty('--edge-fade-opacity', edgeFadeOpacity(
+            Math.max(hops.get(src) ?? Infinity, hops.get(dst) ?? Infinity)));
         } else if (dst === selectedNodeId && src !== dst && !el.classList.contains('cycle-edge')) {
           const entry = just(src);
           const verdict = classifyEdgeVerdict(entry);

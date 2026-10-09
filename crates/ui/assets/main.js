@@ -355,6 +355,7 @@
           el.classList.remove('faded');
         } else {
           el.classList.add('faded');
+          el.style.removeProperty('--fade-opacity');
         }
       });
 
@@ -367,6 +368,7 @@
         } else {
           el.classList.remove('highlighted');
           el.classList.add('faded');
+          el.style.removeProperty('--edge-fade-opacity');
         }
       });
     }

@@ -435,7 +435,7 @@
     }
 
     .node-group.faded {
-      opacity: 0.12 !important;
+      opacity: var(--fade-opacity, 0.12) !important;
       filter: grayscale(80%) brightness(0.65);
       transition: opacity 0.25s ease, filter 0.25s ease;
     }
@@ -492,7 +492,7 @@
     }
 
     .edge-path.faded {
-      opacity: 0.06 !important;
+      opacity: var(--edge-fade-opacity, 0.06) !important;
     }
 
     .edge-path.cycle-edge {

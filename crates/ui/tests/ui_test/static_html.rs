@@ -152,8 +152,8 @@ fn test_ui_selected_node_focal_priority() {
 fn test_ui_noticeable_fading_elements() {
     let html = common::page_content();
 
-    assert!(html.contains(".node-group.faded") && html.contains("opacity: 0.12"));
-    assert!(html.contains(".edge-path.faded") && html.contains("opacity: 0.06"));
+    assert!(html.contains(".node-group.faded") && html.contains("--fade-opacity, 0.12")); // ramp var form; 0.12 stays the floor (T1 2026-10-09)
+    assert!(html.contains(".edge-path.faded") && html.contains("--edge-fade-opacity, 0.06")); // ramp var form; 0.06 stays the floor (T1 2026-10-09)
     assert!(html.contains(".node-group.heat-root"));
 
     // Assert INDEX_HTML contains logic applying faded to non-dependencies when a node is selected in the include graph,

@@ -383,6 +383,7 @@
         const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
         const rootLabel = rootNode ? rootNode.label : selectedNodeId;
         const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
+        const hops = computeHopDistances(selectedNodeId);
 
         nodesLayer.querySelectorAll('.node-group').forEach(el => {
           const nid = el.dataset.nodeId;
@@ -411,6 +412,7 @@
             if (verdict) appendVerdictTip(el, rootLabel, nodeLabel(nid), verdict, j);
           } else {
             el.classList.add('faded');
+            el.style.setProperty('--fade-opacity', hopFadeOpacity(hops.get(nid)));
           }
         });
 
@@ -418,6 +420,8 @@
           const src = el.dataset.edgeSource;
           if (!reachableDependencies.has(src) && src !== selectedNodeId) {
             el.classList.add('faded');
+            el.style.setProperty('--edge-fade-opacity', edgeFadeOpacity(
+              Math.max(hops.get(src) ?? Infinity, hops.get(el.dataset.edgeTarget) ?? Infinity)));
           } else if (src === selectedNodeId && !el.classList.contains('cycle-edge')) {
             // Edge verdict story: tri-color the root's direct outgoing edges.
             const dst = el.dataset.edgeTarget;
@@ -457,6 +461,54 @@
         });
       }
       return reachableDependencies;
+    }
+
+    // Hop-distance heat ramp (track ui-degree-opacity-ramp T1): per-element
+    // inline custom properties replace the flat fade for hop-reachable
+    // elements. Frozen tables: hop >= table length, Infinity, NaN or
+    // undefined resolve to the LAST entry - exactly today's flat values.
+    const HEAT_RAMP_NODE_OPACITIES = [0.85, 0.55, 0.36, 0.23, 0.15, 0.12];
+    const HEAT_RAMP_EDGE_OPACITIES = [0.3, 0.28, 0.18, 0.12, 0.08, 0.06];
+
+    // Undirected BFS hop distance from the selected node over the FULL
+    // tab dataset (never the cap/degree-filtered active view - I3). The
+    // adjacency-build idiom mirrors filterAndExpandSubgraph's (house
+    // pattern); visited-set makes it cycle-safe. Returns Map<nodeId, hop>=1>;
+    // the root is absent (it is never faded).
+    function computeHopDistances(rootId) {
+      const adjOut = {};
+      const adjIn = {};
+      tabAllNodes.forEach(n => { adjOut[n.id] = []; adjIn[n.id] = []; });
+      tabAllEdges.forEach(e => {
+        if(adjOut[e.source]) adjOut[e.source].push(e.target);
+        if(adjIn[e.target]) adjIn[e.target].push(e.source);
+      });
+      const dist = new Map();
+      const visited = new Set([rootId]);
+      const queue = [{ id: rootId, dist: 0 }];
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        const next = cur.dist + 1;
+        (adjOut[cur.id] || []).forEach(id => {
+          if (!visited.has(id)) { visited.add(id); dist.set(id, next); queue.push({ id, dist: next }); }
+        });
+        (adjIn[cur.id] || []).forEach(id => {
+          if (!visited.has(id)) { visited.add(id); dist.set(id, next); queue.push({ id, dist: next }); }
+        });
+      }
+      return dist;
+    }
+
+    function hopFadeOpacity(hop) {
+      const table = HEAT_RAMP_NODE_OPACITIES;
+      if (!(hop >= 1) || hop >= table.length) return String(table[table.length - 1]);
+      return String(table[Math.floor(hop) - 1]);
+    }
+
+    function edgeFadeOpacity(hop) {
+      const table = HEAT_RAMP_EDGE_OPACITIES;
+      if (!(hop >= 1) || hop >= table.length) return String(table[table.length - 1]);
+      return String(table[Math.floor(hop) - 1]);
     }
 
     function selectNode(id, skipFilter = false, skipCrumb = false) {
