@@ -53,6 +53,64 @@ pub struct TuCacheFingerprint {
     pub combined_hash: String,
 }
 
+/// Mixed into the context hash ONLY when context serialization fails
+/// (AR-05 / audit T2). Its presence guarantees a failed serialization can
+/// never reproduce the digest of any honestly serialized context, nor the
+/// old `unwrap_or_default()` empty-bytes digest that let every failing
+/// context share one cache identity.
+const CONTEXT_SERIALIZE_FAILURE_MARKER: &[u8] = b"ariadne:context-serialize-failure:v1";
+
+/// Process-unique salt for the serialize-failure hash: launch nanoseconds
+/// mixed with the process id, fixed for the process lifetime. Because the
+/// salt changes every process launch, a persisted entry written by a
+/// failing context can never validate in a later process - the failure
+/// degrades to a cache miss plus a warning, never a false hit on stale
+/// analysis (handoff AR-05 impact: "slower but correct").
+fn serialize_failure_salt() -> u128 {
+    static PROCESS_SALT: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *PROCESS_SALT.get_or_init(|| {
+        let launch_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let process_tag = u128::from(std::process::id()).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        launch_nanos ^ process_tag
+    })
+}
+
+/// Hash the bincode-serialized compilation context (AR-05 seam).
+///
+/// Honest path: SHA-256 of the exact bincode bytes, byte-identical to the
+/// pre-AR-05 digest (invariant lock:
+/// `honest_context_digest_is_byte_identical_to_direct_bincode_hash`).
+///
+/// Failure path: a salted sentinel hash over the failure marker, the
+/// process-unique salt, `context_description`, and the serializer error.
+/// It cannot equal the empty-bytes digest, cannot equal any honest digest,
+/// and differs across processes and across context names, so failing
+/// contexts never share a cache identity and never validate a stale entry.
+fn context_hash_of(context: &impl Serialize, context_description: &str) -> String {
+    match bincode::serialize(context) {
+        Ok(context_bytes) => format!("{:x}", Sha256::digest(&context_bytes)),
+        Err(serialization_error) => {
+            eprintln!(
+                "ariadne-index: WARNING: compilation context '{}' failed to serialize ({}); \
+                 fingerprinting it with a process-unique failure sentinel so it can never \
+                 match a cached entry",
+                context_description, serialization_error
+            );
+            let mut hasher = Sha256::new();
+            hasher.update(CONTEXT_SERIALIZE_FAILURE_MARKER);
+            hasher.update(serialize_failure_salt().to_string().as_bytes());
+            hasher.update(b"|");
+            hasher.update(context_description.as_bytes());
+            hasher.update(b"|");
+            hasher.update(serialization_error.to_string().as_bytes());
+            format!("{:x}", hasher.finalize())
+        }
+    }
+}
+
 impl TuCacheFingerprint {
     #[allow(clippy::too_many_arguments)]
     pub fn compute(
@@ -65,9 +123,7 @@ impl TuCacheFingerprint {
         language: LanguageId,
         plugin_fingerprint: &str,
     ) -> Self {
-        // Serialize context for context_hash
-        let context_str = bincode::serialize(context).unwrap_or_default();
-        let context_hash = format!("{:x}", Sha256::digest(&context_str));
+        let context_hash = context_hash_of(context, &context.name);
 
         let mut sorted_headers = headers.to_vec();
         sorted_headers.sort_by(|a, b| a.0.cmp(&b.0));
@@ -378,6 +434,84 @@ mod tests {
         assert_eq!(back.language, LanguageId::cpp());
         assert_eq!(back.plugin_fingerprint, "");
         assert_eq!(back.combined_hash, legacy.combined_hash);
+    }
+
+    // ---- AR-05 (T2 MED): fingerprint sentinel on serialize failure ----
+
+    /// SHA-256 of the empty byte string: the exact digest the vulnerable
+    /// `unwrap_or_default()` fallback fed to the hasher for every context
+    /// that failed to serialize, letting unrelated broken contexts share
+    /// one cache identity.
+    const EMPTY_BYTES_SHA256: &str =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    /// Test-only context whose `Serialize` impl always fails, injecting the
+    /// serialize-failure branch without a feature flag.
+    #[derive(Debug)]
+    struct InjectedUnserializableContext;
+
+    impl serde::Serialize for InjectedUnserializableContext {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            _serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom(
+                "injected serialize failure (AR-05 regression seam)",
+            ))
+        }
+    }
+
+    #[test]
+    fn serialize_failure_never_hashes_empty_bytes() {
+        let failed_hash = context_hash_of(&InjectedUnserializableContext, "injected-context");
+        assert_ne!(
+            failed_hash, EMPTY_BYTES_SHA256,
+            "a context that fails to serialize must not hash to the shared empty-bytes digest"
+        );
+    }
+
+    #[test]
+    fn serialize_failure_hash_is_not_a_shared_constant() {
+        // Two failing contexts with different descriptions must not land on
+        // one shared digest (the empty-bytes bug made every failure equal).
+        let alpha_hash = context_hash_of(&InjectedUnserializableContext, "context-alpha");
+        let beta_hash = context_hash_of(&InjectedUnserializableContext, "context-beta");
+        assert_ne!(
+            alpha_hash, beta_hash,
+            "distinct failing contexts must not share one failure digest"
+        );
+        assert_ne!(alpha_hash, EMPTY_BYTES_SHA256);
+        assert_ne!(beta_hash, EMPTY_BYTES_SHA256);
+    }
+
+    #[test]
+    fn serialize_failure_hash_differs_from_honest_hash() {
+        let honest_hash = context_hash_of(&create_test_context(), "test");
+        let failed_hash = context_hash_of(&InjectedUnserializableContext, "test");
+        assert_ne!(
+            honest_hash, failed_hash,
+            "a failed serialization must not be indistinguishable from an honest hash"
+        );
+    }
+
+    #[test]
+    fn honest_context_digest_is_byte_identical_to_direct_bincode_hash() {
+        // Invariant lock: honest contexts keep the exact pre-AR-05 digest.
+        let context = create_test_context();
+        let expected_hash = format!("{:x}", Sha256::digest(&bincode::serialize(&context).unwrap()));
+        assert_eq!(context_hash_of(&context, "test"), expected_hash);
+
+        let fingerprint = TuCacheFingerprint::compute(
+            CURRENT_ANALYSIS_VERSION,
+            &context,
+            &FileId::from_relative_path("src/main.cpp"),
+            "src_hash",
+            &[],
+            None,
+            LanguageId::cpp(),
+            "test-plugin",
+        );
+        assert_eq!(fingerprint.context_hash, expected_hash);
     }
 
     #[test]
