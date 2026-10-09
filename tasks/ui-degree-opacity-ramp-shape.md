@@ -274,3 +274,131 @@ the frozen tables make the numeric contract machine-checkable without a JS
 engine; everything visual rides the journal's manual-smoke lines (hotspot-
 track precedent). Reviewer hop re-runs G1-G5 unedited and enforces
 commit-vs-touch-set: exactly the six touched paths, nothing else.
+
+## Amendment 2026-10-09 (re-anchored at HEAD 20e3fb8; T-R serialization)
+
+Operator landed the traversal WIP as `20e3fb8` ("fixed traversal view").
+Verified at the committed tree (clean, up to date with origin):
+
+### State verification
+
+- `graph.js` 1051 lines > the 998 budget assert AND > the 1000 R2 wall
+  (`R2_SCANNED_SUFFIXES` includes `.js`) - base statically red on both
+  (cannot execute gates here; static falsification is exact). Stale
+  "(cap 990)" message intact at `static_html_sections.rs:216`.
+- Every ramp anchor region is BYTE-IDENTICAL to the shaping-time reads.
+  The WIP commit did not touch the heat passes, fade conditions,
+  `illuminatePath`, `findIncludePath`, or the filter/selection tail. The
+  committed degree fix attempt did NOT land in `graph.js` (tail
+  `:1014-1019` unchanged) - `ui.traversal_view_degree_setting_bug` stays
+  OPEN; distance metric stays well-defined (both passes keyed to
+  `selectedNodeId` + full `tabAllEdges`, both untouched).
+- `hotspots.js` (632 lines) inbound twin unchanged: faded branch `:362-364`,
+  edge faded `:370-371`. `styles.css` (2105 lines): `.node-group.faded`
+  `:437-441`, `.edge-path.faded` `:494-496`, `.edges-has-selection`
+  `:504-506` unchanged. `traversal.js`: no fade/opacity site (selectNode
+  calls only) - flat-fallback boundary holds.
+- `/app/traversal.js`: route at `server.rs:136`, tag at `index.html:594`,
+  locked by `theme_contract.rs:472`; **absent from `ui_smoke.py`
+  ROUTE_ASSERTIONS `:61-70`** (the "six /app/*.js" comment is stale) -
+  confirmed omission persists post-commit.
+- `main.rs` test roster grew `mod traversal_back;` (:24); the ramp mod-line
+  insertion anchor is unchanged: between `mod help_center_readability;`
+  (:11) and `mod hotspot_direction;` (:12).
+- `main.js` is 604 lines and ALREADY owns the heat/legend helper cluster
+  (`getHeatColor :91`, `classifyEdgeVerdict :110`, `verdictBadgeText :120`,
+  `appendVerdictTip :145`, `updateHeatLegend :178`, `restoreStandardLegend
+  :220`) - the extraction precedent: canvas display helpers live in main.js.
+
+### Re-anchor table (HEAD 20e3fb8; coordinates unchanged where stated)
+
+| Anchor | Coordinate | Drift |
+|---|---|---|
+| outbound heat pass (node/edge loops) | graph.js:374-443 (faded else :412-414; edge cond :419) | none |
+| inbound twin | hotspots.js:337-386 (faded :363; edge :371) | none |
+| .faded CSS rules + selection dim | styles.css:437-441 / :494-496 / :504-506 | none |
+| findIncludePath (pattern citation) | graph.js:704-720 | none pre-T-R |
+| illuminatePath (rider site) | graph.js:722-755 | none pre-T-R; moves to main.js at T-R |
+| filterAndExpandSubgraph (non-touch) | graph.js:895-1023 + tail :1014-1019 | none; bug still open |
+| budget lock | static_html_sections.rs:214-217 | none; relocated at T-R |
+| fade-literal test (ramp amendment) | static_html.rs:152-164 | none |
+| ui_smoke roster (I9 byte-lock) | tools/ui_smoke.py:58-70 | none; parity gap = R8 |
+
+### T-R - budget-relief handoff (lands FIRST; serializes before the ramp)
+
+Verbatim relocation (M18 verbatim-move precedent; reviewer proves moved
+ranges byte-equal against `git show 20e3fb8:crates/ui/assets/graph.js`) of
+two blocks out of graph.js into main.js, appended after
+`restoreStandardLegend` (~main.js:230, beside the heat-cluster siblings):
+- Block 1, heat-style cluster, graph.js:445-502 incl. leading comments:
+  `classifyDependency`, `appendVerdictSpine`, `styleDependencyCard`,
+  `verdictBadgeColor` (~58 lines). Cohesive: main.js already hosts the
+  verdict/legend neighbors; `hotspots.js` inbound twin keeps calling them
+  across files (legal - it already calls `classifyEdgeVerdict`/
+  `verdictBadgeText`/`appendVerdictTip` from main.js today).
+- Block 2, thread/path block, graph.js:671-755: `recordCrumb`,
+  `renderThreadBar`, `jumpToCrumb`, `findIncludePath`, `illuminatePath`
+  (~85 lines). main.js is the shared-globals home for chrome behavior
+  (progress/tour/help already live there); inline `onclick="jumpToCrumb()"`
+  / `onclick="illuminatePath()"` callers keep resolving (classic-script
+  globals, and every call happens post-load).
+- Lock relocation (DISCHARGES the ledger deferred row at T-R closeout):
+  remove the line-count assert from `test_extraction_impact_preview_overlay`
+  (`static_html_sections.rs:214-217`) and add a dedicated, findable
+  `#[test] fn test_graph_js_line_budget()` in the same file asserting
+  `GRAPH_JS.lines().count() <= 990` with the message matching the number
+  ("cap 990", R2 wall at 1000 named). Cap set to 990: post-T-R graph.js
+  lands ~896-910, the ramp's ~40 lines fit with ~40 headroom.
+- Declared amendments (exactly three, each with a rationale comment):
+  static_html.rs:238 `GRAPH_JS.contains("function classifyDependency(")`
+  -> MAIN_JS; static_html.rs:367 selectNode-body-slice terminator
+  `"function recordCrumb("` -> `"function clearInspector("` (the next
+  function that stays in graph.js); static_html_sections.rs:214-217 as
+  above. Everything else survives: call-site locks (`appendVerdictSpine(`,
+  `verdictBadgeColor(`, `verdictBadgeText(`, `appendVerdictTip(`,
+  `classifyEdgeVerdict(`) hit graph.js call sites that remain; page-level
+  `html.contains` locks survive cross-asset moves; negative locks stay
+  green; `hotspot_direction.rs` bodies/leads untouched;
+  `static_html.rs::test_ui_noticeable_fading_elements` untouched by T-R
+  (it is the RAMP's declared amendment, unchanged).
+- Post-T-R budget math: 1051 - ~155 moved = ~896 graph.js (implementer
+  verifies; lock tolerates <= 990). main.js ~604 + ~155 = ~759 < 1000,
+  ~240 headroom. Zero roster change (main.js already routed).
+- Produced lines ~360 (2x moved + ~20 test edits + ~14 new lock + journal),
+  ~6-7 gates - well under the sizing law.
+- Why not move the filter/search engine: it is the open degree-bug
+  territory; relocating it under the operator's next fix attempt invites
+  the collision this amendment exists to avoid.
+
+### Ramp (T1) amended anchors + placement
+
+- Full placement in graph.js now applies: ~896 + ~40 ~ 936 < 990 lock and
+  < 1000 R2. Contingency: if the post-T-R measured count is > 950, the
+  3 helpers + 2 tables (~34 lines) move to hotspots.js instead and the
+  ownership locks in `hop_fade_ramp.rs` follow (original rule, threshold
+  re-based).
+- The leak-guard rider (`removeProperty` x2) and its body-lock now anchor
+  `function illuminatePath` IN MAIN.js (post-T-R). The rider semantics are
+  unchanged (flat 0.12/0.06). `function_body`/`js_fn_body` idiom works on
+  main.js (same 4-space house style).
+- `hop_fade_ramp.rs` additionally locks (post-T-R): findIncludePath absent
+  from graph.js and present in main.js is NOT asserted (T-R's verbatim
+  proof owns that); the ramp suite keeps to its own literals.
+- New risks:
+  - R8 roster-parity gap: ui_smoke ROUTE_ASSERTIONS omit `/app/traversal.js`
+    and `/app/provenance.js`; unprobed = unenforced. Mitigation: relay row
+    to ledger (next kickoff runner owns parity; likely a tools touch, not
+    assets). Oracle: G2 byte-identical + PASS both handoffs.
+  - R9 operator may land another `graph.js` edit (degree fix) between T-R
+    and T1: anchor-match rule (kickoff PC-2) forces a before-string check
+    before any mutation; re-anchor at handoff authoring time.
+  - R10 session-start known-red: T-R starts with the budget test + R2 RED
+    (that IS its target); T1 must start on T-R's green landing commit -
+    a red base is a STOP, not background noise. Journals declare counts
+    from the first gate run (declared-red discipline, M28 T0b law).
+- Touch sets (per handoff): T-R = `graph.js`, `main.js`,
+  `static_html.rs` (2 amendments), `static_html_sections.rs` (relocation);
+  T1 = `graph.js` (or hotspots.js contingency), `hotspots.js`,
+  `styles.css`, `hop_fade_ramp.rs` (new), `main.rs` (+1 mod),
+  `static_html.rs` (the 2-line fade-literal amendment). Never parallel;
+  both touch `crates/ui/tests` - serialize strictly T-R then T1 on main.

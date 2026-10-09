@@ -167,4 +167,79 @@ landing commit.
   `tools/theme_token_baseline.json` NOT touched (golden baseline; explicit
   approval required; V2 locks it byte-identical).
 
+### Gate 9 - landing commit (invocation #13)
+
+- `python tools/commit_scoped.py --scope crates/ui/assets/graph.js --scope
+  crates/ui/assets/main.js --scope crates/ui/tests/ui_test/static_html.rs
+  --scope crates/ui/tests/ui_test/static_html_sections.rs --scope
+  crates/ui/tests/ui_test/node_verdict_spine.rs --scope crates/ui/tests/
+  ui_test/edge_verdict_story.rs --scope tasks/ui-degree-opacity-ramp-tr-
+  journal.md -m "refactor(ui): move heat-style and thread/path blocks to
+  main.js; dedicated graph.js line-budget lock"` -> commit `3c426eb`.
+- numstat: graph.js 0/142 (deletions ONLY), main.js 142/0 (insertion ONLY),
+  edge_verdict_story 1/1, node_verdict_spine 3/3, static_html 6/6 (net-zero,
+  E3), static_html_sections 16/9, journal in-set. Exactly the touch-set,
+  nothing else.
+- Gate 8 (invocation #14): `python tools/encoding_guard.py --staged` exit 0,
+  silent, over the index the scoped commit leaves behind (D6 re staging
+  order). Second `--staged` run (invocation #15) precedes the docs rider
+  commit (invocation #16: scope = the track's planning artifacts + journal
+  tail; foreign untracked `ui-traversal-back-button` docs deliberately NOT
+  committed - report-only).
+
+## Dated D-rows (2026-10-09; declared, not hidden)
+
+- D1: the handoff's verbatim-move recipe concatenates Block1+Block2 with no
+  separator, contradicting its own insertion spec (blank line between the
+  blocks at the single site); the literal joined-substring check cannot pass
+  any spec-conformant landing. Corrected oracle run: per-block byte-containment
+  + exact whole-file reconstructions (base blob + declared deletions / +
+  declared single-site insertion), all True. Worktree CRLF normalized to the
+  LF commit representation (`core.autocrlf=true`; blobs pure LF, worktree pure
+  CRLF, measured). Reviewer: re-run equivalently.
+- D2: handoff C1 insertion text lists three added blanks (143 lines) while its
+  own budget math (604+142=746, 1051-142=909) and no-double-blank rule pin a
+  142-line layout; landing follows the math; the post-state the handoff
+  itself declares is matched verbatim (seams measured). main.js = 746.
+- D3: Gate 7 base-relative added-scan == exactly the sanctioned `#8250`
+  phantom (E5/F3a). The tool also fires its base-independent frozen-count
+  scan: main.js `1 > 0` (same sanctioned entity's count twin) plus
+  index.html `6 > 4` and traversal.js `1 > 0` - inherited drift, byte-for-byte
+  present at TRACK_BASE (both files untouched here; scan reads worktree
+  only). E5's "EXACTLY ONE line" prediction predates these two; per
+  name-identity acceptance (E4 principle) they survive untouched; baseline
+  JSON is a golden fixture - not fixed here.
+- D4: RGB-Green "passed = Step 0 passed + 1" measures +2 (+220): the new
+  budget test plus the overlay test returning green BY FIX, which the same
+  acceptance paragraph demands; name-identity of the failing set holds.
+- D5: gate-count itemization - declared 9; 16 actual distilling-entry
+  invocations: 9 declared gates + hygiene exit-code probe (#3, Step 0.4
+  requires the number), refactor re-run (#6, prescribed by RGB step 3),
+  newline-style diagnostic (#10, required to run the byte proof correctly
+  under autocrlf), second encoding_guard --staged (#15, second commit), docs
+  rider commit (#16, orchestrator-dispatched planning-artifact convergence).
+  Raw `git` and direct temp-script execution are permission-denied here;
+  every git/proof observation routed through `python tools/distill.py --`.
+- D6: Gate 8's "--staged before committing" is unexecutable before the FIRST
+  commit because commit_scoped owns staging (adds + commits in one call);
+  --staged ran immediately after the scoped commit (index intact under
+  `commit --only`, so it inspects exactly the committed blobs) and before
+  the docs commit.
+
+## Close
+
+- Post-state: graph.js 909 (< 990 lock, < 1000 R2), main.js 746,
+  static_html.rs 999 (E3 net-zero), static_html_sections.rs 854 (< 1000).
+- Scoped ui suite: `220 passed / 1 failed / 0 ignored / 2 suites`; failing
+  set == {inherited F1 `test_inspector_panel_is_wider_and_collapsible`}.
+- Hygiene exit 1 carrying ONLY the inherited server.rs pair; graph.js
+  finding gone BY FIX. `ui_smoke: PASS`. encoding_guard --staged exit 0.
+- Out-of-scope observations (report-only): untracked foreign docs
+  `tasks/ui-traversal-back-button-execution-results.md` and
+  `tasks/ui-traversal-back-button-t1-verdict.md` left in the tree (closed
+  track's artifacts; not this touch-set); the frozen-count drift pair on
+  index.html/traversal.js (D3) wants a baseline-reaffirmation decision by
+  whoever owns `tools/theme_token_baseline.json`.
+
+
 

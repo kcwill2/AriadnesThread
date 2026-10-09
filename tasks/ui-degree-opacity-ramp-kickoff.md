@@ -151,3 +151,52 @@ nothing becomes *harder* to see than before.
 
 Sizing law check: 1 crate dir; implementer gate invocations <= 8; expected
 produced lines ~200-300 (of which ~150 Rust test) vs the ~1200 bound.
+
+## Amendment 2026-10-09 (post-operator-commit; supersedes preconditions + sizing rows above)
+
+Operator landed the collateral-traversal-view WIP themselves as `20e3fb8`
+("fixed traversal view"). Tree clean at that commit. Verified against the
+committed tree:
+
+1. Precondition 1 MET (landed). Precondition 2 FAILED as feared: `graph.js`
+   is 1051 lines at `20e3fb8`; the budget lock is still
+   `<= 998` with the stale "(cap 990)" message
+   (`static_html_sections.rs:214-217`); `.js` IS scanned by hygiene R2
+   (limit 1000). So the base is statically RED on two blocking gates:
+   `test_extraction_impact_preview_overlay` (budget assert) and
+   `hygiene_check.py` R2. No reviewer can land anything green on this base.
+2. The committed heat passes / fade conditions / filter tail are
+   BYTE-IDENTICAL to the shaping-time anchors (see shape amendment table);
+   the ramp contract survives unchanged. `traversal.js` adds no `.faded`
+   site (calls `selectNode` only). The degree-setting bug remains OPEN
+   (filter tail `:1014-1019` unchanged); the ramp neither breaks nor fixes
+   it, as designed.
+3. Handoff count AMENDED: the original "exactly one handoff, no split" no
+   longer holds. **Option B chosen: TWO serialized handoffs** -
+   **T-R (budget relief)** lands first (verbatim relocation of two
+   graph.js blocks into `main.js` + the deferred lock relocation/fix;
+   ~360 produced lines, ~6-7 gates), then **T1 (the ramp, unchanged
+   contract)** starts from T-R's green landing commit. Rationale against
+   folding (Option A): combined ~13-16 gate invocations across two
+   work-packages in one verdict, and the ledger's deferred row reserves
+   the lock relocation for an extraction-style handoff - T-R IS that
+   installment and discharges the deferred row with a dated archival note
+   at its close. Repo precedent serializes move-vs-feature pairs
+   (clarity T-A/T-B; dark-grey then extraction-story).
+4. Kickoff preconditions REPLACED by: (PC-1) clean tree at T-R's landing
+   commit with scoped ui + hygiene green; (PC-2) anchor-match rule: before
+   mutating, every before-string cited in the shape must match the current
+   committed blob (line numbers are advisory); (PC-3) session-start red
+   set for T-R itself is the budget test + R2 violation - the T-R journal
+   must declare them, turning them green is T-R's acceptance.
+5. New relay (out of both scopes): `tools/ui_smoke.py` ROUTE_ASSERTIONS
+   (:58-70) still omit `/app/traversal.js` although `server.rs:136` serves
+   it and `index.html:594` loads it (provenance.js similarly unprobed -
+   pre-existing class). ui_smoke still PASSes; roster parity is
+   unenforced. G2 of both handoffs keeps "route table byte-identical +
+   PASS". Ledger relay row for the next kickoff runner.
+6. T-R gates: scoped ui green (including the 3 declared amendments and the
+   relocated budget lock at cap 990), `hygiene_check.py` exit 0,
+   `ui_smoke: PASS` (via distill), verbatim-move proof (moved ranges
+   byte-equal to `git show 20e3fb8:crates/ui/assets/graph.js`),
+   encoding/hygiene exit 0, `theme_token_check --check-added` silent.
