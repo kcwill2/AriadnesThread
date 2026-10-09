@@ -69,7 +69,7 @@
         </svg>
         Call Graph
       </button>
-      <button class="tab-btn" id="tabTraversal" onclick="switchTab('traversal')">
+      <button class="tab-btn" id="tabTraversal" onclick="openTraversalTab()">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zm0 2v12h16V6H4zm2 2h12v2H6V8zm0 3h12v2H6v-2zm0 3h12v2H6v-2z"/>
         </svg>
@@ -385,7 +385,7 @@
     <div class="traversal-panel" id="traversalPanel" style="display:none;">
       <div class="traversal-head">
         <span class="traversal-title">&#128279; Collateral Traversal</span>
-        <button class="traversal-close" onclick="closeTraversal()" title="Close">&#10005;</button>
+        <button class="traversal-back" onclick="backFromTraversal()" title="Back to the view you came from">&#8592; Back</button>
       </div>
       <div class="traversal-root-select">
         <label>Root file: </label>

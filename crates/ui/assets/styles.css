@@ -1790,7 +1790,7 @@
       white-space: nowrap;
     }
 
-    .traversal-close {
+    .traversal-back {
       margin-left: auto;
       background: transparent;
       border: none;
@@ -1798,9 +1798,11 @@
       cursor: pointer;
       font-size: 11px;
       padding: 2px 4px;
+      gap: 4px;
+      align-items: center;
     }
 
-    .traversal-close:hover {
+    .traversal-back:hover {
       color: var(--text-main);
     }
 

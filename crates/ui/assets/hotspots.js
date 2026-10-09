@@ -616,7 +616,7 @@
 
     // Open Traversal tab for a specific root file (called from hotspot row button)
     function openTraversalForRoot(rootId) {
-      switchTab('traversal');
+      openTraversalTab();
       // Wait for traversal panel to initialize, then set the root select
       const waitForInit = () => {
         const rootSelect = document.getElementById('traversalRootSelect');

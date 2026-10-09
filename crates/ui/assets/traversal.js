@@ -395,12 +395,22 @@ Click a file to select it in the main graph
       if (window.bindPreviewControls) window.bindPreviewControls(section);
     }
  
-    function closeTraversal() {
-      // Switch main tab back to include (which restores inspector)
-      switchTab('include');
+    // Return-to-origin: the tab active when traversal was last entered.
+    let traversalReturnTab = 'include';
+
+    // Enter traversal from any tab, capturing the origin tab for Back.
+    function openTraversalTab() {
+      if (currentTab !== 'traversal') traversalReturnTab = currentTab;
+      switchTab('traversal');
+    }
+
+    // Leave traversal back to the captured origin tab.
+    function backFromTraversal() {
+      switchTab(traversalReturnTab);
     }
 
     // Expose for graph.js
     window.renderTraversalLegend = renderTraversalLegend;
     window.initTraversalPanel = initTraversalPanel;
-    window.closeTraversal = closeTraversal;
+    window.openTraversalTab = openTraversalTab;
+    window.backFromTraversal = backFromTraversal;
