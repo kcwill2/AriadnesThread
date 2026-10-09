@@ -171,3 +171,44 @@ PowerShell read-only byte-count fallback. Every expected gate ran.
   filterAndExpandSubgraph / stepDegree / toggleAllCapped / setNodeCap (B2's
   insertion site at the computeFullDependencies close and B3's inside the
   heat pass are both outside the filter tail).
+
+## Close (post-commit)
+
+- Landing commit G9: `d97cf905f5c56bdf80c83459cc864d5a9adcc45d`
+  (`d97cf90`) "feat(ui): graduated hop-distance opacity ramp on faded graph
+  nodes and edges". `git show --numstat`: graph.js +52/-0, hotspots.js
+  +4/-0, main.js +2/-0 (exactly the E1 rider), styles.css +2/-2 (exactly the
+  2 opacity declarations), hop_fade_ramp.rs +217/-0 (new), main.rs +1/-0
+  (the mod line), static_html.rs +2/-2 (net-zero, E3), journal +173/-0.
+- Convergence: `git diff --name-only 497ac61..HEAD` == EXACTLY the eight
+  touch-set paths (zero collateral); every frozen-lock file absent from the
+  whole-range name-only diff -> structurally byte-identical (index.html,
+  themes.css, theme.js, tools/**, all crates/**/src/**, traversal.js,
+  api.js, preview.js, file-view.js, provenance.js, theme_token_baseline.json,
+  all other test files incl. static_html_sections.rs + hotspot_direction.rs).
+- Hunk audit (self-check, I8/I4): graph.js hunks @@386/@@415/@@423/@@466 all
+  inside the outbound heat pass or the computeFullDependencies close - none
+  in filterAndExpandSubgraph/stepDegree/toggleAllCapped/setNodeCap;
+  hotspots.js hunks @@336/@@365/@@374 all inside renderInboundHeatView;
+  main.js hunks @@358/@@371 are the two illuminatePath rider lines;
+  styles.css @@438/@@495 the two declarations; main.rs @@12 the mod line;
+  static_html.rs @@155,2+155,2 the declared amendment.
+- Rider commit (D4): this close section lands as a journal-only scoped rider
+  carrying the landing hash; zero code paths.
+- Full invocation ledger (distilling entry points + declared gates):
+  #1 distill git log (precondition), #2 distill git status (PC-1), #3 G1
+  baseline, #4 G2 Red, #5 G3 Green, #6 distill hygiene (G5), #7 distill
+  ui_smoke (G6), #8 theme_token_check (G7), #9 distill git add (pre-commit
+  staging enabler), #10 encoding_guard --staged (G8, exit 0), #11
+  commit_scoped landing (G9), #12 distill diff --name-only (convergence),
+  #13 distill git show --unified=0 (hunk audit; first attempt was a
+  --format=none usage error at exit 128, not a gate), #14 distill git add
+  (rider staging), #15 encoding_guard --staged (rider), #16 commit_scoped
+  rider, #17 distill git status (final tree state), #18 distill git log
+  (lineage). Overshoot vs the typical 8-9 declared under D3; all extras are
+  precondition reads, the pre-commit staging enabler, post-commit proofs,
+  and the D4 rider.
+- Refused-command ledger (all catch-all boilerplate; none a blocked gate):
+  raw `git log`/`git status` (rerouted via distill), PC-4 `python -c` recipe
+  raw + distill + PowerShell fallback (Read-tool line enumeration used per
+  D1), one `--format=none` usage error.
