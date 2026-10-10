@@ -6,6 +6,9 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 
+mod common;
+use common::fixture_path;
+
 /// Keeps the spawned `run_ui` server alive for the test body and guarantees the
 /// task is aborted (its axum listener dropped) even if an assertion panics.
 struct LiveServer {
@@ -33,9 +36,11 @@ impl Drop for LiveServer {
 }
 
 /// Snapshot of the index + graph routes taken while the server reported "loading".
-/// Best-effort: only captured if a loading snapshot is observed before ready, which
-/// locks the "start web server immediately with live progress" behavior when the
-/// build is slow enough to be sampled (it is near-instant on a warm artifact cache).
+/// Captured on the first loading snapshot observed by [`poll_until_ready`]; the
+/// test hard-asserts this fired, locking the "start web server immediately with
+/// live progress" behavior on every run (the suite always boots a FRESH fixture
+/// copy, so the cold C++ pipeline keeps the loading window observable well
+/// beyond the 50 ms sampling interval).
 struct LiveProbe {
     index_status: u16,
     index_cache_control: Option<String>,
@@ -43,13 +48,19 @@ struct LiveProbe {
     graph_include_status: u16,
 }
 
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+fn copy_dir_all_excluding_artifacts(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
-        let target = dst.join(entry.file_name());
+        let file_name = entry.file_name();
+        // The tracked fixture ships a pre-built artifacts/ tree; skipping it
+        // makes the boot copy cold (see provision_basic_repo_copy).
+        if entry.file_type()?.is_dir() && file_name == "artifacts" {
+            continue;
+        }
+        let target = dst.join(file_name);
         if entry.file_type()?.is_dir() {
-            copy_dir_all(&entry.path(), &target)?;
+            copy_dir_all_excluding_artifacts(&entry.path(), &target)?;
         } else {
             fs::copy(entry.path(), &target)?;
         }
@@ -57,12 +68,41 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Boot seam for the serve-while-loading lock (AR-17 T6): the fixture copy is
+/// provisioned WITHOUT its pre-built `artifacts/` tree (the tracked fixture
+/// ships one, which makes a naive copy a near-instant warm boot), and with a
+/// synthetic TU workload added, so `run_ui` must run the real 5-stage pipeline
+/// before it can report ready. The loading state then persists far beyond the
+/// sampling interval, making the loading-window probe in [`poll_until_ready`]
+/// fire by construction instead of by luck. The test-local copy only: the
+/// tracked fixture is never modified or moved.
 fn provision_basic_repo_copy() -> Result<(TempDir, PathBuf)> {
     let guard = tempdir()?;
-    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/basic");
+    let fixture_root = fixture_path("basic");
     let repo_root = guard.path().join("basic");
-    copy_dir_all(&fixture_root, &repo_root)?;
+    copy_dir_all_excluding_artifacts(&fixture_root, &repo_root)?;
+    seed_boot_workload(&repo_root)?;
     Ok((guard, repo_root))
+}
+
+/// Number of generated translation units and declarations per TU. Sized so
+/// the cold debug boot holds the loading window for multiple seconds.
+const BOOT_LOAD_TUS: usize = 20;
+const BOOT_LOAD_DECLS: usize = 400;
+
+fn seed_boot_workload(repo_root: &Path) -> Result<()> {
+    let src_dir = repo_root.join("src");
+    fs::create_dir_all(&src_dir)?;
+    for tu_index in 0..BOOT_LOAD_TUS {
+        let mut source = format!("#include \"thing.h\"\n// boot-load workload TU {tu_index}\n");
+        for decl_index in 0..BOOT_LOAD_DECLS {
+            source.push_str(&format!(
+                "struct BootLoadTu{tu_index}Sym{decl_index} {{ int probe_{decl_index}; }};\n"
+            ));
+        }
+        fs::write(src_dir.join(format!("boot_load_tu_{tu_index}.cpp")), source)?;
+    }
+    Ok(())
 }
 
 fn reserve_free_port() -> u16 {
@@ -128,6 +168,15 @@ async fn probe_live_routes(client: &Client, base_url: &str) -> LiveProbe {
     }
 }
 
+/// Poll `/api/status` until the boot reports ready, sampling every 50 ms.
+///
+/// Determinism of the serve-while-loading lock (AR-17): the probe fires the
+/// first time a snapshot reports `loading`. The test always runs on a FRESH
+/// copy of the fixture, so the boot is cold and the C++ pipeline (5 stages)
+/// holds the loading state far longer than the 50 ms sampling interval.
+/// The first successful fetch lands once `axum::serve` starts accepting
+/// (immediately after bind), while the build still runs on the blocking
+/// pool, so a loading snapshot is observed by construction.
 async fn poll_until_ready(
     client: &Client,
     base_url: &str,
@@ -135,7 +184,7 @@ async fn poll_until_ready(
 ) -> Result<(Vec<Value>, Option<LiveProbe>)> {
     let mut trace = Vec::new();
     let mut live_probe = None;
-    for _ in 0..400 {
+    for _ in 0..800 {
         if let Some(snapshot) = fetch_status(client, base_url).await {
             let state = snapshot["progress"]["state"].as_str();
             if live_probe.is_none() && state == Some("loading") {
@@ -151,7 +200,7 @@ async fn poll_until_ready(
                 "run_ui server task exited before reporting ready (see run_ui error above)"
             ));
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
     Err(anyhow::anyhow!(
         "run_ui did not reach ready within the 40s polling window"
@@ -289,19 +338,23 @@ async fn run_ui_boots_live_serves_no_store_html_then_reports_ready() -> Result<(
     // The status route always reports a valid shape while loading and once ready.
     assert_status_snapshot_shape(&trace);
 
-    // Best-effort live-during-load lock: while loading the index route already serves
-    // HTML (Cache-Control: no-store) yet the graph route stays gated until ready.
-    if let Some(probe) = &live_probe {
-        assert_live_probe_serves_index_gating_graph(probe);
-    }
+    // Serve-while-loading + graph-gating lock (AR-17 T6): the probe MUST have
+    // fired -- a fresh fixture copy is always a cold boot, so a loading window
+    // is observable by construction. A None probe here means the observation
+    // seam broke, and this lock would otherwise become silently vacuous.
+    let probe = live_probe.expect(
+        "live route probe must fire during the loading window: the \
+         serve-while-loading + graph-gating assertions must never go vacuous",
+    );
+    assert_live_probe_serves_index_gating_graph(&probe);
 
-    // Best-effort loading-window contract whenever a loading snapshot is observable.
-    if let Some(loading) = trace
+    // Loading-window contract on every run: the probe firing proves at least
+    // one loading snapshot is observable, so this is a guaranteed assertion.
+    let loading = trace
         .iter()
         .find(|s| s["progress"]["state"].as_str() == Some("loading"))
-    {
-        assert_loading_window_contract(loading);
-    }
+        .expect("trace must contain a loading snapshot (probe fired during loading)");
+    assert_loading_window_contract(loading);
 
     // Lock the terminal ready state and the labels run_ui actually exposes.
     let ready = trace.last().expect("trace ends on a ready snapshot");

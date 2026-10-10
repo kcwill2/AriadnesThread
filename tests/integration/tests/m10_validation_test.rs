@@ -1,7 +1,10 @@
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::tempdir;
+
+mod common;
+use common::fixture_path;
 
 use ariadne_cli;
 use ariadne_repo::Repository;
@@ -54,7 +57,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
 
 fn setup_fixture() -> tempfile::TempDir {
     let dir = tempdir().unwrap();
-    let fixture_dir = PathBuf::from("../../tests/fixtures/basic");
+    let fixture_dir = fixture_path("basic");
 
     copy_dir_all(&fixture_dir, dir.path().join("basic")).unwrap();
 

@@ -2,11 +2,13 @@ use ariadne_cli::run_ui;
 use serde_json::Value;
 use std::fs;
 use std::net::TcpListener;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
+mod common;
+use common::fixture_path;
+
 fn spawn_fixture_ui_server() -> (String, tokio::task::JoinHandle<()>) {
-    let repo_dir = PathBuf::from("../../tests/fixtures/basic");
+    let repo_dir = fixture_path("basic");
 
     // Bind to port 0 to get an ephemeral port
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -31,18 +33,21 @@ fn spawn_fixture_ui_server() -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn wait_for_ready_status(base_url: &str) {
+    // Poll-first idiom (mirrors m21_run_ui_smoke poll_until_ready): probe
+    // immediately, only sleep BETWEEN attempts. Readiness itself stays
+    // characterised by the assertions on the graph routes that follow.
     for _ in 0..120 {
-        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-        let Ok(resp) = reqwest::get(format!("{}/api/status", base_url)).await else {
-            continue;
-        };
-        if !resp.status().is_success() {
-            continue;
+        let mut ready_now = false;
+        if let Ok(resp) = reqwest::get(format!("{}/api/status", base_url)).await {
+            if resp.status().is_success() {
+                let status: Value = resp.json().await.unwrap_or(Value::Null);
+                ready_now = status["progress"]["state"].as_str() == Some("ready");
+            }
         }
-        let status: Value = resp.json().await.unwrap_or(Value::Null);
-        if status["progress"]["state"].as_str() == Some("ready") {
+        if ready_now {
             break;
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
     }
 }
 
@@ -152,7 +157,7 @@ async fn test_e2e_ui_traversal_and_pathfinding() {
 
 #[tokio::test]
 async fn test_e2e_standalone_html_export_traversal() {
-    let repo_dir = PathBuf::from("../../tests/fixtures/basic");
+    let repo_dir = fixture_path("basic");
     let export_dir = tempdir().unwrap();
     let export_file = export_dir.path().join("export_traversal.html");
 
