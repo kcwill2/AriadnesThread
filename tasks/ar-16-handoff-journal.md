@@ -148,8 +148,14 @@ Green re-run after revert:
 
 ## Commit
 
-- Scope: `crates/scheduler/src/worker.rs`, `tasks/ar-16-handoff-journal.md`
-  via `python tools/commit_scoped.py --scope ... -m
-  "test(scheduler): worker dispatch error-path contracts (T3)"`
-- `python tools/encoding_guard.py --staged` -> see digest recorded at commit
-  time in the commit message review trail (PASS).
+- `ea4c576 test(scheduler): worker dispatch error-path contracts (T3)`
+  via `python tools/commit_scoped.py --scope "crates/scheduler/src/worker.rs"
+  --scope "tasks/ar-16-handoff-journal.md" -m "..."`
+  commit_scoped's own listing: `547 0 crates/scheduler/src/worker.rs`,
+  `155 0 tasks/ar-16-handoff-journal.md` - exactly the two touch-set files,
+  insertions only, no foreign files staged.
+- `python tools/encoding_guard.py --staged` post-commit: empty staged set
+  (commit_scoped committed in one step), so vacuous PASS; the substantive
+  form is `--all`, which passed exit 0 over the committed content (gate 2).
+- Journal finalization (this commit-hash record) landed as a second scoped
+  commit touching only this journal file.
