@@ -169,12 +169,96 @@ impl LanguagePlugin for ScalaPlugin {
     fn shaper(&self) -> Option<&dyn UnitShaper> {
         Some(&self.shaper)
     }
+
+    /// AR-18: override of the planning hook — a file counts as an
+    /// aggregation unit when it declares a depth-0 `package object`. The
+    /// trait hands `repo_root` per call, which is exactly where the free
+    /// function's curried closure used to capture it
+    /// (`scala_aggregation_filter(repo_root)(path)`); parity locked by
+    /// `planning_hooks_override_the_defaults_with_free_function_parity`.
+    fn aggregation_filter(
+        &self,
+        repo_root: &std::path::Path,
+        path: &std::path::Path,
+    ) -> Option<bool> {
+        Some(crate::planning::scala_aggregation_filter(repo_root)(path))
+    }
+
+    /// AR-18: override of the planning hook with the Scala target naming
+    /// (`{sanitized_symbol}.scala` beside the aggregation file), delegating
+    /// to `scala_target_path_for`.
+    fn target_path_for(
+        &self,
+        aggregation_path: &std::path::Path,
+        symbol_name: &str,
+    ) -> Option<std::path::PathBuf> {
+        Some(crate::planning::scala_target_path_for(
+            aggregation_path,
+            symbol_name,
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ariadne_repo::{FileId, SourceLanguage};
+
+    /// AR-18 override-parity lock: the `LanguagePlugin` planning hooks must
+    /// reproduce the Scala free functions on identical inputs, including the
+    /// curried-vs-direct normalization (`repo_root` is a per-call parameter
+    /// now, not a closure capture). Exercised via `&dyn LanguagePlugin`
+    /// (also a dyn-compatibility witness: no generic trait methods).
+    #[test]
+    fn planning_hooks_override_the_defaults_with_free_function_parity() {
+        use std::path::Path;
+        let dir = tempfile::tempdir().expect("temp repo root");
+        let root = dir.path();
+        let aggregation_rel = "src/main/scala/com/example/models/all.scala";
+        std::fs::create_dir_all(root.join("src/main/scala/com/example/models"))
+            .expect("package dir");
+        std::fs::write(
+            root.join(aggregation_rel),
+            "package com.example\n\npackage object models {\n  def order(id: Int): Order = new Order(id)\n}\n",
+        )
+        .expect("aggregation fixture");
+        std::fs::write(
+            root.join("src/main/scala/com/example/models/Order.scala"),
+            "package com.example.models\n\nclass Order(val id: Int)\n",
+        )
+        .expect("plain fixture");
+
+        let plugin = ScalaPlugin::new();
+        let as_plugin: &dyn LanguagePlugin = &plugin;
+        let free_filter = crate::planning::scala_aggregation_filter(root);
+        for rel in [
+            aggregation_rel,
+            "src/main/scala/com/example/models/Order.scala",
+            // unreadable paths: both sides must answer "not an aggregation"
+            "src/main/scala/com/example/models/Missing.scala",
+        ] {
+            let path = Path::new(rel);
+            assert_eq!(
+                as_plugin.aggregation_filter(root, path),
+                Some(free_filter(path)),
+                "aggregation-filter parity for {rel}"
+            );
+        }
+        for (aggregation, symbol) in [
+            (aggregation_rel, "com.example.models.Order"),
+            ("models/all.scala", "Order"),
+            ("models/all.scala", "Foo$"),
+            ("models/all.scala", "Thing[T]"),
+            ("models/all.scala", ":::"),
+        ] {
+            let aggregation_path = Path::new(aggregation);
+            assert_eq!(
+                as_plugin.target_path_for(aggregation_path, symbol),
+                Some(crate::planning::scala_target_path_for(aggregation_path, symbol)),
+                "target-path parity for {symbol} out of {aggregation}"
+            );
+        }
+    }
 
     #[test]
     fn plugin_identity_and_fingerprint() {

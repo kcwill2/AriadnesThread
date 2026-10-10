@@ -248,6 +248,21 @@ impl LanguagePlugin for CppPlugin {
     fn shaper(&self) -> Option<&dyn UnitShaper> {
         Some(&self.shaper)
     }
+
+    /// AR-18: override of the planning hook with the header-extension rule.
+    /// Delegates to the same free function the CLI consumes today
+    /// (`cpp_aggregation_filter` is extension-only, so `repo_root` is
+    /// unused here). Parity locked by
+    /// `planning_hooks_override_the_defaults_with_free_function_parity`.
+    fn aggregation_filter(&self, _repo_root: &Path, path: &Path) -> Option<bool> {
+        Some(crate::planning::cpp_aggregation_filter(path))
+    }
+
+    /// AR-18: override of the planning hook with the `{symbol}_extracted.h`
+    /// template (§3.6), delegating to `cpp_target_path_for`.
+    fn target_path_for(&self, aggregation_path: &Path, symbol_name: &str) -> Option<PathBuf> {
+        Some(crate::planning::cpp_target_path_for(aggregation_path, symbol_name))
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +270,42 @@ mod tests {
     use super::*;
     use ariadne_lang::{DirectiveStyle, LanguageRegistry, ResolutionContext};
     use ariadne_repo::FileId;
+
+    /// AR-18 override-parity lock: the `LanguagePlugin` planning hooks must
+    /// reproduce the free functions byte-for-byte on identical inputs — the
+    /// seam AR-19 dispatches through. Exercised via `&dyn LanguagePlugin`
+    /// (also a dyn-compatibility witness: no generic trait methods).
+    #[test]
+    fn planning_hooks_override_the_defaults_with_free_function_parity() {
+        let plugin = CppPlugin::new();
+        let as_plugin: &dyn LanguagePlugin = &plugin;
+        // The extension-only C++ filter ignores the root entirely.
+        let repo_root = Path::new("repo");
+        for name in [
+            "a.h", "a.hpp", "a.hxx", "a.hh", "a.inl", "a.cpp", "a.scala", "noext", "a.H",
+        ] {
+            let path = Path::new(name);
+            assert_eq!(
+                as_plugin.aggregation_filter(repo_root, path),
+                Some(crate::planning::cpp_aggregation_filter(path)),
+                "aggregation-filter parity for {name}"
+            );
+        }
+        for (aggregation, symbol) in [
+            ("src/pkg.h", "Widget"),
+            ("src/pkg.hpp", "std::vector"),
+            ("src/pkg.h", "Thing<T>"),
+            ("src/pkg.h", "A::B"),
+            ("src/pkg.h", ":::"),
+        ] {
+            let aggregation_path = Path::new(aggregation);
+            assert_eq!(
+                as_plugin.target_path_for(aggregation_path, symbol),
+                Some(crate::planning::cpp_target_path_for(aggregation_path, symbol)),
+                "target-path parity for {symbol} out of {aggregation}"
+            );
+        }
+    }
 
     #[test]
     fn plugin_identity_and_fingerprint() {

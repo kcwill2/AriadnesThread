@@ -12,7 +12,7 @@ use ariadne_lang_api::capability::LanguageCapabilities;
 use ariadne_lang_api::identity::LanguageId;
 use ariadne_lang_api::modeling::LanguageModeling;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Bundles all language-specific pipeline components into one object.
 ///
@@ -41,6 +41,30 @@ pub trait LanguagePlugin: Send + Sync {
     /// Unit shaping (build stage). `None` = use the built-in
     /// CMake/VS/compile_commands shaper.
     fn shaper(&self) -> Option<&dyn UnitShaper> {
+        None
+    }
+    /// Planning hook (AR-18): is `path` — repo-relative, as the cluster
+    /// planner receives it — an aggregation unit of the repository rooted
+    /// at `repo_root`? `None` = planning unsupported, mirroring the
+    /// `shaper()` default-`None` idiom; supporting languages override with
+    /// `Some`, and `capabilities().planning` stays the advisory stage gate.
+    /// `repo_root` arrives per call (not closure-captured) so one signature
+    /// fits both filters: the C++ one is extension-only (ignores the root),
+    /// the Scala one reads `repo_root.join(path)` content.
+    fn aggregation_filter(&self, _repo_root: &Path, _path: &Path) -> Option<bool> {
+        None
+    }
+    /// Planning hook (AR-18): extraction target for `symbol_name` pulled
+    /// out of `aggregation_path` (plan §3.6 "Target file naming", per
+    /// language). Arity mirrors `cpp_target_path_for`'s real
+    /// `(aggregation_path, symbol_name)` contract; Scala's naming is purely
+    /// lexical, so neither language needs repository access here.
+    /// `None` = planning unsupported.
+    fn target_path_for(
+        &self,
+        _aggregation_path: &Path,
+        _symbol_name: &str,
+    ) -> Option<PathBuf> {
         None
     }
 }
@@ -601,6 +625,29 @@ mod tests {
         assert_eq!(one.sole_plugin().unwrap().id(), LanguageId::Cpp);
         let two = one.register(Box::new(MockPlugin::with_extension("scala", LanguageId::Scala)));
         assert!(two.sole_plugin().is_none());
+    }
+
+    // ── planning hooks (AR-18: default "planning unsupported") ───────────────
+
+    #[test]
+    fn planning_hooks_default_to_unsupported_without_an_override() {
+        // AR-18 default-shape lock: a plugin that never overrides the
+        // planning hooks reports `None` (= planning unsupported), the same
+        // default-`None` idiom as `shaper()`. MockPlugin declares
+        // `capabilities().planning = false` and never overrides, so the
+        // seam must answer "unsupported" rather than invent a C++ spelling.
+        let plugin = MockPlugin::new();
+        let repo_root = Path::new("repo");
+        assert_eq!(
+            plugin.aggregation_filter(repo_root, Path::new("src/a.h")),
+            None,
+            "no default aggregation decision: header extensions stay a C++ rule"
+        );
+        assert_eq!(
+            plugin.target_path_for(Path::new("src/a.h"), "Widget"),
+            None,
+            "no default target naming: the seam must not invent a C++ spelling"
+        );
     }
 
     // ── unit_shaper_for_repo (plan M22 D22: marker-based selection) ──────────
