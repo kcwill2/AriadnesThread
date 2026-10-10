@@ -58,7 +58,7 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
 /// `capability`; `None` for an unregistered language or a false capability
 /// (callers keep their honest error, never a C++ default). Replaces the
 /// pre-flip exactly-one-claim helper `capability_backend`, which the
-/// [`ScalaPlugin`](ariadne_lang_scala::ScalaPlugin) flip made ambiguous by
+/// `ScalaPlugin` (lang-scala) registration flip made ambiguous by
 /// construction (two plugins claim most stages).
 pub fn capability_backend_for_language<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
@@ -178,6 +178,51 @@ pub fn plugin_for_catalog_file<'a>(
     file_id: ariadne_repo::FileId,
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
     registry.plugin_for_id(catalog.get(&file_id)?.clone())
+}
+
+/// The cluster planner's two hooks, dispatched per path through the registry
+/// (AR-19, A1 part 2). The planner is language-neutral and takes exactly ONE
+/// aggregation filter and ONE target namer (plan M18.6); which plugin answers
+/// is decided HERE, at the only registry-facing seam, by the same
+/// first-claiming-detector lookup `detect_language` performs and the catalog
+/// dispatches through (D-A5: the registry is the dispatch authority, never a
+/// language label and never a C++ default).
+///
+/// The hooks consume the AR-18 trait methods
+/// (`LanguagePlugin::aggregation_filter` / `target_path_for`), so a language
+/// joins planning by registering a plugin that overrides them -- no CLI edit.
+/// A path no plugin claims is honestly NOT an aggregation unit and keeps its
+/// path unchanged (the hook's `PathBuf` return cannot report an error); a
+/// plugin that leaves a hook at the `None` default is likewise unanswered
+/// (planning unsupported), never answered with C++ semantics.
+pub struct PlanningHooks<'a> {
+    pub aggregation: Box<dyn Fn(&std::path::Path) -> bool + Send + Sync + 'a>,
+    pub target: Box<dyn Fn(&std::path::Path, &str) -> std::path::PathBuf + Send + Sync + 'a>,
+}
+
+/// Build [`PlanningHooks`] over `registry` for a repository rooted at
+/// `repo_root` (the Scala aggregation filter reads file content; the C++ one
+/// ignores the root -- the trait signature carries it per call for both).
+pub fn planning_hooks<'a>(
+    registry: &'a LanguageRegistry,
+    repo_root: &'a std::path::Path,
+) -> PlanningHooks<'a> {
+    let aggregation = Box::new(move |path: &std::path::Path| -> bool {
+        registry
+            .plugin_for(path)
+            .and_then(|plugin| plugin.aggregation_filter(repo_root, path))
+            .unwrap_or(false)
+    });
+    let target = Box::new(move |candidate: &std::path::Path, symbol_name: &str| {
+        registry
+            .plugin_for(candidate)
+            .and_then(|plugin| plugin.target_path_for(candidate, symbol_name))
+            .unwrap_or_else(|| candidate.to_path_buf())
+    });
+    PlanningHooks {
+        aggregation,
+        target,
+    }
 }
 
 #[cfg(test)]
@@ -492,5 +537,85 @@ mod tests {
             .is_none(),
             "a file outside the catalog has NO plugin — never a C++ default (D-M23-7)"
         );
+    }
+
+    // AR-19 (A1 part 2): planning_hooks is the registry dispatch the
+    // optimize/UI/plan lanes share; these locks retired the per-language
+    // 2-arm match in commands/plan.rs (whose own unit tests moved here).
+    #[test]
+    fn planning_hooks_keep_cpp_hook_bytes_through_the_plugin_trait() {
+        // Byte-identity witness: the trait hook reached through the registry
+        // must answer exactly what the free functions answered (AR-18 parity
+        // made them equal; this locks the DISPATCH of that answer). The free
+        // fns survive as dev-dependency oracles in cli tests (journal note).
+        let registry = default_registry();
+        let hooks = planning_hooks(&registry, std::path::Path::new("."));
+        let cpp_rel = std::path::Path::new("include/all.h");
+        assert_eq!(
+            (hooks.aggregation)(cpp_rel),
+            ariadne_lang_cpp::cpp_aggregation_filter(cpp_rel),
+            "C++ aggregation decisions stay byte-identical (m00 authority)"
+        );
+        assert_eq!(
+            (hooks.target)(cpp_rel, "Widget"),
+            ariadne_lang_cpp::cpp_target_path_for(cpp_rel, "Widget"),
+            "C++ naming stays byte-identical (m00 authority)"
+        );
+        assert!(
+            !(hooks.aggregation)(std::path::Path::new("src/main.cpp")),
+            "sources are not C++ aggregation units (extension rule survives dispatch)"
+        );
+    }
+
+    #[test]
+    fn planning_hooks_route_scala_through_the_plugin_trait() {
+        let registry = default_registry();
+        let fixture_root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/scala-basic");
+        let hooks = planning_hooks(&registry, &fixture_root);
+        let scala_agg = std::path::Path::new("src/main/scala/com/example/models/all.scala");
+        assert!(
+            (hooks.aggregation)(scala_agg),
+            "the real fixture all.scala is a Scala aggregation unit through \
+             the registry dispatch (plugin trait hook, not test injection)"
+        );
+        assert!(
+            !(hooks.aggregation)(std::path::Path::new(
+                "src/main/scala/com/example/models/User.scala"
+            )),
+            "a Scala file without a package-object clause is NOT an \
+             aggregation unit - the C++ extension filter never claims it"
+        );
+        assert_eq!(
+            (hooks.target)(scala_agg, "com.example.models.User"),
+            ariadne_lang_scala::scala_target_path_for(scala_agg, "com.example.models.User"),
+            "Scala candidates get the Scala namer verbatim"
+        );
+    }
+
+    #[test]
+    fn planning_hooks_answer_honestly_for_paths_no_plugin_claims() {
+        // D-A4 folded into the dispatch: a third language (or any unclaimed
+        // path) gets NO C++ aggregation semantics and NO C++ naming rule --
+        // there is no arm to misroute into any more.
+        let registry = default_registry();
+        let hooks = planning_hooks(&registry, std::path::Path::new("."));
+        for unclaimed in ["src/solver.f90", "src/unclaimed.rs"] {
+            let path = std::path::Path::new(unclaimed);
+            assert!(
+                !(hooks.aggregation)(path),
+                "{unclaimed}: no claiming plugin means NOT an aggregation unit"
+            );
+            assert_eq!(
+                (hooks.target)(path, "Solver"),
+                path,
+                "{unclaimed}: the candidate is returned UNCHANGED, never named by C++"
+            );
+            assert_ne!(
+                (hooks.target)(path, "Solver"),
+                ariadne_lang_cpp::cpp_target_path_for(path, "Solver"),
+                "{unclaimed}: explicitly NOT the C++ target path - the misroute that died"
+            );
+        }
     }
 }

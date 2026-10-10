@@ -3,7 +3,7 @@ use ariadne_pipeline::Pipeline;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Distinct discovered languages whose registered plugin disables the
 /// planning stage (plan M22, D23). Registry lookup only (rule R3): a language
@@ -41,86 +41,13 @@ fn planning_gaps(
     gaps
 }
 
-/// Per-language planning hooks (plan M23, D-M23-7 i). The planner takes
-/// exactly ONE aggregation filter and ONE target namer, so language dispatch
-/// lives INSIDE the closures, keyed by the language the REGISTRY resolved for
-/// the path the planner asks about.
-///
-/// M24 Part A, D-A4: this used to be `Some(Scala) => scala, _ => cpp`, so a
-/// third language silently received C++ aggregation and naming rules — a wrong
-/// answer rather than a compile error. C++ paths keep their hooks
-/// byte-identically; a language with no rule here is now reported honestly
-/// (not an aggregation unit, and an unchanged target) instead of being claimed
-/// by C++.
-struct PlanningHooks {
-    aggregation: Box<dyn Fn(&Path) -> bool + Send + Sync>,
-    target: Box<dyn Fn(&Path, &str) -> PathBuf + Send + Sync>,
-}
-
-/// `FileRecord.path` → language, for the planning dispatch closures.
-///
-/// M24 Part A, D-A5: resolved through the registry's `detect_language`, not
-/// by copying `FileRecord.language`. A path no registered plugin claims is
-/// simply absent, which is what lets the dispatch below tell "unknown" from
-/// "C++".
-fn language_of_path(
-    registry: &ariadne_lang::LanguageRegistry,
-    files: &[ariadne_repo::FileRecord],
-) -> BTreeMap<PathBuf, ariadne_lang::LanguageId> {
-    files
-        .iter()
-        .filter_map(|record| {
-            registry
-                .detect_language(&record.path)
-                .map(|language| (record.path.clone(), language))
-        })
-        .collect()
-}
-
-fn planning_hooks(
-    repo_root: PathBuf,
-    languages: BTreeMap<PathBuf, ariadne_lang::LanguageId>,
-) -> PlanningHooks {
-    let agg_languages = languages.clone();
-    let aggregation = Box::new(move |path: &Path| -> bool {
-        match agg_languages.get(path) {
-            Some(language) if *language == ariadne_lang::LanguageId::Scala => {
-                ariadne_lang_scala::scala_aggregation_filter(&repo_root)(path)
-            }
-            Some(language) if *language == ariadne_lang::LanguageId::Cpp => {
-                ariadne_lang_cpp::cpp_aggregation_filter(path)
-            }
-            // D-A4: no C++ fallback survives. A path whose language is neither
-            // C++ nor Scala -- which today means a third language, and also a
-            // path no registered plugin claims at all -- has no aggregation rule
-            // in this closure. Answering "not an aggregation unit" is the
-            // honest result; the `_ => Cpp` arm this replaces claimed it by
-            // default and handed the file C++ aggregation semantics.
-            Some(_) | None => false,
-        }
-    });
-    let target = Box::new(move |candidate: &Path, symbol_name: &str| -> PathBuf {
-        match languages.get(candidate) {
-            Some(language) if *language == ariadne_lang::LanguageId::Scala => {
-                ariadne_lang_scala::scala_target_path_for(candidate, symbol_name)
-            }
-            Some(language) if *language == ariadne_lang::LanguageId::Cpp => {
-                ariadne_lang_cpp::cpp_target_path_for(candidate, symbol_name)
-            }
-            // D-A4: same discipline for the namer. The hook signature returns a
-            // `PathBuf` and cannot report an error, so for a language with no
-            // rule here the candidate is returned UNCHANGED -- no C++ naming
-            // rule is applied to a file that is not C++. The aggregation
-            // closure above already keeps such paths out of the candidate set;
-            // this is the defensive half.
-            Some(_) | None => candidate.to_path_buf(),
-        }
-    });
-    PlanningHooks {
-        aggregation,
-        target,
-    }
-}
+/// Per-language planning hooks (AR-19, A1 part 2): the dispatch retired the
+/// CLI-side 2-arm language match (the D-M23-7 i closures) in favor of the
+/// registry-plugin hooks in [`crate::registry::planning_hooks`] -- the same
+/// seam the optimize and UI lanes now share. C++ paths keep byte-identical
+/// answers (the cpp plugin's trait hook IS the old free function, AR-18
+/// parity); the honest no-rule answers (not an aggregation unit; candidate
+/// unchanged) come from the absence of a claiming plugin, not from an arm.
 
 /// The single [`ClusteringConstraints`](ariadne_lang::ClusteringConstraints)
 /// injected into the planner (D-M23-7 i): resolves each record to its
@@ -252,12 +179,10 @@ pub fn plan_extractions(
     let registry = crate::registry::default_registry();
     let gaps = planning_gaps(&pipeline.discovery.files, &registry);
 
-    // D-M23-7 i: per-language planning dispatch replaces the pre-M23 C++
-    // hardcode; C++ files keep byte-identical hooks (see PlanningHooks).
-    let hooks = planning_hooks(
-        pipeline.repo.root.clone(),
-        language_of_path(&registry, &pipeline.discovery.files),
-    );
+    // AR-19 (A1 part 2): registry-dispatched planning hooks (see the module
+    // note above) -- one dispatch for the plan/optimize/UI lanes; C++ files
+    // keep byte-identical hooks (locked in registry.rs + m00).
+    let hooks = crate::registry::planning_hooks(&registry, &pipeline.repo.root);
     let catalog = crate::registry::catalog_languages(&registry, &pipeline.discovery);
     let constraints = LanguageRoutingConstraints {
         registry: &registry,
@@ -321,7 +246,7 @@ pub fn show_optimization_plan(repo_path: &PathBuf, id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{language_of_path, planning_gaps, LanguageRoutingConstraints};
+    use super::{planning_gaps, LanguageRoutingConstraints};
     use ariadne_lang::ClusteringConstraints;
     use ariadne_repo::{
         FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, SourceLanguage,
@@ -363,47 +288,50 @@ mod tests {
     }
 
     #[test]
-    fn a_third_language_no_longer_silently_receives_the_cpp_planning_hooks() {
-        // M24 Part A, D-A4 -- THE POINT OF THIS TASK. Before it, both planning
-        // hooks were `Some(Scala) => scala, _ => cpp_...`, so a file in ANY
-        // other language silently received C++ aggregation and C++ naming
-        // rules: a wrong answer rather than a compile error.
-        //
-        // The test uses a deliberately fake third language (no third-language
-        // plugin ships in Part A; that is Part C) so the assertion is about the
-        // DISPATCH, not about a real analyzer.
-        let third_language = ariadne_lang::LanguageId::new("Fortran");
-        let claimed = PathBuf::from("src/solver.f90");
-        let mut languages: BTreeMap<PathBuf, ariadne_lang::LanguageId> = BTreeMap::new();
-        languages.insert(claimed.clone(), third_language);
-
-        let hooks = super::planning_hooks(PathBuf::from("."), languages);
-
+    fn plan_lane_hooks_are_the_registry_dispatch_cpp_and_scala_stay_correct() {
+        // AR-19 (A1 part 2): the D-M23-7 i 2-arm table and its
+        // `language_of_path` lookup retired into
+        // `crate::registry::planning_hooks`; the shared hooks themselves are
+        // locked at that seam (registry.rs `planning_hooks_*` tests, which
+        // absorbed the D-A4/D-A5 witnesses: third language gets no C++
+        // semantics, the registry - never a label - dispatches) and on the
+        // real repo path by `m24a_scala_plan_path_test`. This keeps the
+        // PLAN-LANE witness: the hooks `plan_extractions` feeds the planner
+        // route Scala paths to the Scala plugin and keep C++ bytes.
+        let registry = crate::registry::default_registry();
+        let fixture_root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/scala-basic");
+        let hooks = crate::registry::planning_hooks(&registry, &fixture_root);
+        let scala_agg = PathBuf::from("src/main/scala/com/example/models/all.scala");
         assert!(
-            !(hooks.aggregation)(&claimed),
-            "a language with no planning rule here is NOT an aggregation unit; \
-             the C++ filter claimed it by default before D-A4"
+            (hooks.aggregation)(&scala_agg),
+            "the real fixture all.scala is a Scala aggregation unit through \
+             the CLI plan dispatch (plugin trait hook, not test injection)"
+        );
+        assert!(
+            !(hooks.aggregation)(&PathBuf::from(
+                "src/main/scala/com/example/models/User.scala"
+            )),
+            "a Scala file without a package-object clause is NOT an \
+             aggregation unit - the C++ extension filter never claims it"
         );
         assert_eq!(
-            (hooks.target)(&claimed, "Solver"),
-            claimed,
-            "no C++ naming rule may be applied to a file that is not C++"
+            (hooks.target)(&scala_agg, "com.example.models.User"),
+            ariadne_lang_scala::scala_target_path_for(&scala_agg, "com.example.models.User"),
+            "Scala candidates get the Scala target namer verbatim"
         );
-        assert_ne!(
-            (hooks.target)(&claimed, "Solver"),
-            ariadne_lang_cpp::cpp_target_path_for(&claimed, "Solver"),
-            "explicitly NOT the C++ target path - this is the misroute that died"
+        let cpp_rel = PathBuf::from("include/all.h");
+        assert_eq!(
+            (hooks.target)(&cpp_rel, "Widget"),
+            ariadne_lang_cpp::cpp_target_path_for(&cpp_rel, "Widget"),
+            "non-Scala candidates keep cpp_target_path_for byte-identically"
         );
-    }
-
-    #[test]
-    fn planning_hooks_give_an_unclaimed_path_no_cpp_hooks() {
-        // The other half of D-A4: a path with NO registered plugin used to fall
-        // through to C++ too.
-        let hooks = super::planning_hooks(PathBuf::from("."), BTreeMap::new());
-        let orphan = PathBuf::from("src/unclaimed.rs");
-        assert!(!(hooks.aggregation)(&orphan));
-        assert_eq!((hooks.target)(&orphan, "Thing"), orphan);
+        assert_eq!(
+            (hooks.aggregation)(&cpp_rel),
+            ariadne_lang_cpp::cpp_aggregation_filter(&cpp_rel),
+            "non-Scala aggregation decisions keep cpp_aggregation_filter \
+             byte-identically (pre-dispatch behavior for C++ repos)"
+        );
     }
 
     #[test]
@@ -450,83 +378,6 @@ mod tests {
              (no groups) - per-language delegation, never cross-wired"
         );
         assert!(dispatcher.frozen_symbols(&records).is_empty());
-    }
-
-    #[test]
-    fn language_of_path_resolves_through_the_registry_not_the_record_label() {
-        // SANCTIONED EXPECTATION CHANGE (M24 Part A, D-A5): the map is now
-        // built from `registry.detect_language`, so a record's `language`
-        // LABEL no longer determines dispatch. The `B.scala` record below
-        // deliberately carries the WRONG label (`Other`) - the shape every
-        // third language takes today, because no FileKind variant names it -
-        // and still resolves to the plugin that claims it.
-        let registry = crate::registry::default_registry();
-        let files = vec![
-            record("a.cpp", FileKind::Source, SourceLanguage::Cpp),
-            record("B.scala", FileKind::ScalaSource, SourceLanguage::Other),
-        ];
-        let map = language_of_path(&registry, &files);
-        assert_eq!(
-            map.get(&PathBuf::from("B.scala")),
-            Some(&ariadne_lang::LanguageId::Scala),
-            "the claiming plugin wins over the record's Other label"
-        );
-        assert_eq!(
-            map.get(&PathBuf::from("a.cpp")),
-            Some(&ariadne_lang::LanguageId::Cpp)
-        );
-        assert_eq!(map.get(&PathBuf::from("ghost.h")), None);
-    }
-
-    #[test]
-    fn language_of_path_omits_a_path_no_plugin_claims() {
-        let registry = crate::registry::default_registry();
-        let files = vec![record("notes.md", FileKind::Other, SourceLanguage::Other)];
-        assert!(
-            language_of_path(&registry, &files).is_empty(),
-            "an unclaimed path is absent, which is what lets the hooks tell \
-             'unknown' from 'C++' instead of defaulting"
-        );
-    }
-
-    #[test]
-    fn planning_hooks_route_scala_by_language_and_keep_cpp_hook_bytes() {
-        let scala_rel = PathBuf::from("src/main/scala/com/example/models/all.scala");
-        let cpp_rel = PathBuf::from("include/all.h");
-        let mut languages: BTreeMap<PathBuf, ariadne_lang::LanguageId> = BTreeMap::new();
-        languages.insert(scala_rel.clone(), ariadne_lang::LanguageId::Scala);
-        languages.insert(cpp_rel.clone(), ariadne_lang::LanguageId::Cpp);
-        let fixture_root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/scala-basic");
-        let hooks = super::planning_hooks(fixture_root, languages);
-        assert!(
-            (hooks.aggregation)(&scala_rel),
-            "the real fixture all.scala is a Scala aggregation unit through \
-             the CLI dispatch (scala_aggregation_filter, not test injection)"
-        );
-        assert!(
-            !(hooks.aggregation)(&PathBuf::from(
-                "src/main/scala/com/example/models/User.scala"
-            )),
-            "a Scala file without a package-object clause is NOT an \
-             aggregation unit - the C++ extension filter never claims it"
-        );
-        assert_eq!(
-            (hooks.target)(&scala_rel, "com.example.models.User"),
-            ariadne_lang_scala::scala_target_path_for(&scala_rel, "com.example.models.User"),
-            "Scala candidates get the Scala target namer verbatim"
-        );
-        assert_eq!(
-            (hooks.target)(&cpp_rel, "Widget"),
-            ariadne_lang_cpp::cpp_target_path_for(&cpp_rel, "Widget"),
-            "non-Scala candidates keep cpp_target_path_for byte-identically"
-        );
-        assert_eq!(
-            (hooks.aggregation)(&cpp_rel),
-            ariadne_lang_cpp::cpp_aggregation_filter(&cpp_rel),
-            "non-Scala aggregation decisions keep cpp_aggregation_filter \
-             byte-identically (pre-dispatch behavior for C++ repos)"
-        );
     }
 
     #[test]

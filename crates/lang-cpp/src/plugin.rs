@@ -139,17 +139,17 @@ impl CppPlugin {
         }
     }
 
-    /// C++ planner hook (plan M18.6): header extensions are the aggregation
-    /// units the planner may propose against.
-    pub fn aggregation_filter(&self, path: &Path) -> bool {
-        crate::planning::cpp_aggregation_filter(path)
-    }
-
-    /// C++ planner hook (plan M18.6/§3.6): extracted symbols land in a
-    /// `{symbol}_extracted.h` beside the aggregation file.
-    pub fn target_path_for(&self, aggregation_path: &Path, symbol_name: &str) -> PathBuf {
-        crate::planning::cpp_target_path_for(aggregation_path, symbol_name)
-    }
+    // AR-19 rider (dead-code reconciliation): the inherent M18.6 planner
+    // hooks `aggregation_filter(&self, path)` / `target_path_for(&self,
+    // aggregation_path, symbol_name)` were deleted here. Determination:
+    // DEAD -- a workspace grep of `\.aggregation_filter(` /
+    // `\.target_path_for(` found every live call going through the AR-18
+    // TRAIT hooks on `&dyn LanguagePlugin` (the CLI registry seam, AR-19);
+    // no caller reached the inherent pair, and inherent methods would have
+    // silently shadowed the trait for concrete-type callers. The C++
+    // planning answer is the trait override below, delegating to the same
+    // `crate::planning` free functions (single source of truth; parity
+    // locked by `planning_hooks_override_the_defaults_with_free_function_parity`).
 }
 
 impl Default for CppPlugin {

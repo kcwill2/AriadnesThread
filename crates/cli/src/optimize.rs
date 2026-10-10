@@ -99,7 +99,6 @@ use ariadne_cluster::plan::{OptimizationPlan, RiskLevel};
 use ariadne_cluster::planner::OptimizationPlanner;
 use ariadne_graph::{IncludeClosure, IncludeGraph, LoadAnalyzer, ReducedSemanticModel};
 use ariadne_lang::CyclePolicy;
-use ariadne_lang_cpp::{cpp_aggregation_filter, cpp_target_path_for};
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::{Repository, RepositoryDiscoveryResult};
 use ariadne_transform::{ExtractionResult, GeneratedUnit, IncludeRewriter, IsolationEngine};
@@ -218,6 +217,16 @@ fn analyze_collateral_opportunities(
     let load_analyzer = LoadAnalyzer::with_closures(graph, model, closures);
     let mut header_collateral_map: HashMap<String, usize> = HashMap::new();
 
+    // AR-19 (A1 part 2): which files' collateral is reportable is the PLAN
+    // question "is this an aggregation unit?", answered per source file by
+    // ITS plugin through the registry (the pre-switch `.filter()` applied
+    // the C++ extension rule to every file and silently dropped every
+    // non-C++ aggregation unit's collateral). C++ answers are byte-identical
+    // (trait-hook parity, AR-18); a file no plugin claims is honestly not an
+    // aggregation unit and contributes nothing.
+    let registry = crate::registry::default_registry();
+    let catalog = crate::registry::catalog_languages(&registry, repo_discovery);
+
     for sym in model.symbols.values() {
         // Sibling convention (commands/analyze.rs sweeps): symbols whose load
         // metric cannot be resolved (e.g. no defining file) are skipped in
@@ -231,6 +240,15 @@ fn analyze_collateral_opportunities(
                 .iter()
                 .find(|rf| &rf.id == &src.file_id)
             {
+                let aggregation_unit = crate::registry::plugin_for_catalog_file(
+                    &registry, &catalog, f.id,
+                )
+                .is_some_and(|plugin| {
+                    plugin.aggregation_filter(&repo_discovery.root, &f.path) == Some(true)
+                });
+                if !aggregation_unit {
+                    continue;
+                }
                 let name = f
                     .path
                     .file_name()
@@ -244,7 +262,6 @@ fn analyze_collateral_opportunities(
 
     let mut collateral_opportunities: Vec<CollateralOpportunity> = header_collateral_map
         .into_iter()
-        .filter(|(header_name, _)| cpp_aggregation_filter(std::path::Path::new(header_name)))
         .map(|(header_name, collateral_symbols)| CollateralOpportunity {
             header_name,
             collateral_symbols,
@@ -264,6 +281,13 @@ fn plan_safe_extractions(
     repo_discovery: &RepositoryDiscoveryResult,
     build_discovery: &BuildDiscoveryResult,
 ) -> Vec<OptimizationPlan> {
+    // AR-19 (A1 part 2): the hooks dispatch through the registry (shared
+    // planning_hooks seam, see commands/plan.rs), so the optimize lane plans
+    // for any declared-planning language; C++ answers are byte-identical
+    // (m00 parity). Pre-switch these were the cpp free functions passed
+    // positionally, which silently zero-planned every non-C++ repo.
+    let registry = crate::registry::default_registry();
+    let hooks = crate::registry::planning_hooks(&registry, &repo_discovery.root);
     let tu_file_ids: Vec<_> = build_discovery
         .translation_units
         .iter()
@@ -274,8 +298,8 @@ fn plan_safe_extractions(
         model,
         &repo_discovery.files,
         &tu_file_ids,
-        &cpp_aggregation_filter,
-        &cpp_target_path_for,
+        &hooks.aggregation,
+        &hooks.target,
         None,
         CyclePolicy::Reject,
     );

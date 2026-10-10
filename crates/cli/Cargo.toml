@@ -32,22 +32,24 @@ bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ariadne-ui = { path = "../ui" }
-# M18.3: lang-cpp is referenced only to enumerate `CppPlugin` in
-# src/registry.rs (the single plugin enumeration site); no other CLI code
-# touches a concrete plugin. Enumeration stays here by design — the core
-# pipeline crates must stay plugin-free (plan §7 rule R2).
-ariadne-lang-cpp = { path = "../lang-cpp" }
-# M23 T7 (D-M23-7 i): plan dispatch routes Scala paths to lang-scala's
-# planning hooks (aggregation filter + target naming), same injection
-# stance as the lang-cpp hooks above.
-ariadne-lang-scala = { path = "../lang-scala" }
-# M18.3: registry.rs is the single plugin enumeration site.
+# AR-19 (A1 part 2): the CLI production code no longer references any
+# concrete language plugin -- planning consumes the AR-18 trait hooks through
+# the registry (enumeration is pipeline-side per D9, and pipeline keeps its
+# own lang-cpp/lang-scala deps, so the binaries still get both plugins).
+# Both crates survive as DEV-dependencies below: cli's own unit tests and
+# tests/payload_tail_bench.rs use the planning free functions as the
+# byte-identity oracles the registry dispatch is locked against.
+# M18.3: registry.rs is the single registry-facing seam.
 ariadne-lang = { path = "../lang" }
 open = "5.1.2"
 axum = { version = "0.7", features = ["tokio"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# AR-19: byte-identity oracles for the registry-dispatched planning hooks
+# (src unit tests + tests/payload_tail_bench.rs); see the [dependencies] note.
+ariadne-lang-cpp = { path = "../lang-cpp" }
+ariadne-lang-scala = { path = "../lang-scala" }
 # M28 T0c cap-0 ablation: the stage5_memory_bench release build links the
 # pipeline with the cfg-gated caps-override route so
 # ARIADNE_LOAD_MEM_CAPS reaches the bench children (the ui/graph
