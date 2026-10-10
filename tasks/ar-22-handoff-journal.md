@@ -75,8 +75,9 @@ filter) plus the error case.
 - Compile-green discipline held throughout (shared worktree):
   `python tools/distill.py -- cargo check --workspace` ->
   `ok (exit 0, 0 warnings emitted)` before and after the implementation.
-- RED: first implementation shipped WITHOUT the restriction guard
-  (language_filter stored but never applied); scoped parity run:
+- RED: first compiling implementation was a stub - inputs, manager, and
+  store_ctx only, no registration guard, no restriction, no view recorded;
+  scoped parity run:
   `python tools/testrun.py --distill -- -p ariadne-pipeline --test for_incremental_parity_test` ->
   `0 passed / 5 failed / 0 ignored / 1 suites`, failing for exactly the
   semantic reasons: the two narrowing cases on the build-result parity
