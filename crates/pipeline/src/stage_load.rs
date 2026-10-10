@@ -29,6 +29,7 @@ use rayon::prelude::*;
 use ariadne_graph::{
     IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMemo, LoadMetric, ReducedSemanticModel,
 };
+use ariadne_index::types::SymbolId;
 use ariadne_repo::{FileId, SourceLanguage};
 use ariadne_report::LoadReport;
 
@@ -107,8 +108,7 @@ impl Pipeline {
         // Mutex for the rayon workers (mirroring
         // `rebuild_index_single_threaded`). The old `LoadReport` field
         // order already guaranteed symbols-before-files.
-        let symbol_metrics =
-            self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer, &reduced))?;
+        let symbol_metrics = self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer))?;
         self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
             symbols: symbol_metrics.len(),
         }));
@@ -312,39 +312,82 @@ pub(crate) fn build_stage5_analyzer<'a>(
     LoadAnalyzer::with_memo(graph, reduced, Arc::new(memo))
 }
 
-/// Chunked, parallel, order-preserving symbol metric pass for
-/// `ensure_load` (M28 T2 (c)). The BTreeMap `.values()` view is walked in
-/// name chunks of `LOAD_PASS_CHUNK` (b-tree value iterators are not rayon
-/// parallel iterators): each chunk is collected through
-/// `par_iter().filter_map().collect()` - the same vector, and the same
-/// order, the old full-size collect produced - and appended, so the
-/// chunk-owned intermediates stay chunk-sized while the result keeps the
-/// exact element order (sequential-reference oracles, green UNEDITED).
-fn collect_symbol_metrics(
-    analyzer: &LoadAnalyzer<'_>,
-    reduced: &ReducedSemanticModel,
-) -> Vec<LoadMetric> {
+/// One-shot symbol resolution table over the reduced model, replacing the
+/// per-symbol scan the name entry used to run (AR-08, audit P1 part 2).
+///
+/// It reproduces `LoadAnalyzer::symbol_id_by_name` EXACTLY, not merely for
+/// ids that equal their name: the model is walked in `BTreeMap` key order
+/// (the order that scan uses) and both arms it matches on - the key string
+/// `id.0` and the record `name` - are offered while the slot is still vacant,
+/// so the value a query keeps is the FIRST record the scan would have found.
+/// A model where two records share one name (`a.Widget` and `b.Widget` in the
+/// Scala lane, where `name = decl.simple_name` while the id is
+/// package-qualified) therefore resolves the shared name to `a.Widget` here
+/// just as it did there, and the pass keeps emitting that record's metric
+/// twice (locked by `tests/load_symbol_metrics_lock_test.rs`).
+///
+/// Cost: one pass of O(1) inserts replaces O(S) scans. Keys and values borrow
+/// the model (no string clones at all, where the old pass cloned one name per
+/// symbol) and the table is dropped when the symbol pass returns - before the
+/// file pass and before the artifact-save span the M28 T2 memory work bounds.
+fn symbol_query_resolution(model: &ReducedSemanticModel) -> HashMap<&str, &SymbolId> {
+    let mut resolution: HashMap<&str, &SymbolId> =
+        HashMap::with_capacity(model.symbols.len() * 2);
+    for (symbol_id, record) in &model.symbols {
+        resolution.entry(record.name.as_str()).or_insert(symbol_id);
+        resolution.entry(symbol_id.0.as_str()).or_insert(symbol_id);
+    }
+    resolution
+}
+
+/// Chunked, parallel, order-preserving symbol metric pass for `ensure_load`
+/// (M28 T2 (c)) over the AR-07 by-id seam (AR-08). The BTreeMap `.values()`
+/// view is walked in chunks of `LOAD_PASS_CHUNK` (b-tree value iterators are
+/// not rayon parallel iterators): each chunk is collected through
+/// `par_iter().filter_map().collect()` - the same vector, and the same order,
+/// the old full-size collect produced - and appended, so the chunk-owned
+/// intermediates stay chunk-sized while the result keeps the exact element
+/// order (sequential-reference oracles, green UNEDITED).
+///
+/// Both the walk and the resolution read `analyzer.model` - the same map the
+/// by-id entry resolves against - so the pass cannot index one model while
+/// resolving against another.
+fn collect_symbol_metrics(analyzer: &LoadAnalyzer<'_>) -> Vec<LoadMetric> {
+    let symbols_by_query = symbol_query_resolution(analyzer.model);
     let mut metrics: Vec<LoadMetric> = Vec::new();
-    let mut name_chunk: Vec<String> = Vec::with_capacity(LOAD_PASS_CHUNK);
-    for symbol_record in reduced.symbols.values() {
-        name_chunk.push(symbol_record.name.clone());
-        if name_chunk.len() == LOAD_PASS_CHUNK {
-            metrics.extend(analyze_symbol_chunk(analyzer, &name_chunk));
-            name_chunk.clear();
+    let mut id_chunk: Vec<&SymbolId> = Vec::with_capacity(LOAD_PASS_CHUNK);
+    for symbol_record in analyzer.model.symbols.values() {
+        // The query is a record name, and every record name is a key of the
+        // table, so this cannot miss; the `continue` keeps the shape the old
+        // `filter_map` had for an unresolvable name (drop the element) in the
+        // event the table and the walk were ever built from different maps.
+        let Some(symbol_id) = symbols_by_query.get(symbol_record.name.as_str()) else {
+            continue;
+        };
+        id_chunk.push(symbol_id);
+        if id_chunk.len() == LOAD_PASS_CHUNK {
+            metrics.extend(analyze_symbol_chunk(analyzer, &id_chunk));
+            id_chunk.clear();
         }
     }
-    if !name_chunk.is_empty() {
-        metrics.extend(analyze_symbol_chunk(analyzer, &name_chunk));
+    if !id_chunk.is_empty() {
+        metrics.extend(analyze_symbol_chunk(analyzer, &id_chunk));
     }
     metrics
 }
 
-/// One symbol chunk: analyze every name in parallel, skipping the names
-/// whose analysis errors exactly as the pre-split `filter_map` did.
-fn analyze_symbol_chunk(analyzer: &LoadAnalyzer<'_>, symbol_names: &[String]) -> Vec<LoadMetric> {
-    symbol_names
+/// One symbol chunk: analyze every resolved id in parallel through the by-id
+/// entry - no name round-trip, no per-symbol scan - skipping the ids whose
+/// analysis errors exactly as the pre-split `filter_map` did (the records
+/// without a defining file, which error with the message the name entry has
+/// always produced).
+fn analyze_symbol_chunk(
+    analyzer: &LoadAnalyzer<'_>,
+    symbol_ids: &[&SymbolId],
+) -> Vec<LoadMetric> {
+    symbol_ids
         .par_iter()
-        .filter_map(|name| analyzer.analyze_symbol_load(name).ok())
+        .filter_map(|&symbol_id| analyzer.analyze_symbol_load_by_id(symbol_id).ok())
         .collect()
 }
 
