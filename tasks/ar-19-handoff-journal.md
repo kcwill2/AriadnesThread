@@ -165,3 +165,23 @@ dep graph); wording preserved.
   (m00 goldens, m14/m18 suites, cli unit regression lock
   `test_collateral_opportunities_skip_symbols_without_defining_file`) are
   green UNEDITED/unchanged.
+
+## Addendum (post-commit)
+
+- Main commit: `5de3884` (nine in-scope paths, `git status --short` over the
+  touched scopes EMPTY after it; foreign lane churn - ui assets, report.json,
+  AGENTS.md, other ar-* docs - left untouched and unstaged, as required in a
+  shared worktree).
+- `encoding_guard --staged` ran after staging/commit: silent (clean). Honest
+  semantics note: raw `git add` is denied in this session, so staging happens
+  inside `commit_scoped.py`; the new integration file was therefore guarded
+  BEFORE the commit by `encoding_guard --all` (tracked set, silent) plus
+  per-file byte scans proving zero non-ASCII bytes in every authored file
+  (mojibake cannot arise from pure-ASCII content), and AFTER by the silent
+  `--staged` run. All authored content is pure ASCII by construction.
+- Mid-session landings by other lanes (`bcc08fc` AR-22 pipeline ctor,
+  `15ffbfd` its journal wording) are ancestors of `5de3884`; the final
+  `cargo check --workspace --all-targets` (ok, 1 pre-existing lib.rs:804
+  warning, zero from this diff) and every gate line above ran on top of
+  them.
+
