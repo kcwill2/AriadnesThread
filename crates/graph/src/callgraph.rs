@@ -254,8 +254,28 @@ impl CallGraph {
         cycles
     }
 
+    /// BFS shortest call path from `from` to `to` over outgoing call edges.
+    /// AR-09 (plan audit P4): callee lists are grouped in ONE O(E) pass and
+    /// each caller's list is sorted once, replacing the retired
+    /// `callees_of` O(E) scan + per-node sort (was O(V_visited * E)).
+    /// Iterating the grouped lists yields the same neighbor sequence the
+    /// retired code sorted to per node - duplicates included (kept in the
+    /// lists, suppressed by `visited` as before) - so the parent map and
+    /// the reconstructed path are byte-identical (locked in
+    /// `ar09_adjacency_equivalence_test::callgraph_shortest_path_snapshot_locks`).
     pub fn shortest_call_path(&self, from: &SymbolId, to: &SymbolId) -> Option<Vec<SymbolId>> {
         use std::collections::{HashMap, HashSet, VecDeque};
+
+        let mut callees_by_caller: HashMap<&SymbolId, Vec<&SymbolId>> = HashMap::new();
+        for edge in &self.edges {
+            callees_by_caller
+                .entry(&edge.caller)
+                .or_default()
+                .push(&edge.callee);
+        }
+        for callees in callees_by_caller.values_mut() {
+            callees.sort();
+        }
 
         let mut queue = VecDeque::new();
         let mut visited = HashSet::new();
@@ -277,15 +297,13 @@ impl CallGraph {
                 return Some(path);
             }
 
-            let callees = self.callees_of(&current);
-            let mut neighbors: Vec<_> = callees.iter().map(|e| e.callee.clone()).collect();
-            neighbors.sort();
-
-            for next in neighbors {
-                if !visited.contains(&next) {
-                    visited.insert(next.clone());
-                    parent.insert(next.clone(), current.clone());
-                    queue.push_back(next);
+            if let Some(callees) = callees_by_caller.get(&current) {
+                for &callee in callees {
+                    if !visited.contains(callee) {
+                        visited.insert(callee.clone());
+                        parent.insert(callee.clone(), current.clone());
+                        queue.push_back(callee.clone());
+                    }
                 }
             }
         }

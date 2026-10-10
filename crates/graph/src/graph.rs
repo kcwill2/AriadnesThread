@@ -14,18 +14,30 @@ use std::path::{Path, PathBuf};
 // cloning a graph stays as cheap as cloning the edge Vec alone.
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// AR-09 (plan audit P3): lazily built, edge-count-validated slot for the
+/// cached [`IncludeGraph::adjacency`] map. `validated_edge_count` records
+/// how many edges the cached map was built from; any mismatch means the map
+/// is stale and gets rebuilt on the next query. `validated_edge_count == 0`
+/// with `map == None` (the `Default`) is simply "never built": the `None`
+/// arm forces the first build even for an edge-less graph.
+#[derive(Debug, Clone, Default)]
+struct AdjacencyCache {
+    validated_edge_count: usize,
+    map: Option<Arc<HashMap<FileId, Vec<FileId>>>>,
+}
 
 /// Central include graph model managing dependency edges, closures, and analysis.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct IncludeGraph {
     pub edges: Vec<IncludeEdge>,
     pub file_paths: HashMap<FileId, PathBuf>,
     /// Test-only tally of `find_file_id` O(V) string scans (plan LoadPerf
     /// A2); the by-id analyzer path must keep this at zero. `Arc` so the
-    /// existing `Clone` derive still works (a clone shares the tally);
-    /// Serde-skipped so artifact bytes never see it (absent in non-test
-    /// builds anyway).
+    /// hand-written `Clone` keeps sharing the tally (as the former derive
+    /// did); Serde-skipped so artifact bytes never see it (absent in
+    /// non-test builds anyway).
     #[cfg(test)]
     #[serde(skip)]
     find_file_id_scans: Arc<AtomicUsize>,
@@ -35,7 +47,7 @@ pub struct IncludeGraph {
     /// semantics are byte-identical to the retired O(E) `Vec::contains`
     /// scan: same-endpoint edges with differing metadata (e.g. two include
     /// directives on different lines) stay distinct. `Arc` keeps the
-    /// existing `Clone` derive cheap: a clone shares the set and the first
+    /// hand-written `Clone` cheap: a clone shares the set and the first
     /// `add_edge` on it forks one via copy-on-write. `#[serde(skip)]` keeps
     /// artifact bytes unchanged; every load path (e.g.
     /// `report::manager::graph_io::load_include_checked`) rebuilds graphs
@@ -43,6 +55,58 @@ pub struct IncludeGraph {
     /// exactly right. `Default` derive yields an empty set.
     #[serde(skip)]
     seen_edges: Arc<HashSet<IncludeEdge>>,
+    /// AR-09 (plan audit P3): lazy adjacency index backing
+    /// [`Self::direct_includes`]. The hot callers (`format_explain`,
+    /// `cluster::frontier`, `load_explain`, the UI server) invoke
+    /// `direct_includes` once per visited node, so the retired O(E)-per-call
+    /// scan cost O(V_visited * E) per traversal; the cache amortizes it to
+    /// one O(E) build per graph generation plus O(1) lookups.
+    ///
+    /// Staleness contract: the map is validated against `edges.len()` on
+    /// every access (see [`AdjacencyCache`]), which catches every mutation
+    /// surface this repo actually uses - `add_edge` (append) and the
+    /// test-only direct `graph.edges.push` (also append-only; a grep across
+    /// the workspace finds no remove/truncate/assign on include-graph
+    /// edges). `register_file` is deliberately NOT an invalidation trigger:
+    /// `file_paths` is not an input to the adjacency map. A hypothetical
+    /// length-restoring direct edit would be out of contract and already
+    /// breaks the AR-06 `seen_edges` set, so the cache inherits exactly the
+    /// mutation invariant AR-06 established - no stronger guarantee is
+    /// possible while `edges` stays `pub`.
+    ///
+    /// `#[serde(skip)]` keeps artifact bytes unchanged (locked by
+    /// `ar09_adjacency_equivalence_test::serialized_shape_excludes_adjacency_cache`
+    /// and the m00 goldens); a `Deserialize`d graph starts un-built and
+    /// rebuilds from its loaded edges on first query. `Clone` copies the
+    /// slot, sharing the inner immutable `Arc` map refcount-cheaply while
+    /// each clone validates its OWN edge count - a post-clone `add_edge`
+    /// mutates only the clone's Vec, so the parent's validation keeps its
+    /// cache valid and vice versa. `.lock().unwrap()` on poison follows the
+    /// `load_caches` convention: poisoning requires a prior panic under this
+    /// same lock, which already aborts the run.
+    #[serde(skip)]
+    adjacency_cache: Mutex<AdjacencyCache>,
+}
+
+/// Hand-written to stay value-identical to the former `Clone` derive:
+/// plain field clones, refcount bumps for the two shared `Arc` indexes
+/// (`seen_edges` stays copy-on-write, the test tally stays shared), plus
+/// the AR-09 addition - the adjacency slot is copied into a FRESH mutex
+/// while the immutable `Arc` map inside it is shared, so each clone
+/// validates its own edge count without ever invalidating the other's
+/// cache. `Mutex` is not `Clone`, so the derive cannot express this.
+/// Lock-poison `.unwrap()` follows the documented `load_caches` convention.
+impl Clone for IncludeGraph {
+    fn clone(&self) -> Self {
+        Self {
+            edges: self.edges.clone(),
+            file_paths: self.file_paths.clone(),
+            #[cfg(test)]
+            find_file_id_scans: Arc::clone(&self.find_file_id_scans),
+            seen_edges: Arc::clone(&self.seen_edges),
+            adjacency_cache: Mutex::new(self.adjacency_cache.lock().unwrap().clone()),
+        }
+    }
 }
 
 impl IncludeGraph {
@@ -99,8 +163,12 @@ impl IncludeGraph {
     /// Builds a `source -> sorted, deduplicated destinations` map from the edge list.
     /// Matches `direct_includes` semantics; lets whole-graph traversals run in O(V + E)
     /// instead of rescanning the edge list at every visited node. The single
-    /// adjacency-build call sites are `compute_closures` and `LoadAnalyzer`'s
-    /// `file_adjacency` memo — no other code may duplicate this loop.
+    /// adjacency-build call sites are `compute_closures`, `LoadAnalyzer`'s
+    /// `file_adjacency` memo, and this graph's own [`Self::cached_adjacency`]
+    /// (AR-09) — no other code may duplicate this loop. Directional BFS in
+    /// `traversal.rs` deliberately uses a different, order-preserving
+    /// builder: this map's sort+dedup would re-parent shortest-path BFS
+    /// (see `ar09_adjacency_equivalence_test::shortest_include_path_snapshot_locks`).
     pub(crate) fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
         let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for edge in &self.edges {
@@ -115,20 +183,33 @@ impl IncludeGraph {
         adj
     }
 
-    /// Returns direct outgoing include file IDs for a source file.
-    pub fn direct_includes(&self, file_id: FileId) -> Vec<FileId> {
-        let mut direct = Vec::new();
-        for edge in &self.edges {
-            if edge.source == file_id {
-                if let Some(dest) = edge.destination {
-                    if !direct.contains(&dest) {
-                        direct.push(dest);
-                    }
-                }
-            }
+    /// Shared immutable view of [`Self::adjacency`], rebuilt only when the
+    /// edge count no longer matches the cached one (see the
+    /// [`AdjacencyCache`] staleness contract). The lock is held only for the
+    /// validation/swap - never across derived work - and the map itself is
+    /// immutable behind its `Arc`, so concurrent readers never serialize
+    /// beyond a refcount bump or (once per generation) a single O(E) build.
+    fn cached_adjacency(&self) -> Arc<HashMap<FileId, Vec<FileId>>> {
+        let mut cache = self.adjacency_cache.lock().unwrap();
+        if cache.map.is_none() || cache.validated_edge_count != self.edges.len() {
+            cache.map = Some(Arc::new(self.adjacency()));
+            cache.validated_edge_count = self.edges.len();
         }
-        direct.sort();
-        direct
+        Arc::clone(
+            cache
+                .map
+                .as_ref()
+                .expect("map is populated whenever the slot is validated"),
+        )
+    }
+
+    /// Returns direct outgoing include file IDs for a source file, sorted.
+    /// AR-09: served from [`Self::cached_adjacency`] (sorted+dedup by
+    /// construction) instead of the retired O(E)-per-call edge-list scan;
+    /// byte-identical output is locked by `ar09_adjacency_equivalence_test`.
+    pub fn direct_includes(&self, file_id: FileId) -> Vec<FileId> {
+        let adjacency = self.cached_adjacency();
+        adjacency.get(&file_id).cloned().unwrap_or_default()
     }
 
     /// Computes direct and transitive include closures for all known files in the graph.

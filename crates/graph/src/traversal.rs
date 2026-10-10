@@ -2,6 +2,7 @@ use crate::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::FileId;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraversalDirection {
@@ -16,7 +17,94 @@ pub struct SubgraphSelection<T> {
     pub edges: Vec<(T, T)>,
 }
 
+/// AR-09 (plan audit P4): per-call out/in neighbor maps for one
+/// directional BFS, built from a single O(E) pass instead of rescanning
+/// the whole edge list at every dequeued node.
+///
+/// Deliberately NOT `IncludeGraph::adjacency()`: the neighbor lists here
+/// preserve EDGE LIST ORDER and keep duplicates, because
+/// `shortest_include_path`/`shortest_call_path` reconstruct their path
+/// through `parent`, which is set by first arrival - iterating sorted
+/// neighbors would re-parent equal-distance targets and change the
+/// returned path (locked byte-for-byte by
+/// `ar09_adjacency_equivalence_test::shortest_include_path_snapshot_locks`).
+/// The sorted/deduped `adjacency()` stays the single builder for closure
+/// semantics (`IncludeGraph::direct_includes`'s cached view).
+#[derive(Debug)]
+struct DirectionalAdjacency<N> {
+    outgoing: HashMap<N, Vec<N>>,
+    incoming: HashMap<N, Vec<N>>,
+}
+
+impl<N: Eq + std::hash::Hash + Clone> DirectionalAdjacency<N> {
+    /// One pass over the edge stream; fills only the halves the direction
+    /// actually consumes. An edge whose both endpoints equal the current
+    /// node (self-loop) yields the same single neighbor either way,
+    /// matching the retired per-edge scan's overwrite behavior.
+    fn from_edges(
+        edges: impl Iterator<Item = (N, N)>,
+        direction: TraversalDirection,
+    ) -> Self {
+        let wants_outgoing = direction != TraversalDirection::Incoming;
+        let wants_incoming = direction != TraversalDirection::Outgoing;
+        let mut adjacency = Self {
+            outgoing: HashMap::new(),
+            incoming: HashMap::new(),
+        };
+        for (src, dst) in edges {
+            if wants_outgoing {
+                adjacency.outgoing.entry(src.clone()).or_default().push(dst.clone());
+            }
+            if wants_incoming {
+                adjacency.incoming.entry(dst).or_default().push(src);
+            }
+        }
+        adjacency
+    }
+}
+
+/// Shared depth-bounded expansion used by both graph neighborhood BFSs:
+/// walks the direction's neighbor lists exactly as the retired
+/// per-node edge scans did (same membership; final results are sorted,
+/// so neighbor order cannot leak into the output).
+fn expand_directional_neighbors<N: Clone + Eq + std::hash::Hash>(
+    adjacency: &DirectionalAdjacency<N>,
+    direction: TraversalDirection,
+    current: &N,
+    distance: usize,
+    visited: &mut std::collections::HashSet<N>,
+    queue: &mut std::collections::VecDeque<(N, usize)>,
+) {
+    let mut visit = |node: &N| {
+        if visited.insert(node.clone()) {
+            queue.push_back((node.clone(), distance + 1));
+        }
+    };
+    if direction == TraversalDirection::Outgoing || direction == TraversalDirection::Both {
+        if let Some(nexts) = adjacency.outgoing.get(current) {
+            for next in nexts {
+                visit(next);
+            }
+        }
+    }
+    if direction == TraversalDirection::Incoming || direction == TraversalDirection::Both {
+        if let Some(nexts) = adjacency.incoming.get(current) {
+            for next in nexts {
+                visit(next);
+            }
+        }
+    }
+}
+
 impl IncludeGraph {
+    /// Returns the depth-`depth` neighborhood of `center` in the given
+    /// direction. AR-09: expansion is driven by one per-call
+    /// [`DirectionalAdjacency`] build (O(E) once) instead of rescanning
+    /// `self.edges` for every dequeued node (was O(V_visited * E)); the
+    /// induced-edge pass below stays as-is (single O(E) scan). Output was and
+    /// is order-normalized (sorted nodes/edges), so the change cannot move
+    /// results - locked exhaustively against the frozen scan by
+    /// `ar09_adjacency_equivalence_test`.
     pub fn traverse_neighborhood(
         &self,
         center: FileId,
@@ -24,6 +112,13 @@ impl IncludeGraph {
         direction: TraversalDirection,
     ) -> SubgraphSelection<FileId> {
         use std::collections::{HashSet, VecDeque};
+
+        let adjacency = DirectionalAdjacency::from_edges(
+            self.edges
+                .iter()
+                .filter_map(|edge| edge.destination.map(|dest| (edge.source, dest))),
+            direction,
+        );
 
         let mut visited_nodes = HashSet::new();
         let mut queue = VecDeque::new();
@@ -36,32 +131,14 @@ impl IncludeGraph {
                 continue;
             }
 
-            for edge in &self.edges {
-                if let Some(dest) = edge.destination {
-                    let mut next_node = None;
-
-                    if (direction == TraversalDirection::Outgoing
-                        || direction == TraversalDirection::Both)
-                        && edge.source == curr
-                    {
-                        next_node = Some(dest);
-                    }
-
-                    if (direction == TraversalDirection::Incoming
-                        || direction == TraversalDirection::Both)
-                        && dest == curr
-                    {
-                        next_node = Some(edge.source);
-                    }
-
-                    if let Some(n) = next_node {
-                        if !visited_nodes.contains(&n) {
-                            visited_nodes.insert(n);
-                            queue.push_back((n, d + 1));
-                        }
-                    }
-                }
-            }
+            expand_directional_neighbors(
+                &adjacency,
+                direction,
+                &curr,
+                d,
+                &mut visited_nodes,
+                &mut queue,
+            );
         }
 
         let mut edges = HashSet::new();
@@ -84,12 +161,27 @@ impl IncludeGraph {
         }
     }
 
+    /// BFS shortest include path from `from` to `to` (outgoing edges only).
+    /// AR-09: neighbors come from one per-call [`DirectionalAdjacency`]
+    /// build instead of an O(E) scan per dequeued node (was
+    /// O(V_visited * E)). The build preserves EDGE ORDER (no sort, no
+    /// dedup), so `parent` is set by the same first arrival the retired
+    /// scan produced and the reconstructed path is byte-identical -
+    /// including the tie fixture where insertion order (5 before 3) picks
+    /// the parent of an equal-distance target.
     pub fn shortest_include_path(&self, from: FileId, to: FileId) -> Option<Vec<FileId>> {
-        use std::collections::{HashMap, HashSet, VecDeque};
+        use std::collections::{HashSet, VecDeque};
 
         if from == to {
             return Some(vec![from]);
         }
+
+        let adjacency = DirectionalAdjacency::from_edges(
+            self.edges
+                .iter()
+                .filter_map(|edge| edge.destination.map(|dest| (edge.source, dest))),
+            TraversalDirection::Outgoing,
+        );
 
         let mut queue = VecDeque::new();
         let mut visited = HashSet::new();
@@ -111,14 +203,11 @@ impl IncludeGraph {
                 return Some(path);
             }
 
-            for edge in &self.edges {
-                if edge.source == curr {
-                    if let Some(dest) = edge.destination {
-                        if !visited.contains(&dest) {
-                            visited.insert(dest);
-                            parent.insert(dest, curr);
-                            queue.push_back(dest);
-                        }
+            if let Some(nexts) = adjacency.outgoing.get(&curr) {
+                for &dest in nexts {
+                    if visited.insert(dest) {
+                        parent.insert(dest, curr);
+                        queue.push_back(dest);
                     }
                 }
             }
@@ -338,6 +427,11 @@ impl ReducedSemanticModel {
 }
 
 impl CallGraph {
+    /// Depth-`depth` call neighborhood of `center`. AR-09: same treatment
+    /// as the include-graph neighborhood BFS - one per-call
+    /// [`DirectionalAdjacency`] build (O(E)) replaces the per-dequeued-node
+    /// edge scan (was O(V_visited * E)); output is order-normalized, so
+    /// results are unchanged (locked in `ar09_adjacency_equivalence_test`).
     pub fn traverse_neighborhood(
         &self,
         center: &SymbolId,
@@ -345,6 +439,13 @@ impl CallGraph {
         direction: TraversalDirection,
     ) -> SubgraphSelection<SymbolId> {
         use std::collections::{HashSet, VecDeque};
+
+        let adjacency = DirectionalAdjacency::from_edges(
+            self.edges
+                .iter()
+                .map(|edge| (edge.caller.clone(), edge.callee.clone())),
+            direction,
+        );
 
         let mut visited_nodes = HashSet::new();
         let mut queue = VecDeque::new();
@@ -357,30 +458,14 @@ impl CallGraph {
                 continue;
             }
 
-            for edge in &self.edges {
-                let mut next_node = None;
-
-                if (direction == TraversalDirection::Outgoing
-                    || direction == TraversalDirection::Both)
-                    && edge.caller == curr
-                {
-                    next_node = Some(edge.callee.clone());
-                }
-
-                if (direction == TraversalDirection::Incoming
-                    || direction == TraversalDirection::Both)
-                    && edge.callee == curr
-                {
-                    next_node = Some(edge.caller.clone());
-                }
-
-                if let Some(n) = next_node {
-                    if !visited_nodes.contains(&n) {
-                        visited_nodes.insert(n.clone());
-                        queue.push_back((n, d + 1));
-                    }
-                }
-            }
+            expand_directional_neighbors(
+                &adjacency,
+                direction,
+                &curr,
+                d,
+                &mut visited_nodes,
+                &mut queue,
+            );
         }
 
         let mut edges = HashSet::new();
