@@ -199,5 +199,26 @@ is O(S^2) removed.
 - Non-vacuity mutation: `2 passed / 1 failed / 0 ignored / 1 suites` (expected red, restored after)
 - Post-change scoped gate: `python tools/testrun.py --distill -- -p ariadne-pipeline` -> `35 passed / 0 failed / 4 ignored / 8 suites`
 - `python tools/bench_compare.py` (via distill) x 3 -> `bench compare: 3 run(s), no regressions past 1.25x baseline` (table above)
-- `python tools/encoding_guard.py --all` - see below
-- `python tools/hygiene_check.py` - see below
+- `python tools/encoding_guard.py --all` -> silent (clean; the tool prints only findings, and it printed none, over the whole tracked tree - a superset of this hop's staged bytes, same evidence shape AR-07 recorded). `--staged` was not separately observable: `commit_scoped.py` stages and commits atomically with no stage-only mode.
+- `python tools/hygiene_check.py` -> ZERO NEW from this hop: neither `crates/pipeline/src/stage_load.rs` nor `crates/pipeline/tests/load_symbol_metrics_lock_test.rs` appears in any finding row. What the run does report is all foreign or pre-existing: R2 `crates/ui/src/server.rs: 1172 lines > 1000` + R1 `api_graph_traversal` 161 lines (AR-13's file, and it grew from the 1137 AR-01 saw - concurrent ui work), R1 `tests/integration/tests/m15_graph_ui_test.rs:9` 104 lines (the AR-17 integration lane's in-flight file), and the R3 warn-only census (ui/cli/graph/scheduler/transform/repo/validate + `tasks/*-review-*.py` probes). No R3 row lands on a file this hop touched.
+- Exit-code caveat, same as AR-01/AR-03 recorded: the sandbox allowlist blocks shell chaining and `python -c`, so a gate's raw exit code cannot be echoed into the transcript (`echo "x=$LASTEXITCODE"` after a gate call is refused as a chained command). The gates were therefore adjudicated on their printed contracts, which is what the tools are designed to make decisive: hygiene prints one row per violation and printed none for the touched files, encoding_guard prints one row per mojibake/non-UTF-8 blob and printed none at all.
+- Final confirmation run after the temporary probe file was deleted (the probe was never committed): `35 passed / 0 failed / 4 ignored / 8 suites` - identical to the post-change gate line above, so the probe left no residue in the suite count.
+
+## Reviewer notes
+
+- Two scoped commits: `7f7df89` (implementation + locks + journal, 3 paths,
+  all inside the touch-set globs) and the journal addendum carrying this
+  section. Nothing outside `crates/pipeline/**` and
+  `tasks/ar-08-handoff-journal.md` was staged; `crates/graph/**` was not
+  touched, and the foreign dirty files in this shared worktree
+  (`tests/integration/tests/m1*.rs`, `m21_run_ui_smoke_test.rs` = AR-17 WIP;
+  `tests/fixtures/basic/artifacts/includes/report.json` = the LF/CRLF churn
+  AR-02 and AR-06 both left alone) stayed unstaged.
+- The one decision worth adjudicating is D1/the resolution-table choice: the
+  table is what makes this refactor byte-identical on Scala/mixed models, at
+  the cost of a symbol-count-scaled pointer table that the naive "iterate ids"
+  version would not pay. If the reviewer would rather change behavior (emit
+  each record's OWN metric for a shared name - arguably the more correct
+  output), that is a behavior change with a report-visible diff and needs its
+  own handoff plus a golden-artifact review; this hop preserved today's output
+  exactly as the invariant requires.
