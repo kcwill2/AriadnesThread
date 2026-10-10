@@ -19,6 +19,7 @@ mod node_verdict_spine;
 mod preview_hypothetical;
 mod proposals_payload;
 mod server_api;
+mod search_characterization;
 mod source_containment;
 mod static_html;
 mod static_html_sections;

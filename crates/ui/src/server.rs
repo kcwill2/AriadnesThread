@@ -631,6 +631,26 @@ async fn api_graph_entrypoints(
     }))
 }
 
+/// P7: the wildcard glob for one search request, compiled ONCE per request
+/// instead of once per element. Engaged only when the query carries `*`/`?`
+/// and no `/regex/` literal claimed it; the case-insensitive flag subsumes
+/// the old per-element lowercase of label and path (identical outcomes for
+/// the ASCII targets the graph labels carry). A failed compile yields None
+/// and the substring fallback stays live, exactly as the old per-element
+/// path behaved.
+fn build_wildcard_glob(
+    q_lower: &str,
+    regex_pattern: &Option<regex::Regex>,
+) -> Option<regex::Regex> {
+    if regex_pattern.is_some() || !(q_lower.contains('*') || q_lower.contains('?')) {
+        return None;
+    }
+    let escaped = regex::escape(q_lower)
+        .replace("\\*", ".*")
+        .replace("\\?", ".");
+    regex::Regex::new(&format!("(?i)^{}$", escaped)).ok()
+}
+
 async fn api_graph_search(
     State(state): State<Arc<UiState>>,
     Query(query): Query<SearchQuery>,
@@ -658,20 +678,17 @@ async fn api_graph_search(
 
     let q_lower = q.to_lowercase();
 
+    // P7: wildcard glob compiled once per request (see build_wildcard_glob).
+    // The branch order is locked by the search_characterization suite.
+    let wildcard_pattern = build_wildcard_glob(&q_lower, &regex_pattern);
+
     let is_match = |label: &str, path: &str| -> bool {
         if let Some(re) = &regex_pattern {
             return re.is_match(label) || re.is_match(path);
         }
-
-        if q_lower.contains('*') || q_lower.contains('?') {
-            let escaped = regex::escape(&q_lower)
-                .replace("\\*", ".*")
-                .replace("\\?", ".");
-            if let Ok(re) = regex::Regex::new(&format!("^{}$", escaped)) {
-                return re.is_match(&label.to_lowercase()) || re.is_match(&path.to_lowercase());
-            }
+        if let Some(glob) = &wildcard_pattern {
+            return glob.is_match(label) || glob.is_match(path);
         }
-
         label.to_lowercase().contains(&q_lower) || path.to_lowercase().contains(&q_lower)
     };
 
