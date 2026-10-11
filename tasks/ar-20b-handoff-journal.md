@@ -180,3 +180,27 @@ back to `8 passed / 0 failed / 0 ignored / 1 suites`.
   uncommitted; committed m17 only ever saw green).
 
 ## Addendum (post-commit, filled by the journal-only second commit)
+
+- Landing commit: `dcfc813` - "feat(lang-cpp): consume ariadne-worker-core
+  directly; drop scheduler dep; land transitive guard GREEN (AR-20b)".
+  Touch-set as committed (commit_scoped numstat): Cargo.lock 1/1,
+  crates/lang-cpp/Cargo.toml 7/6, crates/lang-cpp/src/backend.rs 3/3,
+  tests/integration/tests/m17_plugin_seam_test.rs 207/0, this journal 182/0.
+- Gate 7 GREEN-once proof, dispatch form
+  `python tools/distill.py -- git log -S plugin_crates_transitive_tree --oneline -- tests/`
+  (capture `target/distill-capture.txt`) -> EXACTLY ONE line:
+  `dcfc813 feat(lang-cpp): consume ariadne-worker-core directly; drop scheduler dep; land transitive guard GREEN (AR-20b)`
+  The guard's test code exists in no other commit; it was never RED in history.
+- Whole-repo handoff form of the same pickaxe adds a second hit, `d63c0d0`,
+  which is a DOCS-ONLY mention: the cited AR-20 journal text names the function
+  (the reverted extension's description) while the m17 test file itself is
+  unchanged in that commit. Code introduction is unique to `dcfc813`, as the
+  tests/-scoped run above proves (invariant 5's "introducing commit").
+- `python tools/encoding_guard.py --staged` after the scoped commit's staged
+  resolution -> SILENT (exit 0; per D2 mechanics, with `--all` also silent pre-
+  commit).
+- AR-20a byte-freeze held at landing: `git diff 0861db0 -- crates/worker-core
+  crates/scheduler` empty at `dcfc813`.
+- Chain effects on landing (for the orchestrator): AR-26's scheduler-side
+  reparent hold LIFTS (its precondition, this guard, is machine-true); the
+  lang-family queue may drain, AR-24 first.
