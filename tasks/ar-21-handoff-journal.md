@@ -200,3 +200,15 @@ wording row for whoever retires the oracles (the dated notes point here).
   my scopes; not caused by and not affecting any gate above (all gates
   green throughout).
 
+## Landing hashes
+
+- 7797edb - journal baseline (docs-only increment; mechanism ruling +
+  D1 scope-gap pre-disclosed pre-code).
+- 3e874ab - atomic landing: resolver.rs gating (+41/-7), lib.rs
+  re-export split (+8/-1), lang-cpp Cargo.toml [features] (+8),
+  tests/integration/Cargo.toml D1 wiring (+5/-1), journal (+114).
+  Post-commit: `encoding_guard --staged` silent exit 0 (nothing staged
+  after scoped commit - AR-20b D2 practice); porcelain shows my five
+  paths clean.
+
+
