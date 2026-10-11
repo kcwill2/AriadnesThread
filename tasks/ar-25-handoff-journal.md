@@ -90,12 +90,99 @@ above are the contract's RED-before/GREEN-after proof.
 
 ## GREEN + gates
 
-(Pending: filled at the green commit.)
+Green commit `2f3b5e7` (red `96739ad`, skeleton `2aeae5e`; base `d4c608c`).
+Wiring: `incremental_backend` returns `anyhow::Result` carrying
+`anyhow::Error::from(IncrementalDispatchError::…)`; `analyze.rs` propagates
+via plain `?`; test-helper body mirrored to `?` with the production line;
+m24 consumer got one `.to_string()` render token (wording assertions byte-
+untouched - compile-forced, see D1).
 
-## StaleArtifact fold disposition
+Own-run gate lines (verbatim, this session's stdout; capture:
+target/testrun-capture.txt):
 
-(Pending.)
+- `-p ariadne-cli`: `118 passed / 0 failed / 8 ignored / 7 suites`
+  (= 114 baseline + 4 new locks; ignored/suite delta +1 new binary as expected)
+- `-p ariadne-report`: `47 passed / 0 failed / 0 ignored / 4 suites`
+  (byte-identical to pre-change run - report untouched)
+- m24 identity (rider consumer): `8 passed / 0 failed / 0 ignored / 1 suites`
+  (matches AR-24 verdict census 8/0/0/1)
+- m00 facts-path: `2 passed / 0 failed / 0 ignored / 1 suites`;
+  m00 golden-baseline: `2 passed / 0 failed / 0 ignored / 1 suites`
+  (together the AR-24-era 4/0/0/2; both files ZERO-diff in this lane)
+- m18 cpp parity (error-text authority): `23 passed / 0 failed / 0 ignored /
+  1 suites` - UNEDITED, green: external proof no CLI-visible string shifted
+- `cargo check --workspace --all-targets`: ok exit 0. Warning census note:
+  `21 warnings emitted` observed post-change vs `1` in a stash-baseline probe;
+  adjudicated: all 21 are PRE-EXISTING (common/mod.rs dead-code x20
+  duplicates surfaced by stash-mtime rebuild, m7 unused-variable, ui
+  unused-gen, cli/src/lib.rs:804 unused_mut known-deferred row) - zero
+  warnings name any file this lane touched (grep of capture: no hits for
+  registry/analyze/ar25/m24).
+- `python tools/hygiene_check.py`: zero R1/R2 blocking rows; every printed row
+  R3-warn and pre-existing; zero rows in this lane's files.
+- `python tools/encoding_guard.py --staged`: silent (after each commit);
+  `--all`: see landing record below.
+- Grep lock: `.map_err(anyhow::Error::msg)` now ZERO occurrences in all
+  `crates/*/src` production code; the only code occurrence left anywhere is
+  the deliberate pre-form witness inside `ar25_seam_error_chain_test.rs`.
+
+Forced-scenario before/after invariant: the SAME three forced scenarios (zero
+units / unclaimed language / mixed languages) render through the seam in both
+states; the byte-lock `assert_eq` on `to_string()` passed in the red run
+(pre-fix) against literals byte-equal to the pre-change format strings
+(re-derived from the `5de3884^` blob) and passes in the green run.
+
+## StaleArtifact fold disposition: LEFT (non-trivial), with reason
+
+The handoff's conditional ("fold onto the shared error pattern where trivial;
+where non-trivial, journal why and leave it") resolves to LEAVE:
+- `report/manager.rs::StaleArtifact` already IS the shared typed-error pattern
+  in this crate family: hand-rolled `Display + std::error::Error`, carried via
+  `anyhow::Error::from`, consumed by `is_stale` = `downcast_ref`. It needs no
+  folding onto itself.
+- A "fold" could only mean rewriting its Display/Error impls onto thiserror
+  (= new `report` dependency - not trivial, workspace-dep rider) or onto
+  `PluginError` (wrong taxonomy - artifact staleness is not a compiler-
+  validation kind, same argument as the design section).
+- The fold's consumer premise is also void: workspace grep shows ZERO
+  bespoke StaleArtifact handling in cli (all `is_stale` consumers live in
+  report/pipeline internals, already typed). No bespoke reporting existed to
+  fold; `crates/report/src/manager.rs` is therefore ZERO-diff (gate 2 run
+  byte-identical to baseline confirms).
 
 ## Deviations
 
-(Pending.)
+- D1: `tests/integration/tests/m24_language_identity_test.rs` touched (one
+  `.to_string()` render token on the seam-error extraction; assert wording
+  byte-untouched). Compile-forced by the signature change - the same class
+  the AR-24 verdict adjudicated ACCEPTED as D2 ("E-unavoidable: the signature
+  change breaks every consumer by construction; STRICT COMPILE-GREEN forces
+  it"). The UNEDITED constraint's PURPOSE survives: m24's wording locks are
+  byte-untouched and green at pinned census 8/0/0/1. m00/m18 files: ZERO-diff.
+- D2: mechanism-witness premise corrected mid-red on own-run evidence
+  (anyhow 1.0.104 `Error::msg` preserves payload type identity; the erasure
+  AR-25 removes is of the dispatch KIND via String payload, not of bytes).
+  Adjudicated inside this lane's own test+capture, no scope change; see RED
+  section. No production-code consequence.
+- D3: `parse_language_arg` deliberately NOT converted (named "AR-25 territory"
+  by the AR-24 decision table): it is clap's `value_parser` surface
+  (`Err: Display`), not an anyhow re-wrap; conversion would touch clap error
+  rendering for zero typed-flow gain. Objective-scoped leave, per the same
+  table's "cli lock stays green UNEDITED" disposition.
+- D4: AR-23 deferred-row F4 (analyze.rs builds a second `default_registry()`
+  while `pipeline.registry` is public, "cheap cleanup candidate for AR-25's
+  cli visit") deliberately NOT folded in: D9-locked registry selection, zero
+  behavior impact, and unrelated to the re-wrap drop - scope discipline; row
+  remains open for closeout.
+
+## Landing record
+
+Range: `d4c608c..HEAD` for this lane; my commits: `2aeae5e` (journal
+skeleton), `96739ad` (red: enum declaration + ar25 lock suite red at the
+re-wrap layer), `2f3b5e7` (green: wiring + re-wrap drop + m24 token).
+Range-wide note: `tasks/ar-21-handoff-journal.md` appears in `git diff
+--name-only d4c608c..HEAD` from the PARALLEL AR-21 lane's own commit - it is
+not part of any AR-25 commit (each AR-25 commit's diffstat lists only AR-25
+touch-set paths). `encoding_guard.py --all`: silent (this final commit
+carries that verified content; final journal rider per the AR-15/16/24
+landing-record precedent).
