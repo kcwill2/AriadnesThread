@@ -3,9 +3,11 @@
 //!
 //! Two surfaces live here:
 //!
-//! * [`IncludeResolver`] — the byte-identical pre-M18 public API (driven by
-//!   the vendored oracles in `m18_cpp_plugin_parity_test`; the deprecated
-//!   `ariadne-graph` re-export that used to front it was removed in M18.11).
+//! * `IncludeResolver` - the deprecated, test-gated legacy surface (AR-21):
+//!   the byte-identical pre-M18 public API, compiled only under `cfg(test)`
+//!   or the `test-resolver` feature to drive the vendored oracles in
+//!   `m18_cpp_plugin_parity_test`; the `ariadne-graph` re-export that used
+//!   to front it was removed in M18.11.
 //! * [`CppDependencyResolver`] — the stateless plugin implementation of
 //!   `ariadne_lang::DependencyResolver` (`resolve_edges` = parse,
 //!   `resolve_target` = the same include-directory search logic driven
@@ -46,24 +48,42 @@
 //!   hits from `-I` dirs) is CLOSED and locked by the `tu_store_plugin_parity`
 //!   search-path fixture.
 
-use crate::directive_parser::{parse_include_directives, RawIncludeDirective};
+// AR-21: the legacy oracle surface below is compiled only under `cfg(test)`
+// or the `test-resolver` feature (see module docs). Its imports carry the
+// same gate so the production build compiles neither the code nor its
+// bindings; `CppDependencyResolver` (the live plugin resolver) keeps only
+// the ungated imports below.
+#[cfg(any(test, feature = "test-resolver"))]
+use crate::directive_parser::RawIncludeDirective;
+use crate::directive_parser::parse_include_directives;
+#[cfg(any(test, feature = "test-resolver"))]
 use ariadne_build::CompilationContext;
 use ariadne_lang::{
-    normalize_relative_path, DependencyResolver, DirectiveStyle, FileCatalog, RawDepEdge,
-    ResolutionContext, ResolveOutcome,
+    DependencyResolver, DirectiveStyle, FileCatalog, RawDepEdge, ResolutionContext, ResolveOutcome,
 };
+#[cfg(any(test, feature = "test-resolver"))]
+use ariadne_lang::normalize_relative_path;
+#[cfg(any(test, feature = "test-resolver"))]
 use ariadne_lang_api::identity::LanguageId;
+#[cfg(any(test, feature = "test-resolver"))]
 use ariadne_lang_api::types::{IncludeEdge, IncludeKind, SourceLocation};
-use ariadne_repo::{FileId, FileOwnership, FileRecord, RepositoryDiscoveryResult};
+use ariadne_repo::FileId;
+#[cfg(any(test, feature = "test-resolver"))]
+use ariadne_repo::{FileOwnership, FileRecord, RepositoryDiscoveryResult};
 use std::path::{Path, PathBuf};
 
 /// Normalizes a path by resolving `.` and `..` relative components without requiring existing files.
+#[deprecated(
+    note = "legacy oracle surface (AR-21): remove when the m18_cpp_plugin_parity oracles retire - dated 2026-10-11"
+)]
+#[cfg(any(test, feature = "test-resolver"))]
 pub fn normalize_path(path: &Path) -> PathBuf {
     normalize_relative_path(path)
 }
 
 /// Ordered include search paths for one directive: source dir first for
 /// quoted includes, then compilation-context user and system include dirs.
+#[cfg(any(test, feature = "test-resolver"))]
 fn collect_include_candidates(
     repo_root: &Path,
     context: Option<&CompilationContext>,
@@ -116,6 +136,8 @@ fn collect_include_candidates(
 /// First discovery record whose (normalized) relative or canonical path
 /// equals one of the candidates — verbatim search semantics of the legacy
 /// resolver.
+#[cfg(any(test, feature = "test-resolver"))]
+#[allow(deprecated)] // internal self-use of the gated legacy surface
 fn find_in_discovery<'a>(
     discovery: &'a RepositoryDiscoveryResult,
     candidate_paths: &[PathBuf],
@@ -132,12 +154,24 @@ fn find_in_discovery<'a>(
 }
 
 /// Include path resolver against repository file records and compilation context.
+///
+/// AR-21: deprecated and compile-gated (`cfg(any(test, feature =
+/// "test-resolver"))`). This is the legacy dual implementation kept alive
+/// ONLY as the left side of the `m18_cpp_plugin_parity` oracles; the live
+/// plugin surface is [`CppDependencyResolver`]. Production builds never
+/// compile this type.
+#[deprecated(
+    note = "legacy dual resolver, oracle-only (AR-21): remove when the m18_cpp_plugin_parity oracles retire - dated 2026-10-11"
+)]
+#[cfg(any(test, feature = "test-resolver"))]
 pub struct IncludeResolver<'a> {
     pub repo_root: &'a Path,
     pub repo_discovery: Option<&'a RepositoryDiscoveryResult>,
     pub context: Option<&'a CompilationContext>,
 }
 
+#[cfg(any(test, feature = "test-resolver"))]
+#[allow(deprecated)] // the deprecated surface's own implementation
 impl<'a> IncludeResolver<'a> {
     pub fn new(repo_root: &'a Path) -> Self {
         Self {

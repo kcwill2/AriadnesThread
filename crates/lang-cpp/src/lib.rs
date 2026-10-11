@@ -33,7 +33,14 @@ pub use directive_parser::{parse_include_directives, RawIncludeDirective};
 pub use planning::{cpp_aggregation_filter, cpp_target_path_for};
 pub use plugin::{CppPlugin, CPP_ANALYSIS_FINGERPRINT};
 pub use source_extractor::CppSourceExtractor;
-pub use resolver::{CppDependencyResolver, IncludeResolver};
+pub use resolver::CppDependencyResolver;
+// AR-21: the deprecated legacy `IncludeResolver` is an oracle-only surface
+// (module docs in `resolver`): compiled for lang-cpp's own tests or under
+// the test-only `test-resolver` feature (dev-consumer wiring in
+// tests/integration/Cargo.toml); production builds compile it out.
+#[cfg(any(test, feature = "test-resolver"))]
+#[allow(deprecated)]
+pub use resolver::IncludeResolver;
 pub use shaper::CppUnitShaper;
 
 /// The process-wide C++ unit shaper (plan M18.4). Call sites that relied on

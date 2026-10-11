@@ -86,3 +86,117 @@ of this manifest on main is AR-17's.
   lang-api, repo, worker-core, index}) - this handoff adds NO cargo
   dependencies, only a feature; M25/M27 parser/tokenizer byte locks -
   untouched.
+
+## Implementation (landed shape)
+
+- `resolver.rs`: legacy region gated `#[cfg(any(test, feature =
+  "test-resolver"))]` item-by-item (gated imports, `normalize_path`,
+  `collect_include_candidates`, `find_in_discovery`, `IncludeResolver` +
+  impl). Both deprecated surfaces carry dated notes: "remove when the
+  m18_cpp_plugin_parity oracles retire - dated 2026-10-11". Module docs
+  updated to the gated reality (the intra-doc `[`IncludeResolver`]` link
+  was plain-coded to avoid an unresolved-link warning in feature-off doc
+  builds).
+- `lib.rs`: re-export split; the `IncludeResolver` line is
+  `#[cfg(any(test, feature = "test-resolver"))]` + `#[allow(deprecated)]`
+  (deliberate re-export of the deprecated oracle surface).
+- `crates/lang-cpp/Cargo.toml`: `[features] test-resolver = []` with the
+  consumer census comment. No dependency added (cone unchanged - m17
+  guard green). Cargo.lock UNCHANGED (feature-only, no dep-graph edge).
+- D2 (in-touch-set, disclosed): `#[allow(deprecated)]` on the deprecated
+  surface's own implementation sites (`find_in_discovery`,
+  `IncludeResolver` impl, lib re-export) - conventional shim hygiene:
+  the gated code must not self-warn; CONSUMER-side use (lang-cpp unit
+  tests, m18 oracle) keeps warning = the dated removal clock stays
+  audible. Effect: feature-on lang-cpp LIB build = zero warnings.
+
+## RED-to-verify trail (feature-gate off-state, locked red-first)
+
+With gating landed and wiring ABSENT (transient, never committed), the
+default integration build lost the legacy surface - the off-state
+absence lock:
+
+- `python tools/testrun.py --distill -- -p ariadne-integration-tests --test m18_cpp_plugin_parity_test`
+  -> `### cargo test DRIFT (exit 2) ... parse format drift` (compile
+  failure before any test line), capture
+  `target/testrun-capture.txt` (own run): 4x
+  `error[E0433]: failed to resolve: could not find `IncludeResolver` in
+  `ariadne_lang_cpp`` at EXACTLY the four legacy consumption sites
+  (`resolver_parity.rs:215/:290`, `external_boundary_parity.rs:228/:399`).
+  Machine proof: a feature-off (production-shaped) build does not merely
+  HIDE the legacy resolver, it does not COMPILE it - and the only
+  missing-symbol consumers in the workspace are the oracle files
+  themselves (proof D1 is forced, not chosen).
+
+## Gate trail (final state, own stdout, verbatim)
+
+Capture paths cited are own-run digests (shared capture, capture-race
+rule; lines quoted from stdout, not the file).
+
+1. `python tools/testrun.py --distill -- -p ariadne-lang-cpp`
+   -> `155 passed / 0 failed / 0 ignored / 2 suites` (default features;
+   count byte-equal to the re-briefed 155 anchor - contract's 153 stale,
+   +2 = AR-24 kind tests).
+2. `python tools/testrun.py --distill -- -p ariadne-integration-tests --test m18_cpp_plugin_parity_test`
+   -> `23 passed / 0 failed / 0 ignored / 1 suites` - parity lock count
+   UNCHANGED; both oracle module files BYTE-IDENTICAL to HEAD
+   (`git diff --stat HEAD -- tests/integration/tests` lists only foreign
+   AR-25 WIP `m24_language_identity_test.rs`; the m18 files absent).
+   BOTH SIDES EXECUTE - legacy-side probe evidence (own capture, final
+   run): `plugin_closure_matches_vendored_legacy_bfs_basic ... ok`,
+   `..._bfs_expensive ... ok`,
+   `resolve_target_outcome_table_matches_legacy_resolver_basic ... ok`,
+   `..._expensive ... ok`, `plugin_closure_matches_vendored_legacy_external_boundary ... ok`,
+   `resolve_target_outcome_table_matches_legacy_resolver_external_boundary ... ok`
+   (all 6 IncludeResolver-driven left-side tests green; with the gate
+   off they would not compile - RED trail above).
+3. Feature route chosen, both configurations:
+   `python tools/testrun.py --distill -- -p ariadne-lang-cpp --features test-resolver`
+   -> `155 passed / 0 failed / 0 ignored / 2 suites` (parity of counts
+   across configs).
+4. m00 pair UNEDITED: `python tools/testrun.py --distill -- -p ariadne-integration-tests --test m00_golden_baseline_test --test m00_facts_path_parity_test`
+   -> `4 passed / 0 failed / 0 ignored / 2 suites`.
+   m17 cone guard (invariant lock):
+   `python tools/testrun.py --distill -- -p ariadne-integration-tests --test m17_plugin_seam_test`
+   -> `8 passed / 0 failed / 0 ignored / 1 suites` (cone free of
+   scheduler/new deps - feature-only change).
+5. STRICT compile-green:
+   `python tools/distill.py -- cargo check --workspace --all-targets`
+   -> `ok (exit 0, 31 warnings emitted)` (capture
+   `target/distill-capture.txt`). Warning attribution: ALL
+   AR-21-attributable diagnostics carry the dated AR-21 note
+   (`ariadne-lang-cpp (lib test) generated 10 warnings` = unit-test use
+   sites; `m18_cpp_plugin_parity_test generated 12 warnings (7
+   duplicates)` = oracle use sites - oracle files uneditable, warnings
+   are the intended dated signal; feature-on `ariadne-lang-cpp (lib)`
+   emits NO warning summary = zero). The remainder (ui/cli singletons,
+   integration `common` golden-helper dead_code x20 duplicates, m10
+   unused imports) = pre-existing classes, none AR-21.
+   Production absence proof: `python tools/distill.py -- cargo check -p
+   ariadne-pipeline` -> `ok (exit 0, 0 warnings emitted)` - the
+   production graph (pipeline -> lang-cpp, feature-off, no cfg(test))
+   compiles the legacy resolver out entirely.
+6. `python tools/encoding_guard.py --all` -> silent (exit 0), pre-commit;
+   `python tools/hygiene_check.py` -> ZERO blocking rows; every reported
+   row is R3 (warn); `resolver.rs` absent from findings (file ~920
+   lines < 1000, no function grown). Encoding `--staged` after the
+   scoped commit per AR-20b D2 practice (raw `git add` allowlist-denied;
+   commit_scoped stages + the `--all` superset covered the content).
+
+## Oracle doc-comment note
+
+The uneditable oracle files' doc comments still say the legacy resolver
+is "public, non-deprecated" (written pre-AR-21). Public: still true;
+non-deprecated: stale by mandate (this handoff deprecates it). Editing
+those comments is outside FEATURE-WIRING-ONLY permission; banked as a
+wording row for whoever retires the oracles (the dated notes point here).
+
+## Foreign-tree handling
+
+- `tests/fixtures/basic/artifacts/includes/report.json`: CRLF churn from
+  suite runs, left unstaged (D5 precedent).
+- `tests/integration/tests/m24_language_identity_test.rs`: appeared
+  dirty mid-run - foreign AR-25 lane WIP; left unstaged, excluded from
+  my scopes; not caused by and not affecting any gate above (all gates
+  green throughout).
+

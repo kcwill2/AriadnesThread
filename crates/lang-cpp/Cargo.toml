@@ -14,6 +14,14 @@ authors.workspace = true
 # the m17 transitive guard cone stays free of scheduler/report/cluster/
 # graph/transform/validate. Acyclic: worker-core never depends on any
 # plugin crate outside its own dev-deps (see crates/build/Cargo.toml).
+# AR-21 test-only feature: compiles the deprecated legacy `IncludeResolver`
+# oracle surface (resolver.rs + lib.rs re-export). Enabled ONLY by the
+# dev-dependency wiring in tests/integration/Cargo.toml for the
+# m18_cpp_plugin_parity suites; production consumers (pipeline,
+# clang-worker, tool) never enable it and compile the legacy resolver out.
+[features]
+test-resolver = []
+
 [dependencies]
 anyhow.workspace = true
 serde_json.workspace = true
