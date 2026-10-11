@@ -12,6 +12,7 @@ mod gui_scrollbar_style;
 mod help_center_readability;
 mod hop_fade_ramp;
 mod hotspot_direction;
+mod icon_asset;
 mod justification_builders;
 mod justification_golden;
 mod node_verdict_spine;

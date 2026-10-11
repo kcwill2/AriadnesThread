@@ -37,7 +37,10 @@ BASELINE_PATH = "tools/theme_token_baseline.json"
 # The token file is where hardcoded colors are SUPPOSED to live: its literals
 # are the palette, not drift. Exempt it from the added-literal scan and let the
 # frozen count below pin it instead.
-TOKEN_FILES = ("themes.css",)
+# icon.svg is sanctioned brand art (source of truth: media/AT-svg.svg): its
+# literals ARE the fixed brand palette, exempt from BOTH scans exactly like
+# the token file; a re-brand edits media/ then re-syncs the copy (shape D3).
+TOKEN_FILES = ("themes.css", "icon.svg")
 HEX_LENGTHS = (8, 6, 4, 3)
 HEX_LITERAL = re.compile(
     r"#[0-9a-fA-F]{8}(?![0-9a-fA-F])"

@@ -18,3 +18,4 @@ pub const PREVIEW_JS: &str = include_str!("../assets/preview.js");
 pub const PROVENANCE_JS: &str = include_str!("../assets/provenance.js");
 pub const MAIN_JS: &str = include_str!("../assets/main.js");
 pub const THEME_JS: &str = include_str!("../assets/theme.js");
+pub const ICON_SVG: &str = include_str!("../assets/icon.svg");

@@ -1,6 +1,6 @@
 use crate::dto::GraphExportPayload;
 use crate::{
-    API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, INDEX_HTML, MAIN_JS, PREVIEW_JS, PROVENANCE_JS,
+    API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, ICON_SVG, INDEX_HTML, MAIN_JS, PREVIEW_JS, PROVENANCE_JS,
     STYLES_CSS, THEMES_CSS, THEME_JS, TRAVERSAL_JS,
 };
 use std::borrow::Cow;
@@ -19,6 +19,18 @@ fn standalone_template() -> String {
     html = html.replace(
         "<link rel=\"stylesheet\" href=\"/styles.css\">",
         &format!("<style>\n{}\n</style>", STYLES_CSS.trim_end()),
+    );
+    // Brand art under file:// has no routes: the favicon is meaningless and
+    // the header mark must arrive as inline markup. Ids neonGradient/neonGlow
+    // are unique among inline SVGs here (the app page keeps <img> precisely
+    // to keep that guarantee cheap - shape D6).
+    html = html.replace(
+        "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/icon.svg\">",
+        "",
+    );
+    html = html.replace(
+        "<img class=\"brand-mark\" src=\"/icon.svg\" alt=\"Ariadne's Thread logo\">",
+        ICON_SVG.trim_end(),
     );
     for (name, js) in [
         ("api.js", API_JS),

@@ -131,6 +131,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/", get(api_index))
         .route("/styles.css", get(asset_styles_css))
         .route("/themes.css", get(asset_themes_css))
+        .route("/icon.svg", get(asset_icon_svg))
         .route("/app/api.js", get(asset_api_js))
         .route("/app/graph.js", get(asset_graph_js))
         .route("/app/traversal.js", get(asset_traversal_js))
@@ -188,6 +189,10 @@ async fn asset_styles_css() -> axum::response::Response {
 
 async fn asset_themes_css() -> axum::response::Response {
     ui_asset(crate::THEMES_CSS, "text/css; charset=utf-8")
+}
+
+async fn asset_icon_svg() -> axum::response::Response {
+    ui_asset(crate::ICON_SVG, "image/svg+xml")
 }
 
 async fn asset_api_js() -> axum::response::Response {
