@@ -208,7 +208,7 @@
         justificationSidePart('collateral', 'just-collateral', e.collateral_symbols || [], e.collateral_truncated, e.collateral_count || 0),
       ].join('');
       const previewBtn = row.impact
-        ? `<button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(String(nodeId))}" data-preview-source="${escapeHtml(String(row.id))}">Preview after extraction</button>`
+        ? `<button type="button" class="just-preview-btn" data-preview-root="${escapeAttribute(String(nodeId))}" data-preview-source="${escapeAttribute(String(row.id))}">Preview after extraction</button>`
         : '';
       const summary = `<summary><span style="color:var(--cyan);">${escapeHtml(row.label || row.id)}</span>`
         + `<span style="color:var(--text-sub);">${e.justified_count || 0} sym · ${e.collateral_count || 0} col</span></summary>`;
@@ -301,7 +301,7 @@
         const res = await fetch(`/api/graph/path?graph_type=${currentTab}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
         if (res.ok) {
           const path = await res.json();
-          resultDiv.innerHTML = path.map(n => `<span class="path-node">${n}</span>`).join('<span class="path-sep">&rarr;</span>');
+          resultDiv.innerHTML = path.map(n => `<span class="path-node">${escapeHtml(n)}</span>`).join('<span class="path-sep">&rarr;</span>');
           if (path.length > 0) {
             selectNode(path[0]);
           }
@@ -321,7 +321,7 @@
         const res = await fetch(`/api/graph/entrypoints?graph_type=${currentTab}&limit=10`);
         if (res.ok) {
           const eps = await res.json();
-          listDiv.innerHTML = eps.map(ep => `<div style="cursor:pointer; color:var(--cyan); margin: 5px 0;" onclick="selectNode('${ep}'); closeModals();">${ep}</div>`).join('');
+          listDiv.innerHTML = eps.map(ep => `<div style="cursor:pointer; color:var(--cyan); margin: 5px 0;" data-select-id="${escapeAttribute(ep)}">${escapeHtml(ep)}</div>`).join('');
         } else {
           listDiv.innerHTML = 'No entrypoints found.';
         }

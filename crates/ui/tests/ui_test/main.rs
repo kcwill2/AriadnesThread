@@ -1,3 +1,4 @@
+mod asset_injection_hardening;
 mod common;
 mod cors_same_origin;
 mod d27_node_provenance;

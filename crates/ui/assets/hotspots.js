@@ -216,15 +216,21 @@
       return hotspotBurdenCache;
     }
 
+    // AR-11 (S4): quote extension shipped - all five markup-significant
+    // characters now escape in BOTH escapers, so text and attribute contexts
+    // are inert everywhere. Kept as two named escapers to preserve the
+    // caller-side intent (text-node vs quoted-attribute); this is the ONE
+    // escapeHtml shipped across all assets (the file-view.js duplicate was
+    // removed - a weaker late re-declaration would silently override it).
     function escapeHtml(s) {
-      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // Attribute-safe escaper (AR-01 / S4-partial): for repo-derived values
-    // interpolated into quoted HTML attributes. Covers all five
-    // markup-significant characters; text-node rendering keeps using
-    // escapeHtml. The full call-site sweep (inline onclick removal, quote
-    // extension everywhere) is AR-11.
+    // Attribute-safe escaper (AR-01 / S4-partial, completed by AR-11): for
+    // repo-derived values interpolated into quoted HTML attributes. Covers
+    // all five markup-significant characters. With AR-11 every inline
+    // onclick payload of repo data is gone (data-* + delegation), so no
+    // escaper output is ever re-parsed as JavaScript.
     function escapeAttribute(value) {
       return String(value)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -283,10 +289,10 @@
         const active = e.node.id === selectedNodeId ? ' active' : '';
         const hasOutgoing = (e.node.out_degree || 0) > 0;
         const traversalBtn = hasOutgoing
-          ? `<button class="hotspot-traversal-btn" onclick="event.stopPropagation(); openTraversalForRoot('${e.node.id}')" title="Open Traversal view for this root">🔍 Traversal</button>`
+          ? `<button class="hotspot-traversal-btn" data-traversal-root="${escapeAttribute(e.node.id)}" title="Open Traversal view for this root">🔍 Traversal</button>`
           : '';
         return `
-          <div class="hotspot-row${active}" onclick="selectHotspotRow('${e.node.id}')" title="${escapeHtml(tip)}">
+          <div class="hotspot-row${active}" data-select-id="${escapeAttribute(e.node.id)}" title="${escapeHtml(tip)}">
             <span class="hotspot-rank">${i + 1}</span>
             <span class="hotspot-name">${escapeHtml(e.node.label)}</span>
             <span class="hotspot-val">${e.value}</span>
@@ -553,7 +559,7 @@
       const filePlan = renderExtractionFilePlan(p.target_files || [], p.target_files_truncated);
       const applyHint = renderExtractionApplyHint(p.plan_id || '');
       return `
-        <div class="extraction-card" onclick="selectHotspotRow('${escapeHtml(String(p.target_file_id))}')" title="${targetLabel}">
+        <div class="extraction-card" data-select-id="${escapeAttribute(String(p.target_file_id))}" title="${targetLabel}">
           <button type="button" class="extraction-disclosure" aria-expanded="false" onclick="toggleExtractionCard(event, this)">
             <span class="extraction-head">
               <span class="extraction-plan-id">${escapeHtml(p.plan_id || '')}</span>
@@ -645,3 +651,30 @@
       };
       setTimeout(waitForInit, 50);
     }
+
+    // AR-11/S2: delegated clicks for repo-id affordances. The removed inline
+    // handlers and their exact legacy payloads (behavior lock, per oracle):
+    //   hotspot row           selectHotspotRow('${e.node.id}')
+    //   traversal-root button openTraversalForRoot('${e.node.id}')
+    //   extraction card       selectHotspotRow(escaped target_file_id)
+    // The ids now ride inert data-* attributes escaped with escapeAttribute;
+    // one document listener maps each affordance to the same function and
+    // argument the inline handler used. The button branch returns first,
+    // reproducing the inline event.stopPropagation() suppression. Disclosure
+    // and preview buttons keep their own stopPropagation paths unchanged.
+    document.addEventListener('click', event => {
+      const traversalBtn = event.target.closest('.hotspot-traversal-btn[data-traversal-root]');
+      if (traversalBtn) {
+        openTraversalForRoot(traversalBtn.dataset.traversalRoot);
+        return;
+      }
+      const row = event.target.closest('.hotspot-row[data-select-id]');
+      if (row) {
+        selectHotspotRow(row.dataset.selectId);
+        return;
+      }
+      const card = event.target.closest('.extraction-card[data-select-id]');
+      if (card) {
+        selectHotspotRow(card.dataset.selectId);
+      }
+    });
