@@ -1,9 +1,8 @@
 use anyhow::{bail, Result};
-use ariadne_build::BuildDiscoverer;
 use ariadne_graph::LoadAnalyzer;
 use ariadne_lang::{DependencyVocabulary, LanguageRegistry};
 use ariadne_pipeline::Pipeline;
-use ariadne_repo::{Repository, SourceLanguage};
+use ariadne_repo::SourceLanguage;
 use ariadne_report::{ArtifactManager, LoadReport};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,48 +13,39 @@ pub fn run_incremental_analysis(
     run_incremental_analysis_filtered(repo_path, None)
 }
 
-/// Registry-wired incremental analysis (plan M18.3, M19.3): the unit shaper
-/// comes from the registry-selected shaper and the analyzer backend from
+/// Registry-wired incremental analysis (plan M18.3, M19.3, A6/AR-23): the
+/// construction sequence (locate, repo/build discovery, registry-shaper
+/// selection, the `--lang` unit restriction, the registration and
+/// unhandled-language checks, and the artifact-authority rule) is owned by
+/// `Pipeline::for_incremental` - the single implementation, no cli mirror.
+/// The CLI pairs the analyzer backend from the restricted build through
 /// `registry::incremental_backend` (distinct `tu.language` dispatch: one
 /// language -> its plugin, unclaimed language -> "unhandled language"
 /// (sec 3.3 fact 3), mixed -> the M21 language-scoped-cache error, zero
-/// units -> sole-plugin fallback); `--lang` restricts the unit set.
+/// units -> sole-plugin fallback).
 pub fn run_incremental_analysis_filtered(
     repo_path: &PathBuf,
     language: Option<SourceLanguage>,
 ) -> Result<ariadne_scheduler::IncrementalAnalysisResult> {
+    let pipeline = Pipeline::for_incremental(repo_path, language)?;
+    let authoritative = pipeline
+        .incremental_view
+        .as_ref()
+        .expect("for_incremental always records its unit-restriction/authority state")
+        .artifacts_are_authoritative();
+
     let registry = crate::registry::default_registry();
-    if let Some(language) = language {
-        crate::registry::ensure_language_registered(&registry, language)?;
-    }
-
-    let repo = Repository::locate(repo_path)?;
-    let repo_discovery = repo.discover()?;
-    // D22: marker-based registry shaper selection against the repo root
-    // (first-wins fallback preserved).
-    let mut build_discovery = BuildDiscoverer::new(&repo.root)
-        .with_repo_discovery(&repo_discovery)
-        .with_unit_shaper(registry.unit_shaper_for_repo(&repo.root))
-        .discover()?;
-    let discovered_units = build_discovery.translation_units.len();
-    restrict_and_validate_units(&registry, language, &mut build_discovery)?;
-    let authoritative = artifacts_are_authoritative(
-        language,
-        build_discovery.translation_units.len(),
-        discovered_units,
-    );
-
-    let plugin = crate::registry::incremental_backend(&registry, &build_discovery)
+    let plugin = crate::registry::incremental_backend(&registry, &pipeline.build)
         .map_err(anyhow::Error::msg)?;
     let mut analyzer = ariadne_scheduler::IncrementalAnalyzer::new(
-        &repo,
-        &repo_discovery,
-        &build_discovery,
+        &pipeline.repo,
+        &pipeline.discovery,
+        &pipeline.build,
         plugin,
     );
     let result = analyzer.analyze()?;
     if authoritative {
-        result.save_artifacts(&repo)?;
+        result.save_artifacts(&pipeline.repo)?;
     } else {
         println!(
             "Restricted run: skipping authoritative index/reduced artifact persistence \
@@ -75,49 +65,6 @@ pub fn run_incremental_analysis_filtered(
     println!("Cache hit rate:\n    {:.1}%", result.stats.hit_rate);
 
     Ok(result)
-}
-
-/// Apply the `--lang` restriction (when given) and then require every
-/// retained unit to be claimed by some registered plugin (§3.3 fact 3).
-fn restrict_and_validate_units(
-    registry: &LanguageRegistry,
-    language: Option<SourceLanguage>,
-    build: &mut ariadne_build::BuildDiscoveryResult,
-) -> Result<()> {
-    if let Some(language) = language {
-        build
-            .translation_units
-            .retain(|tu| {
-                registry.detect_language(&tu.source_path)
-                    == Some(ariadne_lang::LanguageId::from(language))
-            });
-    }
-    for tu in &build.translation_units {
-        if registry.detect_language(&tu.source_path).is_none() {
-            bail!(
-                "unhandled language for {} (no registered plugin claims it)",
-                tu.source_path.display()
-            );
-        }
-    }
-    Ok(())
-}
-
-/// A run whose unit set was narrowed below the discovered set — an active
-/// `--lang` filter or any other restriction — produces a VIEW, never the
-/// authoritative full-stage artifact. Persisting a filtered result under the
-/// full index/reduced fingerprint would poison every later full run, so only
-/// the unfiltered run persists (mirrors `Pipeline`'s
-/// `language_filter.is_none()` index guard). Today `--lang` is the only
-/// restriction and it always runs before saving, so the false branch is
-/// unreachable — but the guard must exist before M19's per-language split can
-/// actually narrow the unit set.
-fn artifacts_are_authoritative(
-    language_filter: Option<SourceLanguage>,
-    retained_units: usize,
-    discovered_units: usize,
-) -> bool {
-    language_filter.is_none() && retained_units >= discovered_units
 }
 
 pub fn run_production_scale_analysis(
@@ -361,27 +308,6 @@ pub fn explain_dependency_load(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unrestricted_full_unit_set_is_authoritative() {
-        assert!(artifacts_are_authoritative(None, 8, 8));
-    }
-
-    #[test]
-    fn active_language_filter_is_never_authoritative() {
-        assert!(!artifacts_are_authoritative(
-            Some(SourceLanguage::Cpp),
-            8,
-            8
-        ));
-    }
-
-    #[test]
-    fn unit_set_narrowed_below_discovery_is_never_authoritative() {
-        assert!(!artifacts_are_authoritative(
-            None, 5, 8
-        ));
-    }
 
     #[test]
     fn scala_only_run_selects_import_vocabulary_and_scala_caveat() {
