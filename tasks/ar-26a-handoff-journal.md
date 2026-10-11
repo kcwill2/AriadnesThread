@@ -96,6 +96,14 @@ This is the orchestrator's call, not the implementer's.
 - The probe workspace lives only under the temp dir; the repo never hosted
   a failing state for the live AR-31 reviewer lane.
 
+## Gate record + commit proof (addendum - could only be recorded after
+## the commit it describes; AR-16 `a48c018` / AR-26 `a634ae5` ordering precedent)
+
+- Journal commit: `5b7c53d` (`104 0 tasks/ar-26a-handoff-journal.md`, sole
+  path). `python tools/encoding_guard.py --staged` -> silent (exit 0).
+  D7 rename hazard cannot arise: zero `git mv` exists in this stop.
+- This addendum rides the immediate follow-up scoped commit (journal-only).
+
 ## Deviations
 
 - D1 (process): blocker adjudication ran through a temp-dir cargo probe
