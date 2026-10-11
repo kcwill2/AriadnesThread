@@ -233,3 +233,33 @@ the rider line.
   full dep list per contract - later AR owns it); no m17/cone changes
   (26b); no manager/* movement (26a2).
 
+## Commit + rename-completeness proof (final addendum)
+
+- LANDING COMMIT `4794467` via the exact contract scope list (5 globs).
+  commit_scoped numstat (verbatim): `Cargo.lock 11+`, `Cargo.toml 1+`,
+  `crates/artifact/Cargo.toml 11+`, `crates/artifact/src/lib.rs 7+`,
+  `crates/{report => artifact}/src/manifests.rs 1+1-`,
+  `crates/report/Cargo.toml 1+`, `crates/report/src/lib.rs 13+4-`,
+  `tasks/ar-26a-handoff-journal.md 124+1-`.
+- D7 rename-completeness (commit_scoped rename blindness clause):
+  `git show --stat -M HEAD` -> sole manifests entry
+  `crates/{report => artifact}/src/manifests.rs | 2 +-`, 8 paths total,
+  ALL inside the touch-set, no others.
+  `git show --name-status -M HEAD` -> `R099
+  crates/report/src/manifests.rs -> crates/artifact/src/manifests.rs`
+  (9x rename class = the pre-approved single visibility hunk, D2; the
+  ruling supersedes the contract's R100 expectation).
+  `git ls-files crates/report/src/manifests.rs` -> EMPTY (no stale copy).
+  Deletion+addition landed in the ONE commit: the AR-20a D7 recipe
+  (deletion left UNSTAGED before the scoped commit) worked first try -
+  no stray-deletion follow-up commit needed.
+- `python tools/encoding_guard.py --staged` -> silent.
+- `python tools/encoding_guard.py --all` (gate 8, run pre-commit) -> silent.
+- Post-commit `cargo check --workspace --all-targets` -> exit 0, 31
+  warnings (all pre-existing census; none attributable to report/artifact
+  paths in own capture).
+- This addendum rides the immediate journal-only follow-up commit
+  (ordering precedent AR-16 `a48c018`, AR-26 `a634ae5`, and the
+  `5b7c53d`/`2fb9b21` pair above).
+
+
