@@ -1,5 +1,7 @@
 # Ariadne Extension for VS Code
 
+![Ariadne's Thread](media/banner.jpg)
+
 The Ariadne Extension allows you to:
 
 ## 🚀 Core Features
