@@ -216,6 +216,20 @@ empty body when unchanged, Arc bump when a 200 is needed).
   or golden fixture changes; no traversal.js diff.
 - ui_smoke/bench rows NOT re-baselined (bench_compare passed neutral-or-better).
 
+## Commit record
+
+- Landing: cd875de (single scoped commit, 7 paths, touch-set exact; message
+  verbatim per handoff). This addendum commit is journal-only.
+- Post-commit gates: `encoding_guard --all` silent;
+  `theme_token_check --check-added --base HEAD~1` reports exactly the three
+  AR-11-adjudicated informational frozen-count flags (index.html 6>4,
+  main.js 1>0, traversal.js 1>0 - all three files byte-untouched here; the
+  gate's zero-ADDED-hex bar holds: my only asset edit api.js raises no
+  flag).
+- `tests/fixtures/basic/artifacts/includes/report.json` CRLF churn produced
+  by this session's suite/bench runs was restored to HEAD bytes (AR-20a D5
+  precedent); the lane never edited the fixture.
+
 ## Memory mirror owed (orchestrator)
 
 - ar15.snapshot.serving: "/api/export serves a generation-validated
