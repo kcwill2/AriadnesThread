@@ -7,6 +7,7 @@ members = [
     "crates/lang-scala",
     "crates/repo",
     "crates/build",
+    "crates/worker-core",
     "crates/scheduler",
     "crates/index",
     "crates/graph",

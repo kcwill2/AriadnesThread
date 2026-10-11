@@ -15,8 +15,14 @@ pub use pool::*;
 pub mod shard;
 pub use shard::*;
 
-pub mod tu_store;
-pub use tu_store::*;
+// AR-20a compat shim: the engine lives in `ariadne-worker-core` (neutral
+// crate), every name stays reachable here unchanged. The module alias
+// preserves module-qualified `scheduler::tu_store::...` paths (locked by
+// `m18_persistence_incremental_test.rs:226`); the glob preserves the flat
+// names; in-crate `crate::tu_store::` uses keep resolving. Do not repoint
+// consumers around these shims (shape 4.2/4.4 - the compat contract).
+pub use ariadne_worker_core::tu_store;
+pub use ariadne_worker_core::tu_store::*;
 
 pub mod engine;
 pub use engine::*;

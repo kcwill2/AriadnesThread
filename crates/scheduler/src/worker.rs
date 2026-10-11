@@ -31,15 +31,6 @@ impl WorkerBackend for SharedPluginWorkerBackend {
     }
 }
 
-/// `WorkerPool` stores backends as `Arc<B>`, and the registry wiring hands it
-/// an `Arc<dyn WorkerBackend>` (M18.3): dispatch through the `Arc` to the
-/// wrapped backend.
-impl<T: WorkerBackend + ?Sized> WorkerBackend for Arc<T> {
-    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis> {
-        T::analyze_task(self, task, repo_root)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerStatus {
     Idle,
@@ -47,9 +38,13 @@ pub enum WorkerStatus {
     Failed(String),
 }
 
-pub trait WorkerBackend: Send + Sync {
-    fn analyze_task(&self, task: &TuTask, repo_root: &Path) -> Result<TuAnalysis>;
-}
+// AR-20a compat shim: WorkerBackend + its Arc blanket impl moved verbatim
+// to `ariadne_worker_core::worker_backend` (the orphan rule forces the
+// blanket impl into the trait's defining crate). Re-exported so
+// `crate::worker::{SharedPluginWorkerBackend, WorkerBackend}` and the flat
+// name keep resolving; the local impls below stay (local types satisfy the
+// orphan rule wherever the trait lives).
+pub use ariadne_worker_core::worker_backend::WorkerBackend;
 
 /// Registry-dispatching worker backend (plan M18.2; since M18.11 the ONLY
 /// in-process backend): the analyzer and the closure walk are resolved from

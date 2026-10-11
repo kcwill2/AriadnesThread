@@ -300,6 +300,7 @@ dependencies = [
  "ariadne-lang-cpp",
  "ariadne-repo",
  "ariadne-report",
+ "ariadne-worker-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -358,6 +359,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "ariadne-worker-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ariadne-build",
+ "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
+ "ariadne-repo",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
