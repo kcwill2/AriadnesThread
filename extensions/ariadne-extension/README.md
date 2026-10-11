@@ -15,14 +15,19 @@ Open VS Code settings and configure:
 
 ```json
 {
-  "ariadne.serverUrl": "http://localhost:8080",
+  "ariadne.serverUrl": "http://localhost:7742",
+  "ariadne.toolPath": "",
   "ariadne.autoConnect": true
 }
 ```
 
 ### Server URL
-- Where the Ariadne analysis server is running (default: localhost:8080)
+- Where the Ariadne analysis server is running (default: localhost:7742, matching the CLI `tool ui` default port)
 - The server must run locally for path sharing to work
+
+### Tool Binary Path
+- Path to the Ariadne `tool` binary used by "Start Ariadne Server"
+- Leave empty to auto-detect `target/release/tool` or `target/debug/tool` under the project root
 
 ### Auto Connect
 - Whether to automatically connect to server on VS Code startup
@@ -31,6 +36,12 @@ Open VS Code settings and configure:
 
 ### Ariadne: Connect to Server
 Establishes connection to the analysis server.
+
+### Ariadne: Start Ariadne Server (project root as input)
+Launches the AT server (`tool ui <project root> --port <port> --no-open`) with the open workspace's project root as the analysis input, waits until it answers, then marks the extension connected. If no `tool` binary is found it offers to run `cargo build --release --bin tool` or to pick an existing binary. Server output goes to the "Ariadne Server" output channel.
+
+### Ariadne: Stop Ariadne Server
+Stops the server started by "Start Ariadne Server" from this window.
 
 ### Ariadne: Go to Definition
 Jumps to the definition of a symbol you select (either by input or IDE).
@@ -76,20 +87,22 @@ User selects symbol → Extension fetches symbol info → VS Code opens file
 
 ## 🛠️ How to Use
 
-1. **Start the Analysis Server**:
-   ```bash
-   cargo build --release --features server
-   cargo run --release --bin cli --features server
-   ```
-   Quick debug alternative (debug indexing measured ~20x slower than
-   release at TU scale - M27 T1a launch-profile finding, 2026-10-05):
-   `cargo run --bin cli -- features server`
+1. **Start the Analysis Server** - two options:
+   - From VS Code: run "Ariadne: Start Ariadne Server" - it uses the current
+     workspace's project root as the analysis input (no terminal needed).
+   - From the terminal:
+     ```bash
+     cargo build --release --bin tool
+     cargo run --release --bin tool -- ui /path/to/project --port 7742 --no-open
+     ```
+    Release is strongly recommended (debug indexing measured ~20x slower than
+    release at TU scale - M27 T1a launch-profile finding, 2026-10-05).
 
 2. **Install the Extension**:
    - Run `code .` in this directory
    - Open the Command Palette (`Ctrl+Shift+P`)
    - Choose "Extensions: Install Extension"
-   - Select "Ariadne Thread" from the list
+   - Select "Ariadne's Thread" from the list
 
 3. **Connect**: Run "Ariadne: Connect to Server".
 

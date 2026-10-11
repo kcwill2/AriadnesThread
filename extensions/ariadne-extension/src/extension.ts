@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import * as cp from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
 /**
  * Ariadne Extension for VS Code
@@ -17,6 +20,40 @@ interface RepoInfoResponse {
 
 /** Global reference to the connected server URL. */
 let serverUrl: string | undefined;
+
+/** The server child process started by this window, if any. */
+let serverProcess: cp.ChildProcess | undefined;
+
+/** Output channel showing the server's stdout/stderr. */
+let serverChannel: vscode.OutputChannel | undefined;
+
+/** Milliseconds to wait for the server to answer /api/repo-info after start. */
+const SERVER_START_TIMEOUT_MS = 180000;
+
+/** Poll interval while waiting for the server to come up. */
+const SERVER_POLL_INTERVAL_MS = 2000;
+
+function getServerChannel(): vscode.OutputChannel {
+  if (!serverChannel) {
+    serverChannel = vscode.window.createOutputChannel("Ariadne Server");
+  }
+  return serverChannel;
+}
+
+/**
+ * Extract the port from the configured server URL (CLI 'tool ui' default: 7742).
+ */
+function resolvePort(): number {
+  try {
+    const parsed = new URL(resolveServerUrl());
+    if (parsed.port) {
+      return Number(parsed.port);
+    }
+    return parsed.protocol === "https:" ? 443 : 80;
+  } catch {
+    return 7742;
+  }
+}
 
 /**
  * Resolve the server URL from VS Code settings, with a fallback default.
@@ -40,6 +77,210 @@ async function fetchRepoInfo(): Promise<RepoInfoResponse | undefined> {
   } catch (err) {
     console.error("Failed to fetch repo info:", err);
     return undefined;
+  }
+}
+
+/**
+ * Pick the project root to hand to the server as analysis input.
+ */
+async function pickProjectRoot(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    vscode.window.showErrorMessage(
+      "Ariadne: no workspace folder open - open the project you want to analyze first."
+    );
+    return undefined;
+  }
+  if (folders.length === 1) {
+    return folders[0].uri.fsPath;
+  }
+  const picked = await vscode.window.showWorkspaceFolderPick({
+    placeHolder: "Select the Ariadne project root to analyze"
+  });
+  return picked ? picked.uri.fsPath : undefined;
+}
+
+/** Candidate binary locations under a project root (release preferred, per AGENTS.md launch guidance). */
+function toolBinaryCandidates(root: string): string[] {
+  const exe = process.platform === "win32" ? "tool.exe" : "tool";
+  return [
+    path.join(root, "target", "release", exe),
+    path.join(root, "target", "debug", exe)
+  ];
+}
+
+/**
+ * Resolve the Ariadne 'tool' binary: explicit ariadne.toolPath setting first,
+ * then target/release/tool, then target/debug/tool under the project root.
+ */
+function resolveToolBinary(root: string): string | undefined {
+  const configured = vscode.workspace
+    .getConfiguration("ariadne")
+    .get<string>("toolPath", "")
+    .trim();
+  if (configured) {
+    return fs.existsSync(configured) ? configured : undefined;
+  }
+  return toolBinaryCandidates(root).find((candidate) => fs.existsSync(candidate));
+}
+
+/** Run 'cargo build --release --bin tool' in the project root, streaming to the output channel. */
+function buildToolBinary(root: string): Promise<boolean> {
+  const channel = getServerChannel();
+  channel.show(true);
+  channel.appendLine(`$ cargo build --release --bin tool (cwd ${root})`);
+  return new Promise((resolve) => {
+    const child = cp.spawn("cargo", ["build", "--release", "--bin", "tool"], {
+      cwd: root,
+      windowsHide: true
+    });
+    child.stdout?.on("data", (chunk) => channel.append(String(chunk)));
+    child.stderr?.on("data", (chunk) => channel.append(String(chunk)));
+    child.on("error", (err) => {
+      channel.appendLine(`cargo failed to start: ${err}`);
+      resolve(false);
+    });
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+/**
+ * Find the tool binary, or offer to build it / pick a path when missing.
+ */
+async function resolveOrBuildToolBinary(root: string): Promise<string | undefined> {
+  const found = resolveToolBinary(root);
+  if (found) {
+    return found;
+  }
+  const BUILD = "Build (cargo build --release --bin tool)";
+  const PICK = "Select binary path...";
+  const choice = await vscode.window.showWarningMessage(
+    `Ariadne: no 'tool' binary found under ${root}. Build it now or select an existing binary.`,
+    BUILD,
+    PICK
+  );
+  if (choice === BUILD) {
+    const ok = await buildToolBinary(root);
+    if (!ok) {
+      vscode.window.showErrorMessage("Ariadne: cargo build failed - see the Ariadne Server output.");
+      return undefined;
+    }
+    return toolBinaryCandidates(root)[0];
+  }
+  if (choice === PICK) {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      title: "Select the Ariadne 'tool' binary"
+    });
+    if (!picked || picked.length === 0) {
+      return undefined;
+    }
+    const chosen = picked[0].fsPath;
+    await vscode.workspace
+      .getConfiguration("ariadne")
+      .update("toolPath", chosen, vscode.ConfigurationTarget.Workspace);
+    return chosen;
+  }
+  return undefined;
+}
+
+/** Poll /api/repo-info until the server answers or the deadline passes. */
+async function waitForServer(): Promise<RepoInfoResponse | undefined> {
+  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (!serverProcess) {
+      return undefined;
+    }
+    const repo = await fetchRepoInfo();
+    if (repo) {
+      return repo;
+    }
+    await new Promise((resolve) => setTimeout(resolve, SERVER_POLL_INTERVAL_MS));
+  }
+  return undefined;
+}
+
+/** Whether the tracked child process is still running. */
+function isServerRunning(): boolean {
+  return serverProcess !== undefined && serverProcess.exitCode === null;
+}
+
+/** Terminate the server process (and its tree on Windows). */
+function stopServerProcess(): void {
+  if (!serverProcess) {
+    return;
+  }
+  const pid = serverProcess.pid;
+  if (process.platform === "win32" && pid) {
+    try {
+      cp.execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" });
+    } catch {
+      // Process already gone; nothing to kill.
+    }
+  } else {
+    serverProcess.kill();
+  }
+  serverProcess = undefined;
+}
+
+/**
+ * Start 'tool ui <projectRoot> --port <port> --no-open' and wait until it answers.
+ */
+async function startAriadneServer(): Promise<void> {
+  if (isServerRunning()) {
+    const restart = await vscode.window.showInformationMessage(
+      "Ariadne: server is already running in this window.",
+      "Stop and restart"
+    );
+    if (restart !== "Stop and restart") {
+      return;
+    }
+    stopServerProcess();
+  }
+
+  const root = await pickProjectRoot();
+  if (!root) {
+    return;
+  }
+  const binary = await resolveOrBuildToolBinary(root);
+  if (!binary) {
+    return;
+  }
+
+  const port = resolvePort();
+  const channel = getServerChannel();
+  channel.show(true);
+  channel.appendLine(`$ ${binary} ui "${root}" --port ${port} --no-open`);
+
+  serverProcess = cp.spawn(
+    binary,
+    ["ui", root, "--port", String(port), "--no-open"],
+    { cwd: root, windowsHide: true }
+  );
+  serverProcess.stdout?.on("data", (chunk) => channel.append(String(chunk)));
+  serverProcess.stderr?.on("data", (chunk) => channel.append(String(chunk)));
+  serverProcess.on("exit", (code) => {
+    channel.appendLine(`Ariadne server exited with code ${code ?? "null"}`);
+    serverProcess = undefined;
+    void vscode.commands.executeCommand("setContext", "ariadne.connected", false);
+  });
+
+  const repo = await waitForServer();
+  if (repo) {
+    await vscode.commands.executeCommand("setContext", "ariadne.connected", true);
+    vscode.window.showInformationMessage(
+      `Ariadne: server started for ${repo.repo_root} at ${resolveServerUrl()}`
+    );
+  } else if (isServerRunning()) {
+    vscode.window.showWarningMessage(
+      "Ariadne: server is running but did not answer yet (large repos may still be indexing) - see the Ariadne Server output."
+    );
+  } else {
+    vscode.window.showErrorMessage(
+      "Ariadne: server exited during startup - see the Ariadne Server output."
+    );
   }
 }
 
@@ -171,7 +412,24 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage(`Ariadne server URL set to ${input}`);
   });
 
-  context.subscriptions.push(connectCmd, goDefCmd, goFileCmd, showGraphCmd, configureServerCmd);
+  const startServerCmd = vscode.commands.registerCommand(
+    "ariadne.startServer",
+    async () => {
+      await startAriadneServer();
+    }
+  );
+
+  const stopServerCmd = vscode.commands.registerCommand("ariadne.stopServer", () => {
+    if (!isServerRunning()) {
+      vscode.window.showInformationMessage("Ariadne: no server is running in this window.");
+      return;
+    }
+    stopServerProcess();
+    void vscode.commands.executeCommand("setContext", "ariadne.connected", false);
+    vscode.window.showInformationMessage("Ariadne: server stopped.");
+  });
+
+  context.subscriptions.push(connectCmd, startServerCmd, stopServerCmd, goDefCmd, goFileCmd, showGraphCmd, configureServerCmd);
 
   // Auto-connect if enabled.
   const config = vscode.workspace.getConfiguration("ariadne");
@@ -186,5 +444,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+  stopServerProcess();
+  serverChannel?.dispose();
+  serverChannel = undefined;
   console.log("Ariadne extension deactivated");
 }

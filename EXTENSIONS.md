@@ -1,4 +1,4 @@
-# Ariadne Thread - Architecture Overview
+# Ariadne's Thread - Architecture Overview
 
 This is a C++ dependency analysis and visualization platform. It consists of:
 

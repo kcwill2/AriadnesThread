@@ -1,6 +1,6 @@
 {
   "name": "ariadne-extension",
-  "displayName": "Ariadne Thread",
+  "displayName": "Ariadne's Thread",
   "description": "C++ dependency analysis and navigation for VS Code. Connects to Ariadne server for graph visualization and symbol navigation. Assumes server runs locally for path sharing.",
   "version": "0.1.0",
   "publisher": "ariadne",
@@ -24,6 +24,8 @@
   ],
   "activationEvents": [
     "onCommand:ariadne.connect",
+    "onCommand:ariadne.startServer",
+    "onCommand:ariadne.stopServer",
     "onCommand:ariadne.goToDefinition",
     "onCommand:ariadne.navigateToFile",
     "onCommand:ariadne.showGraph"
@@ -34,6 +36,16 @@
       {
         "command": "ariadne.connect",
         "title": "Connect to Ariadne Server",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.startServer",
+        "title": "Start Ariadne Server (project root as input)",
+        "category": "Ariadne"
+      },
+      {
+        "command": "ariadne.stopServer",
+        "title": "Stop Ariadne Server",
         "category": "Ariadne"
       },
       {
@@ -62,8 +74,13 @@
       "properties": {
         "ariadne.serverUrl": {
           "type": "string",
-          "default": "http://localhost:8080",
-          "description": "URL of the Ariadne analysis server (defaults to localhost)"
+          "default": "http://localhost:7742",
+          "description": "URL of the Ariadne analysis server (matches the CLI 'tool ui' default port 7742; 'Start Ariadne Server' binds this port)"
+        },
+        "ariadne.toolPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Ariadne 'tool' binary. Leave empty to auto-detect target/release/tool or target/debug/tool under the project root."
         },
         "ariadne.autoConnect": {
           "type": "boolean",
