@@ -68,6 +68,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "ariadne-artifact"
+version = "0.1.0"
+dependencies = [
+ "ariadne-graph",
+ "ariadne-lang",
+ "ariadne-repo",
+ "serde",
+]
+
+[[package]]
 name = "ariadne-build"
 version = "0.1.0"
 dependencies = [
@@ -274,6 +284,7 @@ name = "ariadne-report"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-artifact",
  "ariadne-build",
  "ariadne-cluster",
  "ariadne-graph",

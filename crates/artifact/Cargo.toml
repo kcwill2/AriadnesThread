@@ -1,0 +1,11 @@
+[package]
+name = "ariadne-artifact"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+ariadne-graph = { path = "../graph" }
+ariadne-lang = { path = "../lang" }
+ariadne-repo = { path = "../repo" }

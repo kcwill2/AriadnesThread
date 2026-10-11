@@ -14,6 +14,7 @@ members = [
     "crates/cluster",
     "crates/transform",
     "crates/validate",
+    "crates/artifact",
     "crates/report",
     "crates/pipeline",
     "tools/clang-worker",
