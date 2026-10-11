@@ -152,11 +152,27 @@ whichever shape is chosen; that constraint is orthogonal to the split.
 
 ## Gates run this session (verbatim digests)
 
-- 4 distiller runs (inventory numstat x2, consumer census, coupling grep,
+- Distiller runs (inventory numstat x2, consumer census, coupling grep,
   manager-path grep) - captures cited below; one expected exit-1: the
   `ariadne_report::manager` grep returning no hits (F3 evidence).
-- encoding_guard / hygiene: see the pre-commit section appended after the
-  journal commit (next section).
+- `python tools/encoding_guard.py --all` -> silent (clean, incl. untracked
+  journal), pre-commit.
+- `python tools/hygiene_check.py` -> R3 warn lines only; ZERO blocking rows
+  (no R1, no R2; the old AR-13 server.rs pair is gone post AR-13 merge).
+  Pinned as "zero blocking", never an R3 count.
+- `python tools/commit_scoped.py --scope "tasks/ar-26-handoff-journal.md"
+  ...` -> `commit e946f57`, numstat `175 0 tasks/ar-26-handoff-journal.md`.
+- `python tools/encoding_guard.py --staged` post-add (commit_scoped leaves
+  the path staged) -> silent.
+- `git show --stat HEAD` (via distiller, capture
+  target/ar26-commit-capture.txt) -> `1 file changed, 175 insertions(+)`,
+  sole path = the journal. Zero stale copies or stray paths: this handoff
+  added no code files, so the AR-20a D7 rename-visibility hazard cannot
+  arise (no git-mv deletes exist); stat proof stands.
+- No suite gates run: zero code change exists to gate (see "Deliberately
+  NOT done"). cargo check --workspace not run for the same reason - the
+  tree compiles as committed by AR-21/AR-25 and this session touched no
+  source.
 
 ## Capture paths (per-run, shared-capture clobber aware)
 
