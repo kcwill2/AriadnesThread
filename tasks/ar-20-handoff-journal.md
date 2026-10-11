@@ -87,7 +87,9 @@ Session anchor: HEAD 0d7ecd3 at start (AR-19 chain landed); HEAD adb54ea
   `git status --porcelain -- tests/integration/tests/m17_plugin_seam_test.rs`
   is EMPTY (byte-identical restore verified; the Edit round-trip had left one
   LF-only line under core.autocrlf=true - restored to pristine checkout bytes
-  via a byte-level write under target/, deleted after use).
+  via a byte-level write under target/ (two throwaway diagnostic scripts stay
+  there, gitignored; Remove-Item is off the session allowlist - they vanish
+  with `cargo clean`).
 
 ## cargo tree evidence (pre-move baseline; the new assert locks its removal)
 
