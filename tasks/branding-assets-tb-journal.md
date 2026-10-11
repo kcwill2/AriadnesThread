@@ -155,3 +155,22 @@ Handoff expects ~5 invocations on the deferral path; this session spent
 almost entirely permission-shape fingerprinting + one refused size-probe
 series (D3) + tool-source reads for the staging question (D4). All handoff
 gates that were executable ran; refusal inventory is in the report.
+
+## Post-commit checkpoint (lands in the working tree, not in b7ba3a1)
+
+- Gate 6 (guard): `python tools/distill.py -- python tools/encoding_guard.py
+  --staged` -> ### generic PASS (exit 0), zero violation lines. Risk R1 did
+  NOT trip: staged banner.jpg carries NUL bytes -> clean binary skip.
+- Gate 7 (commit_scoped, verbatim four scopes + verbatim message):
+  landing commit b7ba3a1; numstat: README +2/-0, banner.jpg binary add,
+  journal 88 lines, package.json NO HUNK (deferral path, lock holds).
+- Reviewer-view set equality (this session's pre-review run):
+  `git diff --name-only f23ca8ac..HEAD` -> exactly README.md,
+  media/banner.jpg, this journal. No icon.png, no package.json, no .vsix,
+  nothing outside extensions/ariadne-extension + the journal.
+- Declared tail: this post-commit section is journal bookkeeping outside the
+  single landing commit by design (handoff mandates ONE commit; the commit
+  hash cannot be journalized before it exists).
+- Message note (reviewer eyes): the mandated -m text mentions "brand icon"
+  while the deferral path ships no icon field; kept verbatim per literal
+  compliance - deferral is recorded above and is the machine-visible truth.
