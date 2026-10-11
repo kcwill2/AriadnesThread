@@ -220,7 +220,7 @@ dependencies = [
  "ariadne-lang",
  "ariadne-lang-api",
  "ariadne-repo",
- "ariadne-scheduler",
+ "ariadne-worker-core",
  "serde_json",
  "tempfile",
 ]

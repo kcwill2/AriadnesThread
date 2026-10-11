@@ -8,11 +8,12 @@ authors.workspace = true
 # ariadne-graph / ariadne-cluster / ariadne-transform / ariadne-validate
 # (enforced by the m17 architecture guard). The Include-graph DTOs the
 # resolver speaks live in ariadne-lang-api.
-# M18.11 note (b): `ClangWorkerBackend` relocated from scheduler to here;
-# `scheduler` is a normal dep because the backend implements
-# `scheduler::WorkerBackend` over `scheduler::TuTask` (reviewer-approved in
-# the M18.1–M18.2 execution note). Acyclic: scheduler no longer reaches
-# lang-cpp (the index/graph shim deps were removed in the same milestone).
+# AR-20 note: the backend implements ariadne_worker_core::WorkerBackend
+# over ariadne_worker_core::TuTask and calls the closure-merge engine
+# (ariadne_worker_core::tu_store) directly - the worker-core dep is why
+# the m17 transitive guard cone stays free of scheduler/report/cluster/
+# graph/transform/validate. Acyclic: worker-core never depends on any
+# plugin crate outside its own dev-deps (see crates/build/Cargo.toml).
 [dependencies]
 anyhow.workspace = true
 serde_json.workspace = true
@@ -20,7 +21,7 @@ ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-lang-api = { path = "../lang-api" }
 ariadne-lang = { path = "../lang" }
-ariadne-scheduler = { path = "../scheduler" }
+ariadne-worker-core = { path = "../worker-core" }
 
 [dev-dependencies]
 serde_json.workspace = true

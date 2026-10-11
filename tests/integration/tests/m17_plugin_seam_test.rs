@@ -453,3 +453,210 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         }
     }
 }
+
+// -- 4. Transitive plugin-cone guard (plan rule R1, transitive form) --------
+
+/// Core-pipeline crates no plugin crate may reach, not even through a chain
+/// of local path edges (plan rule R1 must hold transitively; the AR-20b
+/// end-state cone per `tasks/ar-20-shape.md` invariant 6).
+const TRANSITIVE_FORBIDDEN_DEPS: [&str; 6] = [
+    "ariadne-scheduler",
+    "ariadne-report",
+    "ariadne-cluster",
+    "ariadne-graph",
+    "ariadne-transform",
+    "ariadne-validate",
+];
+
+/// Transitive form of `plugin_crates_do_not_depend_on_core_pipeline` (plan
+/// rule R1, shape `tasks/ar-20-shape.md` invariants 5/6): walks the local
+/// path-dependency closure of each plugin manifest over the
+/// `[dependencies]` / `[build-dependencies]` tables, dev edges skipped,
+/// cycle-safe visited set, asserting none of scheduler/report/cluster/
+/// graph/transform/validate is reachable. Mechanism mirrors `cargo tree`
+/// restricted to compiled edges. Landed GREEN with the AR-20b switch; its
+/// falsification evidence is the AR-20 journal RED run (`6 passed / 1
+/// failed`, `d63c0d0`/`7adbeca`) and its load-bearingness is locked by
+/// `transitive_guard_detects_planted_scheduler_edge` below.
+#[test]
+fn plugin_crates_transitive_tree_excludes_core_pipeline() {
+    const PLUGIN_CRATES: [&str; 2] = ["crates/lang-cpp", "crates/lang-scala"];
+    let mut offenders: Vec<String> = Vec::new();
+    for plugin_crate in PLUGIN_CRATES {
+        let manifest = repo_root().join(plugin_crate).join("Cargo.toml");
+        if !manifest.exists() {
+            continue; // the guard starts asserting the moment a plugin crate appears
+        }
+        let reachable = reachable_local_crate_names(&manifest, &filesystem_manifest_reader);
+        let found: Vec<&str> = TRANSITIVE_FORBIDDEN_DEPS
+            .into_iter()
+            .filter(|forbidden| reachable.iter().any(|name| name == forbidden))
+            .collect();
+        if !found.is_empty() {
+            offenders.push(format!(
+                "{plugin_crate} transitively compiles against core-pipeline \
+                 crates {found:?} (plan rule R1 must hold transitively)"
+            ));
+        }
+    }
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// Non-vacuity self-test for the transitive guard (shape invariant 9): the
+/// closure walker must actually report a planted `ariadne-scheduler` edge
+/// two hops down the chain, and must never follow a dev-dependencies edge.
+/// In-memory planted manifests substitute for the unobservable in-tree RED
+/// (whose evidence is the AR-20 journal's `6 passed / 1 failed` run at
+/// `d63c0d0`/`7adbeca`), mirroring the
+/// `guard_neutral_vocab_stripping_cannot_mask_plugin_names` pattern.
+#[test]
+fn transitive_guard_detects_planted_scheduler_edge() {
+    let planted_root = concat!(
+        "[dependencies]\n",
+        "planted-intermediate = { path = \"../planted-intermediate\" }\n",
+        "\n",
+        "[dev-dependencies]\n",
+        "planted-dev-only = { path = \"../planted-dev-only\" }\n",
+    );
+    let planted_intermediate = concat!(
+        "[dependencies]\n",
+        "ariadne-scheduler = { path = \"../scheduler\" }\n",
+    );
+    let planted_reader = |manifest: &Path| -> Option<String> {
+        let path_text = manifest.to_string_lossy().replace('\\', "/");
+        if path_text.ends_with("planted-intermediate/Cargo.toml") {
+            Some(planted_intermediate.to_string())
+        } else if path_text.ends_with("planted-lang-cpp/Cargo.toml") {
+            Some(planted_root.to_string())
+        } else {
+            None
+        }
+    };
+    let planted_root_manifest = repo_root().join("crates/planted-lang-cpp/Cargo.toml");
+    let reachable = reachable_local_crate_names(&planted_root_manifest, &planted_reader);
+    assert!(
+        reachable.iter().any(|name| name == "ariadne-scheduler"),
+        "planted scheduler edge not detected through closure descent: {reachable:?}"
+    );
+    assert!(
+        !reachable.iter().any(|name| name == "planted-dev-only"),
+        "dev-dependencies edges must not be walked: {reachable:?}"
+    );
+}
+
+/// Crate names reachable from `root_manifest` through local-path compiled
+/// edges, transitively. `manifest_reader` abstracts manifest access so the
+/// planted-edge self-test can plant manifests in memory.
+fn reachable_local_crate_names(
+    root_manifest: &Path,
+    manifest_reader: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<String> {
+    let mut visited = HashSet::new();
+    let mut reachable_names = Vec::new();
+    collect_reachable_local_deps(
+        root_manifest,
+        manifest_reader,
+        &mut visited,
+        &mut reachable_names,
+    );
+    reachable_names
+}
+
+/// Depth-first descent over local-path compiled edges; every manifest is
+/// visited once (normalized-path visited set) so a cycle terminates.
+fn collect_reachable_local_deps(
+    manifest: &Path,
+    manifest_reader: &dyn Fn(&Path) -> Option<String>,
+    visited: &mut HashSet<String>,
+    reachable_names: &mut Vec<String>,
+) {
+    let visit_key = normalize_manifest_path(manifest);
+    if !visited.insert(visit_key) {
+        return; // cycle-safe: each manifest is walked once
+    }
+    let Some(manifest_text) = manifest_reader(manifest) else {
+        return; // absent/unreadable manifest: no further edges
+    };
+    let manifest_dir = manifest.parent().unwrap_or(Path::new("."));
+    for (dep_name, dep_manifest) in parse_local_path_deps(&manifest_text, manifest_dir) {
+        reachable_names.push(dep_name);
+        collect_reachable_local_deps(
+            &dep_manifest,
+            manifest_reader,
+            visited,
+            reachable_names,
+        );
+    }
+}
+
+/// Direct local-path dependency edges declared in one manifest text. Only
+/// the `[dependencies]` / `[build-dependencies]` tables are read (the
+/// compiled-edge shape the journal RED proved); `[dev-dependencies]`,
+/// target-scoped tables, and every other section are skipped.
+fn parse_local_path_deps(
+    manifest_text: &str,
+    manifest_dir: &Path,
+) -> Vec<(String, PathBuf)> {
+    let mut edges = Vec::new();
+    let mut in_compiled_table = false;
+    for raw_line in manifest_text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            let table_name = line.trim_matches(|c| c == '[' || c == ']');
+            in_compiled_table =
+                table_name == "dependencies" || table_name == "build-dependencies";
+            continue;
+        }
+        if !in_compiled_table {
+            continue;
+        }
+        let Some((name_side, value_side)) = line.split_once('=') else {
+            continue;
+        };
+        let Some(relative_path) = quoted_path_value(value_side) else {
+            continue; // registry/workspace dep: no local edge to walk
+        };
+        let dep_name = name_side.trim().to_string();
+        if dep_name.is_empty() {
+            continue;
+        }
+        let dep_manifest = manifest_dir.join(relative_path).join("Cargo.toml");
+        edges.push((dep_name, dep_manifest));
+    }
+    edges
+}
+
+/// Extract the quoted value of a `path = "..."` key from a dependency
+/// line's value side; `None` when the line declares no local path.
+fn quoted_path_value(value_side: &str) -> Option<String> {
+    let after_path_key = value_side.split_once("path")?.1;
+    let opening_quote = after_path_key.find('"')?;
+    let after_open_quote = &after_path_key[opening_quote + 1..];
+    let closing_quote = after_open_quote.find('"')?;
+    Some(after_open_quote[..closing_quote].to_string())
+}
+
+/// Collapse `..` segments textually so the same crate reached through
+/// different relative routes shares one visited key.
+fn normalize_manifest_path(path: &Path) -> String {
+    let mut segments: Vec<&std::ffi::OsStr> = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                segments.pop();
+            }
+            other => segments.push(other.as_os_str()),
+        }
+    }
+    PathBuf::from_iter(segments)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Production manifest reader used by the guard test proper.
+fn filesystem_manifest_reader(manifest: &Path) -> Option<String> {
+    fs::read_to_string(manifest).ok()
+}
