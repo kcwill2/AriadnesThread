@@ -19,7 +19,7 @@ use std::path::PathBuf;
 /// parameter is generic over `Into<LanguageId>` because stages still mix closed
 /// file-kind labels (discovery, build contexts) with open plugin identities
 /// (include edges).
-pub fn collect_stage_languages(
+pub(crate) fn collect_stage_languages(
     languages: impl IntoIterator<Item = impl Into<LanguageId>>,
 ) -> Vec<LanguageId> {
     let mut collected: Vec<LanguageId> = languages
