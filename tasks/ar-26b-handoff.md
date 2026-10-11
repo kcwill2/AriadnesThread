@@ -46,14 +46,17 @@ any mutation)
 
 - scheduler `26/0/0/2`; ariadne-worker-core `8/0/0/2`; report `7/0/0/3`
   (post-26a2); artifact `40/0/0/2`; m17 `8/0/0/1`; m00 `4/0/0/2`;
-  cli `118/0/8/7`; lang-cpp `155/0/0/2`.
-- hygiene ZERO blocking rows. Census post-26a2 state (reviewer pass;
-  passed totals conserved at `1397`).
+  cli `118/0/8/7`. lang-cpp: re-measure at dispatch HEAD and journal
+  (AR-31 landed after the old `155/0/0/2` pin - do not quote it).
+- hygiene ZERO blocking rows. Census anchor post-26a2:
+  `1398 passed / 0 failed / 0 ignored / 105 suites` (AR-26a
+  reviewer-measured, fully attributed; verdict finding 2 superseded the
+  planner's earlier `1397`-based projections).
 
 ## Per-hop reconciliation (what this hop reconciles)
 
 - m17: `8 -> 10` passed (`8/0/0/1 -> 10/0/0/1`): +1 cone guard, +1 planted
-  non-vacuity self-test. Census passed total `1397 -> 1399`, suite count
+  non-vacuity self-test. Census passed total `1398 -> 1400`, suite count
   unchanged (same test binary).
 - scheduler `26/0/0/2` and worker-core `8/0/0/2` conserve UNEDITED - the
   conservation equation for the whole chain closes here.
@@ -232,7 +235,7 @@ scoped commit + journal note.
 Reviewer-gate reference: acceptance is adjudicated via the `review-gate`
 skill; its commit-vs-touch-set check enforces the list above. Terminal
 chain note for the reviewer's acceptance pass: fresh workspace census
-expected `1399/0/13/105` (passed total is the authority), and the chain
+expected `1400/0/13/105` (passed total is the authority), and the chain
 closes the original AR-26 contract per `tasks/ar-26b-shape-ruling.md`:
 audit A3 PARTIALLY satisfied (Ruling 2); the cluster/transform/validate
 residual is a DEFERRED LEDGER ROW registered at orchestrator closeout with
