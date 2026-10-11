@@ -467,21 +467,90 @@ pub struct TraversalApiQuery {
 
 /// Live-mode traversal analysis: computes what the dependency actually pulls in
 /// versus what's strictly needed for the symbols the root uses from it.
+/// AR-13 decomposition of the former 161-line body (R1 row): the request
+/// handler now sequences seed resolution, impact computation and projection;
+/// every check keeps its original order and status code.
 pub async fn api_graph_traversal(
     State(state): State<Arc<UiState>>,
     Query(query): Query<TraversalApiQuery>,
 ) -> Result<Json<TraversalResponse>, axum::http::StatusCode> {
-    let root_id = query.root.parse::<u64>().map(ariadne_repo::FileId);
-    let dep_id = query.dep.parse::<u64>().map(ariadne_repo::FileId);
-    let (root_id, dep_id) = match (root_id, dep_id) {
-        (Ok(r), Ok(d)) => (r, d),
-        _ => return Err(axum::http::StatusCode::BAD_REQUEST),
-    };
+    let (root_id, dep_id) = resolve_traversal_file_pair(&query)?;
 
     let gen = state
         .analysis()
         .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
+    ensure_traversal_edge(&gen, root_id, dep_id)?;
+
+    let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+        &gen.include_graph,
+        &gen.reduced_model,
+        Arc::clone(&gen.memo),
+    );
+
+    // Get justification data to find which symbols root uses from dep
+    let root_metric = match analyzer.analyze_file_load_by_id(root_id) {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(Json(empty_traversal_response(root_id, dep_id)));
+        }
+    };
+    let justification_detail = crate::dto::build_file_justification_detail(
+        &root_id.0.to_string(),
+        root_id,
+        &root_metric,
+        &analyzer,
+        &gen.reduced_model,
+    );
+
+    // Determine which symbols to analyze
+    let symbol_ids = resolve_traversal_symbols(&query.symbols, &justification_detail, dep_id);
+
+    if symbol_ids.is_empty() {
+        // No symbols to analyze - return empty response
+        return Ok(Json(empty_traversal_response(root_id, dep_id)));
+    }
+
+    // Compute extraction impact for these symbols
+    let impact = analyzer.extraction_impact(root_id, dep_id, &symbol_ids);
+
+    let (necessary_subtree, actual_subtree, collateral_delta, summary) =
+        project_traversal_subtrees(impact, &gen, dep_id);
+
+    let analyzed_symbol_ids: Vec<String> = symbol_ids.iter().map(|s| s.0.clone()).collect();
+
+    Ok(Json(TraversalResponse {
+        root_file_id: root_id.0.to_string(),
+        dep_file_id: dep_id.0.to_string(),
+        analyzed_symbol_ids,
+        necessary_subtree,
+        actual_subtree,
+        collateral_delta,
+        summary,
+    }))
+}
+
+/// Seed resolution (AR-13): parse the root/dep query strings into file ids.
+/// An unparsable seed yields 400 exactly as the inline original did.
+fn resolve_traversal_file_pair(
+    query: &TraversalApiQuery,
+) -> Result<(ariadne_repo::FileId, ariadne_repo::FileId), axum::http::StatusCode> {
+    let root_id = query.root.parse::<u64>().map(ariadne_repo::FileId);
+    let dep_id = query.dep.parse::<u64>().map(ariadne_repo::FileId);
+    match (root_id, dep_id) {
+        (Ok(r), Ok(d)) => Ok((r, d)),
+        _ => Err(axum::http::StatusCode::BAD_REQUEST),
+    }
+}
+
+/// Seed validation (AR-13): both files must exist in the graph (404) and dep
+/// must be a direct include of root (400); same checks, same order, same
+/// status codes as the pre-decomposition body.
+fn ensure_traversal_edge(
+    gen: &crate::AnalysisGeneration,
+    root_id: ariadne_repo::FileId,
+    dep_id: ariadne_repo::FileId,
+) -> Result<(), axum::http::StatusCode> {
     // Verify both files exist in the graph
     if !gen.include_graph.file_paths.contains_key(&root_id)
         || !gen.include_graph.file_paths.contains_key(&dep_id)
@@ -494,68 +563,63 @@ pub async fn api_graph_traversal(
     if !direct_includes.contains(&dep_id) {
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
+    Ok(())
+}
 
-    let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
-        &gen.include_graph,
-        &gen.reduced_model,
-        Arc::clone(&gen.memo),
-    );
+/// The "nothing to analyze" payload shared by the two early returns (an
+/// unanalysable root metric, or an empty symbol seed).
+fn empty_traversal_response(
+    root_id: ariadne_repo::FileId,
+    dep_id: ariadne_repo::FileId,
+) -> TraversalResponse {
+    TraversalResponse {
+        root_file_id: root_id.0.to_string(),
+        dep_file_id: dep_id.0.to_string(),
+        analyzed_symbol_ids: vec![],
+        necessary_subtree: TraversalSubtree::empty(),
+        actual_subtree: TraversalSubtree::empty(),
+        collateral_delta: TraversalSubtree::empty(),
+        summary: TraversalSummary::empty(),
+    }
+}
 
-    // Get justification data to find which symbols root uses from dep
-    let root_metric = match analyzer.analyze_file_load_by_id(root_id) {
-        Ok(m) => m,
-        Err(_) => {
-            return Ok(Json(TraversalResponse {
-                root_file_id: root_id.0.to_string(),
-                dep_file_id: dep_id.0.to_string(),
-                analyzed_symbol_ids: vec![],
-                necessary_subtree: TraversalSubtree::empty(),
-                actual_subtree: TraversalSubtree::empty(),
-                collateral_delta: TraversalSubtree::empty(),
-                summary: TraversalSummary::empty(),
-            }));
-        }
-    };
-    let justification_detail = crate::dto::build_file_justification_detail(
-        &root_id.0.to_string(),
-        root_id,
-        &root_metric,
-        &analyzer,
-        &gen.reduced_model,
-    );
-
+/// Symbol seed resolution (AR-13): explicit comma-separated ids win;
+/// otherwise all justified symbols of the root->dep edge, empty when that
+/// edge carries no justification entry.
+fn resolve_traversal_symbols(
+    symbols_param: &str,
+    justification_detail: &FileJustificationResponse,
+    dep_id: ariadne_repo::FileId,
+) -> Vec<ariadne_index::SymbolId> {
     // Find the justification entry for this specific dep
     let dep_str = dep_id.0.to_string();
     let dep_entry = justification_detail.entries.iter().find(|e| e.source_id == dep_str);
 
-    // Determine which symbols to analyze
-    let symbol_ids: Vec<ariadne_index::SymbolId> = if query.symbols.is_empty() {
+    if symbols_param.is_empty() {
         // Use all justified symbols from this edge
         dep_entry
             .map(|e| e.entry.justified_symbols.iter().map(|s| ariadne_index::SymbolId(s.clone())).collect())
             .unwrap_or_default()
     } else {
         // Use explicitly provided symbol IDs (comma-separated)
-        query.symbols.split(',').filter(|s| !s.is_empty()).map(|s| ariadne_index::SymbolId(s.trim().to_string())).collect()
-    };
-
-    if symbol_ids.is_empty() {
-        // No symbols to analyze - return empty response
-        return Ok(Json(TraversalResponse {
-            root_file_id: root_id.0.to_string(),
-            dep_file_id: dep_id.0.to_string(),
-            analyzed_symbol_ids: vec![],
-            necessary_subtree: TraversalSubtree::empty(),
-            actual_subtree: TraversalSubtree::empty(),
-            collateral_delta: TraversalSubtree::empty(),
-            summary: TraversalSummary::empty(),
-        }));
+        symbols_param.split(',').filter(|s| !s.is_empty()).map(|s| ariadne_index::SymbolId(s.trim().to_string())).collect()
     }
+}
 
-    // Compute extraction impact for these symbols
-    let impact = analyzer.extraction_impact(root_id, dep_id, &symbol_ids);
-
-    let (necessary_subtree, actual_subtree, collateral_delta, summary) = if let Some(impact) = impact {
+/// Closure computation + projection (AR-13): turns an extraction impact into
+/// the necessary / actual / collateral subtrees plus the summary; `None`
+/// impact (root == dep, no justified symbols) yields all-empty parts.
+fn project_traversal_subtrees(
+    impact: Option<ariadne_graph::ExtractionImpact>,
+    gen: &crate::AnalysisGeneration,
+    dep_id: ariadne_repo::FileId,
+) -> (
+    TraversalSubtree,
+    TraversalSubtree,
+    TraversalSubtree,
+    TraversalSummary,
+) {
+    if let Some(impact) = impact {
         // Build necessary subtree from required_headers
         let necessary_nodes = build_subtree_nodes(&impact.required_headers, true, false, &gen);
         let necessary_edges = build_subtree_edges(&impact.required_headers, &gen);
@@ -614,19 +678,7 @@ pub async fn api_graph_traversal(
             TraversalSubtree::empty(),
             TraversalSummary::empty(),
         )
-    };
-
-    let analyzed_symbol_ids: Vec<String> = symbol_ids.iter().map(|s| s.0.clone()).collect();
-
-    Ok(Json(TraversalResponse {
-        root_file_id: root_id.0.to_string(),
-        dep_file_id: dep_id.0.to_string(),
-        analyzed_symbol_ids,
-        necessary_subtree,
-        actual_subtree,
-        collateral_delta,
-        summary,
-    }))
+    }
 }
 
 // Helper functions for building subtree representations
