@@ -316,13 +316,13 @@ name = "ariadne-scheduler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-artifact",
  "ariadne-build",
  "ariadne-graph",
  "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
  "ariadne-repo",
- "ariadne-report",
  "ariadne-worker-core",
  "serde",
  "serde_json",

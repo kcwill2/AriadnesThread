@@ -332,7 +332,7 @@ fn plugin_crates_do_not_depend_on_core_pipeline() {
 ///   `guard_neutral_vocab_stripping_cannot_mask_plugin_names`). Stripping is
 ///   exact-string only; whitespace-obfuscated plugin names (`Cpp Plugin`) are
 ///   out of scope for a substring guard.
-const GUARD_CORE_CRATES: [&str; 7] = [
+const GUARD_CORE_CRATES: [&str; 8] = [
     "crates/index",
     "crates/graph",
     "crates/cluster",
@@ -340,6 +340,7 @@ const GUARD_CORE_CRATES: [&str; 7] = [
     "crates/validate",
     "crates/report",
     "crates/pipeline",
+    "crates/artifact",
 ];
 const GUARD_FORBIDDEN: [&str; 7] = [
     "clang",
@@ -460,13 +461,14 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// Core-pipeline crates no plugin crate may reach, not even through a chain
 /// of local path edges (plan rule R1 must hold transitively; the AR-20b
 /// end-state cone per `tasks/ar-20-shape.md` invariant 6).
-const TRANSITIVE_FORBIDDEN_DEPS: [&str; 6] = [
+const TRANSITIVE_FORBIDDEN_DEPS: [&str; 7] = [
     "ariadne-scheduler",
     "ariadne-report",
     "ariadne-cluster",
     "ariadne-graph",
     "ariadne-transform",
     "ariadne-validate",
+    "ariadne-artifact",
 ];
 
 /// Transitive form of `plugin_crates_do_not_depend_on_core_pipeline` (plan
@@ -660,4 +662,79 @@ fn normalize_manifest_path(path: &Path) -> String {
 /// Production manifest reader used by the guard test proper.
 fn filesystem_manifest_reader(manifest: &Path) -> Option<String> {
     fs::read_to_string(manifest).ok()
+}
+
+// -- 5. Scheduler cone guard (AR-26b, shape ruling `tasks/ar-26b-shape-ruling.md`) --
+
+/// Local crates the scheduler must never reach through transitive local-path
+/// compiled edges (AR-26b Ruling 1: `"ariadne-report" NOT-IN Cone(scheduler)`).
+/// Exactly this one-element set is locked: `ariadne-cluster`,
+/// `ariadne-transform`, and `ariadne-validate` are EXPECTED cone members
+/// through `scheduler -> artifact` (precision note P2) and must never enter
+/// this const - broadening it requires a separate shape ruling.
+/// This const + the guard test are ratified verbatim by Ruling 4.
+const SCHEDULER_CONE_FORBIDDEN: [&str; 1] = ["ariadne-report"];
+
+/// Machine lock, mechanism (a) of AR-26b Ruling 1 (the companion mechanism
+/// (b) is the handoff's gate 6: `cargo tree -p ariadne-scheduler -e normal`
+/// exact-token grep, both required).
+/// Walks `reachable_local_crate_names` over the scheduler manifest - the
+/// same closure walker the AR-20b transitive guard uses, helpers reused
+/// without forking - and asserts the cone excludes every name in
+/// `SCHEDULER_CONE_FORBIDDEN`.
+/// Landed RED-first per the AR-26b RGB protocol: the falsification evidence
+/// at dispatch HEAD (scheduler still pulled report) is the AR-26b journal
+/// `9 passed / 1 failed / 0 ignored / 1 suites` run, never committed.
+/// Load-bearingness is locked by
+/// `scheduler_cone_guard_detects_planted_report_edge` below.
+/// The AR-26b hop also extended the two section-3/4 tables:
+/// `GUARD_CORE_CRATES` gained `crates/artifact` (the moved store IO keeps
+/// its R2 neutrality walk) and `TRANSITIVE_FORBIDDEN_DEPS` gained
+/// `ariadne-artifact` (plugin crates must not reach the artifact store).
+#[test]
+fn scheduler_cone_excludes_report() {
+    let root_manifest = repo_root().join("crates/scheduler/Cargo.toml");
+    let reachable = reachable_local_crate_names(&root_manifest, &filesystem_manifest_reader);
+    let mut offenders: Vec<String> = Vec::new();
+    for forbidden in SCHEDULER_CONE_FORBIDDEN {
+        if reachable.iter().any(|name| name == forbidden) {
+            offenders.push(format!(
+                "scheduler must not transitively compile against {forbidden:?} - \
+                 consume ariadne-artifact directly (AR-26b); \
+                 reachable from {root_manifest:?}: {reachable:?}"
+            ));
+        }
+    }
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// Non-vacuity self-test for the scheduler cone guard (AR-26b Ruling 1
+/// non-vacuity lock): the closure walker must report a planted
+/// `ariadne-report` edge when the scheduler manifest declares one.
+/// In-memory planted manifests substitute for the in-tree RED (whose
+/// evidence is the AR-26b journal run), mirroring
+/// `transitive_guard_detects_planted_scheduler_edge`. Green immediately by
+/// design: this is the mechanism proof, not the invariant.
+#[test]
+fn scheduler_cone_guard_detects_planted_report_edge() {
+    let planted_scheduler = concat!(
+        "[dependencies]\n",
+        "ariadne-report = { path = \"../report\" }\n",
+    );
+    let planted_reader = |manifest: &Path| -> Option<String> {
+        let path_text = manifest.to_string_lossy().replace('\\', "/");
+        if path_text.ends_with("planted-scheduler/Cargo.toml") {
+            Some(planted_scheduler.to_string())
+        } else {
+            None
+        }
+    };
+    let reachable = reachable_local_crate_names(
+        &repo_root().join("crates/planted-scheduler/Cargo.toml"),
+        &planted_reader,
+    );
+    assert!(
+        reachable.iter().any(|name| name == "ariadne-report"),
+        "planted report edge not detected from the scheduler cone shape: {reachable:?}"
+    );
 }
