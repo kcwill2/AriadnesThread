@@ -10,6 +10,19 @@ gates.
 
 | Worktree | State at 2026-10-01 | Disposition |
 |---|---|---|
+| `.kilo/worktrees/linen-mice` | M19 branch, complete | merge or abandon with row |
+
+The linen-mice census row DISCHARGED by merge, archived by the AR-30 ledger
+truth-sync 2026-10-10: branch head `32ecf33` is an ancestor of `main`
+(`git branch --contains 32ecf33` -> `main`); the merge is `f9064f4` ("Merge
+branch 'multi-language-support' into main (M24 Part A)", first merge on the
+ancestry path `32ecf33..main`); `crates/lang-scala` present on `main`
+(`git ls-tree main crates/lang-scala` -> tree `e27dd9c`; first `main` commit
+`d0c6499` feat(m19.1,m19.2)); walkthrough on `main`
+(`walkthroughs/m19-scala-discovery-walkthrough.html`). Residual operator
+cleanup (not a milestone disposition): the worktree DIRECTORY still exists on
+disk - `git worktree remove` pending. Cited by key/title ("linen-mice census
+row"), never by row number.
 
 ## Discharged deferred findings
 

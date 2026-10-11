@@ -33,7 +33,7 @@ This project enforces strict code hygiene:
 - **Single responsibility** - Each function must do one thing well
 - **Source lines < 2000 chars** - Never park a paragraph on one line: agent Read/grep silently truncate at 2000 chars, hiding content from every workflow participant. Wrap whitespace-collapsing prose (HTML/Markdown body) sentence-per-line; where newlines are significant (`<pre>`, string literals), split into concatenated parts instead
 
-Violations will cause code review to fail. See `~/.config/devin/skills/idd-workflow/CODE_HYGIENE.md` for detailed guidelines.
+Violations will cause code review to fail. See `~/.agents/skills/idd-workflow/CODE_HYGIENE.md` for detailed guidelines.
 
 ## File-Edit Discipline (UTF-8 hazard — read before touching any file)
 
@@ -93,6 +93,7 @@ This is a Rust workspace for C++ dependency analysis:
 - `python tools/distill.py -- <cmd>` - distilling wrapper for build/clippy/generic commands (digest + `target/distill-capture.txt`, never raw output in agent context)
 - Standing contract: `docs/specs/tool-output-distillation.md` - entry points, digest shapes, prohibitions, evidence rules
 - Skills (`.kilo/skills/`): `handoff-spec` (author handoffs), `review-gate` (adjudicate handoffs; its commit-vs-touch-set check enforces scope), `milestone-lifecycle` (kickout/closeout; ledger is source of truth), `resume-checkpoint`, `walkthrough-commit`
+- Skill entry path (verified 2026-10-10): project skills resolve at `.kilo/skills/<name>/SKILL.md`; global skills (`idd-workflow`, `tdd`, `dev-planning`, `review-team`, `execute-plan`, `quick-solo`, `tool-runner`, `reviewer-hygiene`, `walkthrough-guide`, `implementer-rgb-tdd`) resolve at `~/.agents/skills/<name>/SKILL.md`
 - Milestone state: `tasks/milestone_ledger.md` is the source of truth; kilo-memory mirrors it in the same commit
 
 ### Handoff Sizing Rule (Planning Law)
@@ -144,8 +145,8 @@ You can also invoke skills directly:
 ## Getting Help
 
 For questions about the workflow:
-- See `~/.config/devin/skills/idd-workflow/COORDINATION.md` for coordination protocols
-- See `~/.config/devin/skills/idd-workflow/CODE_HYGIENE.md` for hygiene rules
+- See `~/.agents/skills/idd-workflow/COORDINATION.md` for coordination protocols
+- See `~/.agents/skills/idd-workflow/CODE_HYGIENE.md` for hygiene rules
 - See individual skill SKILL.md files for detailed instructions
 
 ## Contributing
