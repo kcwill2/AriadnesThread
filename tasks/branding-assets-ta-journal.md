@@ -263,3 +263,47 @@ counted honestly; no D-row overshoot beyond those.
   against the handoff's "one landing commit" parenthetical: one scoped commit
   per logical step (code landing / journal landing), never `git add .`,
   scope set unchanged.
+
+## D5 (D6-style rider): user-authorized theme-token baseline regeneration
+
+(Orchestrator asked for a "D6-style" rider row; D1-D4 were consumed by the
+landing hop, so this lands as D5 - the next free number.)
+
+- Trigger: the D3 STOP-report. The rider clause (verify the regen diff
+  contains ONLY the four approved count updates, else STOP with the diff)
+  fired on two extra hunks; the commits were held until disposition.
+- Authorization chain: user explicitly approved regenerating the
+  frozen-count baseline via `--update-baseline` (NOT a guard-code amendment),
+  with the dated ledger row owned by the planner (the implementer did not
+  touch `tasks/milestone_ledger.md`). The orchestrator's disposition for the
+  two out-of-cure hunks, cited verbatim: "user's approval covered a holistic
+  `--update-baseline` regeneration; your zero-diff evidence proves both extra
+  hunks (graph.js 1->0, themes.css:188 value) are TRACK_BASE-pre-existing
+  stale-pin corrections, not this track's content; a hand-narrowed JSON would
+  ship counts contradicting locations -- precisely the drift class the guard
+  exists to catch." (em dash transliterated to `--` for the pure-ASCII rule.)
+- Regeneration (correct form from parse_mode, theme_token_check.py:188-190):
+  `python tools/theme_token_check.py --update-baseline` -
+  `baseline written: 13 files, 296 literals, 296 locations` (11 pinned files
+  plus new keys `traversal.js`, `icon.svg`). Approved-cure counts exactly as
+  predicted: index.html 4->6, main.js 0->1, traversal.js unkeyed->1,
+  icon.svg 0->7. Stale-pin corrections (zero-diff-proven TRACK_BASE-pre-
+  existing; `git diff --name-only b7ba3a1..HEAD -- graph.js themes.css
+  main.js traversal.js index.html` printed ONLY `index.html`): graph.js 1->0
+  (`#8250` now lives at main.js:308), themes.css:188 value `#15803d`->
+  `#166534` (count stays 281), `generated_from_head` d76a559->1c9b466, and
+  mechanical index.html location re-indexing. Arithmetic: 286+7+2+1+1-1=296.
+- Landing: baseline-only scoped commit `a1129eb`
+  "fix(tools): regenerate theme-token baseline (branding-assets rider,
+  user-approved; stale-pin corrections graph.js 1->0 and themes.css:188)"
+  (24/12), preceded by `encoding_guard.py --staged` exit 0; no amend of
+  `9ddf623`/`1c9b466`.
+- Post-fix acceptance (D3 closure), verbatim at HEAD a1129eb -
+  `python tools/theme_token_check.py --check-added --base
+  b7ba3a128a5af3a8f652ba96651c7f42f1183577` via the distiller:
+  `### generic PASS (exit 0)`, capture 0 lines (both scans silent; the bare
+  gate-7 form remains the usage-error form, exit 2 by script design).
+  Scoped suite unchanged: `238 passed / 0 failed / 0 ignored / 3 suites`.
+- Rider-hop gate tally: status 2, add 2, encoding_guard --staged 2, regen 1,
+  combined scan 2, zero-diff proof 1, testrun 1, commit_scoped 2 - 13
+  invocations, no gate-class overshoot beyond the per-commit hygiene pairs.
