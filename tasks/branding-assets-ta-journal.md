@@ -220,4 +220,46 @@ counted honestly; no D-row overshoot beyond those.
 
 ## Landing (gate 9 + gate 10)
 
-- (pending this section's completion below)
+- Gate 9: `python tools/encoding_guard.py --staged` via the distiller - exit 0,
+  silent (0-line capture). Staging used explicit-path
+  `git add -- <the 11 touch-set files>` via the distiller (no `git add .`).
+  autocrlf emitted the repo-standard working-copy notices for 6 files;
+  committed blobs are the normalized (LF) content, identical for the asset
+  pair since normalization is content-deterministic.
+- Gate 10: `python tools/commit_scoped.py` with the handoff's exact nine
+  scopes and message - landed `9ddf623`
+  "feat(ui): serve brand icon at /icon.svg with favicon and brand mark".
+  Stat: icon.svg +55, index.html +2/-3, styles.css +4/-4, export.rs +13/-1,
+  lib.rs +1, server.rs +5, icon_asset.rs +106, main.rs +1, journal +223,
+  theme_token_check.py +4/-1, ui_smoke.py +1. Set equals the Touch-set EXACT
+  (10 files + this journal), riders included, zero collateral.
+- Post-commit scoped testrun: NOT re-run - zero working-tree delta between
+  gate 4b and the commit (staging only); gate 4b's
+  `238 passed / 0 failed / 0 ignored / 3 suites` carries the landing state.
+- Human-eyeball rider (kickoff acceptance): MANUAL EYEBALL PENDING OPERATOR -
+  this implementer session cannot open a browser. Not checked off: header
+  brand mark at ~32px; browser-tab favicon; brand mark render under light /
+  dark / dark-grey / dark-steampunk (fixed art by design; the fourth theme
+  shipped via the ui-dark-grey-theme track). An unexecuted check is never
+  checked off.
+- Out-of-scope observations (report-only): (a) `index.html <title>` still
+  reads "AriadnesThread Graph Visualizer" - pre-existing, out of handoff
+  scope per the explicit out-of-scope section; (b) `--brand-grad-a/b` remain
+  defined in themes.css behind the now-opaque icon - orphan cleanup is the
+  kickoff's scope-out; (c) the ui_smoke.py docstring line "six /app/*.js
+  scripts" has long been drifted from the roster - known relay, untouched.
+- Frozen-lock zero-diff proof (single scoped invocation
+  `git diff --name-only b7ba3a1 -- media themes.css main.js static_html.rs
+  static_html_sections.rs theme_contract.rs theme_js_zero_hex.rs
+  theme_dark_grey_palette.rs theme_token_baseline.json`): EMPTY output.
+  Committed-set proof `git diff --name-only b7ba3a1..HEAD`: the 11 touch-set
+  files exactly, nothing else.
+
+## Deviation D4 (tail journal commit)
+
+- The Landing section records the landing commit's own hash, so it cannot
+  physically live inside `9ddf623`. It lands as one journal-only scoped
+  commit (`--scope tasks/branding-assets-ta-journal.md`), declared here
+  against the handoff's "one landing commit" parenthetical: one scoped commit
+  per logical step (code landing / journal landing), never `git add .`,
+  scope set unchanged.
