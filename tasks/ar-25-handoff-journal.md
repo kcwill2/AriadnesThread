@@ -61,7 +61,32 @@ own stdout; shared capture files treated as clobber-prone.
 
 ## RED evidence
 
-(Pending: filled at the red commit.)
+Red commit adds the enum declaration (unwired) + `crates/cli/tests/
+ar25_seam_error_chain_test.rs` (public-API integration lock). The lock helper
+`forced_seam_error` mirrors the live call-site propagation verbatim at each
+commit (`.map_err(anyhow::Error::msg)` at RED; flips to `?` together with the
+production line at GREEN - one-line harness edit mirroring production).
+
+Own-run digest (verbatim): `114 passed / 3 failed / 0 ignored / 4 suites`
+(capture: target/testrun-capture.txt). The three failures are exactly the
+predicted lines - each test's byte-lock `assert_eq` PASSED first (proving the
+pre-fix forced-scenario string equals the locked literal), then the downcast
+expect panicked:
+- `ar25_sole_plugin_rejection_is_a_typed_source_through_the_seam` -
+  "AR-25 layer-drop proof: the seam error survives anyhow as a typed source"
+- `ar25_unhandled_language_is_a_typed_source_through_the_seam` - same panic
+- `ar25_mixed_languages_is_a_typed_source_through_the_seam` - same panic
+Semantic reason confirmed: pre-fix the seam payload is String; no typed kind
+exists in the chain. Fourth test (mechanism leg) GREEN at RED.
+
+Adjudication during red (anyhow 1.0.104, Cargo.lock:66): my first witness
+asserted `.map_err(anyhow::Error::msg)` destroys TYPE identity for a
+`PluginError` payload - that assertion FAILED, i.e. in 1.0.104 msg preserves
+the payload's own type. Adjudicated on own-run evidence: the erasure AR-25
+removes is of the dispatch KIND (String payload = no branchable kind), not of
+bytes. Witness rewritten to that claim (`ar25_msg_string_payload_carries_no_
+kind_the_consuming_form_transports_one`) and green at RED; the three seam locks
+above are the contract's RED-before/GREEN-after proof.
 
 ## GREEN + gates
 

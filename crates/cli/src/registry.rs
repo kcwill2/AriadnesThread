@@ -94,6 +94,58 @@ pub fn plan_backend<'a>(
     })
 }
 
+/// The typed dispatch failures of [`incremental_backend`] (AR-25, A7 rider).
+///
+/// The variants carry exactly one consumer fact: WHICH registration rule
+/// rejected the build. `Display` renders the strings this seam printed before
+/// AR-25 byte-identically (the strings are the CLI-visible contract, locked
+/// by the `ar25_*_is_a_typed_source_through_the_seam` tests in
+/// `crates/cli/tests/ar25_seam_error_chain_test.rs`). Unlike the `String`
+/// errors they replace, they survive `anyhow` erasure as a typed source: a
+/// caller `downcast_ref`s the kind instead of pattern-matching rendered text
+/// (the same discipline AR-24 established for the plugin seam, and report's
+/// `StaleArtifact` established for artifacts; hand-rolled Display + Error per
+/// that precedent - no new dependency).
+///
+/// Deliberately NOT an `ariadne_lang::PluginError`: those variants are
+/// compiler-validation kinds ("could the validation run at all?"), while
+/// these are registration facts - misfiling them would falsify the kind
+/// taxonomy AR-24's byte-locks and kind tests defend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncrementalDispatchError {
+    /// Zero discovered units and no sole registered plugin to fall back to:
+    /// multi-language dispatch lands with the language-scoped cache (M21).
+    SolePluginRequired,
+    /// Units exist in a language no registered plugin claims (plan sec 3.3
+    /// fact 3 - an honest error, never a C++ default).
+    UnhandledLanguage { language: SourceLanguage },
+    /// Units span more than one distinct language: dispatch lands with the
+    /// language-scoped cache (M21).
+    MultiLanguageDispatch { languages: Vec<SourceLanguage> },
+}
+
+impl std::fmt::Display for IncrementalDispatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SolePluginRequired => f.write_str(
+                "incremental indexing needs exactly one registered language plugin \
+                 (multi-language dispatch lands with the language-scoped cache (M21))",
+            ),
+            Self::UnhandledLanguage { language } => write!(
+                f,
+                "unhandled language: no plugin is registered for {language:?} units"
+            ),
+            Self::MultiLanguageDispatch { languages } => write!(
+                f,
+                "multi-language incremental analysis lands with the language-scoped \
+                 cache (M21); discovered languages: {languages:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IncrementalDispatchError {}
+
 /// The incremental-analysis backend for a build's discovered units: distinct
 /// `tu.language` set dispatch (plan sec 3.3 fact 3 - a unit language with no
 /// registered plugin is an "unhandled language" error, never a C++ default);
