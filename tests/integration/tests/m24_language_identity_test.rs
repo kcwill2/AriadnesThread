@@ -379,7 +379,10 @@ fn a_language_with_no_plugin_yields_an_explicit_unhandled_language_error() {
 
     let err = ariadne_cli::registry::incremental_backend(&registry, &build)
         .err()
-        .expect("an unclaimed unit language must error");
+        // AR-25: the seam now errors as a typed anyhow source; render for the
+        // text lock (wording assertions below UNEDITED).
+        .expect("an unclaimed unit language must error")
+        .to_string();
     assert!(
         err.contains("unhandled language"),
         "the error names the failure honestly: {err}"

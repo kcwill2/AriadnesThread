@@ -59,19 +59,17 @@ fn build_of(languages: &[(&str, SourceLanguage)]) -> BuildDiscoveryResult {
 }
 
 /// Propagates the seam exactly the way the live consumer does at this commit:
-/// `.map_err(anyhow::Error::msg)`, verbatim from `commands/analyze.rs:39`
-/// pre-AR-25 (this helper's body flips to plain `?` together with the
-/// production line, mirroring it). The msg conversion keeps the message but
-/// erases the type - which is precisely what the typed-source assertions
-/// below pin as RED at this commit and GREEN at the fix.
+/// plain `?` over the seam's `anyhow::Result`, verbatim mirror of
+/// `commands/analyze.rs` post-AR-25 (pre-AR-25 this body carried the
+/// `.map_err(anyhow::Error::msg)` that the production line dropped). With the
+/// re-wrap gone, the seam error's typed source survives to this call site.
 fn forced_seam_error(build: &BuildDiscoveryResult) -> anyhow::Error {
     route_build(build).err().expect("these scenarios must error")
 }
 
 fn route_build(build: &BuildDiscoveryResult) -> anyhow::Result<()> {
     let registry = default_registry();
-    let _plugin = ariadne_cli::registry::incremental_backend(&registry, build)
-        .map_err(anyhow::Error::msg)?;
+    let _plugin = ariadne_cli::registry::incremental_backend(&registry, build)?;
     Ok(())
 }
 

@@ -151,17 +151,20 @@ impl std::error::Error for IncrementalDispatchError {}
 /// registered plugin is an "unhandled language" error, never a C++ default);
 /// zero units fall back to the sole plugin (empty-repo behavior unchanged);
 /// more than one distinct language errors until the M21 language-scoped cache.
+///
+/// AR-25 (A7 rider): failures cross as typed [`IncrementalDispatchError`]
+/// anyhow sources - `Display` renders the pre-AR-25 strings byte-identically
+/// (callers' text locks unchanged) while callers can `downcast_ref` the kind
+/// instead of matching rendered text, and the chain stays navigable.
 pub fn incremental_backend<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
     build_discovery: &ariadne_build::BuildDiscoveryResult,
-) -> Result<&'a dyn ariadne_lang::LanguagePlugin, String> {
+) -> anyhow::Result<&'a dyn ariadne_lang::LanguagePlugin> {
     let distinct = distinct_unit_languages(build_discovery);
     match distinct.len() {
-        0 => registry.sole_plugin().ok_or_else(|| {
-            "incremental indexing needs exactly one registered language plugin \
-             (multi-language dispatch lands with the language-scoped cache (M21))"
-                .to_string()
-        }),
+        0 => registry
+            .sole_plugin()
+            .ok_or_else(|| anyhow::Error::from(IncrementalDispatchError::SolePluginRequired)),
         1 => {
             let language = distinct
                 .into_iter()
@@ -170,12 +173,11 @@ pub fn incremental_backend<'a>(
             registry
             .plugin_for_id(LanguageId::from(language))
             .ok_or_else(|| {
-                format!("unhandled language: no plugin is registered for {language:?} units")
+                anyhow::Error::from(IncrementalDispatchError::UnhandledLanguage { language })
             })
         }
-        _ => Err(format!(
-            "multi-language incremental analysis lands with the language-scoped \
-             cache (M21); discovered languages: {distinct:?}"
+        _ => Err(anyhow::Error::from(
+            IncrementalDispatchError::MultiLanguageDispatch { languages: distinct },
         )),
     }
 }
@@ -462,7 +464,8 @@ mod tests {
         let build = build_of(&[("mystery.x", SourceLanguage::Other)]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("sec 3.3 fact 3: unregistered unit language must error");
+            .expect("sec 3.3 fact 3: unregistered unit language must error")
+            .to_string();
         assert!(
             err.contains("unhandled language"),
             "sec 3.3 fact 3 requires the unhandled-language error, got: {err}"
@@ -478,7 +481,8 @@ mod tests {
         ]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("mixed languages must error until M21");
+            .expect("mixed languages must error until M21")
+            .to_string();
         assert!(
             err.contains("language-scoped cache (M21)"),
             "mixed languages must name the M21 cache, got: {err}"
@@ -491,7 +495,8 @@ mod tests {
         let build = build_of(&[]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("empty repo with multi-plugin registry must error, not guess");
+            .expect("empty repo with multi-plugin registry must error, not guess")
+            .to_string();
         assert!(
             err.contains("exactly one registered language plugin"),
             "empty-repo fallback stays sole-plugin semantics, got: {err}"

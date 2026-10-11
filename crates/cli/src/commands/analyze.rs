@@ -35,8 +35,10 @@ pub fn run_incremental_analysis_filtered(
         .artifacts_are_authoritative();
 
     let registry = crate::registry::default_registry();
-    let plugin = crate::registry::incremental_backend(&registry, &pipeline.build)
-        .map_err(anyhow::Error::msg)?;
+    // AR-25 (A7 rider): the seam's typed error propagates through `?` with
+    // its anyhow source intact - no `.map_err(anyhow::Error::msg)` re-wrap
+    // (that flattened typed errors to message bytes and erased the kind).
+    let plugin = crate::registry::incremental_backend(&registry, &pipeline.build)?;
     let mut analyzer = ariadne_scheduler::IncrementalAnalyzer::new(
         &pipeline.repo,
         &pipeline.discovery,
