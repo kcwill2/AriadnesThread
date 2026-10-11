@@ -1,5 +1,12 @@
 # AR-24 Handoff Journal - Typed errors at the plugin seam (A7)
 
+Landing: `8497a67 refactor(lang-api): typed error enum at the plugin seam
+(A7)` - single cross-crate commit, 18 paths, touch-set + declared riders R1-3
+exact (journal-only docs rider commit follows per AR-15/AR-16 precedent).
+Post-commit verification on the committed tree: lang-cpp
+`155 passed / 0 failed / 0 ignored / 2 suites`;
+`encoding_guard --all` silent.
+
 Base HEAD: `cefbd6f` (branch shining-enthusiasm). One cross-crate commit
 (AR-18 precedent, dispatch mandate): lang-api + lang + impl crates +
 workspace Cargo.toml + Cargo.lock + compile-forced mock riders + this journal.
