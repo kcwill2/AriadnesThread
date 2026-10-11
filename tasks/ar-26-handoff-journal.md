@@ -169,6 +169,9 @@ whichever shape is chosen; that constraint is orthogonal to the split.
   sole path = the journal. Zero stale copies or stray paths: this handoff
   added no code files, so the AR-20a D7 rename-visibility hazard cannot
   arise (no git-mv deletes exist); stat proof stands.
+- Addendum commit `a634ae5` (journal-only; it carries the gate results below
+  because they could only be recorded after the commits they describe -
+  same ordering precedent as AR-16's `a48c018`).
 - No suite gates run: zero code change exists to gate (see "Deliberately
   NOT done"). cargo check --workspace not run for the same reason - the
   tree compiles as committed by AR-21/AR-25 and this session touched no
