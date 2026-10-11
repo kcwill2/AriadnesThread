@@ -60,12 +60,17 @@ flush sites" and the fixture approval dated note.
   `155 passed / 0 failed / 0 ignored / 2 suites` (capture:
   target/testrun-capture.txt, 231 lines; matched re-briefed 155, contract's
   153 stale as briefed).
-- [x] Characterization suite + 19 oracles generated GREEN vs OLD tokenizer.
-- [ ] Allocation probe numbers captured (old + new), probe deleted before commit.
-- [ ] Tokenizer rework landed; suite re-run UNEDITED.
-- [ ] m18/m00/m17 + both M27 locks UNEDITED green.
-- [ ] bench_compare neutral-or-better.
-- [ ] encoding_guard --all/--staged + hygiene + strict compile-green.
+- [x] Characterization suite + 19 oracles generated GREEN vs OLD tokenizer;
+  committed at `089a9d1` BEFORE any tokenizer logic change.
+- [x] Allocation probe numbers captured (old 624 / new 458), probe deleted
+  before commit (both runs; `git status` verified suite file byte-identical
+  to the `089a9d1` blob before the refactor commit).
+- [x] Tokenizer rework landed; suite re-run UNEDITED green.
+- [x] m18/m00/m17 + both M27 locks UNEDITED green.
+- [ ] bench_compare neutral-or-better (LAST per re-brief - live AR-25
+  reviewer lane may load the host).
+- [x] encoding_guard --all/--staged + hygiene zero-blocking + strict
+  compile-green (pre-refactor-commit run; re-run at closeout below).
 
 ## Characterization (pre-change) - suite GREEN against the OLD tokenizer
 
