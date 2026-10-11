@@ -238,7 +238,7 @@ mod tests {
     use crate::rewriter::{DependencyRewriter, RewriteSpec};
     use crate::{
         AggregationKind, CyclePolicy, DependencyVocabulary, GuardKind, LanguageCapabilities,
-        SymbolId, SymbolRecord, SymbolPlacement, TuAnalysis, UnitKind,
+        PluginError, SymbolId, SymbolRecord, SymbolPlacement, TuAnalysis, UnitKind,
     };
     use ariadne_repo::FileId;
     use std::collections::HashSet;
@@ -320,7 +320,11 @@ mod tests {
 
     struct MockValidator;
     impl CompilerValidator for MockValidator {
-        fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
+        fn validate_compile(
+            &self,
+            _files: &[PathBuf],
+            _args: &[String],
+        ) -> Result<(), PluginError> {
             Ok(())
         }
     }

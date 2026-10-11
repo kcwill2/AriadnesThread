@@ -798,9 +798,15 @@ mod tests {
     struct FixedToolchain(ToolchainStatus);
 
     impl CompilerValidator for FixedToolchain {
-        fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
+        // AR-24: compile-forced seam signature only; body and locks untouched.
+        fn validate_compile(
+            &self,
+            _files: &[PathBuf],
+            _args: &[String],
+        ) -> Result<(), ariadne_lang::PluginError> {
             Ok(())
         }
+
         fn toolchain_status(&self) -> ToolchainStatus {
             self.0.clone()
         }

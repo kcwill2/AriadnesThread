@@ -8,7 +8,7 @@ use super::{
     CommandOutcome, CommandRunner, ProcessCommandRunner, ScalaToolchainValidator,
     TOOLCHAIN_PROBE_ORDER,
 };
-use ariadne_lang::CompilerValidator;
+use ariadne_lang::{CompilerValidator, PluginError};
 use ariadne_lang::ToolchainStatus;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -231,7 +231,7 @@ fn validate_compile_defers_without_toolchain_and_never_compiles() {
         .validate_compile(&[PathBuf::from("A.scala")], &["-deprecation".into()]);
     let error = result.expect_err("offline validate_compile must never report a vacuous Ok");
     assert!(
-        error.contains("D-M23-12") && error.contains("scalac"),
+        error.to_string().contains("D-M23-12") && error.to_string().contains("scalac"),
         "deferral message names the decision and the probe subject: {error}"
     );
     let calls = observer.calls();
@@ -288,7 +288,7 @@ fn validate_compile_maps_compiler_failure_output_to_err() {
         .validate_compile(&[PathBuf::from("A.scala")], &[])
         .expect_err("a failing compile must map to Err, never a vacuous Ok");
     assert!(
-        error.contains("scalac") && error.contains("not found: type Thing"),
+        error.to_string().contains("scalac") && error.to_string().contains("not found: type Thing"),
         "Err carries the binary and the compiler's own failure text: {error}"
     );
 }
@@ -303,7 +303,7 @@ fn validate_compile_maps_a_vanished_compiler_to_err() {
         .validate_compile(&[PathBuf::from("A.scala")], &[])
         .expect_err("a compiler that vanished between probe and compile must map to Err");
     assert!(
-        error.contains("scalac") && !error.contains("D-M23-12"),
+        error.to_string().contains("scalac") && !error.to_string().contains("D-M23-12"),
         "this is a vanished toolchain, not the offline deferral: {error}"
     );
 }
@@ -315,5 +315,148 @@ fn real_runner_reports_none_for_unspawnable_binary() {
             .run("ariadne-definitely-not-on-path-xyz", &["--version"])
             .is_none(),
         "the production runner maps spawn failure to None — the Missing half of the probe"
+    );
+}
+
+// -- AR-24 byte-stability locks ------------------------------------------------
+// Characterization of every `validate_compile` error STRING, captured
+// against the pre-conversion `Result<(), String>` API and re-verified
+// after the typed-seam conversion renders the same text through Display.
+// The literals below are byte-independent of the implementation constants:
+// if a message shifts, these locks go red -- they are the CLI-visible
+// contract AR-24 must not move.
+
+/// Byte lock: the offline deferral text, verbatim (D-M23-12 wording).
+#[test]
+fn ar24_deferral_error_text_is_byte_locked() {
+    let validator = ScriptedRunner::new().into_validator();
+    let error = validator
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("offline validate_compile must never report a vacuous Ok");
+    assert_eq!(
+        error.to_string(),
+        "Scala compile deferred (D-M23-12): no usable Scala toolchain \
+(scalac/scala-cli/sbt) is present; offline path stays Missing and tier 3 \
+reports Skipped",
+        "AR-24 byte-stability lock on the deferral text"
+    );
+}
+
+/// Byte lock: compiler-failure text prefers trimmed stderr.
+#[test]
+fn ar24_compiler_failure_stderr_text_is_byte_locked() {
+    let validator = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(Some(CommandOutcome {
+            success: false,
+            stdout: "note: in file A.scala".to_string(),
+            stderr: "error: expected type".to_string(),
+        }))
+        .into_validator();
+    let error = validator
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a failing compile must map to Err");
+    assert_eq!(
+        error.to_string(),
+        "scalac exited unsuccessfully: error: expected type",
+        "AR-24 byte-stability lock on the compiler-failure text (stderr-first)"
+    );
+}
+
+/// Byte lock: with empty stderr the failure text falls back to stdout.
+#[test]
+fn ar24_compiler_failure_stdout_fallback_text_is_byte_locked() {
+    let validator = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(Some(CommandOutcome {
+            success: false,
+            stdout: "warning-only output".to_string(),
+            stderr: String::new(),
+        }))
+        .into_validator();
+    let error = validator
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a failing compile must map to Err");
+    assert_eq!(
+        error.to_string(),
+        "scalac exited unsuccessfully: warning-only output",
+        "AR-24 byte-stability lock on the stdout-fallback failure text"
+    );
+}
+
+/// Byte lock: an output-less failure carries the neutral detail.
+#[test]
+fn ar24_compiler_failure_no_output_text_is_byte_locked() {
+    let validator = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(Some(CommandOutcome {
+            success: false,
+            stdout: String::new(),
+            stderr: String::new(),
+        }))
+        .into_validator();
+    let error = validator
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a failing compile must map to Err");
+    assert_eq!(
+        error.to_string(),
+        "scalac exited unsuccessfully: no compiler output",
+        "AR-24 byte-stability lock on the no-compiler-output detail"
+    );
+}
+
+/// Byte lock: the vanished-toolchain text, verbatim.
+#[test]
+fn ar24_vanished_toolchain_text_is_byte_locked() {
+    let validator = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(None)
+        .into_validator();
+    let error = validator
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a vanished compiler must map to Err");
+    assert_eq!(
+        error.to_string(),
+        "scalac became unrunnable between probe and compile",
+        "AR-24 byte-stability lock on the vanished-toolchain text"
+    );
+}
+
+/// AR-24 kind branching: the same forced errors are discriminated by
+/// variant -- a tier-3 consumer decides `Skipped` vs `Fail` structurally,
+/// never by string inspection. The deferral and the vanished toolchain are
+/// both "could not run"; a compiler report is the distinct `CompileFailure`
+/// kind (byte-identical texts, different kinds -- kind is not text).
+#[test]
+fn ar24_error_kinds_discriminate_unrunnable_from_failed_validation() {
+    let deferral = ScriptedRunner::new()
+        .into_validator()
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("offline validate_compile never reports Ok");
+    assert!(
+        matches!(deferral, PluginError::ToolchainUnavailable { .. }),
+        "the offline deferral could not run: {deferral:?}"
+    );
+
+    let failure = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(Some(exited_unsuccessfully()))
+        .into_validator()
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a failing compile never reports Ok");
+    assert!(
+        matches!(failure, PluginError::CompileFailure { .. }),
+        "a compiler report is the failure kind, not an absence: {failure:?}"
+    );
+
+    let vanished = ScriptedRunner::new()
+        .with_probe("scalac", Some(usable("scalac 2.13.14")))
+        .with_compile(None)
+        .into_validator()
+        .validate_compile(&[PathBuf::from("A.scala")], &[])
+        .expect_err("a vanished compiler never reports Ok");
+    assert!(
+        matches!(vanished, PluginError::ToolchainUnavailable { .. }),
+        "unrunnable-between-probe-and-compile is an absence, not a failure: {vanished:?}"
     );
 }

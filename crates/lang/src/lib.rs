@@ -20,6 +20,7 @@ pub mod validator;
 // resolving for existing users after the `lang -> index` edge was removed.
 pub use ariadne_lang_api::capability::{LanguageCapabilities, ToolchainStatus};
 pub use ariadne_lang_api::catalog::{normalize_relative_path, FileCatalog, ResolveOutcome};
+pub use ariadne_lang_api::error::PluginError;
 pub use ariadne_lang_api::identity::{language_of_file_kind, LanguageId};
 pub use ariadne_lang_api::modeling::{
     AggregationKind, CyclePolicy, DependencyVocabulary, GuardKind, LanguageModeling,

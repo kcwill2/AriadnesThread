@@ -452,7 +452,12 @@ mod builder_seam_tests {
 
     struct SeamValidator;
     impl CompilerValidator for SeamValidator {
-        fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
+        // AR-24: compile-forced seam signature only; body and locks untouched.
+        fn validate_compile(
+            &self,
+            _files: &[PathBuf],
+            _args: &[String],
+        ) -> Result<(), ariadne_lang::PluginError> {
             Ok(())
         }
     }

@@ -8,6 +8,7 @@
 
 pub mod capability;
 pub mod catalog;
+pub mod error;
 pub mod identity;
 pub mod modeling;
 pub mod types;

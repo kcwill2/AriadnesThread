@@ -7,7 +7,9 @@ authors.workspace = true
 [dependencies]
 ariadne-repo = { path = "../repo" }
 serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
 bincode.workspace = true
+anyhow.workspace = true

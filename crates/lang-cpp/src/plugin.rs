@@ -12,8 +12,8 @@ use crate::source_extractor::CppSourceExtractor;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     DependencyVocabulary, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId,
-    SymbolPlacement, SymbolRecord, ToolchainStatus, UnitKind, UnitShaper,
+    LanguageModeling, LanguagePlugin, PluginError, SemanticAnalyzer, SourceExtractor,
+    SourceFileKind, SymbolId, SymbolPlacement, SymbolRecord, ToolchainStatus, UnitKind, UnitShaper,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -93,8 +93,17 @@ pub(crate) fn probe_compiler_status(binary: &str) -> ToolchainStatus {
 }
 
 impl CompilerValidator for CppCompilerValidator {
-    fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
-        Err("C++ CompilerValidator not wired yet (M23)".to_string())
+    /// AR-24 typed seam: the M23 placeholder keeps its exact CLI-visible
+    /// wording (`ar24_validate_compile_placeholder_text_is_byte_locked`)
+    /// and gains a kind -- not-wired, never a compile failure.
+    fn validate_compile(
+        &self,
+        _files: &[PathBuf],
+        _args: &[String],
+    ) -> Result<(), PluginError> {
+        Err(PluginError::ValidationNotWired {
+            message: "C++ CompilerValidator not wired yet (M23)".to_string(),
+        })
     }
 
     /// M18.10 (plan §3.4 toolchain row): probes the clang driver exactly as
@@ -514,6 +523,42 @@ mod tests {
         assert_eq!(
             plugin.resolver().resolve_target(&edge, &catalog, &ctx),
             ResolveOutcome::Resolved(record.id)
+        );
+    }
+
+    // AR-24 byte-stability lock: the C++ `validate_compile` error STRING,
+    // captured through `&dyn CompilerValidator` against the pre-conversion
+    // `Result<(), String>` API and re-verified after the typed-seam
+    // conversion renders the same text through Display. The literal is
+    // independent of the implementation string -- if the wording shifts,
+    // this lock goes red.
+    #[test]
+    fn ar24_validate_compile_placeholder_text_is_byte_locked() {
+        let validator = CppCompilerValidator;
+        let as_validator: &dyn CompilerValidator = &validator;
+        let error = as_validator
+            .validate_compile(&[PathBuf::from("a.cpp")], &[])
+            .expect_err("the M23 placeholder must never report a vacuous Ok");
+        assert_eq!(
+            error.to_string(),
+            "C++ CompilerValidator not wired yet (M23)",
+            "AR-24 byte-stability lock on the C++ validate_compile text"
+        );
+    }
+
+    // AR-24 kind branching: the SAME forced error is discriminated by
+    // variant -- the tier-3/AR-25 consumer matches on kind, never on text
+    // (demonstrated through `&dyn CompilerValidator`, the plugin seam).
+    #[test]
+    fn ar24_validate_compile_error_branches_by_kind() {
+        let validator = CppCompilerValidator;
+        let as_validator: &dyn CompilerValidator = &validator;
+        let error = as_validator
+            .validate_compile(&[PathBuf::from("a.cpp")], &[])
+            .expect_err("the M23 placeholder never reports Ok");
+        assert!(
+            matches!(error, PluginError::ValidationNotWired { .. }),
+            "the placeholder is the not-wired kind, never a compile failure: {error:?}"
         );
     }
 }

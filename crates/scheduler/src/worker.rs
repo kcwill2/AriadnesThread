@@ -340,11 +340,12 @@ mod dispatch_contract_tests {
     struct MockValidator;
 
     impl CompilerValidator for MockValidator {
+        // AR-24: compile-forced seam signature only; body and locks untouched.
         fn validate_compile(
             &self,
             _files: &[PathBuf],
             _args: &[String],
-        ) -> Result<(), String> {
+        ) -> Result<(), ariadne_lang::PluginError> {
             Ok(())
         }
     }

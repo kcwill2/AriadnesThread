@@ -30,7 +30,7 @@
 //! calls `validate_compile`; this behavior matters only once T7 flips
 //! `validation: true` and a toolchain actually exists.
 
-use ariadne_lang::{CompilerValidator, ToolchainStatus};
+use ariadne_lang::{CompilerValidator, PluginError, ToolchainStatus};
 use std::path::PathBuf;
 
 /// Probe candidates, probed left to right until one is usable (D-M23-6).
@@ -120,26 +120,30 @@ impl Default for ScalaToolchainValidator {
 
 impl CompilerValidator for ScalaToolchainValidator {
     /// D-M23-12: without a usable toolchain this is an honest `Err` naming
-    /// the decision, with only the `--version` probe walk spawned; with one
-    /// it invokes `<binary> <compiler_args…> <source_files…>` (the scalac
-    /// options-before-sources convention) and maps failure to `Err` carrying
-    /// the compiler output.
+    /// the decision (kind [`PluginError::ToolchainUnavailable`]), with only
+    /// the `--version` probe walk spawned; with one it invokes
+    /// `<binary> <compiler_args...> <source_files...>` (the scalac
+    /// options-before-sources convention) and maps failure to
+    /// [`PluginError::CompileFailure`] carrying the compiler output -- every
+    /// rendering byte-stable (AR-24 locks in [`validator::tests`]).
     fn validate_compile(
         &self,
         source_files: &[PathBuf],
         compiler_args: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<(), PluginError> {
         let Some((binary, _)) = self.first_usable_toolchain() else {
-            return Err(COMPILE_DEFERRAL.to_string());
+            return Err(PluginError::ToolchainUnavailable {
+                message: COMPILE_DEFERRAL.to_string(),
+            });
         };
         let arguments = compile_arguments(compiler_args, source_files);
         let args: Vec<&str> = arguments.iter().map(String::as_str).collect();
         match self.runner.run(binary, &args) {
             Some(outcome) if outcome.success => Ok(()),
-            Some(outcome) => Err(failure_text(binary, &outcome)),
-            None => Err(format!(
-                "{binary} became unrunnable between probe and compile"
-            )),
+            Some(outcome) => Err(failure_error(binary, &outcome)),
+            None => Err(PluginError::ToolchainUnavailable {
+                message: format!("{binary} became unrunnable between probe and compile"),
+            }),
         }
     }
 
@@ -172,9 +176,10 @@ fn compile_arguments(compiler_args: &[String], source_files: &[PathBuf]) -> Vec<
     arguments
 }
 
-/// A failed compile maps to `Err` carrying the binary and the compiler's
-/// own output (stderr first, then stdout).
-fn failure_text(binary: &str, outcome: &CommandOutcome) -> String {
+/// A failed compile maps to [`PluginError::CompileFailure`] carrying the
+/// binary and the compiler's own output (stderr first, then stdout) in the
+/// exact pre-typed-seam wording (byte-locked in [`validator::tests`]).
+fn failure_error(binary: &str, outcome: &CommandOutcome) -> PluginError {
     let stderr = outcome.stderr.trim();
     let stdout = outcome.stdout.trim();
     let detail = if !stderr.is_empty() {
@@ -184,7 +189,9 @@ fn failure_text(binary: &str, outcome: &CommandOutcome) -> String {
     } else {
         "no compiler output"
     };
-    format!("{binary} exited unsuccessfully: {detail}")
+    PluginError::CompileFailure {
+        message: format!("{binary} exited unsuccessfully: {detail}"),
+    }
 }
 
 #[cfg(test)]
