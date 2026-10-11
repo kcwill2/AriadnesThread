@@ -143,9 +143,10 @@ Gates (verbatim, capture paths printed per run; testrun capture =
    m23 re-checked unedited via the frozen-lock diff (measured `7/0/0/1`
    pre-mutation).
 8. `python tools/hygiene_check.py`: R3 warn rows only (all pre-existing,
-   none in touched files); ZERO blocking R1/R2 rows. m17 file at 744
+   none in touched files); ZERO blocking R1/R2 rows. m17 file at 740
    lines - under the 1000 ceiling, no test-body growth beyond the two
-   new tests.
+   new tests. (Superseded mid-write figure 744: actual final file length
+   is 740, re-measured post-commit.)
 
 Frozen-lock evidence (vs base `0d348ee`):
 
@@ -165,3 +166,75 @@ Disposition per Ruling 2/3 (journal of record): audit A3 PARTIALLY
 satisfied; the cluster/transform/validate residual is a DEFERRED LEDGER
 ROW at orchestrator closeout carrying the AR-26c promotion charter
 verbatim - not a follow-up AR.
+
+## Commit record + D7 clause + deviations (post-commit addendum)
+
+Commits (this lane):
+
+- `3064b77` docs(ar-26b): pre-mutation checkpoint (journal only).
+- `8e08600` refactor(scheduler): reparent to ariadne-artifact, drop
+  scheduler->report; m17 scheduler-cone guard (AR-26b) - the contract's
+  single scoped commit verbatim; numstat: Cargo.lock 1/1,
+  scheduler/Cargo.toml 2/1, incremental.rs 1/1, journal 104/0,
+  m17 79/2 (the 2 deletions are the two const size lines themselves;
+  every existing test body byte-intact).
+- (this addendum commit carries the 740-line correction above.)
+
+D7 clause (`python tools/distill.py -- git show --stat -M HEAD`): EXACTLY
+the 5 touch-set paths; no deletes/adds (no `git mv` this hop - the D7
+rename logic is inert by design); no stale copies; no path outside the
+touch-set. Lingering-edge spot-check (`git ls-files` is allowlist-denied;
+substituted per capture-race-adjacent discipline): Grep over
+`crates/scheduler` for `ariadne[-_]report` -> ZERO matches (post-swap;
+was 2 at dispatch HEAD); Cargo.lock scheduler package deps:
+`ariadne-artifact` present, `ariadne-report` absent.
+
+Encoding gates: `--staged` and `--all` both silent (clean). Raw exit
+codes are not echoable in this shell (chained echo / `python -c` are
+allowlist-denied) - adjudicated on the printed contract, same precedent
+as AR-02/AR-08/AR-18 verdicts.
+
+Refused-command log (verbatim shape, substituted, gates never skipped):
+
+- raw `git log --oneline -5; git status --porcelain` -> refused
+  (catch-all deny); rerun as two `python tools/distill.py -- git ...`
+  invocations.
+- `git grep`, `git ls-files`, `python -c`, chained `echo` not attempted
+  as gates; substitutes used (Grep tool, Read tool) and named above.
+
+Deviations:
+
+- D1 NONE against the contract's code shape: guard wording, panic
+  message, const arrays, planted self-test, `-e normal`, RED-first
+  protocol, and single-commit bundling (RED captured in this journal,
+  never committed) all per Ruling 4 verbatim.
+- D2 report suite measured `7/0/0/4` vs the handoff baseline row's
+  `7/0/0/3` (line 47): STALE HANDOFF LINE, the orchestrator dispatch pin
+  and my measurement agree; report-only (handoff is outside touch-set).
+- D3 the module doc still reads "the seven core pipeline crates" while
+  `GUARD_CORE_CRATES` is now 8: deliberately NOT restyled - the contract
+  limits in-place edits to the two const arrays; section 5's doc
+  comment records the walk-scope extension. Report-only observation.
+- D4 two mis-targeted Edit calls aimed at a nonexistent
+  `tasks/placeholder-noop.md` during the m17 append; the tool refused
+  them ("File ... not found"), so nothing was created or modified; the
+  real m17 edits landed correctly and are in `8e08600`. Disclosed for
+  trail completeness.
+- D5 gate 6 BEFORE-side tree capture run in addition to the mandated
+  AFTER-side (dispatch final report requires before/after evidence);
+  extra distill invocation, same mandated command, journal-only.
+
+Out-of-scope observations (report-only, nothing fixed):
+
+- The stale handoff baseline row (D2) and the stale "seven core crates"
+  doc phrase (D3) are one-line corrections for whoever next owns those
+  files (planner/ledger lane).
+- Foreign `tests/fixtures/basic/artifacts/includes/report.json`
+  LF/CRLF churn persists unstaged (pre-existing across the whole AR-26
+  chain per 26a/26a2 journals); left untouched.
+
+Terminal-hold note for the reviewer's acceptance pass (contract's
+Reviewer-gate reference): fresh workspace census expected
+`1400 / 0 / 13 / 105` (m17 8->10; passed total authority); census/gate
+ownership per Planning Law keeps `--baseline` with the orchestrator's
+own bounded run - not run in this lane per dispatch restriction.
