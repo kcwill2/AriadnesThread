@@ -178,10 +178,32 @@ Every hit compiles (gate 1 `--all-targets` green with all suites UNEDITED).
 
 ## Landed
 
-Commit (single, via `python tools/commit_scoped.py` with scopes
-`crates/worker-core/**`, `crates/scheduler/**`, `Cargo.toml`, `Cargo.lock`,
-`tasks/ar-20a-handoff-journal.md`): message
+Commit `0861db0` (parent = dispatch HEAD `768529f`, one commit, via
+`python tools/commit_scoped.py` with scopes `crates/worker-core/**`,
+`crates/scheduler/**`, `Cargo.toml`, `Cargo.lock`,
+`tasks/ar-20a-handoff-journal.md`), message
 `refactor(worker-core): extract tu_store engine + worker types from scheduler (A4 part 1, additive)`.
-Hash recorded in the trailing journal-only follow-up (AR-16/AR-19 precedent).
-`python tools/encoding_guard.py --staged` run after staging: exit 0.
-Nothing else staged: foreign untracked task docs left untouched.
+`git show --stat -M HEAD` records
+`crates/{scheduler => worker-core}/src/tu_store.rs | 0` - rename, zero
+hunks; the commit tree carries the blob at the worker-core path only.
+`python tools/encoding_guard.py --staged` run against the staged landing:
+silent, exit 0. Final frozen-lock re-verification at `0861db0`:
+`git status --porcelain -- tests/` EMPTY;
+`git diff 768529f HEAD --stat -- tests/ crates/lang-api crates/lang-cpp`
+EMPTY. Nothing foreign staged; foreign untracked task docs left untouched.
+
+### D7 - commit_scoped cannot carry an already-staged rename deletion (tooling, NOT fixed here)
+
+First attempt (commit `79a90d3`, discarded) shipped the rename as an addition
+only: `resolve_scopes` enumerates candidates from `git ls-files` (index) +
+`--others`, and a staged `git mv` deletion is absent from the index, so the
+old path never matched any scope; `git commit --only` then excludes it by
+design. Same for the second attempt state. Resolution used here:
+`git reset --soft` back to the dispatch HEAD (discarding only my own
+seconds-old, unpushed, wrong-scope commits `79a90d3`/`d4630d4`), leave the
+tu_store deletion UNSTAGED (path stays in the index, so `ls-files` lists it),
+then run the exact handoff `commit_scoped.py` invocation - the tool stages
+the deletion itself and the third commit `0861db0` is rename-complete.
+Recommendation for the tooling owner (out of this handoff's touch-set): have
+`commit_scoped` resolve candidates also from `git ls-files -d` (worktree-
+deleted paths), or detect staged deletions under a directory scope.
