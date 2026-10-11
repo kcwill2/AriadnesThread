@@ -178,5 +178,61 @@ capture `target/testrun-capture.txt` per run):
   un-grown).
 - Gate 10 `encoding_guard.py --all` -> silent (exit 0).
 
+## Landing commit + D7 rename-completeness proof (checkpoint 5)
+
+- Staging: explicit paths only (`Cargo.lock`, artifact Cargo.toml +
+  lib.rs + manifests.rs + manager.rs + manager/, report lib.rs); old
+  manager paths DELIBERATELY LEFT UNSTAGED per the AR-20a D7 recipe;
+  journal + the rest resolved by `commit_scoped.py` itself.
+  `python tools/encoding_guard.py --staged` -> silent (exit 0) BEFORE the
+  commit.
+- LANDING COMMIT `0d348ee` via the exact contract command (4 scopes:
+  `crates/artifact/**`, `crates/report/**`, `Cargo.lock`, journal).
+  commit_scoped numstat (verbatim shape): Cargo.lock 10+, artifact
+  Cargo.toml 12+, artifact lib.rs 5+3- (old 7-line hop-1 header -> new
+  pinned 9 lines), ALL 11 renames 0/0, manifests.rs 1+1-, report lib.rs
+  4+13-, journal 114+. NOTHING else.
+- D7 proof A - `git show --stat -M HEAD`: EXACTLY 17 paths = 11
+  `{report => artifact}` rename pairs at 0 changed lines + Cargo.lock +
+  artifact Cargo.toml + artifact lib.rs + manifests.rs + report lib.rs +
+  journal. No stale copy, no stray path, no other path; deletion +
+  addition landed together in the ONE commit (no stray-deletion
+  follow-up needed).
+- D7 proof B - `git show --name-status -M HEAD`: **11/11 R100**
+  (manager.rs + all 10 manager/ files; strict-R100 rule held - zero
+  content hunks on moved files), plus `M` for Cargo.lock, artifact
+  Cargo.toml, artifact lib.rs, manifests.rs, report lib.rs, journal.
+- D7 proof C - `git ls-files crates/report/src/manager
+  crates/report/src/manager.rs` -> EMPTY (capture 0 lines; no tracked
+  files at old paths). Disk census (Glob `crates/report/src/**`): only
+  `lib.rs` - no stale on-disk copy.
+- Post-commit `cargo check --workspace --all-targets` ->
+  `ok (exit 0, 11 warnings emitted)`: the 11 = cache-dependent
+  re-emission subset of the pre-existing census (hop-1 journal documents
+  the same phenomenon); grep of OWN capture: every `ariadne-report` /
+  `ariadne-artifact` mention is a `Checking` line - ZERO warning lines
+  attributable to either crate.
+- 9-site consumer attestation AT NEW HOME: `rg -c "use crate::manifests"
+  -g "*.rs" crates/artifact` -> exactly 9 files, one site each
+  (apply_io, discovery_io, graph_io, index_io, metrics_io, transform_io,
+  tests, m22_manifest_languages_tests, payload_reshape_tests) -
+  R100 blob identity proves these lines are BYTE-UNCHANGED; the
+  `crate::` rebinding (report shim binding -> same-crate `pub mod
+  manifests` + `pub(crate)` fn visibility) does all the work, zero
+  consumer import edits.
+- CONSERVATION (contract authority): `40 + 7 = 47` passed; `0` failed
+  both sides; `#[test]` attr diff across report + artifact = 0; ZERO
+  tests authored/edited/deleted.
+- Deviations: NONE. Deliberately NOT done (per contract): unused-dep
+  pruning in `crates/report/Cargo.toml` (deps orphaned by the move are
+  kept - cargo does not error on unused deps; a later AR owns cleanup);
+  no m17/cone edits (26b); no changes under `tests/**`.
+- Out-of-scope observations (report-only): the contract's gate-3
+  suite-count projection (3) miscounts its own 4-target enumeration -
+  measured 4 with PASSED 7 matching (tolerance clause applied); the
+  foreign `report.json` LF/CRLF churn persists worktree-side (warning
+  only, zero content diff; hop-1 saw the same).
+
+
 
 
