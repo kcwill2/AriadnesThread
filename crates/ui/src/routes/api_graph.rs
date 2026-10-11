@@ -49,74 +49,84 @@ pub(crate) async fn api_graph_traverse(
     State(state): State<Arc<UiState>>,
     Query(query): Query<TraverseQuery>,
 ) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
-    let depth = query.depth.unwrap_or(1);
-    let direction = match query.direction.as_deref() {
-        Some("in") | Some("incoming") => TraversalDirection::Incoming,
-        Some("out") | Some("outgoing") => TraversalDirection::Outgoing,
-        _ => TraversalDirection::Both,
-    };
+    // P6 (AR-15): the depth-BFS neighborhood and the payload filter pass
+    // run on the blocking pool (precedent: tokio::task::spawn_blocking in
+    // the cli boot/watcher path) so a deep walk never occupies a tokio
+    // worker. Body moved verbatim into the closure - output byte-identical
+    // (graph_api locks). The Query extractor already ran, so parameter
+    // rejection order is unchanged; a blocking-task panic maps to 500.
+    tokio::task::spawn_blocking(move || {
+        let depth = query.depth.unwrap_or(1);
+        let direction = match query.direction.as_deref() {
+            Some("in") | Some("incoming") => TraversalDirection::Incoming,
+            Some("out") | Some("outgoing") => TraversalDirection::Outgoing,
+            _ => TraversalDirection::Both,
+        };
 
-    let mut elements = Vec::new();
-    let payload = read_state(&state.payload);
-    let payload_ref = payload
-        .as_ref()
-        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+        let mut elements = Vec::new();
+        let payload = read_state(&state.payload);
+        let payload_ref = payload
+            .as_ref()
+            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-    match query.graph_type.as_str() {
-        "include" => {
-            if let Ok(id) = query.center.parse::<u64>() {
-                let center = FileId(id);
+        match query.graph_type.as_str() {
+            "include" => {
+                if let Ok(id) = query.center.parse::<u64>() {
+                    let center = FileId(id);
+                    let gen = state
+                        .analysis()
+                        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                    let subgraph = gen.include_graph.traverse_neighborhood(center, depth, direction);
+                    let node_ids: std::collections::HashSet<String> = subgraph
+                        .nodes
+                        .into_iter()
+                        .map(|n| n.0.to_string())
+                        .collect();
+                    let edge_ids: std::collections::HashSet<String> = subgraph
+                        .edges
+                        .into_iter()
+                        .map(|(src, dst)| format!("{}-{}", src.0, dst.0))
+                        .collect();
+                    elements = filter_elements(&payload_ref.include_graph, &node_ids, &edge_ids);
+                }
+            }
+            "symbol" => {
+                let center = SymbolId(query.center.clone());
                 let gen = state
                     .analysis()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-                let subgraph = gen.include_graph.traverse_neighborhood(center, depth, direction);
-                let node_ids: std::collections::HashSet<String> = subgraph
-                    .nodes
-                    .into_iter()
-                    .map(|n| n.0.to_string())
-                    .collect();
+                let subgraph = gen.reduced_model.traverse_neighborhood(&center, depth, direction);
+                let node_ids: std::collections::HashSet<String> =
+                    subgraph.nodes.into_iter().map(|n| n.0).collect();
                 let edge_ids: std::collections::HashSet<String> = subgraph
                     .edges
                     .into_iter()
                     .map(|(src, dst)| format!("{}-{}", src.0, dst.0))
                     .collect();
-                elements = filter_elements(&payload_ref.include_graph, &node_ids, &edge_ids);
+                elements = filter_elements(&payload_ref.symbol_graph, &node_ids, &edge_ids);
             }
+            "call" => {
+                let center = SymbolId(query.center.clone());
+                let g = read_state(&state.call_graph);
+                let g_ref = g
+                    .as_ref()
+                    .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                let subgraph = g_ref.traverse_neighborhood(&center, depth, direction);
+                let node_ids: std::collections::HashSet<String> =
+                    subgraph.nodes.into_iter().map(|n| n.0).collect();
+                let edge_ids: std::collections::HashSet<String> = subgraph
+                    .edges
+                    .into_iter()
+                    .map(|(src, dst)| format!("{}-{}", src.0, dst.0))
+                    .collect();
+                elements = filter_elements(&payload_ref.call_graph, &node_ids, &edge_ids);
+            }
+            _ => {}
         }
-        "symbol" => {
-            let center = SymbolId(query.center.clone());
-            let gen = state
-                .analysis()
-                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            let subgraph = gen.reduced_model.traverse_neighborhood(&center, depth, direction);
-            let node_ids: std::collections::HashSet<String> =
-                subgraph.nodes.into_iter().map(|n| n.0).collect();
-            let edge_ids: std::collections::HashSet<String> = subgraph
-                .edges
-                .into_iter()
-                .map(|(src, dst)| format!("{}-{}", src.0, dst.0))
-                .collect();
-            elements = filter_elements(&payload_ref.symbol_graph, &node_ids, &edge_ids);
-        }
-        "call" => {
-            let center = SymbolId(query.center.clone());
-            let g = read_state(&state.call_graph);
-            let g_ref = g
-                .as_ref()
-                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            let subgraph = g_ref.traverse_neighborhood(&center, depth, direction);
-            let node_ids: std::collections::HashSet<String> =
-                subgraph.nodes.into_iter().map(|n| n.0).collect();
-            let edge_ids: std::collections::HashSet<String> = subgraph
-                .edges
-                .into_iter()
-                .map(|(src, dst)| format!("{}-{}", src.0, dst.0))
-                .collect();
-            elements = filter_elements(&payload_ref.call_graph, &node_ids, &edge_ids);
-        }
-        _ => {}
-    }
-    Ok(Json(elements))
+        Ok(Json(elements))
+    })
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 fn filter_elements(
@@ -145,42 +155,48 @@ pub(crate) async fn api_graph_path(
     State(state): State<Arc<UiState>>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<Option<Vec<String>>>, axum::http::StatusCode> {
-    let path = match query.graph_type.as_str() {
-        "include" => {
-            if let (Ok(from), Ok(to)) = (query.from.parse::<u64>(), query.to.parse::<u64>()) {
+    // P6 (AR-15): shortest-path BFS off the async worker (see
+    // api_graph_traverse); body moved verbatim, output byte-identical.
+    tokio::task::spawn_blocking(move || {
+        let path = match query.graph_type.as_str() {
+            "include" => {
+                if let (Ok(from), Ok(to)) = (query.from.parse::<u64>(), query.to.parse::<u64>()) {
+                    let gen = state
+                        .analysis()
+                        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                    gen.include_graph
+                        .shortest_include_path(FileId(from), FileId(to))
+                        .map(|p| p.into_iter().map(|id| id.0.to_string()).collect())
+                } else {
+                    None
+                }
+            }
+            "symbol" => {
                 let gen = state
                     .analysis()
                     .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-                gen.include_graph
-                    .shortest_include_path(FileId(from), FileId(to))
-                    .map(|p| p.into_iter().map(|id| id.0.to_string()).collect())
-            } else {
-                None
+                gen.reduced_model
+                    .shortest_dependency_path(
+                        &SymbolId(query.from.clone()),
+                        &SymbolId(query.to.clone()),
+                    )
+                    .map(|p| p.into_iter().map(|id| id.0).collect())
             }
-        }
-        "symbol" => {
-            let gen = state
-                .analysis()
-                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            gen.reduced_model
-                .shortest_dependency_path(
-                    &SymbolId(query.from.clone()),
-                    &SymbolId(query.to.clone()),
-                )
-                .map(|p| p.into_iter().map(|id| id.0).collect())
-        }
-        "call" => {
-            let g = read_state(&state.call_graph);
-            let g_ref = g
-                .as_ref()
-                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
-            g_ref
-                .shortest_call_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
-                .map(|p| p.into_iter().map(|id| id.0).collect())
-        }
-        _ => None,
-    };
-    Ok(Json(path))
+            "call" => {
+                let g = read_state(&state.call_graph);
+                let g_ref = g
+                    .as_ref()
+                    .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+                g_ref
+                    .shortest_call_path(&SymbolId(query.from.clone()), &SymbolId(query.to.clone()))
+                    .map(|p| p.into_iter().map(|id| id.0).collect())
+            }
+            _ => None,
+        };
+        Ok(Json(path))
+    })
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 #[derive(Deserialize)]
@@ -406,51 +422,57 @@ pub async fn api_graph_collateral(
     State(state): State<Arc<UiState>>,
     Query(query): Query<CollateralQuery>,
 ) -> Result<Json<CollateralResponse>, axum::http::StatusCode> {
-    let mut direct_collateral = std::collections::HashMap::new();
-    let mut transitive_collateral = std::collections::HashMap::new();
-    let mut total_collateral = 0;
+    // P6 (AR-15): the memoized load-analysis pass off the async worker
+    // (see api_graph_traverse); body moved verbatim, output byte-identical.
+    tokio::task::spawn_blocking(move || {
+        let mut direct_collateral = std::collections::HashMap::new();
+        let mut transitive_collateral = std::collections::HashMap::new();
+        let mut total_collateral = 0;
 
-    if let Ok(file_id_num) = query.file.parse::<u64>() {
-        let file_id = ariadne_repo::FileId(file_id_num);
+        if let Ok(file_id_num) = query.file.parse::<u64>() {
+            let file_id = ariadne_repo::FileId(file_id_num);
 
-        let gen = state
-            .analysis()
-            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let gen = state
+                .analysis()
+                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-        // Cheap per-request handle over the generation's ONE warm memo (C1).
-        let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
-            &gen.include_graph,
-            &gen.reduced_model,
-            Arc::clone(&gen.memo),
-        );
-        if gen.include_graph.file_paths.contains_key(&file_id) {
-            if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
-                total_collateral = metric.collateral_load;
+            // Cheap per-request handle over the generation's ONE warm memo (C1).
+            let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+                &gen.include_graph,
+                &gen.reduced_model,
+                Arc::clone(&gen.memo),
+            );
+            if gen.include_graph.file_paths.contains_key(&file_id) {
+                if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
+                    total_collateral = metric.collateral_load;
 
-                let direct_includes = gen.include_graph.direct_includes(file_id);
-                let mut direct_set = std::collections::HashSet::new();
-                for d in direct_includes {
-                    direct_set.insert(d);
-                }
+                    let direct_includes = gen.include_graph.direct_includes(file_id);
+                    let mut direct_set = std::collections::HashSet::new();
+                    for d in direct_includes {
+                        direct_set.insert(d);
+                    }
 
-                for source in metric.collateral_sources {
-                    let src_str = source.file_id.0.to_string();
-                    if direct_set.contains(&source.file_id) {
-                        direct_collateral.insert(src_str, source.symbol_count);
-                    } else {
-                        transitive_collateral.insert(src_str, source.symbol_count);
+                    for source in metric.collateral_sources {
+                        let src_str = source.file_id.0.to_string();
+                        if direct_set.contains(&source.file_id) {
+                            direct_collateral.insert(src_str, source.symbol_count);
+                        } else {
+                            transitive_collateral.insert(src_str, source.symbol_count);
+                        }
                     }
                 }
             }
         }
-    }
 
-    Ok(Json(CollateralResponse {
-        target_id: query.file.clone(),
-        total_collateral,
-        direct_collateral,
-        transitive_collateral,
-    }))
+        Ok(Json(CollateralResponse {
+            target_id: query.file.clone(),
+            total_collateral,
+            direct_collateral,
+            transitive_collateral,
+        }))
+    })
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 /// Query for the traversal view: given a root file and a direct dependency,
@@ -474,60 +496,67 @@ pub async fn api_graph_traversal(
     State(state): State<Arc<UiState>>,
     Query(query): Query<TraversalApiQuery>,
 ) -> Result<Json<TraversalResponse>, axum::http::StatusCode> {
-    let (root_id, dep_id) = resolve_traversal_file_pair(&query)?;
+    // P6 (AR-15): the closure/memo-heavy subtree computation off the async
+    // worker (see api_graph_traverse); body moved verbatim, every check's
+    // order and status code preserved (m15/m16 locks, traversal_back).
+    tokio::task::spawn_blocking(move || {
+        let (root_id, dep_id) = resolve_traversal_file_pair(&query)?;
 
-    let gen = state
-        .analysis()
-        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+        let gen = state
+            .analysis()
+            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-    ensure_traversal_edge(&gen, root_id, dep_id)?;
+        ensure_traversal_edge(&gen, root_id, dep_id)?;
 
-    let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
-        &gen.include_graph,
-        &gen.reduced_model,
-        Arc::clone(&gen.memo),
-    );
+        let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+            &gen.include_graph,
+            &gen.reduced_model,
+            Arc::clone(&gen.memo),
+        );
 
-    // Get justification data to find which symbols root uses from dep
-    let root_metric = match analyzer.analyze_file_load_by_id(root_id) {
-        Ok(m) => m,
-        Err(_) => {
+        // Get justification data to find which symbols root uses from dep
+        let root_metric = match analyzer.analyze_file_load_by_id(root_id) {
+            Ok(m) => m,
+            Err(_) => {
+                return Ok(Json(empty_traversal_response(root_id, dep_id)));
+            }
+        };
+        let justification_detail = crate::dto::build_file_justification_detail(
+            &root_id.0.to_string(),
+            root_id,
+            &root_metric,
+            &analyzer,
+            &gen.reduced_model,
+        );
+
+        // Determine which symbols to analyze
+        let symbol_ids = resolve_traversal_symbols(&query.symbols, &justification_detail, dep_id);
+
+        if symbol_ids.is_empty() {
+            // No symbols to analyze - return empty response
             return Ok(Json(empty_traversal_response(root_id, dep_id)));
         }
-    };
-    let justification_detail = crate::dto::build_file_justification_detail(
-        &root_id.0.to_string(),
-        root_id,
-        &root_metric,
-        &analyzer,
-        &gen.reduced_model,
-    );
 
-    // Determine which symbols to analyze
-    let symbol_ids = resolve_traversal_symbols(&query.symbols, &justification_detail, dep_id);
+        // Compute extraction impact for these symbols
+        let impact = analyzer.extraction_impact(root_id, dep_id, &symbol_ids);
 
-    if symbol_ids.is_empty() {
-        // No symbols to analyze - return empty response
-        return Ok(Json(empty_traversal_response(root_id, dep_id)));
-    }
+        let (necessary_subtree, actual_subtree, collateral_delta, summary) =
+            project_traversal_subtrees(impact, &gen, dep_id);
 
-    // Compute extraction impact for these symbols
-    let impact = analyzer.extraction_impact(root_id, dep_id, &symbol_ids);
+        let analyzed_symbol_ids: Vec<String> = symbol_ids.iter().map(|s| s.0.clone()).collect();
 
-    let (necessary_subtree, actual_subtree, collateral_delta, summary) =
-        project_traversal_subtrees(impact, &gen, dep_id);
-
-    let analyzed_symbol_ids: Vec<String> = symbol_ids.iter().map(|s| s.0.clone()).collect();
-
-    Ok(Json(TraversalResponse {
-        root_file_id: root_id.0.to_string(),
-        dep_file_id: dep_id.0.to_string(),
-        analyzed_symbol_ids,
-        necessary_subtree,
-        actual_subtree,
-        collateral_delta,
-        summary,
-    }))
+        Ok(Json(TraversalResponse {
+            root_file_id: root_id.0.to_string(),
+            dep_file_id: dep_id.0.to_string(),
+            analyzed_symbol_ids,
+            necessary_subtree,
+            actual_subtree,
+            collateral_delta,
+            summary,
+        }))
+    })
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 /// Seed resolution (AR-13): parse the root/dep query strings into file ids.
@@ -838,41 +867,48 @@ pub async fn api_justification(
     State(state): State<Arc<UiState>>,
     Query(query): Query<JustificationQuery>,
 ) -> Result<Json<FileJustificationResponse>, axum::http::StatusCode> {
-    let mut response = FileJustificationResponse {
-        target_id: query.file.clone(),
-        total_justified: 0,
-        total_collateral: 0,
-        entries: Vec::new(),
-    };
+    // P6 (AR-15): the memoized justification recomputation off the async
+    // worker (see api_graph_traverse); body moved verbatim, output
+    // byte-identical (server_api memo-counter + rebuild-swap locks).
+    tokio::task::spawn_blocking(move || {
+        let mut response = FileJustificationResponse {
+            target_id: query.file.clone(),
+            total_justified: 0,
+            total_collateral: 0,
+            entries: Vec::new(),
+        };
 
-    if let Ok(file_id_num) = query.file.parse::<u64>() {
-        let file_id = ariadne_repo::FileId(file_id_num);
+        if let Ok(file_id_num) = query.file.parse::<u64>() {
+            let file_id = ariadne_repo::FileId(file_id_num);
 
-        let gen = state
-            .analysis()
-            .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+            let gen = state
+                .analysis()
+                .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
 
-        // C1: O(1) handle over the generation's ONE warm memo — no more
-        // per-request `LoadAnalyzer::new` (which re-ran compute_closures and
-        // cold BFS on every click).
-        let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
-            &gen.include_graph,
-            &gen.reduced_model,
-            Arc::clone(&gen.memo),
-        );
-        if gen.include_graph.file_paths.contains_key(&file_id) {
-            // A4 by-id: the id is already in hand; skip the O(V) path scan.
-            if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
-                response = crate::dto::build_file_justification_detail(
-                    &query.file,
-                    file_id,
-                    &metric,
-                    &analyzer,
-                    &gen.reduced_model,
-                );
+            // C1: O(1) handle over the generation's ONE warm memo — no more
+            // per-request `LoadAnalyzer::new` (which re-ran compute_closures and
+            // cold BFS on every click).
+            let analyzer = ariadne_graph::LoadAnalyzer::with_memo(
+                &gen.include_graph,
+                &gen.reduced_model,
+                Arc::clone(&gen.memo),
+            );
+            if gen.include_graph.file_paths.contains_key(&file_id) {
+                // A4 by-id: the id is already in hand; skip the O(V) path scan.
+                if let Ok(metric) = analyzer.analyze_file_load_by_id(file_id) {
+                    response = crate::dto::build_file_justification_detail(
+                        &query.file,
+                        file_id,
+                        &metric,
+                        &analyzer,
+                        &gen.reduced_model,
+                    );
+                }
             }
         }
-    }
 
-    Ok(Json(response))
+        Ok(Json(response))
+    })
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
 }

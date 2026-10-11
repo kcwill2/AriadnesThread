@@ -17,6 +17,7 @@ mod hotspot_direction;
 mod justification_builders;
 mod justification_golden;
 mod node_verdict_spine;
+mod payload_etag;
 mod preview_hypothetical;
 mod proposals_payload;
 mod server_api;

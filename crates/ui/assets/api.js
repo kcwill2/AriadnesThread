@@ -1,4 +1,17 @@
 // Data & boot layer split from index.html: live/offline data loading and client API helpers.
+
+    // Live-refresh state. AR-15 scope fix: `lastSeenRefresh` used to be
+    // let-bound inside init()'s else-block, but the top-level
+    // startLiveRefresh loop reads it on every tick - a block-scoped
+    // binding made that read a silently-swallowed ReferenceError, so the
+    // delta branch never ran once the server reported a refresh. Top
+    // level is the only scope both sites share.
+    // `exportEtag` carries the /api/export validator across polls so the
+    // live refresh can ask for a delta instead of re-transferring and
+    // re-parsing an unchanged payload (server answers 304 on match).
+    let lastSeenRefresh = 0;
+    let exportEtag = null;
+
     // Synthetic boot snapshot for the standalone export path: same wire shape
     // as /api/status progress, three steps at the historical 25/65/100
     // percents, statuses advancing pending -> active -> done as `activeIndex`
@@ -44,7 +57,7 @@
         const overlay = document.getElementById('loadingOverlay');
         if (overlay) overlay.style.display = 'flex';
 
-        let lastSeenRefresh = 0;
+        // lastSeenRefresh is declared at api.js top level (AR-15 scope fix).
 
         const pollStatus = async () => {
           try {
@@ -75,6 +88,8 @@
                 if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
                 if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
                 if (exportRes && exportRes.ok) {
+                  // AR-15: keep the validator for the live-refresh delta.
+                  exportEtag = exportRes.headers.get('ETag');
                   const exportPayload = await exportRes.json();
                   graphData.file_collateral = exportPayload.file_collateral || {};
                   graphData.file_justification = exportPayload.file_justification || {};
@@ -125,12 +140,19 @@
                 fetch('/api/graph/include').catch(() => null),
                 fetch('/api/graph/symbol').catch(() => null),
                 fetch('/api/graph/call').catch(() => null),
-                fetch('/api/export').catch(() => null),
+                // AR-15 ETag/delta-aware: carry the validator so an unchanged
+                // export costs a 304 instead of a full transfer + parse.
+                fetch('/api/export', exportEtag ? { headers: { 'If-None-Match': exportEtag } } : undefined).catch(() => null),
               ]);
               if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
               if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
               if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
-              if (exportRes && exportRes.ok) {
+              if (exportRes && exportRes.status === 304) {
+                // Delta path: export bytes unchanged (exact ETag match at the
+                // server), so the export-derived fields below stay as they
+                // are; the three graph datasets above may still have changed.
+              } else if (exportRes && exportRes.ok) {
+                exportEtag = exportRes.headers.get('ETag');
                 const p = await exportRes.json();
                 graphData.file_collateral = p.file_collateral || {};
                 graphData.file_justification = p.file_justification || {};
