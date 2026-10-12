@@ -91,8 +91,32 @@ proofs on gates 3-4 (`ariadne-cli`, `ariadne-integration-tests`).
 - Line budget: ~130 produced diff lines (move + header + module doc),
   inside the ~300-450 estimate band's ceiling; gates used: 8, exactly the
   handoff's enumerated list.
-- (pending) Gate 7: scoped landing commit via `commit_scoped.py`.
-- (pending) Gate 8: `encoding_guard.py --all` post-commit.
+- Gate 7: `python tools/commit_scoped.py --scope crates/ui/src/dto.rs
+  --scope crates/ui/src/dto/extraction.rs --scope
+  tasks/ui-extraction-wizard-w1-journal.md -m "refactor(ui): move the
+  extraction-proposal family into dto/extraction.rs (R2 headroom for the
+  wizard DTOs)"` -> landing `b27aa46` (parent `5cc4ac3`). Stat:
+  `crates/ui/src/dto.rs 7+/54-`, `crates/ui/src/dto/extraction.rs 68+/0-`,
+  `tasks/ui-extraction-wizard-w1-journal.md 125+/0-`. Hunk shapes:
+  `@@ -2,6 +2,13 @@` (module doc + `pub mod extraction;` +
+  `pub use extraction::*;`) and `@@ -231,60 +238,6 @@` (the moved block);
+  new file 68 lines. Pure-move proof: the 53 content lines deleted from
+  `dto.rs` equal the 53 content lines added in `extraction.rs`
+  (byte-identical, D3 note), plus only the module doc/submodule lines
+  (`dto.rs`) and the module doc/two `use` header lines (D2).
+- Gate 8: `python tools/encoding_guard.py --all` -> exit 0 (silent),
+  post-commit. Track gates discharged.
+
+## Out-of-scope observations (report-only)
+
+- Pre-existing warn-only hygiene drift noted, untouched: `unused variable
+  gen` at `crates/ui/src/routes/api_graph.rs:719` (fires under the ui lib
+  check) and the long-standing integration-test golden-helper dead-code
+  warnings (the AR-21 `IncludeResolver` deprecation is separately dated in
+  the ledger). None belongs to W-1.
+- `crates/ui/src/dto.rs` lands at 953 lines - W-2b's wizard DTOs land in
+  `dto/extraction.rs` (68 lines) with full headroom; the R2 ceiling risk
+  (shape R8) is discharged.
 
 ## Deliberately NOT done
 
