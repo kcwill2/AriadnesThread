@@ -336,3 +336,24 @@ reported regardless of true cause)
   own R2.4 recipe.
 - D4: `--staged` timing as disclosed in gate 7 (environment constraint,
   T-a journal precedent).
+
+## 11. Landing record (addendum commit, hash-of-hash record precedent:
+AR-16 `a4c018`, AR-08 `73f2160`, AR-07 `602c176`)
+
+- Landing commit (THE one scoped commit): `43e7de1`
+  "refactor: AR-27a0 inert clone-token pre-land - complete ledger via
+  Copy-strip probe (T-a0)", parent `3c814a2` (dispatch HEAD).
+- `git show --stat` (distilled, own stdout): 16 files = the 15 ledger paths
+  (R3 fourteen + probe-appended `crates/cli/tests/ar25_seam_error_chain_test.rs`)
+  + this journal; `377 insertions(+), 39 deletions(-)` = 39 token +/- pairs
+  + journal 338 lines - ONLY ledger paths (+journal).
+- Post-commit `git status --porcelain` (own stdout): only the 4 foreign
+  entries that existed at dispatch - zero residue from this hop.
+- `python tools/encoding_guard.py --staged` after the commit: silent (exit
+  clean); `--all` was silent before the commit (gate 8).
+- Hygiene post-land: ZERO R1/R2 blocking rows, identical R3 set (gate 7).
+- Reviewer handoff (contract's reviewer-gate reference): R2.4 token-diff
+  class check per named frozen file via `git show 43e7de1 -- <file>`;
+  commit-vs-touch-set against the explicit per-path list; build/artifact
+  re-pin at `23/0/0/2` and `40/0/0/2`; workspace census vs
+  `1400/0/13/105` (reviewer's own acceptance gate).
