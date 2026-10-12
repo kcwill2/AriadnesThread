@@ -1,6 +1,7 @@
 //! AR-13 extraction (verbatim from server.rs): analysis-generation state.
 
 use crate::dto::GraphExportPayload;
+use crate::routes::api_extraction::ExtractionManifestReader;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -88,6 +89,13 @@ pub struct UiState {
     /// payload serializations actually performed (steady requests must
     /// serve snapshot clones, so this stays flat between rebuilds).
     export_serialize_count: AtomicU64,
+    /// Wizard reader seam (ui-extraction-wizard W-2b, shape C2): the
+    /// host-installed read-only extraction provider. `None` until the cli
+    /// install sequence has run; the wizard routes answer 503 until then
+    /// (shape C3). The install happens with the generation, in the same
+    /// bounded window the payload write already documents above.
+    extraction_reader:
+        std::sync::RwLock<Option<Arc<dyn ExtractionManifestReader>>>,
 }
 
 impl UiState {
@@ -109,6 +117,7 @@ impl UiState {
             analysis_epoch: AtomicU64::new(0),
             export_snapshot: std::sync::RwLock::new(None),
             export_serialize_count: AtomicU64::new(0),
+            extraction_reader: std::sync::RwLock::new(None),
         }
     }
 
@@ -136,6 +145,7 @@ impl UiState {
             analysis_epoch: AtomicU64::new(0),
             export_snapshot: std::sync::RwLock::new(None),
             export_serialize_count: AtomicU64::new(0),
+            extraction_reader: std::sync::RwLock::new(None),
         };
         // Cold memo; the live server path installs a closure-seeded memo via
         // `install_analysis` instead (cli boot seeds `LoadMemo::with_closures`
@@ -171,6 +181,21 @@ impl UiState {
     /// a rebuild swaps in a newer generation mid-flight.
     pub fn analysis(&self) -> Option<Arc<AnalysisGeneration>> {
         read_state(&self.analysis).clone()
+    }
+
+    /// Install the read-only extraction provider (shape C2). The host (cli)
+    /// calls this right after `install_analysis` in the same
+    /// `swap_into_state` sequence, so a reader always belongs to the
+    /// generation the routes serve; `UiState::new_loading`/`new_loaded`
+    /// keep their signatures and start at `None`.
+    pub fn install_extraction_reader(&self, reader: Arc<dyn ExtractionManifestReader>) {
+        *write_state(&self.extraction_reader) = Some(reader);
+    }
+
+    /// Current reader for one request: an `Arc` refcount bump, the same
+    /// lifetime guarantee `analysis()` gives the generation.
+    pub fn extraction_reader(&self) -> Option<Arc<dyn ExtractionManifestReader>> {
+        read_state(&self.extraction_reader).clone()
     }
 
     /// P5 (AR-15): the current analysis epoch (install count).

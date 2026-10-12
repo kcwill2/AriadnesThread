@@ -66,3 +66,101 @@ pub struct ExtractionProposalDto {
     #[serde(default)]
     pub target_files_truncated: bool,
 }
+
+// ---- Wizard route DTOs (ui-extraction-wizard W-2b, shape C2) ----
+//
+// Additive, serde-plain display data only (the same rule as the module
+// doc): every field carries `serde(default)` so partial payloads decode
+// honestly, and no cluster/transform/validate type crosses the boundary.
+// The caps are shared by the cli provider (W-2a, which enforces them) and
+// the wizard renderer (W-3a/W-3b, which displays the truncation flags).
+
+/// Cap for destination-file rows per manifest (shape C6).
+pub const EXTRACTION_MANIFEST_MAX_FILES: usize = 64;
+
+/// Cap for symbol names per file row in a manifest; `symbol_count` carries
+/// the uncapped truth (shape C6, same inference idiom as
+/// `ExtractionProposalDto`).
+pub const EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE: usize = 200;
+
+/// Cap for consumer rewrite rows per dry-run (shape C6).
+pub const EXTRACTION_DRY_RUN_MAX_REWRITES: usize = 200;
+
+/// One destination file with its capped symbol list and the includes the
+/// new file needs (the S1/S2 step payload, shape C2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionUnitManifestDto {
+    /// Repo-relative, lossy-rendered.
+    #[serde(default)]
+    pub path: String,
+    /// Capped at `EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE`, symbol_id
+    /// order.
+    #[serde(default)]
+    pub symbol_names: Vec<String>,
+    /// Uncapped members.
+    #[serde(default)]
+    pub symbol_count: usize,
+    /// Engine required_deps, lossy-rendered (W3).
+    #[serde(default)]
+    pub required_includes: Vec<String>,
+    /// True iff the engine could not resolve deps.
+    #[serde(default)]
+    pub includes_unavailable: bool,
+}
+
+/// Per-plan manifest answer of the read-only reader (the S1/S2/S3 step
+/// payload, shape C2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionManifestDto {
+    #[serde(default)]
+    pub plan_id: String,
+    #[serde(default)]
+    pub generation_epoch: u64,
+    #[serde(default)]
+    pub files: Vec<ExtractionUnitManifestDto>,
+    #[serde(default)]
+    pub files_truncated: bool,
+    /// Engine unit-graph cycle, when any.
+    #[serde(default)]
+    pub cycle_error: Option<String>,
+}
+
+/// Dry-run answer: which new files would be written and which consumer
+/// includes would be rewritten (the S4 step payload, shape C2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionDryRunDto {
+    #[serde(default)]
+    pub plan_id: String,
+    #[serde(default)]
+    pub generation_epoch: u64,
+    /// Paths the apply would write.
+    #[serde(default)]
+    pub new_files: Vec<String>,
+    #[serde(default)]
+    pub rewrites: Vec<ExtractionRewriteDto>,
+    #[serde(default)]
+    pub rewrites_truncated: bool,
+    /// Symbols the plugin will strip; 0 for C++.
+    #[serde(default)]
+    pub move_removals: usize,
+    /// True when no source symbol is removed.
+    #[serde(default)]
+    pub copy_only: bool,
+    #[serde(default)]
+    pub includes_unavailable: bool,
+}
+
+/// One consumer include rewrite (old -> new); the field names mirror
+/// `ConsumerRewrite` in the transform crate so the provider mapping is
+/// mechanical and reviewable (shape C2 note).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionRewriteDto {
+    #[serde(default)]
+    pub consumer_file: String,
+    #[serde(default)]
+    pub old_includes: Vec<String>,
+    #[serde(default)]
+    pub new_includes: Vec<String>,
+    #[serde(default)]
+    pub side_effect_preservations: Vec<String>,
+}

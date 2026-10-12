@@ -8,6 +8,10 @@ pub(crate) mod state;
 pub use dto::*;
 pub use export::*;
 pub use server::*;
+/// Wizard contract export (ui-extraction-wizard W-2b): the cli provider
+/// (W-2a) implements this trait against the routes seam; the routes module
+/// itself stays crate-internal.
+pub use routes::api_extraction::ExtractionManifestReader;
 
 pub const INDEX_HTML: &str = include_str!("../assets/index.html");
 pub const THEMES_CSS: &str = include_str!("../assets/themes.css");

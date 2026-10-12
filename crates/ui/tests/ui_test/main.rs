@@ -8,6 +8,7 @@ mod extraction_card_playbook;
 mod export_order;
 mod extraction_card_story;
 mod extraction_contrast;
+mod extraction_wizard_api;
 mod file_view;
 mod graph_api;
 mod gui_scrollbar_style;
