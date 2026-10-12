@@ -7,7 +7,7 @@ use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // Re-exported after the verbatim move to `ui/stage_spans.rs`: EXACTLY the
@@ -23,6 +23,7 @@ use stage_spans::{
 };
 
 mod boot_progress;
+mod extraction_reader;
 mod node_maps;
 mod stage_spans;
 
@@ -36,6 +37,15 @@ pub struct UiBuildResult {
     pub payload: GraphExportPayload,
     pub status: StageStatus,
     pub fps: StageFingerprints,
+    /// The plans behind `payload.extraction_proposals` (ui-extraction-wizard
+    /// W-2a): the wizard reader resolves plan ids against THIS generation,
+    /// so the planner's output that the payload was rendered from travels
+    /// with the build result instead of being dropped.
+    pub extraction_plans: Vec<ariadne_cluster::plan::OptimizationPlan>,
+    /// The `UiState` analysis epoch this generation gets when swapped in
+    /// (boot installs epoch 1, the watcher counts up). The export path
+    /// never swaps and leaves it at 0.
+    pub install_epoch: u64,
 }
 
 /// Poison recovery: the holder already panicked elsewhere; the data stays
@@ -274,15 +284,10 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         PLANNING_EXTRACTIONS_PERCENT,
         "Planning extractions",
     );
-    let extraction_proposals = build_extraction_proposals(
-        &include_graph,
-        &reduced_model,
-        &pipeline.discovery.files,
-        &translation_unit_file_ids(&pipeline.build),
-        &load_report.file_metrics,
-        &closures,
-        &registry,
-        &pipeline.repo.root,
+    let (extraction_proposals, extraction_plans) = build_extraction_proposals_and_plans(
+        &include_graph, &reduced_model, &pipeline.discovery.files,
+        &translation_unit_file_ids(&pipeline.build), &load_report.file_metrics,
+        &closures, &registry, &pipeline.repo.root,
     );
     // C1: ONE memo for the whole generation, seeded with the stage closures
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
@@ -336,6 +341,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         payload,
         status,
         fps: pipeline.fps.clone(),
+        extraction_plans,
+        install_epoch: 0,
     })
 }
 
@@ -380,6 +387,14 @@ fn translation_unit_file_ids(
 /// re-running the load analysis cold (plan load-tail A1), so plan output is
 /// byte-equal to the CLI's `plan_extractions` — locked on real C++ fixtures by
 /// `tests/integration/tests/m00_facts_path_parity_test.rs`.
+/// W-2a: the payload path now calls
+/// `build_extraction_proposals_and_plans` directly, leaving this
+/// single-output wrapper as the `builder_tests` import surface only.
+/// `#[allow(dead_code)]`, not a test-cfg gate: the string lock in
+/// `ui/tests.rs` cuts the production section at the first test-cfg
+/// attribute line in this file, so an earlier one would hide the
+/// bind-honesty contract from that lock.
+#[allow(dead_code)]
 fn build_extraction_proposals(
     include_graph: &ariadne_graph::IncludeGraph,
     reduced_model: &ariadne_graph::ReducedSemanticModel,
@@ -390,6 +405,38 @@ fn build_extraction_proposals(
     registry: &ariadne_lang::LanguageRegistry,
     repo_root: &std::path::Path,
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    build_extraction_proposals_and_plans(
+        include_graph,
+        reduced_model,
+        discovery_files,
+        tu_file_ids,
+        file_metrics,
+        closures,
+        registry,
+        repo_root,
+    )
+    .0
+}
+
+/// Same single planner run (m00 parity: this hand adds no second planner
+/// run), returning the DTOs AND the plans behind them: the wizard reader
+/// (W-2a) resolves plan ids against the generation's own plans, so
+/// `conservative_proposals`'s capped survivors travel out with the build
+/// result instead of being dropped at the payload boundary.
+#[allow(clippy::too_many_arguments)]
+fn build_extraction_proposals_and_plans(
+    include_graph: &ariadne_graph::IncludeGraph,
+    reduced_model: &ariadne_graph::ReducedSemanticModel,
+    discovery_files: &[ariadne_repo::FileRecord],
+    tu_file_ids: &[ariadne_repo::FileId],
+    file_metrics: &[ariadne_graph::LoadMetric],
+    closures: &HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+    registry: &ariadne_lang::LanguageRegistry,
+    repo_root: &std::path::Path,
+) -> (
+    Vec<ariadne_ui::ExtractionProposalDto>,
+    Vec<ariadne_cluster::plan::OptimizationPlan>,
+) {
     // AR-19 (A1 part 2): the hooks are the registry dispatch shared with the
     // plan and optimize lanes (crate::registry::planning_hooks); the former
     // positional `ariadne_lang_cpp::cpp_*` references are gone. C++ answers
@@ -407,15 +454,33 @@ fn build_extraction_proposals(
         ariadne_cluster::planner::screening_facts_from_metrics(include_graph, file_metrics),
         closures,
     );
-    conservative_proposals(planner.plan())
+    conservative_proposals_with_plans(planner.plan())
 }
 
 /// Pure filter/sort/cap stage (I6: `(delta desc, plan_id asc)`; I3: top 12),
 /// kept separate from the planner so the ordering contract is testable
 /// without planner machinery.
+/// W-2a: production now goes through
+/// `conservative_proposals_with_plans`, leaving this wrapper as the
+/// `builder_tests` import surface only (that file is outside this hand).
+/// `#[allow(dead_code)]` for the test-cfg-gate reason spelled out on
+/// `build_extraction_proposals`.
+#[allow(dead_code)]
 fn conservative_proposals(
     plans: Vec<ariadne_cluster::plan::OptimizationPlan>,
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    conservative_proposals_with_plans(plans).0
+}
+
+/// The same filter/sort/cap, also returning the plans the DTOs were
+/// rendered from (same order, same cap): the wizard reader answers
+/// exactly those plan ids for this generation.
+fn conservative_proposals_with_plans(
+    plans: Vec<ariadne_cluster::plan::OptimizationPlan>,
+) -> (
+    Vec<ariadne_ui::ExtractionProposalDto>,
+    Vec<ariadne_cluster::plan::OptimizationPlan>,
+) {
     let mut ranked: Vec<_> = plans
         .into_iter()
         .filter(|p| {
@@ -428,11 +493,15 @@ fn conservative_proposals(
             .cmp(&proposal_delta(a))
             .then(a.id.0.cmp(&b.id.0))
     });
-    ranked
+    let chosen: Vec<ariadne_cluster::plan::OptimizationPlan> = ranked
         .into_iter()
         .take(ariadne_ui::EXTRACTION_PROPOSAL_MAX)
-        .map(|p| extraction_proposal_dto(&p))
-        .collect()
+        .collect();
+    let dtos = chosen
+        .iter()
+        .map(|plan| extraction_proposal_dto(plan))
+        .collect();
+    (dtos, chosen)
 }
 
 fn proposal_delta(plan: &ariadne_cluster::plan::OptimizationPlan) -> usize {
@@ -536,7 +605,22 @@ fn proposal_basename(path: &std::path::Path) -> String {
 /// generation's memo with another generation's graph (no stale entries).
 fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
     let fps = out.fps.clone();
+    let reader_epoch = out.install_epoch;
+    let reader_plans = out.extraction_plans;
     state.install_analysis(out.include_graph, out.reduced_model, out.load_memo);
+    // W-2a (shape C2): the reader belongs to THIS generation - installed in
+    // the same sequence right after `install_analysis`, from the plans this
+    // payload was rendered from and the generation Arc `install_analysis`
+    // just published (zero-copy). A reader can never outlive its generation.
+    let reader = extraction_reader::EngineBackedExtractionReader::new(
+        reader_epoch,
+        state.repo_root.clone(),
+        reader_plans,
+        state
+            .analysis()
+            .expect("install_analysis publishes the generation it just installed"),
+    );
+    state.install_extraction_reader(Arc::new(reader));
     *write_state(&state.call_graph) = Some(out.call_graph);
     *write_state(&state.payload) = Some(out.payload);
     *write_state(&state.stage_status) = out.status;
@@ -559,6 +643,9 @@ fn spawn_watcher(
 ) {
     let rebuilding = Arc::new(AtomicBool::new(false));
     let current_fps = Arc::new(RwLock::new(initial_fps));
+    // W-2a: boot consumed epoch 1 of the boot `UiState`; each watcher swap
+    // installs the next one (only successful swaps reach the counter).
+    let next_epoch = Arc::new(AtomicU64::new(2));
 
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(interval);
@@ -572,6 +659,7 @@ fn spawn_watcher(
             let repo = repo_path.clone();
             let fps_lock = current_fps.clone();
             let rebuilding = rebuilding.clone();
+            let next_epoch = next_epoch.clone();
             let _handle = tokio::task::spawn_blocking(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // Pure, artifact-free freshness check: re-hash inputs only.
@@ -601,7 +689,8 @@ fn spawn_watcher(
                         );
                     });
                     match build_ui_payload(&repo, quiet) {
-                        Ok(out) => {
+                        Ok(mut out) => {
+                            out.install_epoch = next_epoch.fetch_add(1, Ordering::SeqCst);
                             let new_fps = swap_into_state(&state, out);
                             *write_state(&fps_lock) = new_fps;
                         }
@@ -760,6 +849,16 @@ fn warn_if_expose_used(expose: Option<&str>) {
     );
 }
 
+/// The generation boot swaps in: a plain payload build stamped with the
+/// `UiState` epoch boot's swap consumes. `new_loading` starts at epoch 0,
+/// so boot's swap installs generation epoch 1 (the wizard reader carries
+/// it; the watcher counts up from 2). R1 extraction from `run_ui`.
+fn build_boot_generation(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
+    let mut built = build_ui_payload(repo_path, progress)?;
+    built.install_epoch = 1;
+    Ok(built)
+}
+
 pub async fn run_ui(
     repo_opt: Option<PathBuf>,
     port: u16,
@@ -828,7 +927,9 @@ pub async fn run_ui(
         // panic or runtime shutdown - if the task died, `fps_tx` died with
         // it, the watcher parks, and the dead boot is surfaced here (R8).
         let boot_handle = tokio::task::spawn_blocking(move || {
-            drive_boot_build(&boot_state, fps_tx, || build_ui_payload(&boot_repo, boot_progress));
+            drive_boot_build(&boot_state, fps_tx, || {
+                build_boot_generation(&boot_repo, boot_progress)
+            });
         });
         tokio::spawn(async move {
             if let Err(join_error) = boot_handle.await {
