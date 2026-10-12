@@ -158,3 +158,6 @@ When contributing to this project:
 5. Review the generated walkthrough
 
 The workflow ensures all contributions meet quality standards before integration.
+
+## Writing style
+**Write in a conversational, plain english tone of voice.**

@@ -5,6 +5,12 @@
   "version": "0.1.0",
   "publisher": "ariadne",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kcwill2/AriadnesThread.git",
+    "directory": "extensions/ariadne-extension"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },

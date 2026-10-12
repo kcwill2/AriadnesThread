@@ -60,7 +60,9 @@ try {
     if (Test-Path -LiteralPath $vsixName) {
         Remove-Item -LiteralPath $vsixName -Force
     }
-    npx --yes @vscode/vsce package --allow-missing-repository
+    $repoRoot = "https://github.com/kcwill2/AriadnesThread"
+    $extRel = "extensions/ariadne-extension"
+    npx --yes @vscode/vsce package --allow-missing-repository --baseContentUrl "$repoRoot/blob/main/$extRel" --baseImagesUrl "$repoRoot/raw/main/$extRel"
     if ($LASTEXITCODE -ne 0) { throw "vsce package failed (exit $LASTEXITCODE)" }
     if (-not (Test-Path -LiteralPath $vsixName)) {
         throw "expected vsix not found: $vsixName"
