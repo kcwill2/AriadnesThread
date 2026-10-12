@@ -503,3 +503,13 @@ stdout via the distilling entry points; capture-race rule honored)
 - `python tools/hygiene_check.py` (gate 8): exit 0; ALL emitted rows are
   pre-existing R3 (warn); ZERO rows on any file this hop created or edited;
   ZERO R1/R2 blocking.
+- Commit `85179b0` (ORACLE: journal + repo/Cargo.toml + the 4 fixture files)
+  and `f0e1cd1` (IMPL: 7 tracked edits + new repo identity.rs + Cargo.lock +
+  this journal) - both via commit_scoped, scoped file lists as above.
+- Gate 9 form: `encoding_guard --staged` clean at both boundaries
+  (commit_scoped stages+commits atomically; the staged-index view is clean).
+  Gate 10: `python tools/encoding_guard.py --all` exit 0, zero findings.
+  Post-commit `git status --porcelain` (distiller): ONLY the pre-existing
+  foreign churn + foreign untracked docs remain; hop tree fully committed.
+- HOP STATE: COMPLETE. Reviewer acceptance remains: workspace-wide census
+  (`1400/0/13/105` anchor, reviewer form), T-b/T-c successors queued.
