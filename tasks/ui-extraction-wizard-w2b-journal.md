@@ -161,9 +161,61 @@ touch-set paths, nothing else.
 
 Command: `python tools/encoding_guard.py --staged` -> exit 0, silent.
 
-## Gate 7 - landing commit (pending; hash recorded by the journal rider, deviation D5)
+## Gate 7 - landing commit
 
-## Gate 8 - encoding guard, all (pending; recorded by the same rider)
+Command (exact handoff form, nine explicit scopes, never `git add .`):
+
+```
+python tools/commit_scoped.py --scope crates/ui/src/dto/extraction.rs
+  --scope crates/ui/src/state.rs --scope crates/ui/src/routes/api_extraction.rs
+  --scope crates/ui/src/routes/mod.rs --scope crates/ui/src/server.rs
+  --scope crates/ui/src/lib.rs --scope
+  crates/ui/tests/ui_test/extraction_wizard_api.rs --scope
+  crates/ui/tests/ui_test/main.rs --scope
+  tasks/ui-extraction-wizard-w2b-journal.md -m "feat(ui): extraction
+  manifest/dry-run routes behind a read-only reader trait (503/404/409)"
+```
+
+Result (rider record, deviation D5 as pre-declared): landing `f5a7d80`,
+parent `7b2238c`. `git show --stat`: exactly the nine touch-set paths,
+808 insertions(+), zero deletions across tracked source
+(dto/extraction.rs 98, lib.rs 4, routes/api_extraction.rs 103 [NEW],
+routes/mod.rs 1, server.rs 3, state.rs 25, extraction_wizard_api.rs 371
+[NEW], main.rs 1, journal 202). Touch-set conformance:
+`git diff --name-only 7b2238c..HEAD` -> exactly those nine paths, nothing
+else. This rider commit is the docs-only second commit scoped to the
+journal path alone.
+
+## Gate 8 - encoding guard, all
+
+Command: `python tools/encoding_guard.py --all` -> exit 0, silent.
+
+## Rider post-commit proofs (all via the distilling entry point)
+
+- `git status --porcelain` -> empty capture; clean tree at landing.
+- `git diff 7b2238c..HEAD -- crates/cli
+  crates/ui/tests/ui_test/extraction_card_story.rs
+  crates/ui/tests/ui_test/extraction_card_playbook.rs` -> 0-line capture
+  (crates/cli diff-empty per the handoff frozen locks; the two named
+  card-family test files untouched; the 9-path range listing above proves
+  the same for all 18).
+- Frozen regions: `tools/theme_token_baseline.json`, `tests/golden/**`,
+  `tests/fixtures/**`, assets, themes.css appear in no diff of this hand
+  (the 9-path listing is the machine proof).
+
+## Completion record
+
+- Gates 1-8: 1 `283 passed / 0 failed / 0 ignored / 3 suites` exit 0;
+  2 exit 1 with the six named Red failures; 3 `294 passed / 0 failed /
+  0 ignored / 3 suites` exit 0; 4 `ok (exit 0, 0 warnings emitted)`;
+  5 `### generic PASS (exit 0)`; 6 exit 0 silent (staged set verified as
+  exactly the nine paths first); 7 landing `f5a7d80`; 8 exit 0 silent.
+- W-2a handoff note: the seam is live - `ariadne_ui::ExtractionManifestReader`
+  (exported from `lib.rs`), the four wizard DTOs and the three caps
+  (exported through `dto/extraction.rs` -> `dto.rs` -> `lib.rs`), and
+  `UiState::install_extraction_reader` / `UiState::extraction_reader`.
+  `new_loading`/`new_loaded` signatures unchanged; the boot payload grew by
+  nothing (W9).
 
 ## Numbered deviations
 
