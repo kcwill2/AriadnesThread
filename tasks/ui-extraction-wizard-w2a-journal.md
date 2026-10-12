@@ -389,3 +389,27 @@ The stale-baseline operator row (4 prior encounters) remains open and
 the boot path was not slowed by design: the reader construction in
 `swap_into_state` is three allocations, and no planner run was added
 (m00 green).
+
+## 13. Rider - gates 7-9 landing records (post-commit; W-1 `82e5ffe` /
+W-2b `27cb9de` rider precedent; deviation D8: this docs-only rider is
+the pre-declared vehicle for the commit-cycle records, it rides no code)
+
+- Gate 7 `python tools/encoding_guard.py --staged` (recorded via the
+  distiller): `### generic PASS (exit 0)`, capture 0 lines (silent).
+- Gate 8 `python tools/commit_scoped.py --scope
+  crates/cli/src/commands/ui/extraction_reader.rs --scope
+  crates/cli/src/commands/ui.rs --scope
+  tasks/ui-extraction-wizard-w2a-journal.md -m "feat(cli): read-only
+  extraction manifest/dry-run provider over the isolation engine"`:
+  landing `cb51bf856cb6f27a34beb825714164afc704d1ba` (parent `a9d8655`
+  = the start rev), stat: `ui.rs +117/-16`,
+  `extraction_reader.rs +839/-0`, journal `+391/-0` - exactly the three
+  touch-set paths, nothing else. Staging route: `python
+  tools/distill.py -- git add -- <the three paths>` (the sanctioned
+  distill staging route; raw `git add` is allowlist-denied).
+- Gate 9 `python tools/encoding_guard.py --all` post-commit:
+  `### generic PASS (exit 0)`, capture 0 lines (silent).
+- Post-landing state: `git status --porcelain=v1` answered 0 lines
+  before this rider; the bootstrap baseline worktree
+  (`C:\Users\Kurt\AppData\Local\Temp\kilo\w2a-baseline`) was removed
+  (`git worktree remove --force`, exit 0).
