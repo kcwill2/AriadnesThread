@@ -117,6 +117,19 @@ carries zero `crates/*/src` paths (proven by the staged name-list below);
 the boot payload byte lock (W-2a's captured-proposals test) is therefore
 untouched by construction.
 
+## Landing record (rider per D5)
+
+- Landing commit: `24c2f7e` (full `24c2f7ea279de1241f876a3858ebcc11decb6dc1`),
+  parent `a7a3e2a` - the boot HEAD, i.e. `c1956e5` + this session's Duty-1
+  docs commit. `git show --stat`: 7 files, 904 insertions / 38 deletions
+  (wizard.js +288, render.rs +322 NEW-locks, styles.css +92/-7, playbook
+  +47/-6, story +35/-12, index.html +3/-1, journal +154).
+- `git diff --name-only a7a3e2a 24c2f7e` = EXACTLY the seven touch-set paths;
+  zero `crates/*/src`, zero `crates/cli/**`, zero frozen assets/tests.
+- G7 `encoding_guard --staged`: silent (exit 0) on the exactly-seven staged
+  set (staged via the distiller, never `git add .`).
+- G9 `encoding_guard --all` post-commit: silent, exit 0 (distiller-verified).
+
 ## Deviations (numbered, per the W-3a verdict doc nit)
 
 - D1 Gate-2 failing-set decomposition: the handoff's Red protocol names the
