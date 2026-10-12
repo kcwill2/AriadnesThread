@@ -1,50 +1,67 @@
-# AR-27a Handoff - LanguageId home move + dual-format serde + byte oracles (A2, hop 1/2)
+# AR-27a Handoff - LanguageId home move + dual-format serde + byte oracles (A2, hop 2/3)
 
-## DISPATCH ORDER - AR-27 re-shape (read first)
+## DISPATCH ORDER - AR-27 re-shape v2 (read first)
 
-Two SERIAL hops. T-a lands (reviewer APPROVED) before T-b dispatches; T-b's
-RED depends on T-a's landed closed-set `parse_language_arg` and on the escape
-arm existing. The hops are NOT parallel-safe: both touch
-`crates/repo/src/types.rs`, `crates/repo/src/identity.rs`,
-`crates/lang-api/src/identity.rs`, and `crates/cli/src/registry.rs`.
-T-a is a STRICT COMPILE-GREEN hop: it must run as the SOLE cargo-heavy lane
-(ruling section 5, dispatch discipline) - no other lane may hold in-flight
-edits in `repo`/`lang-api`/`cli` while T-a mutates.
+Three SERIAL hops, per the RE-RULING (sections R1-R6) in
+`tasks/ar-27-shape-ruling.md`: T-a0 lands (reviewer APPROVED) before T-a
+dispatches; T-a lands before T-b dispatches. T-a0 and T-a share
+`crates/cli/src/registry.rs` - T-a0's clone tokens PRE-EXIST and MUST survive
+T-a's parse rework untouched - and T-a must compile-green with ZERO edits to
+every T-a0 ledger file. T-a and T-b share `crates/repo/src/types.rs`,
+`crates/repo/src/identity.rs`, `crates/lang-api/src/identity.rs`, and
+`crates/cli/src/registry.rs`. Never parallel. T-a is a STRICT COMPILE-GREEN
+hop and must run as the SOLE cargo-heavy lane (ruling section 5, dispatch
+discipline) - no other lane may hold in-flight edits in
+`repo`/`lang-api`/`cli` while T-a mutates.
 
 | hop | file | scope | produced lines | gates |
 |---|---|---|---|---|
-| 1 (this file) | `tasks/ar-27-ta-handoff.md` | byte-oracle fixtures + home move + alias + dual-format serde + string-frame exception + closed parse + clone riders | ~450-520 | 10 |
+| 0 | `tasks/ar-27-ta0-handoff.md` | ALL copy-semantics clone tokens landed INERTLY (complete ledger via Copy-strip probe) | ~90-140 | 9 |
+| 1 (this file) | `tasks/ar-27-ta-handoff.md` | byte-oracle fixtures + home move + alias + dual-format serde + string-frame exception + closed parse - ZERO RIDERS (RE-RULING R1: rider protocol SUPERSEDED, pre-landed by T-a0) | ~430-500 | 10 |
 | 2 | `tasks/ar-27-tb-handoff.md` | registry-derived `--lang` + FileKind role refactor + third-language E2E | ~300-380 | 9 |
 
 Superseded origin: `tasks/ar-27-handoff.md` (bannered). STOP evidence and
-successor notes: `tasks/ar-27-handoff-journal.md` (sections 2, 5, 7). The
-binding shape is `tasks/ar-27-shape-ruling.md` (Option B as amended) -
-this contract embeds its sections 2, 3, 4, 7 VERBATIM below; do not improvise
-around them.
+successor notes: `tasks/ar-27-handoff-journal.md` (sections 2, 5, 7) and
+`tasks/ar-27-ta-handoff-journal.md` (copy-loss STOP at `85f40d5`, probe
+protocol this chain reuses). The binding shape is
+`tasks/ar-27-shape-ruling.md` INCLUDING its RE-RULING (Option B as amended;
+section 4's copy-loss forecast and the 6-site cap are SUPERSEDED by R2/R3 -
+this contract no longer contains a rider protocol); its sections 2, 3, 7 are
+embedded VERBATIM below; do not improvise around them.
 
 Binding inputs (read in this order, targeted reads only):
 1. This file (complete contract).
-2. `tasks/ar-27-shape-ruling.md` sections 1-5 (authority).
-3. `tasks/ar-27-handoff-journal.md` sections 2 and 5 (pre-change baselines;
+2. `tasks/ar-27-shape-ruling.md` sections 1-3, 5-9 AND the RE-RULING R1-R6
+   (authority; R2/R3 supersede section 4's rider protocol - your zero-rider
+   clause comes from R3's Sequencing text, quoted in R3 of
+   `tasks/ar-27-ta0-handoff.md`).
+3. `tasks/ar-27-ta0-handoff-journal.md` + the landed T-a0 commit (the
+   complete clone-token ledger; affected-crate counts incl. the build/
+   artifact pins - your baselines come FROM these, re-measured at YOUR
+   dispatch HEAD).
+4. `tasks/ar-27-handoff-journal.md` sections 2 and 5 (pre-change baselines;
    the measured old-bytes evidence whose values your fixtures regenerate).
-4. `crates/lang-api/src/identity.rs` (the type you move: newtype :42-44,
+5. `crates/lang-api/src/identity.rs` (the type you move: newtype :42-44,
    consts :14-20/:54-63, `cpp()`/`scala()`/`other()` :75-93, Default :99-103,
    Debug/Display :105-115, value From :117-125, `&`-From :127-131, unit
    tests :144-249).
-5. `crates/repo/src/types.rs` (the enum being replaced: :141-159;
+6. `crates/repo/src/types.rs` (the enum being replaced: :141-159;
    `FileRecord.language` :192; FileKind :31-72 UNCHANGED this hop),
    `crates/repo/src/lib.rs` (:9-12 re-export list).
-6. `crates/lang-api/src/types.rs` (`field_conditional_on_format` :13-22,
+7. `crates/lang-api/src/types.rs` (`field_conditional_on_format` :13-22,
    `TuAnalysis` :198-239, `IncludeEdge.language` :302-308,
    `include_kind_bincode_indices_are_pinned` precedent).
-7. `crates/index/src/cache.rs` (epoch pin :30 + pin test ~:398-403,
+8. `crates/index/src/cache.rs` (epoch pin :30 + pin test ~:398-403,
    `context_hash_of` :92-112, `TuCacheFingerprint::compute` :116-126 -
    `.context_hash` is the digest seam your fixture test calls).
-8. `crates/build/src/types.rs` (`CompilationContext` :6-22,
+9. `crates/build/src/types.rs` (`CompilationContext` :6-22,
    `TranslationUnit` :71-81 - ADAPT-8 frozen, read-only).
-9. `crates/cli/src/registry.rs` (`parse_language_arg` :37-54,
-   `ensure_language_registered` :24-32, clone site :186-196).
-10. `crates/pipeline/src/stage_index.rs` :102-119 (named rider).
+10. `crates/cli/src/registry.rs` POST-T-a0 (`parse_language_arg` closed set -
+   note T-a0's clone tokens at :28/:174-175/:192/:448/:520 PRE-EXIST and must
+   survive your parse rework UNTOUCHED;
+   `ensure_language_registered` :24-32).
+11. `crates/pipeline/src/stage_index.rs` :110/:122 POST-T-a0 (R5 erratum -
+    the E0507 sites; read for the ZERO-EDIT proof, NOT as a rider target).
 
 ## Objective
 
@@ -80,10 +97,14 @@ are banked in its journal section 2)
   pinned before); cli `118/0/8/7`; lang-api `41/0/0/4`.
 - `python tools/distill.py -- python tools/ui_smoke.py` -> `ui_smoke: PASS`
   REQUIRED both hops (payload serde surfaces).
-- Rider-crate baselines measured and journalled PRE-mutation (ruling
-  section 4): `-p ariadne-pipeline`, `-p ariadne-worker-core`. Their suites
-  stay UNEDITED at their dispatch-measured counts; reconciled counts mean
-  pre-count + journal-recorded test delta.
+- Rider-crate pre-mutation pins LIVE IN T-a0 (RE-RULING R6.2): the landed
+  T-a0 journal carries `-p ariadne-pipeline` `40/0/4/9`, `-p ariadne-cli`
+  `118/0/8/7`, and the FIRST-EVER `-p ariadne-build` / `-p ariadne-artifact`
+  pins. T-a RE-MEASURES these at its own dispatch HEAD (T-a0 + oracle
+  commits in between) and journals the deltas; reconciled counts mean
+  pre-count + journal-recorded test delta. `crates/worker-core/**` is no
+  longer a rider target at all (tu_store:210 no-op CONFIRMED by the T-a0
+  probe - R5).
 - `python tools/hygiene_check.py` ZERO blocking rows (never quote an R3
   count); `encoding_guard --all` clean.
 
@@ -117,17 +138,23 @@ are banked in its journal section 2)
   `#[serde(default)]`, doc-comment updated; NOTHING else - `TuAnalysis`
   field types stay `SourceLanguage`, which now resolves through the alias
   UNEDITED)
-- `crates/cli/src/registry.rs` (`parse_language_arg` :37-54 closed-set
-  rework per step 4; clone at :192 per ruling section 4; the `{language:?}`
-  bail wording :29 stays byte-stable - Debug is already the bare name)
-- `crates/pipeline/src/stage_index.rs` (BLESSED clone-rider, copy-semantics
-  `.clone()` insertions ONLY - ruling section 4; `:110` moving
-  `self.language_filter` by value out of borrowed `self` is the expected
-  E0507 site)
-- `crates/worker-core/src/tu_store.rs` (expected NO-OP: `:210` assigns from
-  an OWNED local (`file_analysis.language`) - partial move of an owned
-  local is legal Rust; touch ONLY if the compiler says otherwise, then
-  clone-only)
+- `crates/cli/src/registry.rs` (`parse_language_arg` closed-set rework per
+  step 5 - NOTE: T-a0's clone tokens :28/:174-175/:192/:448/:520 PRE-EXIST
+  and MUST survive the rework UNTOUCHED; the `{language:?}` bail wording
+  :29 stays byte-stable - Debug is already the bare name)
+- ZERO-RIDER CLAUSE (RE-RULING R3 Sequencing, verbatim): "T-a (move+serde;
+  MUST compile-green with ZERO rider edits; newly surfaced SAME-class copy
+  site = clone-token addition + journal, no re-ruling; any site needing
+  non-token adaptation = STOP-AND-REPORT)". Concretely: if the alias surfaces
+  a NEW copy-semantics site of the frozen token class (`x`->`x.clone()`,
+  `*x`->`x.clone()`, `x.into()`->`x.clone().into()`,
+  `LanguageId::from(x)`->`LanguageId::from(x.clone())`), land the token +
+  journal it (same class as T-a0's ledger; R2 class law governs frozen test
+  files); ANY site needing anything beyond a token = STOP-AND-REPORT.
+  `crates/pipeline/**`, `crates/build/**`, `crates/artifact/**`,
+  `crates/worker-core/**` are OUTSIDE this hop entirely: they compile
+  through the alias via T-a0's landed tokens - touching them (except the
+  token-class escape above, journal-listed) is a blocker.
 - NEW test files only (existing files in these dirs are byte-frozen):
   - `crates/repo/tests/ar27_old_bytes_lock_test.rs`
   - `crates/lang-api/tests/ar27_dual_format_lock_test.rs`
@@ -137,12 +164,16 @@ are banked in its journal section 2)
 You MUST NOT touch: `crates/build/**`, `crates/index/src/**` (the index test
 is NEW-FILE-ONLY; `cache.rs` UNEDITED including the epoch pin :30, its pin
 test, and the digest locks), `crates/artifact/**` (its `metrics_io.rs:241`
-compiles ONLY via the kept `From<&SourceLanguage>` - do not "help" it),
-`crates/report/**`, `crates/ui/**`, `crates/lang/**`, `crates/lang-scala/**`,
-`crates/worker-core/**` (unless the no-op turns out false - clone-only),
+compiles ONLY via the kept `From<&SourceLanguage>` - do not "help" it; its
+T-a0 tokens stay byte-frozen), `crates/pipeline/**` (T-a0 tokens byte-frozen;
+zero-rider clause), `crates/report/**`, `crates/ui/**`, `crates/lang/**`,
+`crates/lang-scala/**`, `crates/worker-core/**` (no-op CONFIRMED by the T-a0
+probe - OUT this hop, no exceptions),
 EVERY existing file under `tests/**` and `crates/*/tests/**` (suites and
 goldens UNEDITED), `tasks/ar-27-handoff.md`, `tasks/ar-27-shape-ruling.md`,
-`tasks/ar-27-handoff-journal.md`. No `git stash`, no branch change.
+`tasks/ar-27-handoff-journal.md`, `tasks/ar-27-ta-handoff-journal.md`,
+`tasks/ar-27-ta0-handoff.md`, `tasks/ar-27-ta0-handoff-journal.md`. No
+`git stash`, no branch change.
 
 ## The positional encoding contract (ruling section 2, VERBATIM - binding)
 
@@ -251,25 +282,17 @@ the std reflexive blanket plus the kept `&`-impl. The `#[derive]` line loses
 `Serialize, Deserialize` and `PartialOrd, Ord` (hand-written); keeps
 `Clone, PartialEq, Eq, Hash`.
 
-## Clone-rider protocol (ruling section 4, VERBATIM - binding)
+## Clone-rider protocol - SUPERSEDED (RE-RULING R1/R2/R3)
 
-> The journal missed one forced out-of-set consumer:
-> `crates/pipeline/src/stage_index.rs` reads `self.language_filter:
-> Option<SourceLanguage>` by value from borrowed `self` (:103/:110) - legal
-> today only via the enum's `Copy`.
->
-> - `crates/pipeline/src/stage_index.rs`: BLESSED for compiler-forced
->   clone-insertions only (no logic edits). Suite UNEDITED at its dispatch-
->   measured baseline (successor re-brief must pin `-p ariadne-pipeline` counts
->   pre-mutation).
-> - `crates/cli/src/registry.rs:191`: in-set clone, trivial.
-> - `crates/worker-core/src/tu_store.rs:210`: expected NO-OP (partial move of an
->   owned local is legal Rust); blessed as clone-rider only if the compiler says
->   otherwise; same measured-baseline discipline (`-p ariadne-worker-core`).
-> - General rule: any other out-of-set file needing a pure copy-semantics
->   `.clone()` insertion is pre-blessed up to 6 sites TOTAL out-of-set; any
->   out-of-set edit that is not a copy-semantics clone => STOP-AND-REPORT.
->   (No new lock obligations beyond those two rider suites' exact counts.)
+Ruling section 4's 6-site-cap rider protocol is SUPERSEDED and REMOVED from
+this contract: every copy-semantics token it anticipated (incl. the
+`stage_index.rs` :110/:122 sites - R5 erratum: `:103` never was one, the
+match with discriminant-only `Some(_)` does not move) is pre-landed INERTLY
+by `tasks/ar-27-ta0-handoff.md` while the type is still derived-`Copy`, with
+the ledger closed COMPLETE by T-a0's Copy-strip probe. What remains of the
+old rider section is the ZERO-RIDER CLAUSE in the Touch-set above (R3
+Sequencing verbatim: compile-green with ZERO rider edits; same-class token
+additions journal-logged; non-token site = STOP-AND-REPORT).
 
 ## RGB protocol (hard ordering; step 1 is the load-bearing discipline)
 
@@ -282,8 +305,9 @@ byte claim in this contract. An RGB step whose "red" is a compile error is
 not Red; these locks are characterization locks, and weakening an assertion
 to pass is a reviewer blocker.
 
-1. Bootstrap + journal: dispatch HEAD, all Baselines lines, rider-crate
-   pre-mutation counts.
+1. Bootstrap + journal: dispatch HEAD, all Baselines lines RE-MEASURED (the
+   four affected crates + the build/artifact pins carried from T-a0's
+   journal).
 2. ORACLE COMMIT (types untouched): author the four new test files with
    inline hex fixtures. Authoring recipe: write a temporary
    `#[ignore]`d printer test once against the untouched types to print the
@@ -326,7 +350,9 @@ to pass is a reviewer blocker.
    reader now accepts any string - the closed set must be explicit). The
    existing cli lock `parse_language_arg("Fortran") -> Err` MUST still hold
    after T-a (T-b's RED depends on it).
-6. Riders per the quoted section 4.
+6. ZERO-RIDER verification: workspace STRICT COMPILE-GREEN with ZERO edits
+   to T-a0 ledger files; any newly-surfaced SAME-class copy site lands as a
+   token + journal line, any non-token need = STOP-AND-REPORT.
 7. Full gate set; implementation+journal commit.
 
 ## Hygiene (review-enforced)
@@ -371,7 +397,10 @@ final gates belong to the reviewer's acceptance pass, including the
 4. `python tools/testrun.py --distill -p ariadne-index` - pre-existing digest
    locks UNEDITED; +1 suite (probe fixture green pre and post).
 5. `python tools/testrun.py --distill -p ariadne-cli` - `118/0/8/7` EXACT,
-   suite UNEDITED (closed-wording locks live here).
+   suite UNEDITED (closed-wording locks live here; T-a0 clone tokens still
+   compile), then `python tools/testrun.py --distill -p ariadne-pipeline` -
+   `40/0/4/9` IDENTICAL (T-a0 tokens survive the alias; both canonical lines
+   in one gate item).
 6. `python tools/testrun.py --distill -p ariadne-integration-tests --test
    m23_symbol_isolation_test --test m00_golden_baseline_test --test
    m00_facts_path_parity_test --test ar27_field_probe_test` ->
@@ -391,9 +420,11 @@ Commits (both via commit_scoped, never `git add .`):
 - Oracle commit:
   `python tools/commit_scoped.py --scope "crates/repo/tests/**" --scope "crates/lang-api/tests/ar27_dual_format_lock_test.rs" --scope "crates/index/tests/**" --scope "tests/integration/tests/ar27_field_probe_test.rs" --scope "crates/repo/Cargo.toml" --scope "tasks/ar-27-ta-handoff-journal.md" -m "test(ar27): byte-oracle fixtures green PRE-mutation (old-bytes locks, home of AR-27a)"`
 - Implementation commit:
-  `python tools/commit_scoped.py --scope "crates/repo/**" --scope "crates/lang-api/src/**" --scope "crates/cli/src/registry.rs" --scope "crates/pipeline/src/stage_index.rs" --scope "crates/lang-api/tests/ar27_dual_format_lock_test.rs" --scope "tasks/ar-27-ta-handoff-journal.md" -m "refactor(repo,lang-api,cli): LanguageId home move + dual-format serde; SourceLanguage alias; clone riders (AR-27a)"`
-  (add `--scope "crates/worker-core/src/tu_store.rs"` ONLY if the no-op
-  turned out false; journal why).
+  `python tools/commit_scoped.py --scope "crates/repo/**" --scope "crates/lang-api/src/**" --scope "crates/cli/src/registry.rs" --scope "crates/lang-api/tests/ar27_dual_format_lock_test.rs" --scope "tasks/ar-27-ta-handoff-journal.md" -m "refactor(repo,lang-api,cli): LanguageId home move + dual-format serde; SourceLanguage alias; zero riders (AR-27a)"`
+  (NO `crates/pipeline/**`, NO `crates/worker-core/**`: T-a0 landed their
+  tokens; if the zero-rider escape added a same-class token in a ledger
+  file, journal it and add that ONE explicit file path as an extra `--scope`
+  - never a crate glob for out-of-set files).
 
 ## Rename-completeness proof clause (AR-20a D7 - conditional)
 
@@ -409,9 +440,11 @@ stray deletion ONLY and journal it.
 
 - UTF-8: never Set-Content/Out-File/>/Get-Content-replace; Write/Edit tools
   only; authored content pure ASCII (AGENTS.md File-Edit Discipline).
-- Touch only the touch-set; any out-of-set edit that is not a blessed
-  copy-semantics clone (max 6 out-of-set sites, ruling section 4) =
-  STOP-AND-REPORT. Probe surprise = STOP-AND-REPORT. Any contemplated epoch
+- Touch only the touch-set; the ZERO-RIDER CLAUSE governs copy-sites (no
+  6-site cap exists any more: T-a0 pre-landed the complete ledger; a
+  same-class token = add + journal, anything beyond a token =
+  STOP-AND-REPORT). Field-probe surprise (ruling section 2.8) =
+  STOP-AND-REPORT. Any contemplated epoch
   bump = NEVER self-authorize (DP event; ruling section 0 contingency:
   STOP, then a ruling).
 - No raw high-volume commands in your context: everything through the
@@ -438,10 +471,12 @@ stray deletion ONLY and journal it.
    the four suites GREEN at the oracle commit with the dispatch baselines
    beside them (this is the pre-mutation proof), + the discriminator pin +
    escape-arm lines post-impl. 3. Green evidence: gates 2-7 canonical lines
-   verbatim from own stdout + capture paths. 4. Rider ledger: every clone
-   inserted, in-set or out-of-set (cap 6), with the E0507/E0382 that forced
-   it. 5. Any deviation + reason. 6. Out-of-scope observations (report-only).
-   Never paste raw tool output.
+   verbatim from own stdout + capture paths. 4. Zero-rider proof:
+   `git diff <dispatch-HEAD> --stat -- crates/pipeline crates/worker-core
+   crates/build crates/artifact` EMPTY (or exactly the journal-listed
+   same-class escape tokens) + workspace COMPILE-GREEN with zero rider
+   edits. 5. Any deviation + reason. 6. Out-of-scope observations
+   (report-only). Never paste raw tool output.
 
 Reviewer-gate reference: acceptance is adjudicated via the `review-gate`
 skill (fresh full verification, per-commit `git show` oldest-first,
