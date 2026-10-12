@@ -87,8 +87,22 @@ kilo-memory mirrors at closeout. Status: provisional until closeout lands.
   lose write forms the original had. RECOVERY LESSON: after a provider death,
   mutation work via FRESH session; resume for analysis only. The 89-file
   staged index survived death + concurrent AR-27 commit_scoped use
-  (--only-path semantics immune to foreign staged content). Record
+  (--only-path semantics immune to foreign staged content). CONFIRMED 2nd
+  occurrence (ar-27 T-a/T-b contracts): resumed planner blanket-denied again;
+  ESTABLISHED RECIPE = authoring lane stages + guard-checks + posts ASK;
+  FRESH micro-hop lands via commit_scoped with EXPLICIT per-file --scope args
+  (landed @ 23b9b61 for 89 files; contract-trio landed @ 85f40d5 — recipe
+  now twice-proven, treat as standard). Record
   disposition at closeout ledger registration.
+- DOCS SWEEP LANDED `23b9b61` (89 tasks/** workflow artifacts: all AR-class
+  handoffs/verdicts/execution-results, ar-20-kickoff/shape, ar-26b-shape-
+  ruling, this bank). TOOL FACT: commit_scoped RE-STAGES scoped paths from
+  the WORKTREE (not the index) — concurrent same-file edits ride into the
+  commit (benign here: my +12 bank lines); doc hops must expect
+  last-re-stage-wins. CLOSEOUT DUTY: `tasks/ar-27-handoff.md` STILL UNTRACKED
+  (live-lane exclusion) — commit contract + final journal with the AR-27
+  verdict bookkeeping. Also `checkpoint_guard status` shows the branch name
+  truncated in its print (`shining-entrousiasm`) — cosmetic, noted.
 - cp1252 console-echo crashes count 2: `tools/distill.py:213` AND
   `tools/testrun.py:262` bare-mode echo (reproduced independently by AR-23
   and AR-24 reviewers; workaround PYTHONIOENCODING=utf-8). One tools ticket
@@ -235,6 +249,82 @@ kilo-memory mirrors at closeout. Status: provisional until closeout lands.
 - @AR-20b (dcfc813): m17 suite 6->`8` (guard + planted-edge self-test;
   GREEN-once, single git log -S line); worker-core 8/scheduler 26
   conserved; +2 suite count already in the 101 from 20a.
+  RULING FILED `tasks/ar-27-shape-ruling.md`: OPTION B ADOPTED (dual-format
+  serde; epoch bump NOT needed, no user-DP). Encoding contract: u32 LE tags
+  Cpp=0/Scala=1/Other=2, open ids tag 3 + bincode String; JSON transparent
+  bare-name ALL ids; discriminator `is_human_readable` (bincode=false,
+  proven by green m23 family). RULING-VERIFIED AMENDMENTS the journal missed:
+  IncludeEdge.language needs field-level STRING-FRAME serde module (edges.bin
+  string-framed at current epoch); custom legacy-index Ord (lexicographic
+  flips Scala/Other manifest sorts); value From<SourceLanguage> DELETED
+  (E0119), From<&...> KEPT (artifact/metrics_io.rs:241); pipeline/stage_index
+  clone rider + <=6 out-of-set clone sites else STOP. LOCK AMENDMENTS NONE.
+  T-a(450-520)/T-b(300-380, incl. FileKind role refactor + RED-first E2E);
+  planner authoring ar-27-ta/tb-handoff.md + SUPERSEDED banner.
+- @AR-27 T-a0 APPROVED (43e7de1+046e38c, tasks/ar-27-ta0-verdict.md) — 30th
+  closed hand: token-only purity 39/39 CONFIRMED via ruling recipe (31 class
+  A + 8 class B; frozen files byte-equal after normalization); escape hatch
+  accepted same-class; probe attestation strengthened to blob level (diff vs
+  3c814a2 EMPTY, types.rs:141 still Copy, identity.rs:129 probe token never
+  landed); CENSUS EXACT 1400/0/13/105. ADOPTED PINS (reviewer-confirmed,
+  downstream contracts MUST baseline): `-p ariadne-build` = `23/0/0/2`,
+  `-p ariadne-artifact` = `40/0/0/2`. F1 wording lesson banked: cargo check
+  emits NO clippy lints — journal's "23/31 warnings = clone_on_copy class"
+  was wrong (all 31 = legacy rustc set; clone_on_copy exists only under
+  clippy, present unsuppressed at discovery.rs:253/:272). T-a dispatched
+  zero-rider; registry.rs T-a0 clone tokens must survive parse rework.
+- @AR-27 T-a0 LANDED (43e7de1 single scoped commit + 046e38c journal hash-
+  record), review running: Copy-strip probe to ZERO = COMPLETE enumeration
+  39 tokens/15 files (planning band ~28-45); escape hatch used once, same
+  class (for_incremental.rs:120 if-let cluster + ar25:56); 4 if-let-scrutinee
+  fix tokens (D2); probe residue attestations clean; FIRST-EVER PINS
+  (reviewer adoption pending): build `23/0/0/2`, artifact `40/0/0/2` — bank
+  for downstream contracts; all other suites identical-count by design
+  (token-only hop, census expected 1400/0/13/105 exact); self-caught m23
+  whitespace drift (D3) corrected byte-exact.
+- @AR-27 T-a STOPPED #2 (journal-only 747a266, 283-line journal; zero code):
+  ruling Option B's COPY-LOSS forecast empirically 4x under — alias forces
+  Cow-newtype-no-Copy -> 24 out-of-set prod sites/9 files vs the <=6 clamp,
+  incl. 6 in build/artifact (own MUST-NOT-touch breach) + >=6 token sites in
+  byte-frozen gate-lock tests (for_incremental_parity x4, m22:280, m23:406;
+  stated lower bound). BYTE CONTRACT UNCONTRADICTED (tu_store:210 +
+  metrics_io:241 rides confirmed; 7 crates zero loss). Probe fully reverted,
+  crates clean. Options A (enumerated rider + frozen-token class ruling) /
+  B (T-a0 consumer-adaptation hop first) / C rejected again / D irrelevant.
+  RE-RULING in flight (same architect session; append-only §: option pick,
+  frozen-TEST-token class ruling vs "lock amendments NONE", build/artifact
+  boundary restatement, stage_index:103-vs-122 erratum, planner change list).
+  HOLD board_12f06f30 answered. RE-RULING FILED (R1-R6, append-only; §2 byte
+  contract untouched): OPTION B -> NEW HOP T-a0 (all ~28-45 copy-semantics
+  tokens land FIRST while still derived-Copy = value-inert identity;
+  throwaway Copy-strip probe upgrades ledger to COMPLETE enumeration
+  pre-landing; single scoped commit; ~90-140 ln; <=9 gates). FROZEN-TOKEN
+  CLASS RULED: compiler-forced copy tokens in gate-lock files =
+  compile-adaptation RIDERS not lock amendments (token forms enumerated;
+  zero literal/assert/count edits; suite counts identical; reviewer
+  token-diff-normalization recipe) — "LOCK AMENDMENTS: NONE" survives on its
+  axis. Amended out-of-set boundary = named 12-file ledger for T-a0 ONLY
+  (build discovery.rs:253/:272, artifact discovery_io :51/:130/:131, m22
+  :39/:154/:169; ADAPT-8 comment byte-unedited, index 15/0/0/2 digest proves).
+  Erratum recorded: stage_index :110/:122 (:103 no-op). Estimates: T-a0
+  90-140, T-a 430-500, T-b unchanged. Closeout note: THREE stop-records for A2 —
+  honest ledger wording = A2 achieved via ruling chain (stop #1 positional
+  bincode, stop #2 Copy-loss), not via the original contract as written.
+- @AR-27 STOPPED-AND-RULED-PENDING (journal-only 6f02b3c; ZERO code landed):
+  contract-instructed halt. EMPIRICAL: workspace bincode is FIXINT POSITIONAL
+  — transparent LanguageId newtype re-reads old u32 index bytes as u64 length
+  prefix -> old blobs UnexpectedEof; serde aliases can't fix positional
+  formats; the UNEDITED-m24 shorthand forces `pub type SourceLanguage =
+  LanguageId` which moves context_hash bytes +7/field -> ADAPT-8 violation.
+  Options A (epoch bump = USER DP event per DP-6/DP-2 + out-of-set index/
+  build) / B (RECOMMENDED: dual-format serde, all bytes stable) / C (>800
+  bound). Architect ruling tasked `tasks/ar-27-shape-ruling.md`; expect B +
+  T-a(~450)/T-b(~300) split + planner rewrite of the contract (banner
+  SUPERSEDED). NEW MEASURED BASELINES (bank for re-briefs): repo `15/0/0/2`;
+  m23 SPLIT: symbol-isolation `7/0/0/1` vs bincode-lock `5/0/0/1` (the
+  single `7/0/0/1` pin in contracts under-specifies — re-brief precisely).
+  Successor bootstraps `checkpoint_guard.py resume --spec
+  tasks/ar-27-handoff.md` post-ruling.
 - @AR-26b APPROVED (3064b77/8e08600/ff526b6, tasks/ar-26b-verdict.md) —
   AR-26 CHAIN CLOSED, all 3 hops. Guard byte-exact `[&str;1]=["ariadne-report"]`
   (P2 compliant — zero absence-assertions of cluster/transform/validate),
