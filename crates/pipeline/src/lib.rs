@@ -678,7 +678,7 @@ fn cycle_policy_by_file(
         .iter()
         .map(|record| {
             let policy = registry
-                .plugin_for_id(LanguageId::from(record.language))
+                .plugin_for_id(LanguageId::from(record.language.clone()))
                 .map(|plugin| plugin.modeling().cycle_policy)
                 .unwrap_or(CyclePolicy::Reject);
             (record.id, policy)

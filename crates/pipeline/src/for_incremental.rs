@@ -63,7 +63,7 @@ impl IncrementalView {
 /// registration half: naming an unregistered language is a clear error,
 /// never a silently empty run). Registry lookup only (R3).
 fn ensure_language_registered(registry: &LanguageRegistry, language: SourceLanguage) -> Result<()> {
-    if registry.plugin_for_id(LanguageId::from(language)).is_none() {
+    if registry.plugin_for_id(LanguageId::from(language.clone())).is_none() {
         bail!("language plugin not registered: {language:?}");
     }
     Ok(())
@@ -82,7 +82,7 @@ fn restrict_and_validate_units(
     if let Some(language) = language {
         build
             .translation_units
-            .retain(|tu| registry.detect_language(&tu.source_path) == Some(LanguageId::from(language)));
+            .retain(|tu| registry.detect_language(&tu.source_path) == Some(LanguageId::from(language.clone())));
     }
     for tu in &build.translation_units {
         if registry.detect_language(&tu.source_path).is_none() {
@@ -117,12 +117,12 @@ impl Pipeline {
         language: Option<SourceLanguage>,
     ) -> Result<Self> {
         let registry = default_registry();
-        if let Some(language) = language {
-            ensure_language_registered(&registry, language)?;
+        if let Some(language) = language.clone() {
+            ensure_language_registered(&registry, language.clone())?;
         }
         let (repo, discovery, mut build, fps) = Self::compute_inputs(repo_path, &registry)?;
         let discovered_units = build.translation_units.len();
-        restrict_and_validate_units(&registry, language, &mut build)?;
+        restrict_and_validate_units(&registry, language.clone(), &mut build)?;
         let retained_units = build.translation_units.len();
         let manager = ArtifactManager::prepare_for_repo(&repo)?;
         let store_ctx = TuStoreContext::new(&discovery, build.contexts.clone());
@@ -138,7 +138,7 @@ impl Pipeline {
             workers: None,
             progress: None,
             registry,
-            language_filter: language,
+            language_filter: language.clone(),
             incremental_view: Some(IncrementalView {
                 language_filter: language,
                 discovered_units,

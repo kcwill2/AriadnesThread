@@ -48,7 +48,7 @@ impl ArtifactManager {
             policy_summary: discovery.policy_summary.clone(),
             input_fingerprint: input_fingerprint.to_string(),
             analysis_version: CURRENT_ANALYSIS_VERSION.to_string(),
-            languages: collect_stage_languages(discovery.files.iter().map(|f| f.language)),
+            languages: collect_stage_languages(discovery.files.iter().map(|f| f.language.clone())),
         };
         write_json_atomic(&repo_artifact_dir.join("manifest.json"), &manifest)?;
 
@@ -127,8 +127,8 @@ impl ArtifactManager {
                 build_result
                     .contexts
                     .iter()
-                    .map(|c| c.language)
-                    .chain(build_result.translation_units.iter().map(|tu| tu.language)),
+                    .map(|c| c.language.clone())
+                    .chain(build_result.translation_units.iter().map(|tu| tu.language.clone())),
             ),
         };
         write_json_atomic(&contexts_artifact_dir.join("manifest.json"), &manifest)?;

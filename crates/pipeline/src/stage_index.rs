@@ -107,7 +107,7 @@ impl Pipeline {
                     .with_repo_discovery(&self.discovery)
                     .with_unit_shaper(select_unit_shaper(
                         &self.registry,
-                        self.language_filter,
+                        self.language_filter.clone(),
                         &self.repo.root,
                     ))
                     .discover()?;
@@ -119,7 +119,7 @@ impl Pipeline {
                 reshaped
             }
         };
-        if let Some(language) = self.language_filter {
+        if let Some(language) = self.language_filter.clone() {
             // M24 Part A: the `--lang` filter arrives as the closed file-kind
             // label, while detection answers in the open identity, so the
             // comparison goes through the one direction that exists.

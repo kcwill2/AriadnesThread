@@ -36,7 +36,7 @@ fn fixture_discovery(root: &Path, languages: &[SourceLanguage]) -> RepositoryDis
         files: languages
             .iter()
             .enumerate()
-            .map(|(i, lang)| fixture_file_record(&format!("src/unit_{i}.cc"), *lang))
+            .map(|(i, lang)| fixture_file_record(&format!("src/unit_{i}.cc"), lang.clone()))
             .collect(),
         ownership_summary: HashMap::new(),
         policy_summary: HashMap::new(),
@@ -151,7 +151,7 @@ fn fixture_build_result(root: &Path, languages: &[SourceLanguage]) -> BuildDisco
     for (i, lang) in languages.iter().enumerate() {
         let name = format!("ctx_{i}");
         let mut ctx = CompilationContext::new(name.clone(), "cc");
-        ctx.language = *lang;
+        ctx.language = lang.clone();
         contexts.push(ctx);
         let file = format!("src/unit_{i}.cc");
         translation_units.push(TranslationUnit {
@@ -166,7 +166,7 @@ fn fixture_build_result(root: &Path, languages: &[SourceLanguage]) -> BuildDisco
                 context_name: name,
                 output: None,
             },
-            language: *lang,
+            language: lang.clone(),
         });
     }
     BuildDiscoveryResult {

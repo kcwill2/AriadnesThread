@@ -25,7 +25,7 @@ pub fn ensure_language_registered(
     registry: &LanguageRegistry,
     language: SourceLanguage,
 ) -> anyhow::Result<()> {
-    if registry.plugin_for_id(LanguageId::from(language)).is_none() {
+    if registry.plugin_for_id(LanguageId::from(language.clone())).is_none() {
         anyhow::bail!("language plugin not registered: {language:?}");
     }
     Ok(())
@@ -171,7 +171,7 @@ pub fn incremental_backend<'a>(
                 .next()
                 .expect("one distinct language present");
             registry
-            .plugin_for_id(LanguageId::from(language))
+            .plugin_for_id(LanguageId::from(language.clone()))
             .ok_or_else(|| {
                 anyhow::Error::from(IncrementalDispatchError::UnhandledLanguage { language })
             })
@@ -189,7 +189,7 @@ fn distinct_unit_languages(
     let mut distinct: Vec<ariadne_repo::SourceLanguage> = Vec::new();
     for unit in &build_discovery.translation_units {
         if !distinct.contains(&unit.language) {
-            distinct.push(unit.language);
+            distinct.push(unit.language.clone());
         }
     }
     distinct
@@ -445,7 +445,7 @@ mod tests {
             contexts: vec![],
             translation_units: languages
                 .iter()
-                .map(|(rel, language)| unit_with_language(rel, *language))
+                .map(|(rel, language)| unit_with_language(rel, language.clone()))
                 .collect(),
         }
     }
@@ -517,7 +517,7 @@ mod tests {
                     content_hash: String::new(),
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
-                    language: *language,
+                    language: language.clone(),
                 })
                 .collect(),
             ownership_summary: Default::default(),

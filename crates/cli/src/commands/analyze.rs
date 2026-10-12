@@ -86,7 +86,7 @@ pub fn run_production_scale_analysis_filtered(
 ) -> Result<ariadne_scheduler::ProductionAnalysisResult> {
     let num_workers = workers.unwrap_or(4);
     let registry = Arc::new(crate::registry::default_registry());
-    if let Some(language) = language {
+    if let Some(language) = language.clone() {
         crate::registry::ensure_language_registered(&registry, language)?;
     }
     let mut pipeline = Pipeline::with_registry(repo_path, Some(num_workers), registry)?
@@ -140,18 +140,18 @@ fn run_vocabulary(
     let mut distinct: Vec<SourceLanguage> = Vec::new();
     for language in languages {
         if !distinct.contains(language) {
-            distinct.push(*language);
+            distinct.push(language.clone());
         }
     }
     let vocabulary = match distinct.as_slice() {
         [language] if *language != SourceLanguage::default() => registry
-            .plugin_for_id(ariadne_lang::LanguageId::from(*language))
+            .plugin_for_id(ariadne_lang::LanguageId::from(language.clone()))
             .map(|plugin| plugin.modeling().dependency_vocabulary),
         _ => None,
     };
     let mut caveats: Vec<String> = Vec::new();
     for language in &distinct {
-        let Some(plugin) = registry.plugin_for_id(ariadne_lang::LanguageId::from(*language)) else {
+        let Some(plugin) = registry.plugin_for_id(ariadne_lang::LanguageId::from(language.clone())) else {
             continue;
         };
         if let Some(caveat) = plugin.modeling().analysis_caveat {
@@ -166,7 +166,7 @@ fn discovered_languages(pipeline: &Pipeline) -> Vec<SourceLanguage> {
     let mut languages: Vec<SourceLanguage> = Vec::new();
     for record in &pipeline.discovery.files {
         if !languages.contains(&record.language) {
-            languages.push(record.language);
+            languages.push(record.language.clone());
         }
     }
     languages
@@ -259,7 +259,7 @@ pub fn analyze_dependency_load(
         // manifest carries `languages`, an all-C++ run stays empty-skipped
         // and byte-identical (D25, m00 witness).
         let stage_languages: Vec<SourceLanguage> =
-            pipeline.discovery.files.iter().map(|f| f.language).collect();
+            pipeline.discovery.files.iter().map(|f| f.language.clone()).collect();
         artifacts.save_load_artifacts_with_languages(
             &load_report,
             &pipeline.fps.load,

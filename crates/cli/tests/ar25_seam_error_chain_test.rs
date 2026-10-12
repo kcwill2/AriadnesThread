@@ -53,7 +53,7 @@ fn build_of(languages: &[(&str, SourceLanguage)]) -> BuildDiscoveryResult {
         contexts: vec![],
         translation_units: languages
             .iter()
-            .map(|(rel, language)| unit_with_language(rel, *language))
+            .map(|(rel, language)| unit_with_language(rel, language.clone()))
             .collect(),
     }
 }

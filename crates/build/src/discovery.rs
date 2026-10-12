@@ -250,7 +250,7 @@ impl<'a> BuildDiscoverer<'a> {
                 // type and bytes must not move. `TranslationUnit.language` is
                 // the same file-kind label for the same reason -- dispatch
                 // authority is the registry, not this field (D-A5).
-                ctx.language = record.language;
+                ctx.language = record.language.clone();
                 ctx
             });
         ctx.defines.extend(descriptor.defines.iter().cloned());
@@ -269,7 +269,7 @@ impl<'a> BuildDiscoverer<'a> {
                 context_name: descriptor.context_name.clone(),
                 output: None,
             },
-            language: record.language,
+            language: record.language.clone(),
         }
     }
 }

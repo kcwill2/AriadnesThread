@@ -277,7 +277,7 @@ fn plan_evolved_from_capability_rejection_to_planned_nothing() -> Result<()> {
         .discovery
         .files
         .iter()
-        .any(|record| match registry.plugin_for_id(record.language.into()) {
+        .any(|record| match registry.plugin_for_id(record.language.clone().into()) {
             Some(plugin) => !plugin.capabilities().planning,
             None => false,
         });

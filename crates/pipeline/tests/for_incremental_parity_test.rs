@@ -92,7 +92,7 @@ fn ensure_language_registered(
     language: SourceLanguage,
 ) -> Result<(), String> {
     if registry
-        .plugin_for_id(ariadne_lang::LanguageId::from(language))
+        .plugin_for_id(ariadne_lang::LanguageId::from(language.clone()))
         .is_none()
     {
         return Err(format!("language plugin not registered: {language:?}"));
@@ -111,7 +111,7 @@ fn restrict_and_validate_units(
     if let Some(language) = language {
         build.translation_units.retain(|tu| {
             registry.detect_language(&tu.source_path)
-                == Some(ariadne_lang::LanguageId::from(language))
+                == Some(ariadne_lang::LanguageId::from(language.clone()))
         });
     }
     for tu in &build.translation_units {
@@ -133,7 +133,7 @@ fn mirror_construct(
     language: Option<SourceLanguage>,
 ) -> Result<MirroredState, String> {
     let registry = build_default_registry();
-    if let Some(language) = language {
+    if let Some(language) = language.clone() {
         ensure_language_registered(&registry, language)?;
     }
     let repo = Repository::locate(repo_path).map_err(|err| err.to_string())?;
@@ -150,7 +150,7 @@ fn mirror_construct(
         &build_discovery.translation_units,
     );
     let discovered_units = build_discovery.translation_units.len();
-    restrict_and_validate_units(&registry, language, &mut build_discovery)?;
+    restrict_and_validate_units(&registry, language.clone(), &mut build_discovery)?;
     let manager = ArtifactManager::init(&repo.root).map_err(|err| err.to_string())?;
     let retained_units = build_discovery.translation_units.len();
     Ok(MirroredState {

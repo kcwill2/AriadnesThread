@@ -180,7 +180,7 @@ impl Pipeline {
             .discovery
             .files
             .iter()
-            .map(|record| record.language)
+            .map(|record| record.language.clone())
             .collect();
         self.manager
             .save_load_artifacts_with_languages(report, &self.fps.load, &stage_languages)
