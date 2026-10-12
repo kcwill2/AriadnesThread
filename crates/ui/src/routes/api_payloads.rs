@@ -76,6 +76,10 @@ pub(crate) async fn asset_main_js() -> axum::response::Response {
     ui_asset(crate::MAIN_JS, "text/javascript; charset=utf-8")
 }
 
+pub(crate) async fn asset_extraction_wizard_js() -> axum::response::Response {
+    ui_asset(crate::EXTRACTION_WIZARD_JS, "text/javascript; charset=utf-8")
+}
+
 pub(crate) async fn asset_theme_js() -> axum::response::Response {
     ui_asset(crate::THEME_JS, "text/javascript; charset=utf-8")
 }

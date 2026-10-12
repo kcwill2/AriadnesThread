@@ -427,8 +427,8 @@ fn test_index_markup_has_no_inline_style_or_script_bodies() {
     );
     assert_eq!(
         html.matches("<script src=").count(),
-        9,
-        "exactly nine classic asset scripts"
+        10,
+        "exactly ten classic asset scripts"
     );
 }
 
@@ -442,6 +442,7 @@ fn tag_start_is_asset(tag: &str) -> bool {
         "/app/preview.js",
         "/app/provenance.js",
         "/app/main.js",
+        "/app/extraction-wizard.js",
         "/app/theme.js",
     ]
     .iter()

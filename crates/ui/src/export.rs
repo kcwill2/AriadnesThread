@@ -1,7 +1,7 @@
 use crate::dto::GraphExportPayload;
 use crate::{
-    API_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, ICON_SVG, INDEX_HTML, MAIN_JS, PREVIEW_JS, PROVENANCE_JS,
-    STYLES_CSS, THEMES_CSS, THEME_JS, TRAVERSAL_JS,
+    API_JS, EXTRACTION_WIZARD_JS, FILE_VIEW_JS, GRAPH_JS, HOTSPOTS_JS, ICON_SVG, INDEX_HTML,
+    MAIN_JS, PREVIEW_JS, PROVENANCE_JS, STYLES_CSS, THEMES_CSS, THEME_JS, TRAVERSAL_JS,
 };
 use std::borrow::Cow;
 
@@ -41,6 +41,7 @@ fn standalone_template() -> String {
         ("preview.js", PREVIEW_JS),
         ("provenance.js", PROVENANCE_JS),
         ("main.js", MAIN_JS),
+        ("extraction-wizard.js", EXTRACTION_WIZARD_JS),
         ("theme.js", THEME_JS),
     ] {
         let tag = format!("<script src=\"/app/{name}\"></script>");

@@ -558,6 +558,11 @@
         : '';
       const filePlan = renderExtractionFilePlan(p.target_files || [], p.target_files_truncated);
       const applyHint = renderExtractionApplyHint(p.plan_id || '');
+      // Wizard entry (ui-extraction-wizard W-3a): the summary-card-first model
+      // keeps this card collapsed; this control opens the stepper for exactly
+      // this plan. The plan id rides an inert escaped data attribute (AR-11
+      // idiom) - the delegated listener below calls the wizard handler.
+      const wizardOpenBtn = `<div class="extraction-row"><button type="button" class="wizard-open-btn" data-wizard-plan="${escapeAttribute(p.plan_id || '')}">Open wizard</button></div>`;
       return `
         <div class="extraction-card" data-select-id="${escapeAttribute(String(p.target_file_id))}" title="${targetLabel}">
           <button type="button" class="extraction-disclosure" aria-expanded="false" onclick="toggleExtractionCard(event, this)">
@@ -581,6 +586,7 @@
             ${applyHint}
           </div>
           ${previewBtn}
+          ${wizardOpenBtn}
         </div>`;
     }
 
@@ -663,6 +669,11 @@
     // reproducing the inline event.stopPropagation() suppression. Disclosure
     // and preview buttons keep their own stopPropagation paths unchanged.
     document.addEventListener('click', event => {
+      const wizardOpenBtn = event.target.closest('.wizard-open-btn[data-wizard-plan]');
+      if (wizardOpenBtn) {
+        openExtractionWizard(wizardOpenBtn.dataset.wizardPlan);
+        return;
+      }
       const traversalBtn = event.target.closest('.hotspot-traversal-btn[data-traversal-root]');
       if (traversalBtn) {
         openTraversalForRoot(traversalBtn.dataset.traversalRoot);

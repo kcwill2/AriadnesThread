@@ -67,6 +67,7 @@ ROUTE_ASSERTIONS = (
     ("/app/hotspots.js", "text/javascript", True),
     ("/app/preview.js", "text/javascript", True),
     ("/app/main.js", "text/javascript", True),
+    ("/app/extraction-wizard.js", "text/javascript", True),
     ("/icon.svg", "image/svg+xml", True),
 )
 

@@ -18,9 +18,10 @@ use crate::routes::api_graph::{
     api_graph_symbol, api_graph_traverse,
 };
 use crate::routes::api_payloads::{
-    api_export, api_index, api_status, asset_api_js, asset_file_view_js, asset_graph_js,
-    asset_hotspots_js, asset_icon_svg, asset_main_js, asset_preview_js, asset_provenance_js,
-    asset_styles_css, asset_theme_js, asset_themes_css, asset_traversal_js,
+    api_export, api_index, api_status, asset_api_js, asset_extraction_wizard_js,
+    asset_file_view_js, asset_graph_js, asset_hotspots_js, asset_icon_svg, asset_main_js,
+    asset_preview_js, asset_provenance_js, asset_styles_css, asset_theme_js, asset_themes_css,
+    asset_traversal_js,
 };
 use crate::routes::api_source::{api_repo_info, api_source};
 use axum::routing::get;
@@ -60,6 +61,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/app/preview.js", get(asset_preview_js))
         .route("/app/provenance.js", get(asset_provenance_js))
         .route("/app/main.js", get(asset_main_js))
+        .route("/app/extraction-wizard.js", get(asset_extraction_wizard_js))
         .route("/app/theme.js", get(asset_theme_js))
         .route("/api/status", get(api_status))
         .route("/api/repo-info", get(api_repo_info))

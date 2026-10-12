@@ -584,6 +584,40 @@ Cycle participation keeps your current Direction.</li>
     <div id="quickOpenPanel" style="display:none;"></div>
   </div>
 
+  <!-- EXTRACTION WIZARD (ui-extraction-wizard W-3a): modal stepper over the
+       proposal payload. Open/close behavior lives in /app/extraction-wizard.js;
+       the close affordances ride the existing closeModals() path. Steps are
+       switched by the hidden attribute; S0 is the visible step. -->
+  <div class="modal wizard-modal" id="wizardModal" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <div class="modal-header">
+      <h3 id="wizardTitle">Extraction wizard</h3>
+      <button class="modal-close" onclick="closeModals()" title="Close">&#10005;</button>
+    </div>
+    <ol class="wizard-step-list">
+      <li class="wizard-step-item" id="wizardStepItem0" aria-current="step">Overview</li>
+      <li class="wizard-step-item" id="wizardStepItem1">Files to create</li>
+      <li class="wizard-step-item" id="wizardStepItem2">Per-file manifest</li>
+      <li class="wizard-step-item" id="wizardStepItem3">Impact and risk</li>
+      <li class="wizard-step-item" id="wizardStepItem4">Dry run</li>
+      <li class="wizard-step-item" id="wizardStepItem5">Execute</li>
+      <li class="wizard-step-item" id="wizardStepItem6">After apply</li>
+    </ol>
+    <div class="wizard-step-body">
+      <section class="wizard-step" id="wizardStep0"><div class="wizard-step-content" id="wizardStepContent0"></div></section>
+      <section class="wizard-step" id="wizardStep1" hidden><div class="wizard-step-content" id="wizardStepContent1"></div></section>
+      <section class="wizard-step" id="wizardStep2" hidden><div class="wizard-step-content" id="wizardStepContent2"></div></section>
+      <section class="wizard-step" id="wizardStep3" hidden><div class="wizard-step-content" id="wizardStepContent3"></div></section>
+      <section class="wizard-step" id="wizardStep4" hidden><div class="wizard-step-content" id="wizardStepContent4"></div></section>
+      <section class="wizard-step" id="wizardStep5" hidden><div class="wizard-step-content" id="wizardStepContent5"></div></section>
+      <section class="wizard-step" id="wizardStep6" hidden><div class="wizard-step-content" id="wizardStepContent6"></div></section>
+    </div>
+    <div class="wizard-error" id="wizardError" hidden></div>
+    <div class="wizard-nav">
+      <button type="button" class="btn-secondary" id="wizardBack" onclick="wizardStepBack()">Back</button>
+      <button type="button" class="btn-primary" id="wizardNext" onclick="wizardStepNext()">Next</button>
+    </div>
+  </div>
+
   <!-- EMBEDDED DATA PLACEHOLDER -->
   <script>/*__ARIADNE_DATA__*/</script>
 
@@ -596,6 +630,7 @@ Cycle participation keeps your current Direction.</li>
   <script src="/app/preview.js"></script>
   <script src="/app/provenance.js"></script>
   <script src="/app/main.js"></script>
+  <script src="/app/extraction-wizard.js"></script>
   <!-- theme.js loads after main.js: applyTheme re-renders via renderSvg(),
        which only exists once graph.js/main.js have evaluated. -->
   <script src="/app/theme.js"></script>
