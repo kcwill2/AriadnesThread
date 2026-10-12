@@ -1089,7 +1089,10 @@
     }
 
     .extraction-risk {
-      color: var(--text-sub);
+      /* C5 amendment 2 (ui-extraction-wizard W-3b): --text-sub measured
+         2.97:1 in dark on the card surface; --text-muted is the token the
+         four-theme contrast oracle locks at >= 4.5:1 on every ground. */
+      color: var(--text-muted);
       font-weight: 700;
     }
 
@@ -2207,11 +2210,86 @@
        font-size: 11px;
        margin: 6px 0;
      }
-     .wizard-nav {
-       display: flex;
-       justify-content: flex-end;
-       gap: 8px;
-       margin-top: 12px;
-     }
+      .wizard-nav {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      /* W-3b continuation of the wizard block: the S2 manifest block (the
+         per-file block moved here from the card, shape C5 item 3), the
+         symbol/include rows, and the S4 dry-run diff rows. Token-driven
+         only (zero hex); just-more chips reuse the existing .just-more. */
+      .extraction-file-block {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-card);
+        color: var(--text-main);
+        margin-bottom: 6px;
+      }
+      .wizard-symbol-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 8px;
+      }
+      .wizard-symbol-row,
+      .wizard-include-row,
+      .wizard-rewrite-path {
+        color: var(--text-main);
+        overflow-wrap: anywhere;
+      }
+      .wizard-include-heading {
+        color: var(--text-muted);
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .wizard-impact-line {
+        color: var(--text-main);
+        margin: 4px 0;
+      }
+      .wizard-impact-fallback {
+        color: var(--text-muted);
+        font-style: italic;
+        margin: 4px 0;
+      }
+      .wizard-rewrite-row {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-card);
+        color: var(--text-main);
+        margin-bottom: 6px;
+      }
+      .wizard-rewrite-file {
+        color: var(--cyan);
+        flex-shrink: 0;
+      }
+      .wizard-diff-old {
+        color: var(--red);
+        overflow-wrap: anywhere;
+      }
+      .wizard-diff-new {
+        color: var(--green);
+        overflow-wrap: anywhere;
+      }
+      .wizard-diff-arrow {
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .wizard-diff-kept {
+        color: var(--text-muted);
+      }
+      .wizard-truncation-note {
+        color: var(--amber);
+        margin: 4px 0;
+      }
 
 

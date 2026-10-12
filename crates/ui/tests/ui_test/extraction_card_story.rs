@@ -5,7 +5,7 @@
 //! markup, its CSS tier rules, and the Hotspots help copy, following the
 //! house string-assert idiom of static_html.rs / help_center_readability.rs.
 
-use ariadne_ui::{HOTSPOTS_JS, INDEX_HTML, STYLES_CSS};
+use ariadne_ui::{EXTRACTION_WIZARD_JS, HOTSPOTS_JS, INDEX_HTML, STYLES_CSS};
 
 /// Local copy of the css_rule_body idiom (help_center_readability.rs) so this
 /// suite can judge rule bodies without reaching into another test module.
@@ -146,9 +146,14 @@ fn test_risk_tier_badge_sanitized() {
         "the aggressive tier must read red"
     );
     let base = css_rule_body(STYLES_CSS, ".extraction-risk {");
+    // C5 amendment 2 (shape C5, inherited from clarity T-B): the base rule
+    // painted the card surface with --text-sub, measured 2.97:1 in dark at
+    // HEAD 97dd836 - below the UI-ink floor. The swap to --text-muted moves
+    // the degraded tier onto a token the four-theme contrast oracle locks at
+    // >= 4.5:1 on every ground (extraction_contrast.rs, unedited).
     assert!(
-        base.contains("var(--text-sub)"),
-        "unknown tiers must degrade to the neutral base rule"
+        base.contains("var(--text-muted)"),
+        "unknown tiers must degrade to the neutral base rule on the --text-muted token (C5: 2.97:1 in dark was too low)"
     );
 }
 
@@ -168,23 +173,29 @@ fn test_order_and_preview_locks() {
 
 #[test]
 fn test_beats_appear_in_story_order() {
-    // The five beats occur in the builder in narrative order, top to bottom.
+    // C5 amendment 1 (shape C5, inherited from clarity T-B): the narrative
+    // these five beats carried moved into the wizard, so the beat list
+    // becomes the wizard-step order. The lock survives unchanged in KIND -
+    // an order lock over the asset that tells the story - now over the S0..S6
+    // step renderers in shape C1 order. The card builder itself is untouched.
     let beats = [
-        "extraction-head",
-        "extraction-problem",
-        "extraction-cost",
-        "extraction-chips",
-        "extraction-tu",
+        "function renderWizardStepOverview(",
+        "function renderWizardStepFiles(",
+        "function renderWizardStepManifest(",
+        "function renderWizardStepImpact(",
+        "function renderWizardStepDryRun(",
+        "function renderWizardStepExecute(",
+        "function renderWizardStepAfterApply(",
     ];
     let mut previous_beat: Option<(&str, usize)> = None;
     for beat in beats {
-        let beat_at = HOTSPOTS_JS
+        let beat_at = EXTRACTION_WIZARD_JS
             .find(beat)
-            .unwrap_or_else(|| panic!("card markup must contain the {beat} beat"));
+            .unwrap_or_else(|| panic!("wizard asset must define the {beat} step renderer in step order"));
         if let Some((earlier_beat, earlier_at)) = previous_beat {
             assert!(
                 earlier_at < beat_at,
-                "beat {beat} must appear after beat {earlier_beat} in the card story"
+                "step renderer {beat} must appear after {earlier_beat} in the wizard-step order (shape C1)"
             );
         }
         previous_beat = Some((beat, beat_at));

@@ -285,3 +285,325 @@ fn test_ui_smoke_route_table_carries_wizard_row() {
         "tools/ui_smoke.py ROUTE_ASSERTIONS must carry the wizard route row"
     );
 }
+
+// ==== W-3b: steps S2-S6, the reset paths, the recipe, and the help copy ====
+//
+// Shape C1 rows S2-S6, C3 error handling, C6 caps, C7 resets, W3/W4/W5/W6/W9
+// invariants. Local helper copies follow the house idiom (the card suites
+// each carry their own css_rule_body/tab_slice copies).
+
+/// Body of a named top-level extraction-wizard.js function, delimited by its
+/// opening brace and the asset's column-0 closing-brace line (the asset is
+/// not wrapped in an IIFE, unlike hotspots.js).
+fn wizard_function_body(js: &str, name: &str) -> String {
+    let head = format!("function {name}(");
+    let at = js
+        .find(&head)
+        .unwrap_or_else(|| panic!("extraction-wizard.js must define {head}"));
+    let open = js[at..]
+        .find('{')
+        .unwrap_or_else(|| panic!("unterminated body for {name}"));
+    let close = js[at + open..]
+        .find("\n}")
+        .unwrap_or_else(|| panic!("unterminated body block for {name}"));
+    js[at + open + 1..at + open + close].to_string()
+}
+
+/// Region of index markup between two unique markers, opening tag excluded
+/// (local copy of the tab_slice idiom from help_center_readability.rs).
+fn wizard_tab_slice(html: &str, start_marker: &str, end_marker: &str) -> String {
+    let marker_at = html.find(start_marker).unwrap_or_else(|| {
+        panic!("index.html must contain {start_marker}");
+    });
+    let gt = html[marker_at..]
+        .find('>')
+        .unwrap_or_else(|| panic!("unterminated opening tag at {start_marker}"));
+    let start = marker_at + gt + 1;
+    let end = html[start..].find(end_marker).unwrap_or_else(|| {
+        panic!("index.html must close the region after {start_marker} with {end_marker}");
+    });
+    html[start..start + end].to_string()
+}
+
+/// W4 copy-vs-move sentence, verbatim contract text (shape section 2 W4: it
+/// must state that the backend writes the new file and that the source
+/// declarations stay in place). The asset carries this constant verbatim.
+const COPY_VS_MOVE_SENTENCE: &str = "The C++ backend writes the new file and leaves the source declarations in place; nothing is moved out of the source files.";
+
+// Required test 1: S2 fetches the manifest route per step, never at boot.
+#[test]
+fn test_wizard_step_manifest_fetches_per_step() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("'/api/extraction/'"),
+        "extraction-wizard.js must fetch the manifest for the selected file"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("'/manifest'"),
+        "extraction-wizard.js must build the manifest URL from '/api/extraction/' + plan id + '/manifest' (shape C2)"
+    );
+    assert_eq!(
+        EXTRACTION_WIZARD_JS.matches("fetch(").count(),
+        1,
+        "the wizard must keep exactly one fetch call site (fetch handling in one place)"
+    );
+    let fetcher = wizard_function_body(EXTRACTION_WIZARD_JS, "fetchWizardRoute");
+    assert!(
+        fetcher.contains("await fetch("),
+        "the single fetch call site must live in fetchWizardRoute"
+    );
+    let opener = wizard_function_body(EXTRACTION_WIZARD_JS, "openExtractionWizard");
+    assert!(
+        !opener.contains("fetch(") && !opener.contains("ensureWizard"),
+        "the boot/open path must fetch nothing (shape C6: per-step fetching, never at boot)"
+    );
+    let entry = wizard_function_body(EXTRACTION_WIZARD_JS, "enterWizardStep");
+    assert!(
+        entry.contains("ensureWizardManifest") && entry.contains("ensureWizardDryRun"),
+        "step entry must drive the per-step manifest and dry-run fetches (shape C6)"
+    );
+    assert!(
+        wizard_function_body(EXTRACTION_WIZARD_JS, "wizardStepNext").contains("enterWizardStep("),
+        "step navigation must enter the new step so its data is fetched per step"
+    );
+}
+
+// Required test 2: the honest includes fallback (W3), never a fabricated path.
+#[test]
+fn test_wizard_includes_fallback_when_unavailable() {
+    let manifest_step = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepManifest");
+    assert!(
+        manifest_step.contains("includes_unavailable"),
+        "the S2 renderer must read includes_unavailable as the degradation signal (W3)"
+    );
+    assert!(
+        manifest_step.contains("Includes unavailable: the engine could not resolve the dependencies for this new file"),
+        "the S2 renderer must print the honest fallback line when includes_unavailable (W3)"
+    );
+    for fabricated in ["#include", "extracted.h"] {
+        assert!(
+            !EXTRACTION_WIZARD_JS.contains(fabricated),
+            "no include path may be hardcoded in the wizard asset, found {fabricated} (W3)"
+        );
+    }
+}
+
+// Required test 3: the exact copy-vs-move sentence, keyed off the COMPUTED
+// move_removals path with includes_unavailable as the degradation signal.
+// The degraded honest_absent_dry_run answers copy_only: false alongside
+// move_removals: 0, so the renderer must never read the bare copy_only flag
+// (W-2a verdict relay): the computed path plus the degradation gate carries
+// the truth.
+#[test]
+fn test_copy_vs_move_sentence_is_exact_and_keyed_off_the_computed_path() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains(COPY_VS_MOVE_SENTENCE),
+        "extraction-wizard.js must carry the exact locked copy-vs-move sentence (W4)"
+    );
+    let impact = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepImpact");
+    assert!(
+        impact.contains("COPY_VS_MOVE_SENTENCE"),
+        "step S3 must carry the locked copy-vs-move sentence (W4)"
+    );
+    let execute = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepExecute");
+    assert!(
+        execute.contains("COPY_VS_MOVE_SENTENCE"),
+        "step S5 must carry the locked copy-vs-move sentence (W4)"
+    );
+    let copy_only_gate = wizard_function_body(EXTRACTION_WIZARD_JS, "wizardCopyOnly");
+    assert!(
+        copy_only_gate.contains("includes_unavailable"),
+        "the copy-only gate must treat includes_unavailable as the degradation signal (W-2a verdict relay)"
+    );
+    assert!(
+        copy_only_gate.contains("move_removals === 0"),
+        "the copy-only sentence must be keyed off the computed move_removals path, never the bare copy_only flag"
+    );
+    assert!(
+        !EXTRACTION_WIZARD_JS.contains(".copy_only"),
+        "the renderer must never read the copy_only field directly (degraded answers set it false by force)"
+    );
+}
+
+// Required test 4: S4 fetches the dry-run route and renders rewrite rows
+// with the &rarr; entity between the old and new include sets (shape C4).
+#[test]
+fn test_wizard_dry_run_rewrites_render() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("'/dry-run'"),
+        "extraction-wizard.js must fetch the dry-run route '/api/extraction/' + plan id + '/dry-run' (shape C2)"
+    );
+    let dry_run = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepDryRun");
+    assert!(
+        dry_run.contains("&rarr;"),
+        "rewrite rows must separate old and new include sets with the &rarr; entity"
+    );
+    let old_at = dry_run.find("wizard-diff-old").expect("rewrite rows must mark the old include set");
+    let arrow_at = dry_run.find("&rarr;").expect("rewrite rows must carry the &rarr; entity");
+    let new_at = dry_run
+        .find("wizard-diff-new")
+        .expect("rewrite rows must mark the new include set");
+    assert!(
+        old_at < arrow_at && arrow_at < new_at,
+        "the &rarr; entity must sit between the old and the new include set in every rewrite row"
+    );
+    assert!(
+        dry_run.contains("side_effect_preservations"),
+        "rewrite rows must render the preserved side-effect includes (shape C4)"
+    );
+    assert!(
+        dry_run.contains("The dry run changes nothing"),
+        "the dry-run panel must honestly state that it changes nothing (shape C4)"
+    );
+}
+
+// Required test 5 (first half, W6/C7): the 409 stale-generation handler
+// resets the wizard state from the fetch error path.
+#[test]
+fn test_wizard_resets_on_stale_generation() {
+    let fetcher = wizard_function_body(EXTRACTION_WIZARD_JS, "fetchWizardRoute");
+    assert!(
+        fetcher.contains("response.status === 409"),
+        "extraction-wizard.js must handle the 409 stale-generation error shape (shape C3/W6)"
+    );
+    assert!(
+        fetcher.contains("resetWizardState(wizardState.planId)"),
+        "a 409 stale-generation response must reset the wizard step state from the fetch error path (C7)"
+    );
+}
+
+// Required test 5 (second half, C7): the payload-swap re-render path resets
+// the wizard state; the reset call stays string-lockable.
+#[test]
+fn test_wizard_resets_on_payload_swap() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("function resetWizardOnPayloadSwap("),
+        "extraction-wizard.js must declare the payload-swap wizard reset (shape C7)"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("window.applyLoadedData = "),
+        "the payload-swap reset must hook the existing re-render path (applyLoadedData, shape C7)"
+    );
+    let swap = wizard_function_body(EXTRACTION_WIZARD_JS, "resetWizardOnPayloadSwap");
+    assert!(
+        swap.contains("resetWizardState(planId)"),
+        "the payload swap must reset the wizard state and keep it string-lockable (C7)"
+    );
+}
+
+// Required test 6: caps, symbol_count truth, and the truncation copy (C6).
+#[test]
+fn test_wizard_step_caps_and_truncation_are_honest() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE = 200"),
+        "the renderer must mirror the documented per-file cap EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE = 200 (C6)"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("EXTRACTION_DRY_RUN_MAX_REWRITES = 200"),
+        "the renderer must mirror EXTRACTION_DRY_RUN_MAX_REWRITES = 200 (C6)"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("EXTRACTION_MANIFEST_MAX_FILES = 64"),
+        "the renderer must mirror EXTRACTION_MANIFEST_MAX_FILES = 64 (C6)"
+    );
+    let manifest_step = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepManifest");
+    assert!(
+        manifest_step.contains("EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE"),
+        "the per-file list must render at most EXTRACTION_MANIFEST_MAX_SYMBOLS_PER_FILE rows"
+    );
+    assert!(
+        manifest_step.contains("symbol_count"),
+        "symbol_count must render beside the capped rows as the count truth (C6)"
+    );
+    assert!(
+        manifest_step.contains("wizardCapChip"),
+        "the per-file overflow must use the shared +K more chip helper (shape C6)"
+    );
+    assert!(
+        manifest_step.contains("files_truncated"),
+        "files_truncated must drive the honest file-list cap copy (C6)"
+    );
+    let chip = wizard_function_body(EXTRACTION_WIZARD_JS, "wizardCapChip");
+    assert!(
+        chip.contains("class=\"just-more\">+${hiddenCount} more"),
+        "the chip must reuse the just-more idiom with the +K more form (shape C6)"
+    );
+    let dry_run = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepDryRun");
+    assert!(
+        dry_run.contains("EXTRACTION_DRY_RUN_MAX_REWRITES"),
+        "the rewrites list must honor EXTRACTION_DRY_RUN_MAX_REWRITES"
+    );
+    assert!(
+        dry_run.contains("rewrites_truncated") && dry_run.contains("truncated"),
+        "rewrites_truncated must drive the honest truncation copy (C6)"
+    );
+}
+
+// Required test 7: the recipe verb list is exactly the three W5 verbs with
+// the plan id interpolated; no fourth verb string exists in the asset.
+#[test]
+fn test_wizard_recipe_names_exactly_the_three_w5_verbs() {
+    let execute = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepExecute");
+    assert!(
+        execute.contains("tool transform extract &lt;repo-root&gt; --plan "),
+        "the recipe lock reports the missing verb: 'tool transform extract <repo-root> --plan <plan_id>' (W5)"
+    );
+    assert!(
+        execute.contains("tool migrate &lt;repo-root&gt; --plan ") && execute.contains("--preview"),
+        "the recipe must show the --preview-first step 'tool migrate <repo-root> --plan <plan_id> --preview' (W5)"
+    );
+    assert!(
+        execute.contains("tool apply &lt;repo-root&gt; --plan "),
+        "the recipe must show 'tool apply <repo-root> --plan <plan_id>' (W5)"
+    );
+    let preview_first = execute
+        .find("tool migrate")
+        .expect("migrate verb present in the recipe");
+    let extract_at = execute
+        .find("tool transform extract")
+        .expect("transform extract verb present in the recipe");
+    let apply_at = execute.find("tool apply").expect("apply verb present in the recipe");
+    assert!(
+        preview_first < extract_at && extract_at < apply_at,
+        "the recipe order must be preview first, then transform extract, then the full apply"
+    );
+    assert!(
+        execute.contains("escapeHtml(planId || '')"),
+        "the plan id interpolated into every recipe verb must pass through escapeHtml"
+    );
+    let named_verbs = EXTRACTION_WIZARD_JS.matches("tool ").count();
+    let honest_verbs = EXTRACTION_WIZARD_JS.matches("tool apply").count()
+        + EXTRACTION_WIZARD_JS.matches("tool migrate").count()
+        + EXTRACTION_WIZARD_JS.matches("tool transform extract").count();
+    assert_eq!(
+        named_verbs, honest_verbs,
+        "W5: only tool apply, tool migrate and tool transform extract may be named in the wizard asset"
+    );
+}
+
+// Required test 8: the help copy names the execution boundary and the
+// follow-on milestone key; the W-3b renderers keep the escape discipline.
+#[test]
+fn test_wizard_help_copy_names_the_execution_boundary() {
+    let legend = wizard_tab_slice(INDEX_HTML, "id=\"helpTab-legend\"", "id=\"helpTab-recipes\"");
+    assert!(
+        legend.contains("never mutates the repository"),
+        "the Hotspots help copy must state that the UI never mutates the repository in this version"
+    );
+    assert!(
+        legend.contains("extraction-auto-apply"),
+        "the Hotspots help copy must name the follow-on milestone key extraction-auto-apply as the execution boundary (shape section 4)"
+    );
+    for raw_interpolation in [
+        "${proposal.",
+        "${manifest.",
+        "${selected.",
+        "${dryRun.",
+        "${rewrite.",
+        "${fileRow.",
+    ] {
+        assert!(
+            !EXTRACTION_WIZARD_JS.contains(raw_interpolation),
+            "every W-3b interpolated payload value must pass through an escaper, found raw {raw_interpolation}"
+        );
+    }
+}

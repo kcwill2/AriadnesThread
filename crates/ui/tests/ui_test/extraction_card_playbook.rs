@@ -6,7 +6,7 @@
 //! static_html.rs / help_center_readability.rs; the CSS rule bodies reuse the
 //! local css_rule_body and tab_slice copies.
 
-use ariadne_ui::{HOTSPOTS_JS, INDEX_HTML, STYLES_CSS};
+use ariadne_ui::{EXTRACTION_WIZARD_JS, HOTSPOTS_JS, INDEX_HTML, STYLES_CSS};
 
 /// Local copy of the css_rule_body idiom (help_center_readability.rs) so this
 /// suite can judge rule bodies without reaching into another test module.
@@ -142,9 +142,14 @@ fn test_file_plan_rows_markup() {
         plan.contains("Files to create"),
         "C3: the manifest rows must be introduced by a Files to create label"
     );
+    // C5 amendment 3 (shape C5): the wizard restructure owns the full
+    // destination-file block now (its .extraction-file-block in step S2);
+    // the card keeps its row but the block selector moved with the block
+    // into the wizard asset. The two selectors cannot coexist as the single
+    // source of truth for the file block, so the expectation moves with it.
     assert!(
-        plan.contains("class=\"extraction-file\""),
-        "C3: each destination file renders an .extraction-file row"
+        EXTRACTION_WIZARD_JS.contains("class=\"extraction-file-block\""),
+        "C3 amended (C5): the destination-file block moved into the wizard asset and renders .extraction-file-block"
     );
     assert!(
         plan.contains("class=\"extraction-file-path\""),
@@ -168,6 +173,11 @@ fn test_file_plan_rows_markup() {
 fn test_apply_recipe_is_honest() {
     // P9: exactly the two real CLI verbs with the positional <repo-root>
     // placeholder and the plan id interpolated; no other command is named.
+    // C5 amendment 5 (shape C5): the verb list grows by tool transform
+    // extract ONLY - it is a real CLI verb (crates/cli/src/lib.rs) and the
+    // wizard's S5 recipe names it per W5 - and the "UI never applies"
+    // sentence is reworded to name the follow-on boundary (kickoff frozen
+    // lock: the help-copy flip belongs to extraction-auto-apply).
     let hint = function_body(HOTSPOTS_JS, "renderExtractionApplyHint");
     assert!(
         hint.contains("tool apply &lt;repo-root&gt; --plan ${"),
@@ -185,12 +195,29 @@ fn test_apply_recipe_is_honest() {
         hint.contains("Validates and rolls back"),
         "P9: the note must state the validate/rollback guarantee honestly"
     );
-    let named_verbs = HOTSPOTS_JS.matches("tool ").count();
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("tool transform extract &lt;repo-root&gt; --plan "),
+        "P9 amended (C5): the wizard recipe names the third real verb 'tool transform extract <repo-root> --plan <plan_id>' (W5)"
+    );
+    let named_verbs = HOTSPOTS_JS.matches("tool ").count()
+        + EXTRACTION_WIZARD_JS.matches("tool ").count();
     let honest_verbs = HOTSPOTS_JS.matches("tool apply").count()
-        + HOTSPOTS_JS.matches("tool migrate").count();
+        + HOTSPOTS_JS.matches("tool migrate").count()
+        + EXTRACTION_WIZARD_JS.matches("tool apply").count()
+        + EXTRACTION_WIZARD_JS.matches("tool migrate").count()
+        + EXTRACTION_WIZARD_JS.matches("tool transform extract").count();
     assert_eq!(
         named_verbs, honest_verbs,
-        "P9: only tool apply and tool migrate may be named as commands"
+        "P9 amended: only tool apply, tool migrate and tool transform extract may be named as commands"
+    );
+    let legend = tab_slice(INDEX_HTML, "id=\"helpTab-legend\"", "id=\"helpTab-recipes\"");
+    assert!(
+        legend.contains("never applies"),
+        "C7: the reworded sentence must still state that the UI never applies anything"
+    );
+    assert!(
+        legend.contains("extraction-auto-apply"),
+        "C5 amended: the reworded never-applies sentence must name the follow-on boundary extraction-auto-apply"
     );
 }
 
@@ -218,12 +245,20 @@ fn test_playbook_escape_discipline() {
 fn test_playbook_styles_declared_tokens() {
     // C6: the new playbook rules take every color from the existing
     // three-theme token set; belt over the hex drift gate.
+    // C5 amendment 4 (shape C5): the selector list is extended with the
+    // wizard rules - the playbook's visual language continued into the
+    // modal stepper (W-3a shell + W-3b blocks), and those rules carry the
+    // same token discipline.
     for selector in [
         ".extraction-disclosure {",
         ".extraction-details {",
         ".extraction-file-path {",
         ".extraction-command {",
         ".extraction-apply-note {",
+        ".extraction-file-block {",
+        ".wizard-file-row {",
+        ".wizard-file-path {",
+        ".wizard-rewrite-row {",
     ] {
         let body = css_rule_body(STYLES_CSS, selector);
         assert!(
