@@ -2,6 +2,13 @@ use crate::cycle_groups_view;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// The extraction-proposal family (caps plus proposal DTO types) lives in
+/// `dto/extraction.rs` - `dto.rs` sat at exactly the 1000-line R2 hygiene
+/// ceiling (ui-extraction-wizard W-1) and the wizard DTOs need headroom.
+/// Re-exported here so every public path via `lib.rs` stays unchanged.
+pub mod extraction;
+pub use extraction::*;
+
 /// Lifecycle of one boot step row, serialized lowercase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -230,60 +237,6 @@ const JUSTIFICATION_MAX_HEADERS: usize = 8;
 /// existing rank order — the top-ranked eligible sources win the slots).
 const IMPACT_DROPPED_SAMPLE_MAX: usize = 8;
 const IMPACT_MAX_ENTRIES_PER_ROOT: usize = 8;
-
-/// Extraction-proposal payload caps (I3/I8): top proposals per payload,
-/// symbol names per proposal (I6: sorted by SymbolId before capping; the UI
-/// infers truncation from `symbol_names.len() < total_symbols`), required
-/// header basenames per proposal. Name/header caps reuse the justification
-/// caps.
-pub const EXTRACTION_PROPOSAL_MAX: usize = 12;
-pub const EXTRACTION_PROPOSAL_MAX_NAMES: usize = JUSTIFICATION_MAX_NAMES;
-pub const EXTRACTION_PROPOSAL_MAX_HEADERS: usize = JUSTIFICATION_MAX_HEADERS;
-
-/// Cap for destination-file rows per proposal (mirrors the header cap).
-pub const EXTRACTION_PROPOSAL_MAX_TARGET_FILES: usize = 8;
-
-/// One suggested destination file and the symbols it should contain.
-/// `path` is repo-relative, lossy-rendered like the plan's PathBuf (plain
-/// display data only — the cluster plan type never crosses into ui).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProposedTargetFileDto {
-    /// Repo-relative destination path suggested by the plan.
-    pub path: String,
-    /// Symbols destined for this file, sorted by symbol_id, capped at
-    /// `EXTRACTION_PROPOSAL_MAX_NAMES`.
-    pub symbol_names: Vec<String>,
-    /// Uncapped member count for this file (truncation of `symbol_names`
-    /// is `symbol_count - symbol_names.len()`).
-    pub symbol_count: usize,
-}
-
-/// One Conservative extraction proposal shown in both surfaces (I5/I8):
-/// plain display data only — the cluster crate's `OptimizationPlan` never
-/// crosses into the ui crate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExtractionProposalDto {
-    pub plan_id: String,
-    pub target_file: String,
-    pub target_file_id: String,
-    pub problem: String,
-    pub collateral_load_before: usize,
-    pub collateral_load_after: usize,
-    pub symbol_names: Vec<String>,
-    pub total_symbols: usize,
-    pub required_headers: Vec<String>,
-    pub consumer_tu_count: usize,
-    pub risk: String,
-    /// Suggested destination files with per-file symbol manifests, grouped
-    /// from the plan's proposed extractions; `serde(default)` keeps payloads
-    /// written before this field decodable (empty = no file plan known).
-    #[serde(default)]
-    pub target_files: Vec<ProposedTargetFileDto>,
-    /// True iff destination-file rows were capped at
-    /// `EXTRACTION_PROPOSAL_MAX_TARGET_FILES` by the producer.
-    #[serde(default)]
-    pub target_files_truncated: bool,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphExportPayload {
