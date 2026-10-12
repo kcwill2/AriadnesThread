@@ -309,4 +309,28 @@ This hand did not improvise them (numbered deviation D1).
     zero re-declared selectors (every first-occurrence rule body the
     frozen card/help locks read is byte-unchanged).
 
+## Landing records (post-commit; this section rides the rider commit per the W-2a precedent)
+
+- Gate 9 landed: `49fc843` `feat(ui): extraction-wizard asset registered +
+  stepper shell with steps 0-1`, parent `bf5a1db`, carrying exactly the 13
+  gate-9 scoped paths (asset +182, render tests +287, index.html +35,
+  styles.css +116/-4, journal +166, hotspots.js +11, server.rs +5/-3,
+  api_payloads.rs +4, theme_contract.rs +3/-2, export.rs +3/-2, main.rs +1,
+  ui_smoke.py +1, lib.rs +1).
+- Gate 8 pre-flight: staged set confirmed via `git diff --cached
+  --name-only` = exactly the 13 paths; `python tools/encoding_guard.py
+  --staged` silent exit 0. Gate 10 `--all` post-commit: silent exit 0.
+- Whitespace erratum inside the styles.css hunk (deviation D11): the
+  4-line `.step-bar-remainder` rule was rewritten byte-identical except
+  one extra leading space of indent (an anchor artifact of the
+  append-edit); CSS-irrelevant, no lock reads that rule body (the only
+  test mentions are a token-name list in theme_dark_grey_palette.rs and a
+  JS-builder string check in static_html.rs:561). Left as landed rather
+  than re-touched after the gate sequence had already gone green on this
+  exact content.
+11. D11: Journal rider commit after the landing commit (house precedent
+    `90f4298` for W-2a): post-commit facts - the landing hash and the
+    gate-10 pass - cannot self-contain inside the landing commit, so they
+    ride a journal-only scoped follow-up. No code change.
+
 
