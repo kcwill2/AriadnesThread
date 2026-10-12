@@ -31,8 +31,8 @@ pub fn ensure_language_registered(
     Ok(())
 }
 
-/// Parse a `--lang` value through `ariadne_repo::SourceLanguage`'s serde
-/// variant names (the stored PascalCase names), also accepting the exact
+/// Parse a `--lang` value against the stored PascalCase serde names
+/// (`SourceLanguage::CPP`/`SCALA`/`OTHER`), also accepting the exact
 /// lowercase short form (`--lang cpp` ≡ `--lang Cpp`) for ergonomics.
 pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
     let mut chars = raw.chars();
@@ -41,9 +41,7 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
         None => String::new(),
     };
     for candidate in [raw, capitalized.as_str()] {
-        if let Ok(language) =
-            serde_json::from_value::<SourceLanguage>(serde_json::Value::String(candidate.into()))
-        {
+        if let Some(language) = closed_set_language_by_serde_name(candidate) {
             return Ok(language);
         }
     }
@@ -51,6 +49,24 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
         "unknown language '{raw}'; expected cpp, scala, or other \
          (serde names: Cpp, Scala, Other)"
     ))
+}
+
+/// AR-27a closed-set lookup over the stored serde names. The JSON arm of
+/// `SourceLanguage` (now the open `LanguageId` newtype) parses ANY name, so
+/// the `--lang` selection must not run through it: `--lang rust` stays the
+/// clear error §3.3 fact 3 demands, and an open id enters a run only through
+/// a registered plugin, never through this argument.
+fn closed_set_language_by_serde_name(name: &str) -> Option<SourceLanguage> {
+    if name == SourceLanguage::CPP {
+        return Some(SourceLanguage::Cpp);
+    }
+    if name == SourceLanguage::SCALA {
+        return Some(SourceLanguage::Scala);
+    }
+    if name == SourceLanguage::OTHER {
+        return Some(SourceLanguage::Other);
+    }
+    None
 }
 
 /// Language-scoped stage backend (plan M23, D-M23-7 ii, T7): the plugin

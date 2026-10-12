@@ -198,3 +198,67 @@ fn legacy_ids_json_as_bare_names() {
         assert_eq!(serde_json::from_str::<LanguageId>(json).unwrap(), id);
     }
 }
+
+/// SHAPE RULING SECTION 8 DISCRIMINATOR PIN (observational): the two serde
+/// arms are selected by format, proven BY BYTES, not by trusting
+/// `is_human_readable` in the abstract. JSON spells every id as the bare
+/// name; bincode spells the three legacy ids as the frozen u32 LE indices
+/// the closed enum emitted - the exact tags `tasks/ar-27-handoff-journal.md`
+/// section 5 recorded from the enum era.
+#[test]
+fn discriminator_selects_the_wire_arm_by_format() {
+    for (id, tag) in [
+        (LanguageId::Cpp, [0u8, 0, 0, 0]),
+        (LanguageId::Scala, [1u8, 0, 0, 0]),
+        (LanguageId::Other, [2u8, 0, 0, 0]),
+    ] {
+        assert_eq!(
+            bincode::serialize(&id).unwrap(),
+            tag.to_vec(),
+            "the positional arm reproduces the legacy enum index for {id:?}"
+        );
+        assert_eq!(bincode::deserialize::<LanguageId>(&tag).unwrap(), id);
+        assert_eq!(
+            serde_json::to_string(&id).unwrap(),
+            format!("\"{}\"", id.as_str()),
+            "the human-readable arm stays transparent for {id:?}"
+        );
+    }
+}
+
+/// The escape arm (shape ruling section 2): an open id under a positional
+/// writer is tag 3 + u64 LE length + UTF-8 bytes. `tu_analyses.bin` could
+/// never carry one pre-AR-27a (the enum could not name it), so this arm
+/// ADDS capability without moving any pre-existing byte.
+#[test]
+fn positional_form_names_an_open_id_through_the_escape_arm() {
+    let fortran = LanguageId::new("Fortran");
+    let wire = [
+        3u8, 0, 0, 0, // variant index 3 (Open) as u32 LE
+        7, 0, 0, 0, 0, 0, 0, 0, // string length as u64 LE
+        70, 111, 114, 116, 114, 97, 110, // b"Fortran"
+    ];
+    assert_eq!(bincode::serialize(&fortran).unwrap(), wire.to_vec());
+    assert_eq!(bincode::deserialize::<LanguageId>(&wire).unwrap(), fortran);
+    // And the same id in JSON needs no wire vocabulary at all.
+    assert_eq!(serde_json::to_string(&fortran).unwrap(), "\"Fortran\"");
+    assert_eq!(
+        serde_json::from_str::<LanguageId>("\"Fortran\"").unwrap(),
+        fortran
+    );
+}
+
+/// An index that was never allocated is a decode ERROR (shape ruling section
+/// 2: never a panic, never a silent legacy-id substitution). Index 3 exists
+/// only as `Open(String)`; a stream that ends at the tag can never decode.
+#[test]
+fn positional_form_rejects_unknown_wire_tags_as_errors() {
+    for bad in [
+        vec![7u8, 0, 0, 0],
+        vec![255, 0, 0, 0],
+        vec![3u8, 0, 0, 0], // escape tag with no string payload at all
+    ] {
+        let outcome = bincode::deserialize::<LanguageId>(&bad);
+        assert!(outcome.is_err(), "wire tag {bad:?} must be a decode error");
+    }
+}

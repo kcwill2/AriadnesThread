@@ -135,28 +135,17 @@ mod includable_header_tests {
 
 /// The programming language associated with a file.
 ///
-/// Derived `Ord` gives a stable order for report grouping; `#[default] Cpp`
-/// makes every pre-existing JSON artifact (which lacks the field) read back
-/// as `Cpp`. Stored PascalCase variant names are unchanged (no `rename_all`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
-pub enum SourceLanguage {
-    #[default]
-    Cpp,
-    Scala,
-    Other,
-}
+/// AR-27a home move: the closed enum is retired; this is now a `pub type`
+/// alias of the open-ended [`LanguageId`] newtype homed in
+/// [`crate::identity`]. Every expression-spelled site (`SourceLanguage::Cpp`,
+/// `SourceLanguage::default()`, `SourceLanguage::from_file_kind(..)`, the
+/// `.language` fields) compiles unchanged through the alias; the serde shape
+/// contract (positional u32 index under bincode, bare name under JSON) is
+/// carried by the newtype's dual-format impls and byte-locked by the
+/// `ar27_*` oracle tests.
+pub type SourceLanguage = crate::identity::LanguageId;
 
-impl SourceLanguage {
-    pub fn from_file_kind(kind: FileKind) -> Self {
-        match kind {
-            FileKind::Header | FileKind::Source => SourceLanguage::Cpp,
-            FileKind::ScalaSource | FileKind::ScalaScript | FileKind::BuildDefinition => {
-                SourceLanguage::Scala
-            }
-            FileKind::Other => SourceLanguage::Other,
-        }
-    }
-}
+pub use crate::identity::LanguageId;
 
 /// Entity controlling or producing the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

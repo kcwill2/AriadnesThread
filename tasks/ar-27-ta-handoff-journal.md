@@ -421,3 +421,85 @@ stdout via the distilling entry points; capture-race rule honored)
 - Next: IMPL commit (home move, alias, dual-format serde, frame exception,
   custom legacy-rank Ord, value-`From` deletion, closed-set parse rework),
   then gates 1-10 + ui_smoke + help-line byte-lock.
+
+## 15. IMPL phase (mutation + gates) - same session
+
+- CORRECTION to the section-14 "next" line: the help-line byte-lock is a T-b
+  obligation (`tasks/ar-27-tb-handoff.md` "HELP BYTE-LOCK"), NOT a T-a gate -
+  T-a gate 7 is ui + `ui_smoke: PASS` only (handoff lines 411-414). No help
+  text was changed this hop; nothing to lock.
+- Mutation landed (7 tracked edits + 1 new file): `crates/repo/src/identity.rs`
+  NEW (LanguageId home: consts, Cpp/Scala/Other + cpp()/scala()/other() seam,
+  `from_file_kind`, private `WireLanguageForm` {Cpp,Scala,Other,Open(String)}
+  with frozen 0/1/2/3 arm order, hand-written dual-format Serialize/
+  Deserialize keyed on `is_human_readable` (verified false for bincode 1.3.3
+  BOTH directions in the vendored source; true serde_json),
+  `language_transparent_frame` pub module, hand-written legacy-rank `Ord`
+  (Cpp<Scala<Other<open-lex, consistent with string-equality Eq), 6 moved
+  unit tests + 1 NEW legacy-rank lock); `repo/src/types.rs` enum DELETED,
+  replaced by `pub type SourceLanguage = crate::identity::LanguageId;` +
+  re-export; `repo/src/lib.rs` `pub mod identity;` + `pub use
+  identity::LanguageId`; `lang-api/src/identity.rs` -> re-export shim +
+  `language_of_file_kind` + its exhaustive test; `lang-api/src/types.rs`
+  `IncludeEdge.language` gains `#[serde(default, with =
+  "ariadne_repo::identity::language_transparent_frame")]`;
+  `cli/src/registry.rs` `parse_language_arg` reworked to closed-set if-return
+  (`closed_set_language_by_serde_name` over the `SourceLanguage::CPP/SCALA/
+  OTHER` consts; Err wording byte-identical; the 39 T-a0 clone tokens are
+  OUTSIDE the diff hunks - proof below).
+- COHERENCE FINDING (contract wording refined, not a deviation): std has NO
+  `From<&T> for T` blanket - only reflexive `From<T> for T`. The value
+  `From<SourceLanguage>` deletion is therefore forced (alias makes it
+  `From<Self>` = std reflexive already, all call sites compile unchanged),
+  while the by-reference `From<&SourceLanguage>` MUST stay a hand-written
+  impl (kept, in repo identity, body `source.clone()`-equivalent) - exactly
+  what `crates/artifact/metrics_io.rs:241` consumes; artifact untouched and
+  its suite green (proof below).
+- Gate 1: `python tools/distill.py -- cargo check --workspace
+  --all-targets` -> `ok (exit 0, 31 warnings emitted)` (warning count
+  IDENTICAL to the pre-mutation baseline; one E0308 during iteration was the
+  coherence finding above, fixed before the green run).
+- Post-mutation oracle + pins (verbatim own stdout):
+  - `-p ariadne-repo`: `26 passed / 0 failed / 0 ignored / 3 suites`
+    (15 + 6 moved + 4 fixtures + 1 new legacy-rank lock).
+  - `-p ariadne-lang-api`: `41 passed / 0 failed / 0 ignored / 5 suites`
+    (41 - 6 moved + 3 fixtures + 3 new dual-format locks: discriminator
+    pin [tags 0/1/2 BY BYTES + JSON bare names], escape-arm
+    [3,0,0,0|u64 7|Fortran], unknown-tag/EOF decode errors).
+  - `-p ariadne-index`: `17 passed / 0 failed / 0 ignored / 3 suites`
+    (ADAPT-8 ctx bytes + digest pin green POST-mutation).
+  - `-p ariadne-integration-tests --test ar27_field_probe_test`:
+    `3 passed / 0 failed / 0 ignored / 1 suites`.
+  - m23 bincode `-p ariadne-lang-api --test m23_bincode_serde_locks`:
+    `5 passed / 0 failed / 0 ignored / 1 suites` (frozen identical-count).
+  - `--test m23_symbol_isolation_test --test m00_golden_baseline_test
+    --test m00_facts_path_parity_test`: `11 passed / 0 failed / 0 ignored /
+    3 suites` = 7 + 4 splits exact.
+  - `--test m24_language_identity_test --test m24a_scala_plan_path_test
+    --test m18_cpp_plugin_parity_test`: `33 passed / 0 failed / 0 ignored /
+    3 suites` = 8 + 2 + 23 exact (guard scans: no banned substrings
+    introduced in cli/lang-api; repo outside both scans by design).
+  - `-p ariadne-cli`: `118 passed / 0 failed / 8 ignored / 7 suites` (pin;
+    parse closed-set accepts cpp/Cpp/scala/other, rejects ""/rust/py/Cpp20).
+  - `-p ariadne-pipeline`: `40 passed / 0 failed / 4 ignored / 9 suites`
+    (pin - rider crate compiles through the alias + identity/kept From with
+    ZERO edits).
+  - `-p ariadne-build`: `23 passed / 0 failed / 0 ignored / 2 suites` (pin).
+  - `-p ariadne-artifact`: `40 passed / 0 failed / 0 ignored / 2 suites`
+    (pin - the kept `From<&..>` seam proven).
+  - `-p ariadne-ui`: `272 passed / 0 failed / 0 ignored / 3 suites` (pin).
+  - `python tools/distill.py -- python tools/ui_smoke.py` -> `boot+route
+    checks clean (cold fixture, attempt 1, 0.7s)` / `ui_smoke: PASS`.
+- Zero-rider PROOFS (distiller git): `git diff --name-only 85179b0` footprint
+  = my 7 tracked edits + `Cargo.lock` + the 2 pre-existing foreign churns;
+  `git diff 85179b0 -- crates/pipeline crates/build crates/artifact` and
+  `-- crates/worker-core` -> BOTH EMPTY (capture 0 lines). `stage_index.rs`
+  not in footprint (untouched). `git diff 85179b0 -- crates/cli/src/registry.rs`
+  = 3 hunks, all inside parse_language_arg + the new helper; every
+  `LanguageId::from(language.clone())` token line is outside the hunks.
+- `Cargo.lock` rides the IMPL commit: the serde_json dev-dep added at the
+  ORACLE commit (`85179b0`) updates it, and commit_scoped's oracle scope
+  named only the 6 contract files; lock consistency restored here.
+- `python tools/hygiene_check.py` (gate 8): exit 0; ALL emitted rows are
+  pre-existing R3 (warn); ZERO rows on any file this hop created or edited;
+  ZERO R1/R2 blocking.

@@ -302,9 +302,13 @@ pub struct IncludeEdge {
     /// Language the edge was produced for. Additive (plan §3.5, M18.5):
     /// `#[serde(default)]` ⇒ pre-existing artifacts read back as `Cpp`.
     /// M24 Part A: open-ended, because it records the resolving PLUGIN, not a
-    /// file-kind label — `#[serde(transparent)]` keeps the stored bytes
-    /// identical to the enum variant names it replaced.
-    #[serde(default)]
+    /// file-kind label — the stored bytes stayed identical to the enum variant
+    /// names it replaced.
+    /// AR-27a: this field opts OUT of the global positional wire arm — the
+    /// `language_transparent_frame` keeps the STRING-FRAMED warm shape M24
+    /// Part A froze for `includes/edges.bin` (byte lock:
+    /// `ar27_dual_format_lock_test.rs`).
+    #[serde(default, with = "ariadne_repo::identity::language_transparent_frame")]
     pub language: LanguageId,
 }
 
