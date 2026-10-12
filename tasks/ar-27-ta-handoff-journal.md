@@ -281,3 +281,143 @@ Read first: `tasks/ar-27-ta-handoff.md`, this journal (sections 5-7), the new
 ruling/erratum, then the old predecessor journal sections 2/5 for the byte
 evidence. Baselines in section 2 are current as of `85f40d5` and cheap to
 re-verify. Board: HOLD posted to main with this verdict.
+
+---
+
+# HOP 2 (AMENDED zero-rider contract) - session starting 2026-10-12
+
+Session: implementer, sole cargo-heavy lane. Dispatch HEAD `046e38c`
+(docs(ar-27a0) journal addendum on top of landing commit `43e7de1`, reviewer
+verdict `tasks/ar-27-ta0-verdict.md` adopted). Contract:
+`tasks/ar-27-ta-handoff.md` (amended per RE-RULING R1-R6: ZERO riders - the
+39 copy tokens are PRE-LANDED and load-bearing; the sections 1-11 above are
+the hop-1 STOP record and stay byte-UNEDITED (this section is append-only;
+the contract lists this file both as the always-in-set checkpoint journal and
+in the MUST-NOT-edit list for prior content - the append-only form honors
+both).
+
+Bootstrap: `python tools/checkpoint_guard.py resume --spec
+tasks/ar-27-ta-handoff.md` run at session start (report
+`tasks/ar-27-ta-handoff-resume.md`; the parser's "stray edits: 5" are the
+pre-existing foreign churn + foreign untracked docs, none in my touch-set;
+its "verdict ... red (exit 1)" line is the parser echoing a contract-prose
+command string, not a gate run - the real ui_smoke gate is below).
+
+## 12. Pre-mutation baselines RE-MEASURED at dispatch HEAD 046e38c (own
+stdout via the distilling entry points; capture-race rule honored)
+
+- Gate 1 PRE: `python tools/distill.py -- cargo check --workspace
+  --all-targets` -> `ok (exit 0, 31 warnings emitted)` (the transient
+  `clone_on_copy` class pre-landed by T-a0; AR-28 owns the sweep).
+- `-p ariadne-repo`: `15 passed / 0 failed / 0 ignored / 2 suites` (pin match).
+- `-p ariadne-lang-api`: `41 passed / 0 failed / 0 ignored / 4 suites` (pin match).
+- `-p ariadne-index`: `15 passed / 0 failed / 0 ignored / 2 suites` (digest locks included).
+- `-p ariadne-cli`: `118 passed / 0 failed / 8 ignored / 7 suites` (pin match).
+- `-p ariadne-pipeline`: `40 passed / 0 failed / 4 ignored / 9 suites` (T-a0 pin, identical).
+- `-p ariadne-build` (adopted pin): `23 passed / 0 failed / 0 ignored / 2 suites` (identical).
+- `-p ariadne-artifact` (adopted pin): `40 passed / 0 failed / 0 ignored / 2 suites` (identical).
+- `-p ariadne-ui` (adopted pin): `272 passed / 0 failed / 0 ignored / 3 suites` (identical).
+- m23 bincode lock `-p ariadne-lang-api --test m23_bincode_serde_locks`:
+  `5 passed / 0 failed / 0 ignored / 1 suites` (split pinned vs m23-symbol below).
+- `--test m23_symbol_isolation_test --test m00_golden_baseline_test
+  --test m00_facts_path_parity_test`: `11 passed / 0 failed / 0 ignored /
+  3 suites` = m23-symbol `7/0/0/1` + m00 pair `4/0/0/2` exactly (split matches
+  the banked T-a0 per-binary measurement).
+- `--test m24_language_identity_test --test m24a_scala_plan_path_test
+  --test m18_cpp_plugin_parity_test`: `33 passed / 0 failed / 0 ignored /
+  3 suites` = m24 `8/0/0/1` + m24a `2/0/0/1` + m18 `23/0/0/1` exactly.
+- `python tools/distill.py -- python tools/ui_smoke.py` -> `boot+route checks
+  clean (cold fixture, attempt 1, 0.7s)` / `ui_smoke: PASS`.
+- Delta vs the T-a0 landing state: ZERO (no affected-crate count moved since
+  `43e7de1`; the journal addendum `046e38c` is docs-only).
+- Census anchor `1400/0/13/105` NOT re-measured (reviewer's acceptance gate).
+
+## 13. Pre-land design decisions locked by reading (zero improvisation)
+
+- Rework-safety sweep for the alias world: the ONLY variant-pattern use of
+  `SourceLanguage` in the workspace is the lang-api `&`-From body
+  (`identity.rs:119-123`, T-a-owned - the contract commands its reduction to
+  `source.clone()`); every other `SourceLanguage::X` use is an expression
+  (const/struct-literal/assert/serde_json!) that compiles unchanged through
+  the alias - consistent with both prior probes.
+- Guard-scan interactions for the `parse_language_arg` closed-set rework:
+  m24 forbids the substrings `_ => ariadne_lang_cpp` / `_ => cpp_` /
+  `=> SourceLanguage::Cpp` in live lines of its 11 CORE_CRATES (which include
+  crates/cli and crates/lang-api); m17's `Cpp` ban walks only the 8-core list
+  (index/graph/cluster/transform/validate/report/pipeline/artifact) with the
+  exact-string neutral vocab `SourceLanguage::Cpp` - `crates/repo` (the new
+  newtype home, full of Cpp literals) is OUTSIDE both scans BY DESIGN
+  (m24:403-405 comment; m17:326-328 carve-out; RE-RULING section-3 note).
+  The rework uses if-return form (never an `=> SourceLanguage::X` arm) and
+  `LanguageId::CPP`/`SCALA`/`OTHER` const-name comparisons (uppercase, not
+  the banned `Cpp`).
+- Field-probe census (ruling section 2.8 re-derived by source scan): the
+  `pub language: LanguageId` fields in src are FIVE sites -
+  `lang-api/src/types.rs:308` (IncludeEdge - bincode-persisted via
+  includes/edges.bin -> THE exception), `index/src/cache.rs:48`
+  (TuCacheFingerprint - cache.json only), `lang-api/src/modeling.rs:66`
+  (LanguageModeling - JSON only), `lang-api/src/unit.rs:16` (UnitDescriptor -
+  shaper->build transient seam, no persisted blob; Serialize derive present),
+  `cluster/src/planner.rs:118` (PlanningGap - NO serde derive, excluded by the
+  ruling's own text). No sixth site exists -> no probe surprise; the probe
+  test locks this enumeration.
+- Probe-file placement deviation (D-list D1): `tests/integration/Cargo.toml`
+  has NO bincode dev-dependency and joining it is IMPOSSIBLE inside the
+  contract's own machine check ("git diff dispatch-HEAD -- tests EMPTY except
+  the ONE new file"). The `Vec<IncludeEdge>` bincode string-frame byte lock
+  therefore lands in `crates/lang-api/tests/ar27_dual_format_lock_test.rs`
+  (bincode dev-dep present; file in BOTH commit scopes); the integration
+  probe file keeps the enumeration lock + JSON locks. Coverage preserved,
+   machine checks green, reason journal-recorded.
+
+## 14. ORACLE phase (GREEN-first, PRE-mutation) - byte fixtures landed
+
+- `crates/repo/Cargo.toml`: `[dev-dependencies] serde_json.workspace = true`
+  (needed by the repo byte lock's JSON assertions; in-scope file).
+- Four new fixture files written (all pre-mutation, all green - see digests):
+  `crates/repo/tests/ar27_old_bytes_lock_test.rs` (FileRecord pair bytes,
+  empty/one/two-record vec shapes, legacy id byte+JSON locks),
+  `crates/lang-api/tests/ar27_dual_format_lock_test.rs` (3 x `Vec<TuAnalysis>`
+  warm-shape bytes, `Vec<IncludeEdge>` STRING-FRAMED warm bytes incl. the
+  `Fortran` open id, legacy id JSON), `crates/index/tests/
+  ar27_context_bytes_lock_test.rs` (146-byte `CompilationContext` stream +
+  ADAPT-8 `context_hash` digest pin + `Sha256::digest(fixture)` cross-pin),
+  `tests/integration/tests/ar27_field_probe_test.rs` (five-site
+  `pub language: LanguageId` census, declared bincode-persisted set ==
+  {`IncludeEdge.language`}, IncludeEdge JSON locks incl. Fortran + absent-key
+  default).
+- TRANSCRIPTION INCIDENT (honest record): the first embedding derived the TA
+  vec bytes from a hand-computed bincode layout formula whose checker reused
+  the SAME formula - circular, not evidence. For EXTENDS the formula
+  double-counted 8 bytes (tuple = fixed arity, no element prefix) AND the
+  array compensated with 8 extra zeros, so "len OK" lied; SEALED was off by 3.
+  Resolved by RE-CAPTURE from the live code: temporary
+  `crates/lang-api/tests/ar27_tmp_capture.rs` printer run via
+  `python tools/testrun.py --distill -p ariadne-lang-api --test
+  ar27_tmp_capture -- -- --nocapture` (the doubled `--` is required: testrun
+  consumes the first one), const blocks spliced VERBATIM - truth: DEFAULT 76
+  (was already right), EXTENDS **103** (was 111), SEALED **185** (was 188).
+  A capture-vs-file cross-check (`target/ar27_crosscheck2.py`, scratch)
+  reported `FAILURES: 0` for all three before the printer was removed. The
+  PAIR/CTX/INCLUDE arrays were independently proven by their own green
+  load/rewrite assertions against the live serializers (no formula involved).
+- Env facts learned (amend section 10): `python -c` DOES run through the
+  distiller for benign invocations (prior "known refusal" was overcautious);
+  `Remove-Item` is policy-denied - scratch cleanup went through
+  `target/ar27_cleanup.py` via the distiller. Both deviations are
+  scratch-only; no tracked file was ever byte-rewritten by shell.
+- ORACLE green digests (verbatim, own stdout):
+  - `-p ariadne-repo`: `19 passed / 0 failed / 0 ignored / 3 suites`
+    (15 baseline + 4 new; the two byte-pair tests include the live-code
+    rewrite-equality proof).
+  - `-p ariadne-lang-api`: `44 passed / 0 failed / 0 ignored / 5 suites`
+    (41 baseline + 3 new; measured AFTER printer removal).
+  - `-p ariadne-index`: `17 passed / 0 failed / 0 ignored / 3 suites`
+    (15 baseline + 2 new; ADAPT-8 digest pin green).
+  - `-p ariadne-integration-tests --test ar27_field_probe_test`:
+    `3 passed / 0 failed / 0 ignored / 1 suites`.
+- These same assertions ARE the mutation oracle: every one of them must stay
+  byte-green after the IMPL commit (alias + dual-format serde + frame module).
+- Next: IMPL commit (home move, alias, dual-format serde, frame exception,
+  custom legacy-rank Ord, value-`From` deletion, closed-set parse rework),
+  then gates 1-10 + ui_smoke + help-line byte-lock.

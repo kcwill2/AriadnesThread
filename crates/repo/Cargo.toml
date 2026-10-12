@@ -12,4 +12,6 @@ bincode.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# AR-27a: moved LanguageId unit tests + old-bytes lock tests use serde_json.
+serde_json.workspace = true
 
