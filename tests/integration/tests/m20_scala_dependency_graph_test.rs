@@ -151,10 +151,10 @@ fn fixture_cycle_is_informational_under_tolerate_policy() -> Result<()> {
     let repo = isolated_scala_repo("cycle-policy")?;
     let graph = scala_graph(&repo.root)?;
 
-    let cycles = graph.detect_cycles();
+    let cycle_groups = graph.detect_cycle_groups();
     assert!(
-        cycles.len() >= 1,
-        "the deliberate models <-> services fixture cycle is detected"
+        !cycle_groups.is_empty(),
+        "the deliberate models <-> services fixture cycle is detected as one entangled group"
     );
 
     let tolerated =

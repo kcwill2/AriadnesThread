@@ -1,7 +1,8 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
+use ariadne_repo::FileId;
 use ariadne_ui::{
-    build_call_elements, build_include_elements, build_symbol_elements, GraphExportPayload,
-    SummaryStats,
+    build_call_elements, build_include_elements, build_symbol_elements,
+    CytoscapeElement, GraphExportPayload, SummaryStats,
 };
 use std::collections::HashMap;
 
@@ -9,12 +10,12 @@ use std::collections::HashMap;
 async fn test_dto_builders() {
     let include_graph = IncludeGraph::new();
     let closures = HashMap::new();
-    let cycles = vec![];
+    let cycle_groups = vec![];
 
     let elements = build_include_elements(
         &include_graph,
         &closures,
-        &cycles,
+        &cycle_groups,
         &HashMap::new(),
         &HashMap::new(),
     );
@@ -378,4 +379,284 @@ fn test_standalone_export_embeds_impact_summaries() {
         "impact: None must be skipped from the exported blob"
     );
     assert!(!none_blob.contains("vendored_marker.h"));
+}
+
+// ---------------------------------------------------------------------------
+// M23.5 T3-A -- group-based cycle classification (plan
+// 1790821308681-cycle-substrate-scc-m23_5 sec1.3, IV-2/IV-3, sec3.3 node
+// data). Fixture: a.h(1) -> b.h(2) -> c.h(3) -> a.h(1) plus the chord
+// a.h -> c.h plus the acyclic tail edge c.h -> d.h(4). The old DFS path
+// representation reports the single path [1, 2, 3] for this graph; the SCC
+// representation yields one group {1, 2, 3} and leaves d.h ungrouped.
+// ---------------------------------------------------------------------------
+
+fn chord_cycle_edge(source: u64, destination: u64) -> ariadne_graph::IncludeEdge {
+    ariadne_graph::IncludeEdge {
+        source: FileId(source),
+        destination: Some(FileId(destination)),
+        context_name: String::new(),
+        source_location: ariadne_graph::SourceLocation { line: 1, column: 1 },
+        kind: ariadne_graph::IncludeKind::Local,
+        raw_path: String::new(),
+        resolved_path: None,
+        language: ariadne_graph::LanguageId::Cpp,
+    }
+}
+
+fn chord_cycle_graph() -> IncludeGraph {
+    let mut graph = IncludeGraph::new();
+    for (id, path) in [(1u64, "a.h"), (2, "b.h"), (3, "c.h"), (4, "d.h")] {
+        graph
+            .file_paths
+            .insert(FileId(id), std::path::PathBuf::from(path));
+    }
+    for (source, destination) in [(1, 2), (2, 3), (3, 1), (1, 3), (3, 4)] {
+        graph.edges.push(chord_cycle_edge(source, destination));
+    }
+    graph
+}
+
+fn node_element<'a>(elements: &'a [CytoscapeElement], id: &str) -> &'a CytoscapeElement {
+    elements
+        .iter()
+        .find(|element| {
+            element.data["id"] == id
+                && matches!(element.data["kind"].as_str(), Some("HEADER") | Some("SOURCE"))
+        })
+        .unwrap_or_else(|| panic!("no node element with id {id} among {} elements", elements.len()))
+}
+
+fn edge_element<'a>(
+    elements: &'a [CytoscapeElement],
+    source: u64,
+    destination: u64,
+) -> &'a CytoscapeElement {
+    elements
+        .iter()
+        .find(|element| {
+            element.data["source"] == source.to_string()
+                && element.data["target"] == destination.to_string()
+        })
+        .unwrap_or_else(|| {
+            panic!("no edge element from {source} to {destination} among {} elements", elements.len())
+        })
+}
+
+/// The group of `member` as the real producer (phase 2 `detect_cycle_groups`)
+/// sees it on the chord fixture: exactly one entangled group.
+fn single_group_containing(graph: &IncludeGraph, member: FileId) -> ariadne_graph::CycleGroup {
+    let groups = graph.detect_cycle_groups();
+    assert_eq!(groups.len(), 1, "chord fixture must yield exactly one cycle group");
+    assert!(
+        groups[0].member_files.contains(&member),
+        "the group {:?} must contain {:?}",
+        groups[0].member_files,
+        member
+    );
+    groups[0].clone()
+}
+
+#[test]
+fn intra_group_non_tree_edge_carries_the_cycle_class() {
+    // R1 (IV-3, plan sec1.1 item 1): the chord a.h -> c.h sits inside the
+    // entangled group {a.h, b.h, c.h}, but the old DFS path enumeration only
+    // ever reports the walked tree path [a, b, c] plus its closing pair, so
+    // the chord rendered UNSTYLED between two nodes that both carry the
+    // `cycle` class. Under group membership the chord cannot be missed:
+    // both endpoints are in the SAME group, so the edge must class `cycle`.
+    // TDD trail: this Red failed against the old path-based entry point
+    // (pair (1, 3) emitted is_cycle=false, journal checkpoint 1); the Green
+    // step re-pointed it to the group-based builder per handoff sec4.
+    let graph = chord_cycle_graph();
+    let group = single_group_containing(&graph, FileId(1));
+    let elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[group],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let chord = edge_element(&elements, 1, 3);
+    assert_eq!(
+        chord.data["is_cycle"],
+        serde_json::json!(true),
+        "intra-group chord edge (a.h -> c.h), pair (1, 3), must carry is_cycle = true"
+    );
+    assert_eq!(
+        chord.classes,
+        Some("cycle".to_string()),
+        "intra-group chord edge (a.h -> c.h), pair (1, 3), must carry the cycle class"
+    );
+}
+
+#[test]
+fn node_cycle_data_reports_group_size_and_witness_only_for_grouped_nodes() {
+    // R2 (sec3.3): a grouped node gains `cycle_group_size` (its group's member
+    // count) and `cycle_witness` (the group's representative-cycle path labels
+    // in representative_cycle order, IV-5); a node in no group carries
+    // NEITHER key -- the D27 OMITS rule, never null and never 0.
+    // TDD trail: this Red failed against the old path-based entry point
+    // (cycle_group_size key absent, journal checkpoint 1); the Green step
+    // re-pointed it to the group-based builder per handoff sec4.
+    let graph = chord_cycle_graph();
+    let group = single_group_containing(&graph, FileId(2));
+    let elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[group.clone()],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    let node_b = node_element(&elements, "2");
+    assert_eq!(
+        node_b.data.get("cycle_group_size"),
+        Some(&serde_json::json!(3)),
+        "grouped node b.h (FileId 2) must expose cycle_group_size = 3; actual data map: {}",
+        node_b.data
+    );
+    let expected_witness: Vec<String> = group
+        .representative_cycle
+        .iter()
+        .map(|member| graph.file_paths[member].to_string_lossy().to_string())
+        .collect();
+    assert_eq!(
+        node_b.data.get("cycle_witness"),
+        Some(&serde_json::json!(expected_witness)),
+        "cycle_witness on b.h must equal the group's representative_cycle path labels in witness order; actual data map: {}",
+        node_b.data
+    );
+    let node_d = node_element(&elements, "4");
+    assert!(
+        node_d.data.get("cycle_group_size").is_none(),
+        "ungrouped node d.h (FileId 4) must NOT carry cycle_group_size; actual data map: {}",
+        node_d.data
+    );
+    assert!(
+        node_d.data.get("cycle_witness").is_none(),
+        "ungrouped node d.h (FileId 4) must NOT carry cycle_witness; actual data map: {}",
+        node_d.data
+    );
+}
+
+/// Two disjoint entangled groups plus a cross-group chord and a grouped ->
+/// ungrouped tail: a.h(10) <-> b.h(11) <-> c.h(12), x.h(20) <-> y.h(21),
+/// chord-like cross edge c.h -> x.h, tail y.h -> off.cc(30).
+fn two_group_chord_graph() -> IncludeGraph {
+    let mut graph = IncludeGraph::new();
+    for (id, path) in [
+        (10u64, "a.h"),
+        (11, "b.h"),
+        (12, "c.h"),
+        (20, "x.h"),
+        (21, "y.h"),
+        (30, "off.cc"),
+    ] {
+        graph
+            .file_paths
+            .insert(FileId(id), std::path::PathBuf::from(path));
+    }
+    for (source, destination) in [(10, 11), (11, 10), (11, 12), (12, 11), (12, 20), (20, 21), (21, 20), (21, 30)] {
+        graph.edges.push(chord_cycle_edge(source, destination));
+    }
+    graph
+}
+
+#[test]
+fn grouped_nodes_and_edges_are_classed_cycle_from_membership_not_from_reported_paths() {
+    // IV-2 + IV-3 at the DTO layer. The groups below are hand-built on
+    // purpose: c.h (12) is a member_files entry that NO witness path covers,
+    // the exact shape under which the old representation could class a member
+    // from its reported paths only. The builder must read member_files and
+    // nothing else. Edge (12, 20) is the group-IDENTITY lock: both endpoints
+    // sit in SOME group, but in DIFFERENT groups -- IV-3 (same-group) says
+    // it stays unclassed; a co-membership bug would class it.
+    let graph = two_group_chord_graph();
+    let first_group = ariadne_graph::CycleGroup {
+        member_files: vec![FileId(10), FileId(11), FileId(12)],
+        representative_cycle: vec![FileId(10), FileId(11), FileId(10)],
+        external_in_count: 0,
+        external_out_count: 1,
+    };
+    let second_group = ariadne_graph::CycleGroup {
+        member_files: vec![FileId(20), FileId(21)],
+        representative_cycle: vec![FileId(20), FileId(21), FileId(20)],
+        external_in_count: 1,
+        external_out_count: 1,
+    };
+    assert!(
+        !first_group.representative_cycle.contains(&FileId(12)),
+        "fixture sanity: c.h must be grouped without appearing on any witness path"
+    );
+    let elements = build_include_elements(
+        &graph,
+        &HashMap::new(),
+        &[first_group, second_group],
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+
+    for grouped_id in ["10", "11", "12", "20", "21"] {
+        let node = node_element(&elements, grouped_id);
+        assert_eq!(
+            node.data["is_cycle"],
+            serde_json::json!(true),
+            "member node {grouped_id} must be classed cycle from member_files membership (IV-2)"
+        );
+        assert_eq!(
+            node.classes,
+            Some("cycle".to_string()),
+            "member node {grouped_id} must carry the cycle class"
+        );
+    }
+    let ungrouped = node_element(&elements, "30");
+    assert_eq!(
+        ungrouped.data["is_cycle"],
+        serde_json::json!(false),
+        "ungrouped node 30 must not be classed cycle"
+    );
+    assert_eq!(ungrouped.classes, None, "ungrouped node 30 carries no class");
+
+    for (source, destination) in [(10, 11), (11, 10), (11, 12), (12, 11), (20, 21), (21, 20)] {
+        let same_group_edge = edge_element(&elements, source, destination);
+        assert_eq!(
+            same_group_edge.data["is_cycle"],
+            serde_json::json!(true),
+            "same-group edge ({source}, {destination}) must class cycle (IV-3), witness coverage aside"
+        );
+        assert_eq!(
+            same_group_edge.classes,
+            Some("cycle".to_string()),
+            "same-group edge ({source}, {destination}) must carry the cycle class"
+        );
+    }
+
+    let cross_group_edge = edge_element(&elements, 12, 20);
+    assert_eq!(
+        cross_group_edge.data["is_cycle"],
+        serde_json::json!(false),
+        "edge (12, 20) joins group 1 to group 2: both endpoints are grouped but NOT in the same group, so IV-3 identity requires it to stay unclassed"
+    );
+    assert_eq!(
+        cross_group_edge.classes,
+        None,
+        "cross-group edge (12, 20) must not carry the cycle class"
+    );
+    let tail_edge = edge_element(&elements, 21, 30);
+    assert_eq!(
+        tail_edge.data["is_cycle"],
+        serde_json::json!(false),
+        "edge (21, 30) joins a grouped file to an ungrouped file and must stay unclassed"
+    );
+    assert_eq!(tail_edge.classes, None, "tail edge (21, 30) carries no class");
+
+    assert_eq!(
+        node_element(&elements, "12").data["cycle_group_size"],
+        serde_json::json!(3),
+        "c.h rides group 1's member count"
+    );
+    assert_eq!(
+        node_element(&elements, "20").data["cycle_group_size"],
+        serde_json::json!(2),
+        "x.h rides group 2's member count"
+    );
 }

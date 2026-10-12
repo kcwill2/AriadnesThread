@@ -1,6 +1,7 @@
 use ariadne_graph::{CallGraph, IncludeGraph, ReducedSemanticModel};
 use ariadne_ui::{
-    build_call_elements, build_include_elements, GraphExportPayload, SummaryStats, UiState,
+    build_call_elements, build_include_elements, GraphExportPayload,
+    SummaryStats, UiState,
 };
 use axum::{
     body::Body,

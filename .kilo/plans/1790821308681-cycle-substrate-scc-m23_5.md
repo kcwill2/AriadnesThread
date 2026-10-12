@@ -98,14 +98,14 @@ impl IncludeGraph {
 - **Red:** T1.1 suite is red.
 - **Green:** replace recursion with explicit `Vec<TarjanFrame { symbol_ptr, neighbor_position, ... }>`; lowlink propagation happens on **frame pop**, not on call return -- the classic trap this design structurally avoids. Output contract identical (IV-8): same order, same intra-SCC sort, wrapper `compute_symbol_sccs` unchanged, frame state `Send + Sync`-compatible for the rayon planner (adjacency remains read-only).
 - **Refactor:** one predicate helper per frame-machine step, each < 100 lines; keep `build_symbol_adjacency` untouched.
-- **Review gate:** Code-reviewer audits lowlink update points specifically (push/advance/pop) against the Tarjan invariant; then `cargo test -p ariadne-cluster` + `planner_characterization` + `planner_facts_parity` + **`m00_facts_path_parity_test`** (production byte-lock) all green.
+- **Review gate:** Reviewer audits lowlink update points specifically (push/advance/pop) against the Tarjan invariant; then `cargo test -p ariadne-cluster` + `planner_characterization` + `planner_facts_parity` + **`m00_facts_path_parity_test`** (production byte-lock) all green.
 
 ### Phase 2 -- `CycleGroup` core in crate:graph
 
 **T2.1 `CycleGroup` type + iterative graph Tarjan (groups only).**
 - **Red:** new `crates/graph/tests/cycle_groups_test.rs`: two-cycle fixture (mirrors `m3` and graph.rs's own unit fixture) -> exactly one group `{a,b}`, witness length 3 closing `[a,b,a]`, `external_in/out` counts; diamond-with-chord fixture (a->b->c->a, a->d<-c) -> one 3-member group, `d` in no group, **every** intra-group edge cyclic (IV-3 -- the unstyled-edge-between-reds regression lock); self-include `a->a` -> group `{a}`, witness `[a,a]`; two disjoint groups + DAG connector -> reverse-topological group order (IV-5); empty/acyclic graph -> empty vec.
 - **Green:** `detect_cycle_groups` in **new `crates/graph/src/cycle_groups.rs`** (proactive extraction, section 1.4) -- iterative Tarjan (share the frame-machine *shape* from T1.2; do **not** add a cross-crate dependency -- graph and cluster stay decoupled, ~60-line duplication accepted, noted for reviewer); filter nontrivial/self-loop SCCs; compute external degrees from adjacency crossing counts.
-- **Refactor:** `graph.rs` returns toward <= ~550 lines by deleting `dfs_cycle`/`detect_cycles`.
+- **Refactor (AMENDED 2026-10-04 against the built tree at `b950963`):** `graph.rs` is at **704 lines and stayed at 704 through all of Phase 2** (T2-A and T2-B reviewers both measured it unchanged; the new machine lives in the extracted `crates/graph/src/cycle_groups.rs`, 527 lines). `graph.rs` does NOT return toward ~550 in T2.1. The `dfs_cycle`/`detect_cycles` deletion belongs to **Phase 3 (T3.1)**, not T2.1, and lands in the Phase 3 unit that owns `crates/graph` -- `tasks/m235-t3d-handoff.md` -- where it is atomic with its own last repoint: three of the seven call sites live OUTSIDE `crate:graph` (`crates/cli/src/commands/ui.rs:310`, `crates/cli/tests/payload_tail_bench.rs:295`, and the two Scala integration tests), so no `crate:graph`-scoped unit may delete the method without breaking the workspace build. The proactive `cycle_groups.rs` extraction (above) is what discharges the 1000-line ceiling pressure (plan sec1.4); the deletion is not.
 
 **T2.2 Representative-cycle witness (closed walk per group).**
 - **Red:** seeded random digraphs suite (pattern copied from `closure_equivalence_tests`): every returned witness verified edge-by-edge against `graph.edges` (IV-4); a group with a *known* 2-cycle embedded in a 200-node random tangle must return a witness (existence, not exactness -- exactness is nondeterministic-by-design under DFS choice).
@@ -134,7 +134,7 @@ impl IncludeGraph {
 **T4.1 Full-workspace verification + hygiene.**
 - `python tools/testrun.py --distill` -> quote the canonical `N passed / M failed / K ignored / S suites` line verbatim (compare against the `1147 / 0 / 4 / 85` post-merge baseline; expect net-positive from new suites); golden suite byte-clean (LF pins intact); `python tools/hygiene_check.py` (R1/R2 blocking -- watch the 1000-line ceiling), `python tools/encoding_guard.py --all`; export determinism re-check on the SCC-dense 520-header bench fixture; `payload_tail_bench` timings recorded.
 - Commit this plan file alongside the code (repo.tracks_plan_files).
-- **Code-reviewer handoff:** diffs, T1.1/T2.3 oracle suites, bench numbers, goldens diff, m20/m22 migration diffs. Focus asks: lowlink update points, tie-break determinism, absence of any retained dual cycle representation, policy-seam stance preservation (IV-11).
+- **Reviewer handoff:** diffs, T1.1/T2.3 oracle suites, bench numbers, goldens diff, m20/m22 migration diffs. Focus asks: lowlink update points, tie-break determinism, absence of any retained dual cycle representation, policy-seam stance preservation (IV-11).
 
 ---
 

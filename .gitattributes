@@ -5,3 +5,7 @@ crates/ui/tests/fixtures/*.json text eol=lf
 # against `serde_json::to_string_pretty` output, which is LF-only, so a CRLF
 # checkout makes every line differ by its terminator.
 tests/golden/**/*.json text eol=lf
+# Same rationale for test-run artifact files written under tests/fixtures: an
+# unpinned path under core.autocrlf=true re-dirties its stat entry on every
+# full test run even while its content stays byte-equal to HEAD.
+tests/fixtures/**/artifacts/**/*.json text eol=lf

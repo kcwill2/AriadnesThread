@@ -17,10 +17,11 @@
 //!   excludes the first file's completion tail counted into `symbol_pass`.
 //! - `save_load_artifacts` is COMBINED with the `Arc::new(report)` cache
 //!   wrap: measured as terminal-event -> `ensure_load` return.
-//! - `generate_report`/`detect_cycles` and the `path_to_id`/`file_collateral`
+//! - `generate_report`/`detect_cycle_groups` and the `path_to_id`/`file_collateral`
 //!   maps are each timed COMBINED (two adjacent public calls per row).
 //!
-//! ## Baseline table (recorded 2026-09-29, this bench, `--test-threads=1`)
+//! ## Baseline table (recorded 2026-09-29, combined cycle row re-pinned
+//! ## 2026-10-04, this bench, `--test-threads=1`)
 //!
 //! Fixture: 520 headers / 40 TUs, 2160 reduced symbols, 560 file metrics,
 //! 8960 justification entries, 520 plans (all Conservative rows).
@@ -36,7 +37,7 @@
 //! get_or_build_load clone (cold)                   |   1048.8
 //! get_or_build_include_graph clone (warm)          |      1.4
 //! get_or_build_load clone (warm)                   |   1056.5
-//! generate_report+detect_cycles (combined)         |      5.8
+//! generate_report+detect_cycle_groups (combined)   |      5.6
 //! build_include_elements                           |      5.4
 //! path_to_id+file_collateral maps (combined)       |     29.5
 //! build_file_justification_with_memo               |  15383.9
@@ -57,6 +58,33 @@
 //! true boot order — proposals before the justification memo takes the
 //! closures), so the current planner row is NOT comparable against the A0
 //! cold number kept above for history.
+//!
+//! M23.5 T3.2 re-pin (2026-10-04): the `generate_report+detect_cycles`
+//! combined column became `generate_report+detect_cycle_groups` (the SCC
+//! replacement for `detect_cycles`; crates/graph unit D deleted the public
+//! `detect_cycles()` in `acea7f2`, approved range `adb53a3..aebfa9b`). This
+//! row was re-pinned above to `5.6` ms
+//! from a `--release -- --ignored --test-threads=1` run on 2026-10-04. The
+//! prior combined figure was `5.8` ms (this bench's 2026-09-29 table). The
+//! plan's stated baseline was a DIFFERENT number, `4.7` ms, quoted in the
+//! `ui.rs:103` stage-5 calibration table for the same combined call; `4.7`
+//! and `5.8` were never reconciled in the tree. I re-pinned against this
+//! bench's OWN recorded `5.8` (the same bench, same table, same combined
+//! call) and measured `5.6`: parity within single-run noise, the expected
+//! outcome since SCC detection is linear in V+E. Both sites now record the
+//! single measured `5.6` (the `ui.rs` stage-5 calibration comment moved
+//! with this row per handoff sec 3.3); the split `5.8`-vs-`4.7` pre-unit
+//! baseline is recorded here and in `tasks/m235-t3b-journal.md` rather than
+//! silently resolved.
+//!
+//! UNVERIFIED (handoff sec 5): `5.6` is a SINGLE LOCAL MEASUREMENT on this
+//! machine on 2026-10-04, NOT a bench-compare-verified result.
+//! `python tools/bench_compare.py` is REFUSED by the reviewer bash allowlist
+//! (ledger M23.5 F10) and was NOT run, so there is NO reviewer-run
+//! perf-regression evidence for `detect_cycle_groups`. "Expected parity" is
+//! not "measured parity": the comparison above is UNVERIFIED against
+//! `bench_compare.py`, and it was NOT routed through `distill.py` to evade
+//! the denial.
 //!
 //! Run with:
 //!   cargo test -p ariadne-cli --test payload_tail_bench --release -- \
@@ -291,11 +319,11 @@ fn run_assembly(
     let (_, load_warm_ms) = timed(|| pipeline.get_or_build_load().unwrap());
 
     // ui.rs:238-239 — two adjacent serial calls, timed together.
-    let ((_graph_report, cycles), report_cycles_ms) =
-        timed(|| (graph.generate_report(), graph.detect_cycles()));
+    let ((_graph_report, cycle_groups), report_cycles_ms) =
+        timed(|| (graph.generate_report(), graph.detect_cycle_groups()));
     let (_elements, include_elements_ms) = timed(|| {
         let no_decoration = std::collections::HashMap::new();
-        ariadne_ui::build_include_elements(&graph, &closures, &cycles, &no_decoration, &no_decoration)
+        ariadne_ui::build_include_elements(&graph, &closures, &cycle_groups, &no_decoration, &no_decoration)
     });
     // ui.rs:247-248 — two cheap serial maps, timed together.
     let (justification_maps_ms, path_to_id) = {
@@ -358,7 +386,7 @@ fn run_assembly(
         ("get_or_build_load hand-out (cold)", load_cold_ms),
         ("get_or_build_include_graph clone (warm)", graph_warm_ms),
         ("get_or_build_load hand-out (warm)", load_warm_ms),
-        ("generate_report+detect_cycles (combined)", report_cycles_ms),
+        ("generate_report+detect_cycle_groups (combined)", report_cycles_ms),
         ("build_include_elements", include_elements_ms),
         (
             "path_to_id+file_collateral maps (combined)",
@@ -469,4 +497,126 @@ fn payload_tail_phase_timing() {
     ];
     rows.extend(assembly.rows.iter().map(|(n, ms)| (*n, *ms)));
     print_table(&rows);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-process export byte-stability lock (M23.5 T3-B, item 2).
+//
+// T3-A verdict sec 8 / finding 1 deferred this lock to unit B ("before
+// T4.1"): IV-5 requires `--export` to stay byte-stable across PROCESSES.
+// Two calls in one process cannot detect per-process hash-seed,
+// map-iteration-order, or address-derived nondeterminism, so each export
+// here is its OWN OS process: a separate `std::process::Command`
+// invocation of the real `ariadne` binary, running the export branch of
+// `ui.rs` (build_ui_payload + export_standalone_html; no server, no port).
+// This is the crate's only in-touch-set integration target, which is why
+// the lock lives beside the bench rather than in a new test file.
+// ---------------------------------------------------------------------------
+
+/// Cycle-bearing mini repo: a.h <-> b.h mutual includes form one nontrivial
+/// SCC (group size 2), pulled into the load stage by one TU. Deliberately
+/// tiny - the property locked is byte-stability across processes, not
+/// throughput.
+fn generate_cyclic_export_fixture(root: &Path) {
+    let include_dir = root.join("include");
+    let src_dir = root.join("src");
+    fs::create_dir_all(&include_dir).unwrap();
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(
+        include_dir.join("a.h"),
+        "#pragma once\n#include \"b.h\"\nstruct A { B* peer; int value; };\n",
+    )
+    .unwrap();
+    fs::write(
+        include_dir.join("b.h"),
+        "#pragma once\n#include \"a.h\"\nstruct B { A* peer; int value; };\n",
+    )
+    .unwrap();
+    fs::write(
+        src_dir.join("tu.cpp"),
+        "#include \"a.h\"\nstruct Tu { A* entry; };\nvoid run_entry(A* a) { (void)a; }\n",
+    )
+    .unwrap();
+    let root_str = root.to_string_lossy().replace('\\', "/");
+    fs::write(
+        root.join("compile_commands.json"),
+        format!(
+            "[\n    {{ \"directory\": \"{root_str}\", \"command\": \
+             \"clang++ -Iinclude -c src/tu.cpp\", \"file\": \"src/tu.cpp\" }}\n]\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// One genuine OS process: the built `ariadne` binary running
+/// `ui <repo> --export <path>` to completion.
+fn run_cold_cli_export(repo: &Path, export_path: &Path) {
+    let cli_binary = env!("CARGO_BIN_EXE_ariadne");
+    let run = std::process::Command::new(cli_binary)
+        .arg("ui")
+        .arg(repo)
+        .arg("--export")
+        .arg(export_path)
+        .output()
+        .unwrap_or_else(|spawn_failure| panic!("export process failed to start: {spawn_failure}"));
+    assert!(
+        run.status.success(),
+        "ariadne ui --export exited {}: {}",
+        run.status,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn export_bytes_are_identical_across_two_separate_processes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = dir.path().join("cyclicrepo");
+    generate_cyclic_export_fixture(&repo);
+    let first_export = dir.path().join("export-first.html");
+    let second_export = dir.path().join("export-second.html");
+
+    run_cold_cli_export(&repo, &first_export);
+    // Wipe every persisted stage state (incl. the TU shard cache, all under
+    // `<repo>/artifacts/`) so the second process recomputes symmetrically
+    // from scratch instead of reading the first process's cache.
+    fs::remove_dir_all(repo.join("artifacts")).unwrap();
+    run_cold_cli_export(&repo, &second_export);
+
+    let first_bytes = fs::read(&first_export).unwrap();
+    let second_bytes = fs::read(&second_export).unwrap();
+
+    // Non-vacuity: the payload region must actually carry the cycle-group
+    // currency this milestone introduced (no asset JS contains this key,
+    // so a payload-only substring is a real proof, not a template echo).
+    let data_marker = b"window.__ARIADNE_DATA__ = ";
+    let payload_start = first_bytes
+        .windows(data_marker.len())
+        .position(|window| window == data_marker)
+        .expect("export must embed the payload behind the data marker");
+    let group_size_key = b"cycle_group_size";
+    assert!(
+        first_bytes[payload_start..]
+            .windows(group_size_key.len())
+            .any(|window| window == group_size_key),
+        "payload region must carry cycle_group_size after the T3-B rewiring \
+         (a payload with no cycle-group data could never falsify this lock)"
+    );
+
+    // The lock itself: byte equality across the two separate processes.
+    assert_eq!(
+        first_bytes.len(),
+        second_bytes.len(),
+        "the two exports differ in length: {} vs {} bytes",
+        first_bytes.len(),
+        second_bytes.len()
+    );
+    let first_difference = first_bytes
+        .iter()
+        .zip(second_bytes.iter())
+        .position(|(first, second)| first != second);
+    assert_eq!(
+        first_difference, None,
+        "export bytes diverged at byte offset {:?} (payload starts at byte {payload_start})",
+        first_difference
+    );
 }

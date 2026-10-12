@@ -1,5 +1,6 @@
 //! Physical file include graph structure, closure calculation, cycle detection, and visualization.
 
+use crate::cycle_groups::CycleGroup;
 use crate::types::{IncludeClosure, IncludeEdge, IncludeKind, IncludeReport};
 // M20 D11 (R2-legal): only the policy enum is named here — never a language.
 use ariadne_lang_api::modeling::CyclePolicy;
@@ -77,9 +78,13 @@ impl IncludeGraph {
 
     /// Builds a `source -> sorted, deduplicated destinations` map from the edge list.
     /// Matches `direct_includes` semantics; lets whole-graph traversals run in O(V + E)
-    /// instead of rescanning the edge list at every visited node. The single
-    /// adjacency-build call sites are `compute_closures` and `LoadAnalyzer`'s
-    /// `file_adjacency` memo — no other code may duplicate this loop.
+    /// instead of rescanning the edge list at every visited node. The production
+    /// adjacency-build call sites are `compute_closures` (here),
+    /// `detect_cycle_groups` (`cycle_groups.rs`) and `LoadAnalyzer`'s
+    /// `file_adjacency` memo (`load_caches.rs`) - no other code may duplicate
+    /// this loop. The `#[cfg(test)]` callers (`compute_closures_bfs_oracle`
+    /// here and `closure_equivalence_tests.rs`) are separate, deliberate
+    /// consumers of this same contract, not a licence to add a loop.
     pub(crate) fn adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
         let mut adj: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for edge in &self.edges {
@@ -230,62 +235,6 @@ impl IncludeGraph {
         result
     }
 
-    /// Detects cycles in the include graph using DFS traversal.
-    pub fn detect_cycles(&self) -> Vec<Vec<FileId>> {
-        let mut cycles = Vec::new();
-        let mut visited = HashSet::new();
-        let mut rec_stack = HashSet::new();
-        let mut current_path = Vec::new();
-
-        let mut all_files: Vec<FileId> = self.file_paths.keys().copied().collect();
-        all_files.sort();
-        let adj = self.adjacency();
-
-        for &node in &all_files {
-            if !visited.contains(&node) {
-                Self::dfs_cycle(
-                    node,
-                    &adj,
-                    &mut visited,
-                    &mut rec_stack,
-                    &mut current_path,
-                    &mut cycles,
-                );
-            }
-        }
-
-        cycles
-    }
-
-    fn dfs_cycle(
-        node: FileId,
-        adj: &HashMap<FileId, Vec<FileId>>,
-        visited: &mut HashSet<FileId>,
-        rec_stack: &mut HashSet<FileId>,
-        current_path: &mut Vec<FileId>,
-        cycles: &mut Vec<Vec<FileId>>,
-    ) {
-        visited.insert(node);
-        rec_stack.insert(node);
-        current_path.push(node);
-
-        if let Some(neighbors) = adj.get(&node) {
-            for &neighbor in neighbors {
-                if !visited.contains(&neighbor) {
-                    Self::dfs_cycle(neighbor, adj, visited, rec_stack, current_path, cycles);
-                } else if rec_stack.contains(&neighbor) {
-                    if let Some(pos) = current_path.iter().position(|&n| n == neighbor) {
-                        let cycle = current_path[pos..].to_vec();
-                        cycles.push(cycle);
-                    }
-                }
-            }
-        }
-
-        rec_stack.remove(&node);
-        current_path.pop();
-    }
-
     /// Generates an aggregated summary report of the include graph, treating
     /// every file's cycle stance as `Reject` (IV-4): `informational_cycle_count`
     /// is 0 and skipped by serde, so the artifact shape is unchanged for all
@@ -294,19 +243,26 @@ impl IncludeGraph {
         self.generate_report_with_cycle_policies(&|_file_id| CyclePolicy::Reject)
     }
 
-    /// A cycle is informational iff **every** member file's policy is
-    /// non-`Reject` (M20 D11, IV-3); a mixed-member cycle is blocking.
-    fn cycle_is_informational(cycle: &[FileId], policy_of: &dyn Fn(FileId) -> CyclePolicy) -> bool {
-        cycle
+    /// A group is informational iff **every** member file's policy is
+    /// non-`Reject` (M20 D11 ported to partition semantics, IV-11); a
+    /// mixed-member group is blocking.
+    fn group_is_informational(
+        group: &CycleGroup,
+        policy_of: &dyn Fn(FileId) -> CyclePolicy,
+    ) -> bool {
+        group
+            .member_files
             .iter()
             .all(|&file_id| !matches!(policy_of(file_id), CyclePolicy::Reject))
     }
 
-    /// Generates the summary report classifying cycles against the injected
-    /// per-file cycle policies (M20 D11). `cycle_count` still counts every
-    /// detected cycle (IV-2, m3 lock); `informational_cycle_count` counts the
-    /// cycles where all members tolerate. No language is named here (R2) —
-    /// the stance arrives purely through `policy_of`.
+    /// Generates the summary report classifying entangled groups against the
+    /// injected per-file cycle policies (M20 D11 ported to groups, IV-11).
+    /// `cycle_count` counts every detected entangled group (IV-9: the field
+    /// name survives and the m3 lock holds; the unit is now the group);
+    /// `informational_cycle_count` counts the groups where all members
+    /// tolerate. No language is named here (R2) - the stance arrives purely
+    /// through `policy_of`.
     pub fn generate_report_with_cycle_policies(
         &self,
         policy_of: &dyn Fn(FileId) -> CyclePolicy,
@@ -353,10 +309,10 @@ impl IncludeGraph {
         closure_sizes.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
         let top_headers = closure_sizes.into_iter().take(10).collect();
 
-        let detected_cycles = self.detect_cycles();
-        let informational_cycle_count = detected_cycles
+        let detected_groups = self.detect_cycle_groups();
+        let informational_cycle_count = detected_groups
             .iter()
-            .filter(|cycle| Self::cycle_is_informational(cycle, policy_of))
+            .filter(|group| Self::group_is_informational(group, policy_of))
             .count();
 
         IncludeReport {
@@ -366,7 +322,7 @@ impl IncludeGraph {
             system_headers_count: system_count,
             external_headers_count: external_count,
             unresolved_includes_count: unresolved_count,
-            cycle_count: detected_cycles.len(),
+            cycle_count: detected_groups.len(),
             informational_cycle_count,
             top_headers_by_closure: top_headers,
         }
@@ -531,9 +487,9 @@ mod tests {
             language: LanguageId::cpp(),
         });
 
-        let cycles = graph.detect_cycles();
+        let cycle_groups = graph.detect_cycle_groups();
         assert!(
-            !cycles.is_empty(),
+            !cycle_groups.is_empty(),
             "Cycle must be detected between a.h and b.h"
         );
     }
@@ -609,12 +565,86 @@ mod tests {
         graph
     }
 
+    /// One entangled group `{1, 2, 3}` that the old recursive DFS path
+    /// enumeration reported as TWO cycles: the chord `3 -> 2` makes the walk
+    /// emit both `[1, 2, 3]` (via back edge `3 -> 1`) and `[2, 3]` (via chord
+    /// back edge `3 -> 2`). All three files are registered, so IV-2
+    /// membership equality holds and only the COUNT differs between the two
+    /// representations -- the fixture that discriminates path semantics from
+    /// group semantics (`mutual_cycle_graph` cannot: one path, one group).
+    fn double_reporting_scc() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        let cpp = LanguageId::cpp();
+        graph.register_file(FileId(1), PathBuf::from("a.h"));
+        graph.register_file(FileId(2), PathBuf::from("b.h"));
+        graph.register_file(FileId(3), PathBuf::from("c.h"));
+        graph.add_edge(edge(FileId(1), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(2), FileId(3), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(3), FileId(1), IncludeKind::Local, cpp.clone()));
+        graph.add_edge(edge(FileId(3), FileId(2), IncludeKind::Local, cpp.clone()));
+        graph
+    }
+
+    #[test]
+    fn cycle_count_counts_entangled_groups_not_reported_paths() {
+        // IV-9 / plan sec1.1 item 2 (R1): `cycle_count` stops exploding
+        // combinatorially -- it counts entangled groups, not DFS-accidental
+        // paths. The old enumeration reported two paths for this one SCC;
+        // the group count is 1.
+        let report = double_reporting_scc().generate_report();
+        assert_eq!(
+            report.cycle_count, 1,
+            "the SCC {{1, 2, 3}} is ONE entangled group even though the old \
+             DFS path enumeration reported two paths ([1, 2, 3] and [2, 3]) for it"
+        );
+    }
+
+    #[test]
+    fn double_reporting_scc_with_one_rejecting_member_is_blocking() {
+        // IV-11 (R2): the group rule classifies the WHOLE entangled group.
+        // Group {1, 2, 3} contains the rejecting FileId(1), so it is blocking
+        // even though the old enumeration happened to report the
+        // all-tolerating path [2, 3] alongside [1, 2, 3] -- under the old
+        // per-path rule `informational_cycle_count` was 1 and the key
+        // serialized.
+        use ariadne_lang_api::modeling::CyclePolicy;
+        let report = double_reporting_scc().generate_report_with_cycle_policies(&|file_id| {
+            if file_id == FileId(1) {
+                CyclePolicy::Reject
+            } else {
+                CyclePolicy::Tolerate
+            }
+        });
+        assert_eq!(
+            report.informational_cycle_count, 0,
+            "a group containing a rejecting member is blocking even if some \
+             old DFS path through it (here [2, 3]) was all-tolerating"
+        );
+        let report_json = serde_json::to_string(&report).unwrap();
+        assert!(
+            !report_json.contains("informational_cycle_count"),
+            "zero informational groups must keep the skip-when-zero serde shape: {report_json}"
+        );
+    }
+
+    // IV-11 policy suite: every stance below is now asserted on the GROUP
+    // unit (the M20 D11 rule ported from DFS-accidental paths to entangled
+    // groups). `mutual_cycle_graph()` yields exactly one group, so every
+    // numeric stance is identical under both representations - porting here
+    // means the wording is honest about the unit counted, and the two serde
+    // byte-stability locks below stay byte-for-byte. The discriminating
+    // coverage for the semantic shift is
+    // `cycle_count_counts_entangled_groups_not_reported_paths` and
+    // `double_reporting_scc_with_one_rejecting_member_is_blocking` above.
     #[test]
     fn cycle_with_all_members_tolerating_is_informational() {
         use ariadne_lang_api::modeling::CyclePolicy;
         let report = mutual_cycle_graph()
             .generate_report_with_cycle_policies(&|_file_id| CyclePolicy::TolerateWithinPackage);
-        assert_eq!(report.cycle_count, 1, "IV-2: cycle_count keeps counting all cycles");
+        assert_eq!(
+            report.cycle_count, 1,
+            "IV-9: cycle_count keeps counting every entangled group"
+        );
         assert_eq!(report.informational_cycle_count, 1);
     }
 
