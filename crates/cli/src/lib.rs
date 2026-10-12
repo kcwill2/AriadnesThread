@@ -253,6 +253,10 @@ pub enum Commands {
         /// Disable the live-refresh watcher
         #[arg(long, default_value_t = false)]
         no_watch: bool,
+        /// Bind a wider address (e.g. a LAN address) instead of the
+        /// 127.0.0.1 default; the UI has no authentication and this warns
+        #[arg(long)]
+        expose: Option<String>,
     },
 }
 
@@ -324,8 +328,17 @@ pub fn run_cli() -> Result<()> {
             export,
             watch_interval,
             no_watch,
+            expose,
         }) => {
-            dispatch_ui(repo, port, no_open, export, watch_interval, no_watch)?;
+            dispatch_ui(
+                repo,
+                port,
+                no_open,
+                export,
+                watch_interval,
+                no_watch,
+                expose,
+            )?;
         }
     }
 
@@ -446,6 +459,7 @@ fn dispatch_ui(
     export: Option<PathBuf>,
     watch_interval: u64,
     no_watch: bool,
+    expose: Option<String>,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run_ui(
@@ -455,6 +469,7 @@ fn dispatch_ui(
         export,
         watch_interval,
         no_watch,
+        expose,
     ))?;
     Ok(())
 }
@@ -753,6 +768,67 @@ mod tests {
                 assert_eq!(repo.to_str().unwrap(), "my_repo");
             }
             _ => panic!("Expected Optimize command"),
+        }
+    }
+
+    // AR-02 (S6): `tool ui` must accept `--expose <addr>` as the only opt-in
+    // to a non-localhost bind; omitting it keeps the 127.0.0.1 default.
+    #[test]
+    fn test_cli_ui_accepts_expose_flag() {
+        use clap::CommandFactory;
+        let parsed = Cli::command().try_get_matches_from(vec![
+            "tool", "ui", "my_repo", "--expose", "10.0.0.5",
+        ]);
+        assert!(
+            parsed.is_ok(),
+            "`tool ui --expose <addr>` must parse; got: {:?}",
+            parsed.err().map(|error| error.to_string())
+        );
+    }
+
+    #[test]
+    fn test_cli_ui_expose_flag_carries_address() {
+        let args = vec!["tool", "ui", "my_repo", "--expose", "10.0.0.5"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Ui { expose, .. } => {
+                assert_eq!(expose.as_deref(), Some("10.0.0.5"));
+            }
+            _ => panic!("Expected Ui command with --expose"),
+        }
+    }
+
+    #[test]
+    fn test_cli_ui_help_documents_expose_lan_warning() {
+        use clap::CommandFactory;
+        let mut root_command = Cli::command();
+        let ui_command = root_command
+            .find_subcommand("ui")
+            .expect("`ui` subcommand must exist");
+        let expose_flag = ui_command
+            .get_arguments()
+            .find(|arg| arg.get_long() == Some("expose"))
+            .expect("`ui` must carry a --expose flag");
+        let help_text = expose_flag
+            .get_help()
+            .map(|help| help.to_string())
+            .unwrap_or_default();
+        assert!(
+            help_text.contains("127.0.0.1") && help_text.contains("warn"),
+            "--expose help must state the localhost default and the exposure warning: {help_text}"
+        );
+    }
+
+    #[test]
+    fn test_cli_ui_without_expose_keeps_localhost_default() {
+        let args = vec!["tool", "ui", "my_repo"];
+        let cli = Cli::parse_from(args);
+        match cli.command.unwrap() {
+            Commands::Ui { expose, .. } => {
+                assert!(expose.is_none(), "no --expose means no bind override");
+                assert_eq!(resolve_bind_addr(expose.as_deref()), "127.0.0.1");
+            }
+            _ => panic!("Expected Ui command"),
         }
     }
 }

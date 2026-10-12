@@ -9,3 +9,9 @@ tests/golden/**/*.json text eol=lf
 # unpinned path under core.autocrlf=true re-dirties its stat entry on every
 # full test run even while its content stays byte-equal to HEAD.
 tests/fixtures/**/artifacts/**/*.json text eol=lf
+# Same rationale for the AR-31 tokenizer byte-oracle files: the comparison
+# is a byte-exact read of these .txt oracles against re-tokenized fixture
+# streams, so a CRLF smudge on checkout makes every oracle line differ by
+# its terminator (caught at the shining-enthusiasm -> main merge 2026-10-12:
+# green in the authoring worktree, red on the smudged copy).
+crates/lang-cpp/tests/tokenizer_oracles/** text eol=lf

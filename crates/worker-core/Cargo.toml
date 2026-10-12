@@ -1,0 +1,24 @@
+[package]
+name = "ariadne-worker-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ariadne-repo = { path = "../repo" }
+ariadne-build = { path = "../build" }
+ariadne-index = { path = "../index" }
+ariadne-lang = { path = "../lang" }
+
+[dev-dependencies]
+tempfile.workspace = true
+# The canonical closure/merge tests travel verbatim with tu_store and run
+# the real C++ plugin through the registry seam (production code in this
+# crate stays plugin-free). This dev-dependencies edge back into lang-cpp
+# is test-only and cargo-legal, mirroring the documented precedent at
+# crates/build/Cargo.toml:16-21 (lang-cpp depends on this crate's
+# publisher chain normally, so this edge must stay dev-only).
+ariadne-lang-cpp = { path = "../lang-cpp" }

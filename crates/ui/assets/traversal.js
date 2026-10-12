@@ -41,7 +41,7 @@ function populateTraversalRootSelect() {
         .filter(n => filesWithDeps.has(n.id))
         .sort((a, b) => a.label.localeCompare(b.label));
       console.log('[traversal] traversalRoots:', traversalRoots.length, traversalRoots.map(r => r.label));
-      select.innerHTML = traversalRoots.map(n => `<option value="${n.id}">${escapeHtml(n.label)} (${n.path})</option>`).join('');
+      select.innerHTML = traversalRoots.map(n => `<option value="${escapeAttribute(n.id)}">${escapeHtml(n.label)} (${escapeHtml(n.path)})</option>`).join('');
       
       // If there's a currently selected node that's a valid root, use it
       let rootToUse = traversalRoots[0]?.id;
@@ -128,7 +128,7 @@ function populateTraversalRootSelect() {
         `<div class="searchable-select-option" data-value="${d.id}" data-index="${i}">${escapeHtml(d.label)} <span class="searchable-select-path">(${escapeHtml(d.path)})</span></div>`
       ).join('');
       
-      hiddenSelect.innerHTML = deps.map(d => `<option value="${d.id}">${escapeHtml(d.label)} (${d.path})</option>`).join('');
+      hiddenSelect.innerHTML = deps.map(d => `<option value="${escapeAttribute(d.id)}">${escapeHtml(d.label)} (${escapeHtml(d.path)})</option>`).join('');
       
       // Click handler for options
       dropdown.querySelectorAll('.searchable-select-option').forEach(opt => {

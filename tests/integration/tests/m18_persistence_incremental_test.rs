@@ -311,23 +311,29 @@ async fn test_m18_ui_warm_start_reports_all_stages_loaded() {
 
     let repo_dir = root.clone();
     let server_task = tokio::spawn(async move {
-        let _ = ariadne_cli::run_ui(Some(repo_dir), port, true, None, 2, true).await;
+        // S6: keep the 127.0.0.1 bind default (no --expose).
+        let _ = ariadne_cli::run_ui(Some(repo_dir), port, true, None, 2, true, None).await;
     });
 
+    // Poll-first readiness (mirrors m21_run_ui_smoke poll_until_ready):
+    // probe immediately, only sleep BETWEEN attempts. Same 120 x 250 ms
+    // budget and the same terminal ready assertions below.
     let base = format!("http://127.0.0.1:{}", port);
     let mut status = serde_json::Value::Null;
     for _ in 0..120 {
-        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
         let Ok(resp) = reqwest::get(format!("{}/api/status", base)).await else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
             continue;
         };
         if !resp.status().is_success() {
+            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
             continue;
         }
         status = resp.json().await.unwrap_or(serde_json::Value::Null);
         if status["progress"]["state"].as_str() == Some("ready") {
             break;
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
     }
 
     assert_eq!(status["progress"]["state"].as_str(), Some("ready"));

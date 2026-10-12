@@ -68,6 +68,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "ariadne-artifact"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ariadne-build",
+ "ariadne-cluster",
+ "ariadne-graph",
+ "ariadne-index",
+ "ariadne-lang",
+ "ariadne-repo",
+ "ariadne-transform",
+ "ariadne-validate",
+ "bincode",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "ariadne-build"
 version = "0.1.0"
 dependencies = [
@@ -205,10 +225,12 @@ dependencies = [
 name = "ariadne-lang-api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "ariadne-repo",
  "bincode",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -220,7 +242,7 @@ dependencies = [
  "ariadne-lang",
  "ariadne-lang-api",
  "ariadne-repo",
- "ariadne-scheduler",
+ "ariadne-worker-core",
  "serde_json",
  "tempfile",
 ]
@@ -263,6 +285,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "serde",
+ "serde_json",
  "sha2",
  "tempfile",
 ]
@@ -272,6 +295,7 @@ name = "ariadne-report"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-artifact",
  "ariadne-build",
  "ariadne-cluster",
  "ariadne-graph",
@@ -293,13 +317,14 @@ name = "ariadne-scheduler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ariadne-artifact",
  "ariadne-build",
  "ariadne-graph",
  "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
  "ariadne-repo",
- "ariadne-report",
+ "ariadne-worker-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -358,6 +383,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "ariadne-worker-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ariadne-build",
+ "ariadne-index",
+ "ariadne-lang",
+ "ariadne-lang-cpp",
+ "ariadne-repo",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -1820,6 +1860,26 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]

@@ -96,9 +96,10 @@
       return lines.length;
     }
 
-    function escapeHtml(str) {
-      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
+    // AR-11/S4: the local weaker escapeHtml duplicate is REMOVED - hotspots.js
+    // ships the single quote-safe shared escaper, and a second global
+    // declaration here would silently override it for the whole app depending
+    // on load order. All escapeHtml calls in this file bind to the shared one.
 
     function exportData() {
       const jsonStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(graphData, null, 2));

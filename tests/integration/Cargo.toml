@@ -29,6 +29,10 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 ariadne-lang-api = { path = "../../crates/lang-api" }
 ariadne-lang = { path = "../../crates/lang" }
 # M18.4: fingerprint helpers must inject the same C++ shaper the pipeline does.
-ariadne-lang-cpp = { path = "../../crates/lang-cpp" }
+# AR-21 D1: the m18 parity binary drives its legacy side through the
+# test-gated `ariadne_lang_cpp::IncludeResolver` (see crates/lang-cpp
+# Cargo.toml [features]); this dev-dep edge is the single feature-wiring
+# site (a tests-only package; production builds never see the feature).
+ariadne-lang-cpp = { path = "../../crates/lang-cpp", features = ["test-resolver"] }
 # M19.3: the m19 discovery suite asserts the Scala plugin contract end to end.
 ariadne-lang-scala = { path = "../../crates/lang-scala" }

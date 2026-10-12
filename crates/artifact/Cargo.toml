@@ -1,0 +1,23 @@
+[package]
+name = "ariadne-artifact"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+rayon.workspace = true
+ariadne-build = { path = "../build" }
+ariadne-graph = { path = "../graph" }
+ariadne-index = { path = "../index" }
+ariadne-lang = { path = "../lang" }
+ariadne-repo = { path = "../repo" }
+ariadne-cluster = { path = "../cluster" }
+ariadne-transform = { path = "../transform" }
+ariadne-validate = { path = "../validate" }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -20,7 +20,7 @@ pub struct IncrementalAnalysisResult {
 
 impl IncrementalAnalysisResult {
     pub fn save_artifacts(&self, repo: &Repository) -> Result<()> {
-        let manager = ariadne_report::ArtifactManager::prepare_for_repo(repo)?;
+        let manager = ariadne_artifact::ArtifactManager::prepare_for_repo(repo)?;
 
         manager
             .save_repository_artifacts(&self.store_ctx.discovery, &self.fingerprints.repository)?;

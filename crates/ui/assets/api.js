@@ -1,4 +1,17 @@
 // Data & boot layer split from index.html: live/offline data loading and client API helpers.
+
+    // Live-refresh state. AR-15 scope fix: `lastSeenRefresh` used to be
+    // let-bound inside init()'s else-block, but the top-level
+    // startLiveRefresh loop reads it on every tick - a block-scoped
+    // binding made that read a silently-swallowed ReferenceError, so the
+    // delta branch never ran once the server reported a refresh. Top
+    // level is the only scope both sites share.
+    // `exportEtag` carries the /api/export validator across polls so the
+    // live refresh can ask for a delta instead of re-transferring and
+    // re-parsing an unchanged payload (server answers 304 on match).
+    let lastSeenRefresh = 0;
+    let exportEtag = null;
+
     // Synthetic boot snapshot for the standalone export path: same wire shape
     // as /api/status progress, three steps at the historical 25/65/100
     // percents, statuses advancing pending -> active -> done as `activeIndex`
@@ -44,7 +57,7 @@
         const overlay = document.getElementById('loadingOverlay');
         if (overlay) overlay.style.display = 'flex';
 
-        let lastSeenRefresh = 0;
+        // lastSeenRefresh is declared at api.js top level (AR-15 scope fix).
 
         const pollStatus = async () => {
           try {
@@ -75,6 +88,8 @@
                 if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
                 if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
                 if (exportRes && exportRes.ok) {
+                  // AR-15: keep the validator for the live-refresh delta.
+                  exportEtag = exportRes.headers.get('ETag');
                   const exportPayload = await exportRes.json();
                   graphData.file_collateral = exportPayload.file_collateral || {};
                   graphData.file_justification = exportPayload.file_justification || {};
@@ -125,12 +140,19 @@
                 fetch('/api/graph/include').catch(() => null),
                 fetch('/api/graph/symbol').catch(() => null),
                 fetch('/api/graph/call').catch(() => null),
-                fetch('/api/export').catch(() => null),
+                // AR-15 ETag/delta-aware: carry the validator so an unchanged
+                // export costs a 304 instead of a full transfer + parse.
+                fetch('/api/export', exportEtag ? { headers: { 'If-None-Match': exportEtag } } : undefined).catch(() => null),
               ]);
               if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
               if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
               if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
-              if (exportRes && exportRes.ok) {
+              if (exportRes && exportRes.status === 304) {
+                // Delta path: export bytes unchanged (exact ETag match at the
+                // server), so the export-derived fields below stay as they
+                // are; the three graph datasets above may still have changed.
+              } else if (exportRes && exportRes.ok) {
+                exportEtag = exportRes.headers.get('ETag');
                 const p = await exportRes.json();
                 graphData.file_collateral = p.file_collateral || {};
                 graphData.file_justification = p.file_justification || {};
@@ -208,7 +230,7 @@
         justificationSidePart('collateral', 'just-collateral', e.collateral_symbols || [], e.collateral_truncated, e.collateral_count || 0),
       ].join('');
       const previewBtn = row.impact
-        ? `<button type="button" class="just-preview-btn" data-preview-root="${escapeHtml(String(nodeId))}" data-preview-source="${escapeHtml(String(row.id))}">Preview after extraction</button>`
+        ? `<button type="button" class="just-preview-btn" data-preview-root="${escapeAttribute(String(nodeId))}" data-preview-source="${escapeAttribute(String(row.id))}">Preview after extraction</button>`
         : '';
       const summary = `<summary><span style="color:var(--cyan);">${escapeHtml(row.label || row.id)}</span>`
         + `<span style="color:var(--text-sub);">${e.justified_count || 0} sym · ${e.collateral_count || 0} col</span></summary>`;
@@ -301,7 +323,7 @@
         const res = await fetch(`/api/graph/path?graph_type=${currentTab}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
         if (res.ok) {
           const path = await res.json();
-          resultDiv.innerHTML = path.map(n => `<span class="path-node">${n}</span>`).join('<span class="path-sep">&rarr;</span>');
+          resultDiv.innerHTML = path.map(n => `<span class="path-node">${escapeHtml(n)}</span>`).join('<span class="path-sep">&rarr;</span>');
           if (path.length > 0) {
             selectNode(path[0]);
           }
@@ -321,7 +343,7 @@
         const res = await fetch(`/api/graph/entrypoints?graph_type=${currentTab}&limit=10`);
         if (res.ok) {
           const eps = await res.json();
-          listDiv.innerHTML = eps.map(ep => `<div style="cursor:pointer; color:var(--cyan); margin: 5px 0;" onclick="selectNode('${ep}'); closeModals();">${ep}</div>`).join('');
+          listDiv.innerHTML = eps.map(ep => `<div style="cursor:pointer; color:var(--cyan); margin: 5px 0;" data-select-id="${escapeAttribute(ep)}">${escapeHtml(ep)}</div>`).join('');
         } else {
           listDiv.innerHTML = 'No entrypoints found.';
         }

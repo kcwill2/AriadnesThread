@@ -1,6 +1,7 @@
 //! Compiler validation trait for language plugins.
 
 use ariadne_lang_api::capability::ToolchainStatus;
+use ariadne_lang_api::error::PluginError;
 use std::path::PathBuf;
 
 /// Invokes the real language compiler to verify that a set of source files
@@ -11,13 +12,17 @@ use std::path::PathBuf;
 pub trait CompilerValidator: Send + Sync {
     /// Attempt to compile `source_files` using `compiler_args`.
     ///
-    /// Returns `Ok(())` on success or `Err(message)` on failure, where
-    /// `message` contains the compiler's error output.
+    /// Returns `Ok(())` on success, or a typed [`PluginError`] on failure:
+    /// [`PluginError::ValidationNotWired`] / [`PluginError::ToolchainUnavailable`]
+    /// when the validation could not run, [`PluginError::CompileFailure`]
+    /// when the compiler ran and reported its output. The `Display`
+    /// rendering is the plugin's CLI-visible message VERBATIM -- byte-stable
+    /// across the typed-seam conversion (AR-24 locks).
     fn validate_compile(
         &self,
         source_files: &[PathBuf],
         compiler_args: &[String],
-    ) -> Result<(), String>;
+    ) -> Result<(), PluginError>;
 
     /// Whether the language toolchain is present, so tier-3 validation can
     /// report `Skipped` instead of `Fail` when the compiler is absent.
@@ -36,7 +41,7 @@ mod tests {
             &self,
             _source_files: &[PathBuf],
             _compiler_args: &[String],
-        ) -> Result<(), String> {
+        ) -> Result<(), PluginError> {
             Ok(())
         }
     }

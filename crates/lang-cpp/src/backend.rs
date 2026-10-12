@@ -16,12 +16,12 @@
 //! in-process fallback is byte-identical to the removed pre-M18
 //! `DefaultWorkerBackend`: body-only `CppSemanticAnalyzer::analyze_source`,
 //! or the canonical plugin closure merge when the task carries a store
-//! context (`scheduler::tu_store::analyze_tu_full_with_plugin`).
+//! context (`ariadne_worker_core::tu_store::analyze_tu_full_with_plugin`).
 
 use anyhow::Result;
 use std::path::Path;
 
-use ariadne_scheduler::{TuTask, WorkerBackend};
+use ariadne_worker_core::{TuTask, WorkerBackend};
 // `TuAnalysis` lives in `ariadne-lang-api` and is re-exported by
 // `ariadne-lang` (and `ariadne-index`): the same type end to end, without a
 // new `lang-cpp -> index` edge.
@@ -177,7 +177,7 @@ fn inprocess_cpp_fallback(task: &TuTask, repo_root: &Path) -> Result<TuAnalysis>
     if let Some(ctx) = &task.context {
         // Canonical closure merge through the C++ plugin — identical bytes to
         // the pre-M18 `analyze_tu_full` the deprecated backend ran here.
-        let (analysis, _fingerprint) = ariadne_scheduler::analyze_tu_full_with_plugin(
+        let (analysis, _fingerprint) = ariadne_worker_core::tu_store::analyze_tu_full_with_plugin(
             &task.tu,
             repo_root,
             ctx,

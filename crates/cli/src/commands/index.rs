@@ -69,7 +69,7 @@ pub fn handle_index_with_registry_filtered(
     registry: Arc<LanguageRegistry>,
     language: Option<SourceLanguage>,
 ) -> Result<IndexResult> {
-    if let Some(language) = language {
+    if let Some(language) = language.clone() {
         crate::registry::ensure_language_registered(&registry, language)?;
     }
 

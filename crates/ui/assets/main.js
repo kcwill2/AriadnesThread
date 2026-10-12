@@ -318,6 +318,32 @@
       selectNode(crumb.id);
     }
 
+    // AR-11/S2: delegated clicks for the inspector link lists and the
+    // entrypoints modal. The removed inline payloads were
+    //   upstream/downstream row:  selectNode('${e.source/e.target}')
+    //   collateral row:           illuminatePath('${id}', '${entry.id}')
+    //   entrypoint row:           selectNode('${ep}'); closeModals();
+    // and now ride inert data-* attributes (graph.js/api.js emit them). One
+    // listener per static container maps the row to the same function call
+    // the inline handler made. main.js loads last, so containers and handler
+    // globals all exist here. The thread-bar crumb keeps jumpToCrumb(${i}):
+    // its argument is a numeric array index, never repo content.
+    function onListClick(containerId, rowSelector, handler) {
+      const list = document.getElementById(containerId);
+      if (!list) return;
+      list.addEventListener('click', event => {
+        const row = event.target.closest(rowSelector);
+        if (row) handler(row);
+      });
+    }
+    onListClick('inspUpstreamList', '.link-item[data-select-id]', row => selectNode(row.dataset.selectId));
+    onListClick('inspDownstreamList', '.link-item[data-select-id]', row => selectNode(row.dataset.selectId));
+    onListClick('inspCollateralList', '.link-item[data-path-from]', row => illuminatePath(row.dataset.pathFrom, row.dataset.pathTo));
+    onListClick('entrypointsList', 'div[data-select-id]', row => {
+      selectNode(row.dataset.selectId);
+      closeModals();
+    });
+
     function findIncludePath(fromId, toId) {
       if (fromId === toId) return [fromId];
       const queue = [[fromId]];

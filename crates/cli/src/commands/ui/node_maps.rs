@@ -56,10 +56,10 @@ pub fn unit_kind_map(
     let mut by_language: HashMap<SourceLanguage, Option<String>> = HashMap::new();
     for file in files {
         let unit = by_language
-            .entry(file.language)
+            .entry(file.language.clone())
             .or_insert_with_key(|language| {
                 registry
-                    .plugin_for_id(ariadne_lang::LanguageId::from(*language))
+                    .plugin_for_id(ariadne_lang::LanguageId::from(language.clone()))
                     .map(|plugin| format!("{:?}", plugin.modeling().unit))
             });
         if let Some(unit) = unit {

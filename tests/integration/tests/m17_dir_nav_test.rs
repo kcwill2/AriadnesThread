@@ -1,10 +1,12 @@
 use std::fs;
-use std::path::PathBuf;
 use tempfile::tempdir;
+
+mod common;
+use common::fixture_path;
 
 #[tokio::test]
 async fn test_m17_dir_nav_markers_in_export() {
-    let repo_dir = PathBuf::from("../../tests/fixtures/basic");
+    let repo_dir = fixture_path("basic");
     let export_dir = tempdir().unwrap();
     let export_file = export_dir.path().join("export.html");
 
@@ -15,6 +17,7 @@ async fn test_m17_dir_nav_markers_in_export() {
         Some(export_file.clone()),
         2,
         true,
+        None, // S6: keep the 127.0.0.1 bind default
     )
     .await;
 

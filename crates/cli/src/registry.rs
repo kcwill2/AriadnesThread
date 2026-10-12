@@ -25,14 +25,14 @@ pub fn ensure_language_registered(
     registry: &LanguageRegistry,
     language: SourceLanguage,
 ) -> anyhow::Result<()> {
-    if registry.plugin_for_id(LanguageId::from(language)).is_none() {
+    if registry.plugin_for_id(LanguageId::from(language.clone())).is_none() {
         anyhow::bail!("language plugin not registered: {language:?}");
     }
     Ok(())
 }
 
-/// Parse a `--lang` value through `ariadne_repo::SourceLanguage`'s serde
-/// variant names (the stored PascalCase names), also accepting the exact
+/// Parse a `--lang` value against the stored PascalCase serde names
+/// (`SourceLanguage::CPP`/`SCALA`/`OTHER`), also accepting the exact
 /// lowercase short form (`--lang cpp` ≡ `--lang Cpp`) for ergonomics.
 pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
     let mut chars = raw.chars();
@@ -41,9 +41,7 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
         None => String::new(),
     };
     for candidate in [raw, capitalized.as_str()] {
-        if let Ok(language) =
-            serde_json::from_value::<SourceLanguage>(serde_json::Value::String(candidate.into()))
-        {
+        if let Some(language) = closed_set_language_by_serde_name(candidate) {
             return Ok(language);
         }
     }
@@ -53,12 +51,30 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
     ))
 }
 
+/// AR-27a closed-set lookup over the stored serde names. The JSON arm of
+/// `SourceLanguage` (now the open `LanguageId` newtype) parses ANY name, so
+/// the `--lang` selection must not run through it: `--lang rust` stays the
+/// clear error §3.3 fact 3 demands, and an open id enters a run only through
+/// a registered plugin, never through this argument.
+fn closed_set_language_by_serde_name(name: &str) -> Option<SourceLanguage> {
+    if name == SourceLanguage::CPP {
+        return Some(SourceLanguage::Cpp);
+    }
+    if name == SourceLanguage::SCALA {
+        return Some(SourceLanguage::Scala);
+    }
+    if name == SourceLanguage::OTHER {
+        return Some(SourceLanguage::Other);
+    }
+    None
+}
+
 /// Language-scoped stage backend (plan M23, D-M23-7 ii, T7): the plugin
 /// **of `language`** when that plugin's own capabilities enable
 /// `capability`; `None` for an unregistered language or a false capability
 /// (callers keep their honest error, never a C++ default). Replaces the
 /// pre-flip exactly-one-claim helper `capability_backend`, which the
-/// [`ScalaPlugin`](ariadne_lang_scala::ScalaPlugin) flip made ambiguous by
+/// `ScalaPlugin` (lang-scala) registration flip made ambiguous by
 /// construction (two plugins claim most stages).
 pub fn capability_backend_for_language<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
@@ -94,36 +110,90 @@ pub fn plan_backend<'a>(
     })
 }
 
+/// The typed dispatch failures of [`incremental_backend`] (AR-25, A7 rider).
+///
+/// The variants carry exactly one consumer fact: WHICH registration rule
+/// rejected the build. `Display` renders the strings this seam printed before
+/// AR-25 byte-identically (the strings are the CLI-visible contract, locked
+/// by the `ar25_*_is_a_typed_source_through_the_seam` tests in
+/// `crates/cli/tests/ar25_seam_error_chain_test.rs`). Unlike the `String`
+/// errors they replace, they survive `anyhow` erasure as a typed source: a
+/// caller `downcast_ref`s the kind instead of pattern-matching rendered text
+/// (the same discipline AR-24 established for the plugin seam, and report's
+/// `StaleArtifact` established for artifacts; hand-rolled Display + Error per
+/// that precedent - no new dependency).
+///
+/// Deliberately NOT an `ariadne_lang::PluginError`: those variants are
+/// compiler-validation kinds ("could the validation run at all?"), while
+/// these are registration facts - misfiling them would falsify the kind
+/// taxonomy AR-24's byte-locks and kind tests defend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncrementalDispatchError {
+    /// Zero discovered units and no sole registered plugin to fall back to:
+    /// multi-language dispatch lands with the language-scoped cache (M21).
+    SolePluginRequired,
+    /// Units exist in a language no registered plugin claims (plan sec 3.3
+    /// fact 3 - an honest error, never a C++ default).
+    UnhandledLanguage { language: SourceLanguage },
+    /// Units span more than one distinct language: dispatch lands with the
+    /// language-scoped cache (M21).
+    MultiLanguageDispatch { languages: Vec<SourceLanguage> },
+}
+
+impl std::fmt::Display for IncrementalDispatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SolePluginRequired => f.write_str(
+                "incremental indexing needs exactly one registered language plugin \
+                 (multi-language dispatch lands with the language-scoped cache (M21))",
+            ),
+            Self::UnhandledLanguage { language } => write!(
+                f,
+                "unhandled language: no plugin is registered for {language:?} units"
+            ),
+            Self::MultiLanguageDispatch { languages } => write!(
+                f,
+                "multi-language incremental analysis lands with the language-scoped \
+                 cache (M21); discovered languages: {languages:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IncrementalDispatchError {}
+
 /// The incremental-analysis backend for a build's discovered units: distinct
 /// `tu.language` set dispatch (plan sec 3.3 fact 3 - a unit language with no
 /// registered plugin is an "unhandled language" error, never a C++ default);
 /// zero units fall back to the sole plugin (empty-repo behavior unchanged);
 /// more than one distinct language errors until the M21 language-scoped cache.
+///
+/// AR-25 (A7 rider): failures cross as typed [`IncrementalDispatchError`]
+/// anyhow sources - `Display` renders the pre-AR-25 strings byte-identically
+/// (callers' text locks unchanged) while callers can `downcast_ref` the kind
+/// instead of matching rendered text, and the chain stays navigable.
 pub fn incremental_backend<'a>(
     registry: &'a ariadne_lang::LanguageRegistry,
     build_discovery: &ariadne_build::BuildDiscoveryResult,
-) -> Result<&'a dyn ariadne_lang::LanguagePlugin, String> {
+) -> anyhow::Result<&'a dyn ariadne_lang::LanguagePlugin> {
     let distinct = distinct_unit_languages(build_discovery);
     match distinct.len() {
-        0 => registry.sole_plugin().ok_or_else(|| {
-            "incremental indexing needs exactly one registered language plugin \
-             (multi-language dispatch lands with the language-scoped cache (M21))"
-                .to_string()
-        }),
+        0 => registry
+            .sole_plugin()
+            .ok_or_else(|| anyhow::Error::from(IncrementalDispatchError::SolePluginRequired)),
         1 => {
             let language = distinct
                 .into_iter()
                 .next()
                 .expect("one distinct language present");
             registry
-            .plugin_for_id(LanguageId::from(language))
+            .plugin_for_id(LanguageId::from(language.clone()))
             .ok_or_else(|| {
-                format!("unhandled language: no plugin is registered for {language:?} units")
+                anyhow::Error::from(IncrementalDispatchError::UnhandledLanguage { language })
             })
         }
-        _ => Err(format!(
-            "multi-language incremental analysis lands with the language-scoped \
-             cache (M21); discovered languages: {distinct:?}"
+        _ => Err(anyhow::Error::from(
+            IncrementalDispatchError::MultiLanguageDispatch { languages: distinct },
         )),
     }
 }
@@ -135,7 +205,7 @@ fn distinct_unit_languages(
     let mut distinct: Vec<ariadne_repo::SourceLanguage> = Vec::new();
     for unit in &build_discovery.translation_units {
         if !distinct.contains(&unit.language) {
-            distinct.push(unit.language);
+            distinct.push(unit.language.clone());
         }
     }
     distinct
@@ -178,6 +248,51 @@ pub fn plugin_for_catalog_file<'a>(
     file_id: ariadne_repo::FileId,
 ) -> Option<&'a dyn ariadne_lang::LanguagePlugin> {
     registry.plugin_for_id(catalog.get(&file_id)?.clone())
+}
+
+/// The cluster planner's two hooks, dispatched per path through the registry
+/// (AR-19, A1 part 2). The planner is language-neutral and takes exactly ONE
+/// aggregation filter and ONE target namer (plan M18.6); which plugin answers
+/// is decided HERE, at the only registry-facing seam, by the same
+/// first-claiming-detector lookup `detect_language` performs and the catalog
+/// dispatches through (D-A5: the registry is the dispatch authority, never a
+/// language label and never a C++ default).
+///
+/// The hooks consume the AR-18 trait methods
+/// (`LanguagePlugin::aggregation_filter` / `target_path_for`), so a language
+/// joins planning by registering a plugin that overrides them -- no CLI edit.
+/// A path no plugin claims is honestly NOT an aggregation unit and keeps its
+/// path unchanged (the hook's `PathBuf` return cannot report an error); a
+/// plugin that leaves a hook at the `None` default is likewise unanswered
+/// (planning unsupported), never answered with C++ semantics.
+pub struct PlanningHooks<'a> {
+    pub aggregation: Box<dyn Fn(&std::path::Path) -> bool + Send + Sync + 'a>,
+    pub target: Box<dyn Fn(&std::path::Path, &str) -> std::path::PathBuf + Send + Sync + 'a>,
+}
+
+/// Build [`PlanningHooks`] over `registry` for a repository rooted at
+/// `repo_root` (the Scala aggregation filter reads file content; the C++ one
+/// ignores the root -- the trait signature carries it per call for both).
+pub fn planning_hooks<'a>(
+    registry: &'a LanguageRegistry,
+    repo_root: &'a std::path::Path,
+) -> PlanningHooks<'a> {
+    let aggregation = Box::new(move |path: &std::path::Path| -> bool {
+        registry
+            .plugin_for(path)
+            .and_then(|plugin| plugin.aggregation_filter(repo_root, path))
+            .unwrap_or(false)
+    });
+    let target = Box::new(move |candidate: &std::path::Path, symbol_name: &str| {
+        registry
+            .plugin_for(candidate)
+            .and_then(|plugin| plugin.target_path_for(candidate, symbol_name))
+            .unwrap_or_else(|| candidate.to_path_buf())
+    });
+    PlanningHooks {
+        aggregation,
+        target,
+    }
 }
 
 #[cfg(test)]
@@ -346,7 +461,7 @@ mod tests {
             contexts: vec![],
             translation_units: languages
                 .iter()
-                .map(|(rel, language)| unit_with_language(rel, *language))
+                .map(|(rel, language)| unit_with_language(rel, language.clone()))
                 .collect(),
         }
     }
@@ -365,7 +480,8 @@ mod tests {
         let build = build_of(&[("mystery.x", SourceLanguage::Other)]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("sec 3.3 fact 3: unregistered unit language must error");
+            .expect("sec 3.3 fact 3: unregistered unit language must error")
+            .to_string();
         assert!(
             err.contains("unhandled language"),
             "sec 3.3 fact 3 requires the unhandled-language error, got: {err}"
@@ -381,7 +497,8 @@ mod tests {
         ]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("mixed languages must error until M21");
+            .expect("mixed languages must error until M21")
+            .to_string();
         assert!(
             err.contains("language-scoped cache (M21)"),
             "mixed languages must name the M21 cache, got: {err}"
@@ -394,7 +511,8 @@ mod tests {
         let build = build_of(&[]);
         let err = incremental_backend(&registry, &build)
             .err()
-            .expect("empty repo with multi-plugin registry must error, not guess");
+            .expect("empty repo with multi-plugin registry must error, not guess")
+            .to_string();
         assert!(
             err.contains("exactly one registered language plugin"),
             "empty-repo fallback stays sole-plugin semantics, got: {err}"
@@ -415,7 +533,7 @@ mod tests {
                     content_hash: String::new(),
                     ownership: ariadne_repo::FileOwnership::Repository,
                     optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
-                    language: *language,
+                    language: language.clone(),
                 })
                 .collect(),
             ownership_summary: Default::default(),
@@ -492,5 +610,85 @@ mod tests {
             .is_none(),
             "a file outside the catalog has NO plugin — never a C++ default (D-M23-7)"
         );
+    }
+
+    // AR-19 (A1 part 2): planning_hooks is the registry dispatch the
+    // optimize/UI/plan lanes share; these locks retired the per-language
+    // 2-arm match in commands/plan.rs (whose own unit tests moved here).
+    #[test]
+    fn planning_hooks_keep_cpp_hook_bytes_through_the_plugin_trait() {
+        // Byte-identity witness: the trait hook reached through the registry
+        // must answer exactly what the free functions answered (AR-18 parity
+        // made them equal; this locks the DISPATCH of that answer). The free
+        // fns survive as dev-dependency oracles in cli tests (journal note).
+        let registry = default_registry();
+        let hooks = planning_hooks(&registry, std::path::Path::new("."));
+        let cpp_rel = std::path::Path::new("include/all.h");
+        assert_eq!(
+            (hooks.aggregation)(cpp_rel),
+            ariadne_lang_cpp::cpp_aggregation_filter(cpp_rel),
+            "C++ aggregation decisions stay byte-identical (m00 authority)"
+        );
+        assert_eq!(
+            (hooks.target)(cpp_rel, "Widget"),
+            ariadne_lang_cpp::cpp_target_path_for(cpp_rel, "Widget"),
+            "C++ naming stays byte-identical (m00 authority)"
+        );
+        assert!(
+            !(hooks.aggregation)(std::path::Path::new("src/main.cpp")),
+            "sources are not C++ aggregation units (extension rule survives dispatch)"
+        );
+    }
+
+    #[test]
+    fn planning_hooks_route_scala_through_the_plugin_trait() {
+        let registry = default_registry();
+        let fixture_root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/scala-basic");
+        let hooks = planning_hooks(&registry, &fixture_root);
+        let scala_agg = std::path::Path::new("src/main/scala/com/example/models/all.scala");
+        assert!(
+            (hooks.aggregation)(scala_agg),
+            "the real fixture all.scala is a Scala aggregation unit through \
+             the registry dispatch (plugin trait hook, not test injection)"
+        );
+        assert!(
+            !(hooks.aggregation)(std::path::Path::new(
+                "src/main/scala/com/example/models/User.scala"
+            )),
+            "a Scala file without a package-object clause is NOT an \
+             aggregation unit - the C++ extension filter never claims it"
+        );
+        assert_eq!(
+            (hooks.target)(scala_agg, "com.example.models.User"),
+            ariadne_lang_scala::scala_target_path_for(scala_agg, "com.example.models.User"),
+            "Scala candidates get the Scala namer verbatim"
+        );
+    }
+
+    #[test]
+    fn planning_hooks_answer_honestly_for_paths_no_plugin_claims() {
+        // D-A4 folded into the dispatch: a third language (or any unclaimed
+        // path) gets NO C++ aggregation semantics and NO C++ naming rule --
+        // there is no arm to misroute into any more.
+        let registry = default_registry();
+        let hooks = planning_hooks(&registry, std::path::Path::new("."));
+        for unclaimed in ["src/solver.f90", "src/unclaimed.rs"] {
+            let path = std::path::Path::new(unclaimed);
+            assert!(
+                !(hooks.aggregation)(path),
+                "{unclaimed}: no claiming plugin means NOT an aggregation unit"
+            );
+            assert_eq!(
+                (hooks.target)(path, "Solver"),
+                path,
+                "{unclaimed}: the candidate is returned UNCHANGED, never named by C++"
+            );
+            assert_ne!(
+                (hooks.target)(path, "Solver"),
+                ariadne_lang_cpp::cpp_target_path_for(path, "Solver"),
+                "{unclaimed}: explicitly NOT the C++ target path - the misroute that died"
+            );
+        }
     }
 }

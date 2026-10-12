@@ -19,6 +19,7 @@ ariadne-transform = { path = "../transform" }
 ariadne-validate = { path = "../validate" }
 # M18.8a: artifact IO threads a neutral SourceExtractor through to the engine.
 ariadne-lang = { path = "../lang" }
+ariadne-artifact = { path = "../artifact" }
 
 [dev-dependencies]
 tempfile.workspace = true

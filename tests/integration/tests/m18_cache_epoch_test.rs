@@ -15,6 +15,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+mod common;
+use common::fixture_path;
+
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -31,7 +34,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
 fn isolated_repo() -> Result<(TempDir, PathBuf)> {
     let guard = tempfile::tempdir()?;
-    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/basic");
+    let fixture_root = fixture_path("basic");
     let repo_root = guard.path().join("basic");
     copy_dir_all(&fixture_root, &repo_root)?;
     Ok((guard, repo_root))

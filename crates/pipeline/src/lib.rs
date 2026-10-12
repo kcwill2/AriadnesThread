@@ -45,6 +45,12 @@ pub use registry::{build_default_registry, default_registry};
 mod stage_index;
 mod stage_load;
 
+// A6 (AR-22): the `for_incremental` construction seam (an `impl Pipeline`
+// block, the `stage_index`/`stage_load` precedent) plus the unit-restriction
+// + artifact-authority state it records.
+mod for_incremental;
+pub use for_incremental::IncrementalView;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StageReuse {
@@ -187,6 +193,12 @@ pub struct Pipeline {
     /// the registry detects for the unit path. Registration is validated by
     /// the construction site; the index stage is the only consumer.
     language_filter: Option<SourceLanguage>,
+    /// A6 (AR-22): the unit-restriction + artifact-authority state carried by
+    /// [`Pipeline::for_incremental`] (the `analyze.rs` incremental mirror's
+    /// `restrict_and_validate_units` + `artifacts_are_authoritative` data).
+    /// `None` for every other constructor - their runs carry no incremental
+    /// view. The public surface a parity test locks.
+    pub incremental_view: Option<IncrementalView>,
     include_cache: Option<(IncludeGraph, HashMap<ariadne_repo::FileId, IncludeClosure>)>,
     index_cache: Option<IndexResult>,
     reduced_cache: Option<ReducedSemanticModel>,
@@ -275,6 +287,7 @@ impl Pipeline {
             progress,
             registry,
             language_filter: None,
+            incremental_view: None,
             include_cache: None,
             index_cache: None,
             reduced_cache: None,
@@ -665,7 +678,7 @@ fn cycle_policy_by_file(
         .iter()
         .map(|record| {
             let policy = registry
-                .plugin_for_id(LanguageId::from(record.language))
+                .plugin_for_id(LanguageId::from(record.language.clone()))
                 .map(|plugin| plugin.modeling().cycle_policy)
                 .unwrap_or(CyclePolicy::Reject);
             (record.id, policy)

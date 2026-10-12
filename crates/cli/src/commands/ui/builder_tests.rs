@@ -153,7 +153,20 @@ fn test_planner_wiring_on_empty_inputs_yields_no_proposals() {
         extends_edges: Vec::new(),
         sealed_symbols: Vec::new(),
     };
-    let out = build_extraction_proposals(&IncludeGraph::new(), &model, &[], &[], &[], &HashMap::new());
+    // AR-19 (A1 part 2): the proposals seam takes the registry-dispatched
+    // hooks now (shared with plan/optimize); on empty inputs the dispatch
+    // has nothing to claim, so the witness is unchanged.
+    let registry = crate::registry::default_registry();
+    let out = build_extraction_proposals(
+        &IncludeGraph::new(),
+        &model,
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        &registry,
+        std::path::Path::new("."),
+    );
     assert!(out.is_empty());
 }
 

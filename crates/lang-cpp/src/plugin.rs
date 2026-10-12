@@ -12,8 +12,8 @@ use crate::source_extractor::CppSourceExtractor;
 use ariadne_lang::{
     AggregationKind, ClusteringConstraints, CompilerValidator, CyclePolicy, DependencyResolver,
     DependencyVocabulary, GuardKind, LanguageCapabilities, LanguageDetector, LanguageId,
-    LanguageModeling, LanguagePlugin, SemanticAnalyzer, SourceExtractor, SourceFileKind, SymbolId,
-    SymbolPlacement, SymbolRecord, ToolchainStatus, UnitKind, UnitShaper,
+    LanguageModeling, LanguagePlugin, PluginError, SemanticAnalyzer, SourceExtractor,
+    SourceFileKind, SymbolId, SymbolPlacement, SymbolRecord, ToolchainStatus, UnitKind, UnitShaper,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -93,8 +93,17 @@ pub(crate) fn probe_compiler_status(binary: &str) -> ToolchainStatus {
 }
 
 impl CompilerValidator for CppCompilerValidator {
-    fn validate_compile(&self, _files: &[PathBuf], _args: &[String]) -> Result<(), String> {
-        Err("C++ CompilerValidator not wired yet (M23)".to_string())
+    /// AR-24 typed seam: the M23 placeholder keeps its exact CLI-visible
+    /// wording (`ar24_validate_compile_placeholder_text_is_byte_locked`)
+    /// and gains a kind -- not-wired, never a compile failure.
+    fn validate_compile(
+        &self,
+        _files: &[PathBuf],
+        _args: &[String],
+    ) -> Result<(), PluginError> {
+        Err(PluginError::ValidationNotWired {
+            message: "C++ CompilerValidator not wired yet (M23)".to_string(),
+        })
     }
 
     /// M18.10 (plan §3.4 toolchain row): probes the clang driver exactly as
@@ -139,17 +148,17 @@ impl CppPlugin {
         }
     }
 
-    /// C++ planner hook (plan M18.6): header extensions are the aggregation
-    /// units the planner may propose against.
-    pub fn aggregation_filter(&self, path: &Path) -> bool {
-        crate::planning::cpp_aggregation_filter(path)
-    }
-
-    /// C++ planner hook (plan M18.6/§3.6): extracted symbols land in a
-    /// `{symbol}_extracted.h` beside the aggregation file.
-    pub fn target_path_for(&self, aggregation_path: &Path, symbol_name: &str) -> PathBuf {
-        crate::planning::cpp_target_path_for(aggregation_path, symbol_name)
-    }
+    // AR-19 rider (dead-code reconciliation): the inherent M18.6 planner
+    // hooks `aggregation_filter(&self, path)` / `target_path_for(&self,
+    // aggregation_path, symbol_name)` were deleted here. Determination:
+    // DEAD -- a workspace grep of `\.aggregation_filter(` /
+    // `\.target_path_for(` found every live call going through the AR-18
+    // TRAIT hooks on `&dyn LanguagePlugin` (the CLI registry seam, AR-19);
+    // no caller reached the inherent pair, and inherent methods would have
+    // silently shadowed the trait for concrete-type callers. The C++
+    // planning answer is the trait override below, delegating to the same
+    // `crate::planning` free functions (single source of truth; parity
+    // locked by `planning_hooks_override_the_defaults_with_free_function_parity`).
 }
 
 impl Default for CppPlugin {
@@ -248,6 +257,21 @@ impl LanguagePlugin for CppPlugin {
     fn shaper(&self) -> Option<&dyn UnitShaper> {
         Some(&self.shaper)
     }
+
+    /// AR-18: override of the planning hook with the header-extension rule.
+    /// Delegates to the same free function the CLI consumes today
+    /// (`cpp_aggregation_filter` is extension-only, so `repo_root` is
+    /// unused here). Parity locked by
+    /// `planning_hooks_override_the_defaults_with_free_function_parity`.
+    fn aggregation_filter(&self, _repo_root: &Path, path: &Path) -> Option<bool> {
+        Some(crate::planning::cpp_aggregation_filter(path))
+    }
+
+    /// AR-18: override of the planning hook with the `{symbol}_extracted.h`
+    /// template (§3.6), delegating to `cpp_target_path_for`.
+    fn target_path_for(&self, aggregation_path: &Path, symbol_name: &str) -> Option<PathBuf> {
+        Some(crate::planning::cpp_target_path_for(aggregation_path, symbol_name))
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +279,42 @@ mod tests {
     use super::*;
     use ariadne_lang::{DirectiveStyle, LanguageRegistry, ResolutionContext};
     use ariadne_repo::FileId;
+
+    /// AR-18 override-parity lock: the `LanguagePlugin` planning hooks must
+    /// reproduce the free functions byte-for-byte on identical inputs — the
+    /// seam AR-19 dispatches through. Exercised via `&dyn LanguagePlugin`
+    /// (also a dyn-compatibility witness: no generic trait methods).
+    #[test]
+    fn planning_hooks_override_the_defaults_with_free_function_parity() {
+        let plugin = CppPlugin::new();
+        let as_plugin: &dyn LanguagePlugin = &plugin;
+        // The extension-only C++ filter ignores the root entirely.
+        let repo_root = Path::new("repo");
+        for name in [
+            "a.h", "a.hpp", "a.hxx", "a.hh", "a.inl", "a.cpp", "a.scala", "noext", "a.H",
+        ] {
+            let path = Path::new(name);
+            assert_eq!(
+                as_plugin.aggregation_filter(repo_root, path),
+                Some(crate::planning::cpp_aggregation_filter(path)),
+                "aggregation-filter parity for {name}"
+            );
+        }
+        for (aggregation, symbol) in [
+            ("src/pkg.h", "Widget"),
+            ("src/pkg.hpp", "std::vector"),
+            ("src/pkg.h", "Thing<T>"),
+            ("src/pkg.h", "A::B"),
+            ("src/pkg.h", ":::"),
+        ] {
+            let aggregation_path = Path::new(aggregation);
+            assert_eq!(
+                as_plugin.target_path_for(aggregation_path, symbol),
+                Some(crate::planning::cpp_target_path_for(aggregation_path, symbol)),
+                "target-path parity for {symbol} out of {aggregation}"
+            );
+        }
+    }
 
     #[test]
     fn plugin_identity_and_fingerprint() {
@@ -463,6 +523,42 @@ mod tests {
         assert_eq!(
             plugin.resolver().resolve_target(&edge, &catalog, &ctx),
             ResolveOutcome::Resolved(record.id)
+        );
+    }
+
+    // AR-24 byte-stability lock: the C++ `validate_compile` error STRING,
+    // captured through `&dyn CompilerValidator` against the pre-conversion
+    // `Result<(), String>` API and re-verified after the typed-seam
+    // conversion renders the same text through Display. The literal is
+    // independent of the implementation string -- if the wording shifts,
+    // this lock goes red.
+    #[test]
+    fn ar24_validate_compile_placeholder_text_is_byte_locked() {
+        let validator = CppCompilerValidator;
+        let as_validator: &dyn CompilerValidator = &validator;
+        let error = as_validator
+            .validate_compile(&[PathBuf::from("a.cpp")], &[])
+            .expect_err("the M23 placeholder must never report a vacuous Ok");
+        assert_eq!(
+            error.to_string(),
+            "C++ CompilerValidator not wired yet (M23)",
+            "AR-24 byte-stability lock on the C++ validate_compile text"
+        );
+    }
+
+    // AR-24 kind branching: the SAME forced error is discriminated by
+    // variant -- the tier-3/AR-25 consumer matches on kind, never on text
+    // (demonstrated through `&dyn CompilerValidator`, the plugin seam).
+    #[test]
+    fn ar24_validate_compile_error_branches_by_kind() {
+        let validator = CppCompilerValidator;
+        let as_validator: &dyn CompilerValidator = &validator;
+        let error = as_validator
+            .validate_compile(&[PathBuf::from("a.cpp")], &[])
+            .expect_err("the M23 placeholder never reports Ok");
+        assert!(
+            matches!(error, PluginError::ValidationNotWired { .. }),
+            "the placeholder is the not-wired kind, never a compile failure: {error:?}"
         );
     }
 }

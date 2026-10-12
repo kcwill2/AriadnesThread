@@ -592,8 +592,8 @@
         const srcNode = tabAllNodes.find(n => n.id === e.source);
         const name = srcNode ? srcNode.label : e.source;
         return `
-          <div class="link-item" onclick="selectNode('${e.source}')">
-            <span>${name}</span>
+          <div class="link-item" data-select-id="${escapeAttribute(e.source)}">
+            <span>${escapeHtml(name)}</span>
             <span style="color:var(--text-sub);">${e.kind || 'Direct'}</span>
           </div>
         `;
@@ -606,8 +606,8 @@
         const dstNode = tabAllNodes.find(n => n.id === e.target);
         const name = dstNode ? dstNode.label : e.target;
         return `
-          <div class="link-item" onclick="selectNode('${e.target}')">
-            <span style="color:var(--cyan);">${name}</span>
+          <div class="link-item" data-select-id="${escapeAttribute(e.target)}">
+            <span style="color:var(--cyan);">${escapeHtml(name)}</span>
             <span style="color:${e.is_cycle ? 'var(--red)' : 'var(--text-sub)'};">${e.is_cycle ? 'Cycle' : (e.kind || 'Direct')}</span>
           </div>
         `;
@@ -634,10 +634,10 @@
           collateralList.innerHTML = entries.map(entry => {
             const hc = getHeatColor(entry.col, maxCol);
             return `
-              <div class="link-item" onclick="illuminatePath('${id}', '${entry.id}')" title="Click to illuminate path from ${node.label} to ${entry.label}">
+              <div class="link-item" data-path-from="${escapeAttribute(id)}" data-path-to="${escapeAttribute(entry.id)}" title="Click to illuminate path from ${escapeAttribute(node.label)} to ${escapeAttribute(entry.label)}">
                 <div style="display:flex;align-items:center;gap:6px;">
                   <span style="width:8px;height:8px;border-radius:2px;background:${hc.border};display:inline-block;"></span>
-                  <span>${entry.label}</span>
+                  <span>${escapeHtml(entry.label)}</span>
                 </div>
                 <span style="font-family:monospace;font-weight:700;color:${hc.text};">+${entry.col}</span>
               </div>

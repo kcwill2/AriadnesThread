@@ -13,8 +13,12 @@ ariadne-repo = { path = "../repo" }
 ariadne-build = { path = "../build" }
 ariadne-index = { path = "../index" }
 ariadne-graph = { path = "../graph" }
-ariadne-report = { path = "../report" }
+# AR-26b: artifact-store IO consumed directly (was via report).
+ariadne-artifact = { path = "../artifact" }
 ariadne-lang = { path = "../lang" }
+# AR-20a: the tu_store engine + worker vocabulary live in the neutral
+# ariadne-worker-core crate; scheduler re-exports them (see src/lib.rs).
+ariadne-worker-core = { path = "../worker-core" }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,11 +1,37 @@
 use std::fs;
 use std::net::TcpListener;
-use std::path::PathBuf;
 use tempfile::tempdir;
+
+mod common;
+use common::fixture_path;
+
+/// Poll `/api/status` until the artifact-first boot reports ready (poll-first
+/// idiom, mirrors m21_run_ui_smoke `poll_until_ready`): probe immediately,
+/// only sleep BETWEEN attempts. Same 120 x 250 ms budget as the original
+/// fixed-sleep loop; returns the last successful status snapshot (Null when
+/// the endpoint never answered). Readiness itself is asserted by the caller.
+async fn poll_until_ready_status(base_url: &str) -> serde_json::Value {
+    let mut status_json = serde_json::Value::Null;
+    for _ in 0..120 {
+        let resp = match reqwest::get(format!("{}/api/status", base_url)).await {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                continue;
+            }
+        };
+        status_json = resp.json().await.unwrap_or(serde_json::Value::Null);
+        if status_json["progress"]["state"].as_str() == Some("ready") {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+    }
+    status_json
+}
 
 #[tokio::test]
 async fn test_m15_graph_ui_command() {
-    let repo_dir = PathBuf::from("../../tests/fixtures/basic");
+    let repo_dir = fixture_path("basic");
     let export_dir = tempdir().unwrap();
     let export_file = export_dir.path().join("export.html");
 
@@ -17,6 +43,7 @@ async fn test_m15_graph_ui_command() {
         Some(export_file.clone()),
         2,
         true,
+        None, // S6: keep the 127.0.0.1 bind default
     )
     .await;
 
@@ -45,25 +72,15 @@ async fn test_m15_graph_ui_command() {
             None,
             2,
             true, // no watch: keep the test deterministic
+            None, // S6: keep the 127.0.0.1 bind default
         )
         .await;
         assert!(result.is_ok());
     });
 
-    // Give server time to start and poll until the artifact-first boot is ready
+    // Poll the artifact-first boot until ready (AR-17: no leading fixed sleep).
     let base_url = format!("http://127.0.0.1:{}", port);
-    let mut status_json = serde_json::Value::Null;
-    for _ in 0..120 {
-        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-        let resp = match reqwest::get(&format!("{}/api/status", base_url)).await {
-            Ok(r) if r.status().is_success() => r,
-            _ => continue,
-        };
-        status_json = resp.json().await.unwrap_or(serde_json::Value::Null);
-        if status_json["progress"]["state"].as_str() == Some("ready") {
-            break;
-        }
-    }
+    let status_json = poll_until_ready_status(&base_url).await;
     assert_eq!(
         status_json["progress"]["state"].as_str(),
         Some("ready"),

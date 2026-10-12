@@ -1,10 +1,12 @@
 //! Repository discovery and filesystem canonicalization.
 
 pub mod discovery;
+pub mod identity;
 pub mod policy;
 pub mod types;
 
 pub use discovery::{build_discovery_result, compute_file_hash, discover_repository_files};
+pub use identity::LanguageId;
 pub use policy::classify_ownership_and_policy;
 pub use types::{
     is_includable_header, FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy,

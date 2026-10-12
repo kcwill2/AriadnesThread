@@ -252,11 +252,10 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     let load_report = pipeline.get_or_build_load()?;
     let report = include_graph.generate_report();
     let cycle_groups = include_graph.detect_cycle_groups();
-let node_maps = node_maps::build(
-        &include_graph,
-        &pipeline.discovery.files,
-        &crate::registry::default_registry(),
-    );
+    // AR-19 (A1 part 2): one registry per payload build - shared by the node
+    // language maps and the registry-dispatched planning hooks below.
+    let registry = crate::registry::default_registry();
+    let node_maps = node_maps::build(&include_graph, &pipeline.discovery.files, &registry);
     let include_elements = ariadne_ui::build_include_elements(
         &include_graph,
         &closures,
@@ -282,6 +281,8 @@ let node_maps = node_maps::build(
         &translation_unit_file_ids(&pipeline.build),
         &load_report.file_metrics,
         &closures,
+        &registry,
+        &pipeline.repo.root,
     );
     // C1: ONE memo for the whole generation, seeded with the stage closures
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
@@ -386,14 +387,21 @@ fn build_extraction_proposals(
     tu_file_ids: &[ariadne_repo::FileId],
     file_metrics: &[ariadne_graph::LoadMetric],
     closures: &HashMap<ariadne_repo::FileId, ariadne_graph::IncludeClosure>,
+    registry: &ariadne_lang::LanguageRegistry,
+    repo_root: &std::path::Path,
 ) -> Vec<ariadne_ui::ExtractionProposalDto> {
+    // AR-19 (A1 part 2): the hooks are the registry dispatch shared with the
+    // plan and optimize lanes (crate::registry::planning_hooks); the former
+    // positional `ariadne_lang_cpp::cpp_*` references are gone. C++ answers
+    // stay byte-identical (trait-hook parity, AR-18; m00 parity UNEDITED).
+    let hooks = crate::registry::planning_hooks(registry, repo_root);
     let planner = ariadne_cluster::planner::OptimizationPlanner::with_screening_facts(
         include_graph,
         reduced_model,
         discovery_files,
         tu_file_ids,
-        &ariadne_lang_cpp::cpp_aggregation_filter,
-        &ariadne_lang_cpp::cpp_target_path_for,
+        &hooks.aggregation,
+        &hooks.target,
         None,
         ariadne_lang::CyclePolicy::Reject,
         ariadne_cluster::planner::screening_facts_from_metrics(include_graph, file_metrics),
@@ -732,6 +740,26 @@ fn drive_boot_build(
     }
 }
 
+/// S6 (AR-02): the UI binds localhost by default; `--expose <addr>` is the
+/// single opt-in to a wider bind address (LAN exposure warns at startup).
+pub fn resolve_bind_addr(expose: Option<&str>) -> String {
+    match expose {
+        Some(addr) if !addr.trim().is_empty() => addr.trim().to_string(),
+        _ => "127.0.0.1".to_string(),
+    }
+}
+
+/// S6: an active `--expose` widens the bind beyond localhost; the R8
+/// never-silent rule puts that trade on the console at every such boot.
+fn warn_if_expose_used(expose: Option<&str>) {
+    let Some(addr) = expose.map(str::trim).filter(|addr| !addr.is_empty()) else {
+        return;
+    };
+    eprintln!(
+        "warning: --expose {addr} binds the UI beyond localhost: it has no authentication and is reachable from the local network"
+    );
+}
+
 pub async fn run_ui(
     repo_opt: Option<PathBuf>,
     port: u16,
@@ -739,6 +767,7 @@ pub async fn run_ui(
     export_opt: Option<PathBuf>,
     watch_interval: u64,
     no_watch: bool,
+    expose_opt: Option<String>,
 ) -> Result<()> {
     let repo_path = match repo_opt {
         Some(path) => path,
@@ -774,7 +803,10 @@ pub async fn run_ui(
         }
 
         let app = ariadne_ui::build_router(state.clone());
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+        // S6: localhost-only unless the operator opts in via `--expose`.
+        let bind_addr = resolve_bind_addr(expose_opt.as_deref());
+        warn_if_expose_used(expose_opt.as_deref());
+        let listener = tokio::net::TcpListener::bind(format!("{bind_addr}:{port}")).await?;
 
         println!(
             "AriadnesThread Visualizer loading at http://localhost:{}",
