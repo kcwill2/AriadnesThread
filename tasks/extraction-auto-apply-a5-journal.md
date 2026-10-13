@@ -179,7 +179,34 @@ content was ever staged by hand and `git add .` was never invoked.
 
 ## Gate 3 checkpoint (post-commit state)
 
-(Recorded at the bottom of this file once the landing commit hash exists.)
+- Module: A-5 complete (S5 approval surface, S6 live outcome, apply
+  request, state resets, copy flip, styles block, C8 amendments 1-3 plus
+  the D1 lock disposition, 8 new renderer locks).
+- Commit hash: `f89c901` (parent `42ccff5`), exactly the six touch-set
+  files: `extraction-wizard.js` 168/8, `index.html` 3/3, `styles.css`
+  26/0, `extraction_card_playbook.rs` 10/4, `extraction_wizard_render.rs`
+  249/7, this journal.
+- Deviations: D1-D6 as tabled above; none silent, all reported for the
+  reviewer's frozen-locks adjudication.
+- Lock finding: the exactly-one-fetch-site assertion (D1) is the only
+  unlisted lock this hand had to touch; `extraction_card_story.rs`,
+  `extraction_wizard_api.rs`, `crates/ui/tests/ui_test/main.rs` and
+  everything under `crates/ui/src` appear in no diff of the range.
+- Gate 9 (post-commit): `python tools/encoding_guard.py --all` silent
+  exit 0.
+- Producer zero-diff proof (bench stance, post-commit):
+  `git diff --numstat 42ccff5..HEAD -- crates/cli/src crates/ui/src
+  crates/transform crates/validate crates/artifact crates/cli/tests` ->
+  capture 0 lines, and `git diff --name-only 42ccff5..HEAD --
+  "crates/*/src"` -> capture 0 lines. The empty producer-crate diff: this
+  hand's whole range is `crates/ui/assets` + two ui test lock files + the
+  journal. The reviewer hop carries the DOCUMENTED_PHASES stance;
+  `bench_compare.py` was not run.
+- Range census for the reviewer hop (workspace-wide gates belong there):
+  expected delta on the ariadne-ui scope is exactly +8 tests
+  (`335 passed / 0 failed / 0 ignored / 3 suites` scoped); the workspace
+  anchor `1513 passed / 0 failed / 13 ignored / 112 suites` should
+  reconcile to 1521 passed at closeout (8 new tests, no other movement).
 
 ## Bench stance - producer zero-diff proof
 
@@ -265,4 +292,6 @@ only pre-existing copy that touches the claim is report-only above.
 
 ## Landing
 
-(Commit hash recorded below after gate 8.)
+`f89c901` carries the implementation and this journal as committed; the
+post-commit gate records (gate 9 and the zero-diff proof above) ride the
+journal-only rider commit per the W-1 D5 / A-2 D2 / A-4 D7 precedent.
