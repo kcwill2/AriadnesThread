@@ -332,3 +332,12 @@ proof.
 - Acceptance 6 completion: `encoding_guard --all` exit 0 - MET.
 - Acceptance 7: the numstat digest above is the touch-set record for the
   reviewer's commit-vs-touch-set check - MET.
+
+## APPENDIX (added by the A-4 implementer hop; discharges A-3 verdict finding 1)
+
+- F14 census note: the FOUR-site count at :33-43 is preflight-scoped to the
+  start rev `eb2bd91`; the census moves 4 -> 5 on landing because the new
+  test file builds its own `ExtractionDryRunDto` sample per the own-helpers
+  rule (handoff lines 270-272) - `extraction_apply_api.rs:211-223`, inside
+  the touch-set, plan-mandated, with the new `apply_token: String::new()`
+  field present.
