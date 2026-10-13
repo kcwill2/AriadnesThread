@@ -240,3 +240,31 @@ ariadne-ui`)
   range (recorded in the rider); the OPTIONAL compensating
   `--bench stage5-memory --runs 6` is not run here and is the reviewer
   hop's to own if it elects.
+
+## Rider - landing record and post-commit gates (D7)
+
+- Landing commit `ad33b11` (parent `7451c36`), gate 8 digest verbatim:
+  `commit ad33b11 feat(cli): engine-backed extraction applier (token
+  registry, apply mutex, dry-run-then-apply delegation) installed with
+  the generation`; stat exactly three paths: `7 0
+  crates/cli/src/commands/ui.rs`, `999 0
+  crates/cli/src/commands/ui/extraction_apply.rs`, `242 0
+  tasks/extraction-auto-apply-a4-journal.md` - the touch-set exactly
+  (acceptance 8). The 999 count confirms the 1000-line gate with 1 line
+  of margin.
+- Gate 7 (`python tools/encoding_guard.py --staged` before the commit):
+  `(no output)`, exit 0.
+- Gate 9 (`python tools/encoding_guard.py --all` post-commit): `(no
+  output)`, exit 0.
+- Producer zero-diff proof (bench stance): `python tools/distill.py --
+  git diff --numstat "7451c36..HEAD" -- crates/cli/tests` -> `### generic
+  PASS (exit 0)`, capture 0 lines - the producer set is byte-identical
+  across the hand's range; no timing attributed (per the DOCUMENTED_
+  PHASES dated row).
+- Staging route: `python tools/distill.py -- git add -- <the three
+  paths>` -> `### generic PASS (exit 0)` (the D1 staging precedent,
+  A-2/W-1 T-C), so gate 7 was non-vacuous. The LF/CRLF working-copy
+  warnings are autocrlf noise on the working copy, not blob content.
+- Acceptance 6 line-count note: the frozen A-1 ceiling test (<= 880) is
+  green inside the gate 3 run, so `ui.rs` is at/below 880; its diff is
+  exactly the module line + the install block (7 added lines, 0 removed).
