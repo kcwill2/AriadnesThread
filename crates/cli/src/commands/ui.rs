@@ -33,6 +33,7 @@ use boot_progress::{
 
 mod boot_progress;
 mod extraction_reader;
+mod extraction_apply;
 mod node_maps;
 mod stage_spans;
 
@@ -616,6 +617,7 @@ fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
     let fps = out.fps.clone();
     let reader_epoch = out.install_epoch;
     let reader_plans = out.extraction_plans;
+    let applier_plans = reader_plans.clone();
     state.install_analysis(out.include_graph, out.reduced_model, out.load_memo);
     // W-2a (shape C2): the reader belongs to THIS generation - installed in
     // the same sequence right after `install_analysis`, from the plans this
@@ -630,6 +632,11 @@ fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
             .expect("install_analysis publishes the generation it just installed"),
     );
     state.install_extraction_reader(Arc::new(reader));
+    // A-4 (shape C2): the applier belongs to THIS generation exactly like
+    // the reader; the install body lives in `extraction_apply` so this
+    // file keeps its A-1 ceiling headroom (journal D1). A1: every
+    // UI-triggered mutation goes through it to the shared core.
+    extraction_apply::install_with_generation(state, reader_epoch, applier_plans);
     *write_state(&state.call_graph) = Some(out.call_graph);
     *write_state(&state.payload) = Some(out.payload);
     *write_state(&state.stage_status) = out.status;
