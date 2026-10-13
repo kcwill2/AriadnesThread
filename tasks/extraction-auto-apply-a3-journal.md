@@ -296,3 +296,39 @@ proof.
 7. Commit touch-set = exactly the twelve gate-8 files (reviewer
    commit-vs-touch-set enforcement) - landing rider records `git show
    --stat`.
+
+## Landing record (journal rider, D2)
+
+- Landing commit: `f93e51d` (parent `eb2bd91`), message verbatim from
+  gate 8. `commit_scoped.py` numstat digest: exactly the twelve touch-set
+  paths - `api_extraction_apply.rs 186+`, `extraction_apply_api.rs
+  639+`, `dto/extraction.rs 62+`, `state.rs 26+`, `api_extraction.rs
+  21+/1-`, this journal `298+`, `server.rs 3+/1-`,
+  `extraction_reader.rs 2+`, `lib.rs 1+`, `routes/mod.rs 1+`, `main.rs
+  1+`, `extraction_wizard_api.rs 1+`. Nothing else.
+- Gate 7 (with the D1 staging route): the twelve paths staged via
+  `python tools/distill.py -- git add -- <twelve explicit paths>`
+  (`### generic PASS (exit 0)`; git's informational LF/CRLF warnings on
+  the working copies only - the staged blobs are what the guard
+  scanned), then `python tools/encoding_guard.py --staged` silent exit 0.
+- Gate 9: `python tools/encoding_guard.py --all` silent exit 0
+  post-commit. This also discharges the byte-level coverage of duty 1's
+  verdict file and duty 2's amended A-2 journal (O4).
+- Range proof: `git diff --name-only "eb2bd91..HEAD"` = exactly the
+  twelve touch-set paths. `crates/ui/assets/**`, the card-family files,
+  `extraction_wizard_render.rs`, `transform.rs`, `commands/ui.rs`, every
+  other `crates/cli/**` file, `tests/**`, `tools/**`, `Cargo.toml` and
+  `Cargo.lock` appear in NO hunk of the landing range.
+- Producer zero-diff proof (bench stance): `git diff --numstat
+  "eb2bd91..HEAD" -- crates/cli/tests` returned EMPTY (capture 0 lines)
+  - the bench producer set is byte-identical across the landing range.
+  Combined with the DOCUMENTED_PHASES deterministic blocker at
+  `tools/bench_compare.py:84` (exit 2 before any timing comparison;
+  `bench_compare.py` not run in this hop), NO timing number is
+  attributable to A-3; the reviewer hop carries the exemption with this
+  proof.
+- Post-landing tree: `git status --porcelain` shows only this journal as
+  modified (the rider's own content) - no other dirt.
+- Acceptance 6 completion: `encoding_guard --all` exit 0 - MET.
+- Acceptance 7: the numstat digest above is the touch-set record for the
+  reviewer's commit-vs-touch-set check - MET.
