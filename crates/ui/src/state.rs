@@ -2,6 +2,7 @@
 
 use crate::dto::GraphExportPayload;
 use crate::routes::api_extraction::ExtractionManifestReader;
+use crate::routes::api_extraction_apply::ExtractionPlanApplier;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -96,6 +97,14 @@ pub struct UiState {
     /// bounded window the payload write already documents above.
     extraction_reader:
         std::sync::RwLock<Option<Arc<dyn ExtractionManifestReader>>>,
+    /// Apply seam (extraction-auto-apply A-3, shape C2): the host-installed
+    /// mutation delegate, the twin of `extraction_reader`. `None` until the
+    /// cli install sequence has run; the apply route answers 503 until then
+    /// (shape C3). The install happens with the generation, immediately
+    /// after `install_extraction_reader`, inside the same bounded window
+    /// the payload write documents above.
+    extraction_applier:
+        std::sync::RwLock<Option<Arc<dyn ExtractionPlanApplier>>>,
 }
 
 impl UiState {
@@ -118,6 +127,7 @@ impl UiState {
             export_snapshot: std::sync::RwLock::new(None),
             export_serialize_count: AtomicU64::new(0),
             extraction_reader: std::sync::RwLock::new(None),
+            extraction_applier: std::sync::RwLock::new(None),
         }
     }
 
@@ -146,6 +156,7 @@ impl UiState {
             export_snapshot: std::sync::RwLock::new(None),
             export_serialize_count: AtomicU64::new(0),
             extraction_reader: std::sync::RwLock::new(None),
+            extraction_applier: std::sync::RwLock::new(None),
         };
         // Cold memo; the live server path installs a closure-seeded memo via
         // `install_analysis` instead (cli boot seeds `LoadMemo::with_closures`
@@ -196,6 +207,21 @@ impl UiState {
     /// lifetime guarantee `analysis()` gives the generation.
     pub fn extraction_reader(&self) -> Option<Arc<dyn ExtractionManifestReader>> {
         read_state(&self.extraction_reader).clone()
+    }
+
+    /// Install the mutation delegate (extraction-auto-apply shape C2). The
+    /// host (cli) calls this right after `install_extraction_reader` in the
+    /// same `swap_into_state` sequence, so an applier always belongs to the
+    /// generation the routes serve; `UiState::new_loading`/`new_loaded`
+    /// keep their signatures and start the field at `None`.
+    pub fn install_extraction_applier(&self, applier: Arc<dyn ExtractionPlanApplier>) {
+        *write_state(&self.extraction_applier) = Some(applier);
+    }
+
+    /// Current applier for one request: an `Arc` refcount bump, the same
+    /// lifetime guarantee `analysis()` gives the generation.
+    pub fn extraction_applier(&self) -> Option<Arc<dyn ExtractionPlanApplier>> {
+        read_state(&self.extraction_applier).clone()
     }
 
     /// P5 (AR-15): the current analysis epoch (install count).

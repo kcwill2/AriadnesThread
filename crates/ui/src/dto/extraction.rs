@@ -148,6 +148,12 @@ pub struct ExtractionDryRunDto {
     pub copy_only: bool,
     #[serde(default)]
     pub includes_unavailable: bool,
+    /// Single-use approval token for the apply route (extraction-auto-apply
+    /// shape C4): minted by the dry-run route; empty without an applier.
+    /// Additive and serde-defaulted, so pre-apply payloads and struct
+    /// literals decode unchanged.
+    #[serde(default)]
+    pub apply_token: String,
 }
 
 /// One consumer include rewrite (old -> new); the field names mirror
@@ -163,4 +169,60 @@ pub struct ExtractionRewriteDto {
     pub new_includes: Vec<String>,
     #[serde(default)]
     pub side_effect_preservations: Vec<String>,
+}
+
+// ---- Apply route DTOs (extraction-auto-apply A-3, shape C3) ----
+//
+// Additive, serde-plain display data only (the same plain-display-data
+// rule as the module doc): every field carries `serde(default)`, and no
+// validate/transform/cluster type crosses into the ui crate. The cli
+// applier (A-4) owns the `ValidationStatus` -> `status` + `detail` mapping
+// and the ASCII sanitization; this module owns the shape.
+
+/// Request body of the apply route (shape C3): the single-use approval
+/// token minted by the GET dry-run route. The handler parses it
+/// tolerantly - an absent, unparseable or empty-token body is the 428
+/// `dry_run_required` refusal, never an extractor 4xx.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionApplyRequestDto {
+    #[serde(default)]
+    pub apply_token: String,
+}
+
+/// One validation tier's result row (shape C3): `tier` mirrors
+/// `ValidationTier`'s serde names ("Structural", "GeneratedHeaders",
+/// "AffectedTUs" - stability locked in `crates/validate/src/lib.rs`),
+/// `status` is "pass", "fail" or "skipped", and `detail` carries the
+/// fail/skip reason (empty on pass), ASCII-sanitized by the producer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionTierResultDto {
+    #[serde(default)]
+    pub tier: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+/// Outcome answer of the apply route (shape C3, invariant A5): the three
+/// tier results, the committed-vs-rolled-back verdict (both complete
+/// answers are 200), the files the transaction created (repo-relative,
+/// lossy-rendered) and the verbatim `ApplyOutcome::format_output` text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtractionApplyOutcomeDto {
+    #[serde(default)]
+    pub plan_id: String,
+    /// The epoch the approval was minted on.
+    #[serde(default)]
+    pub generation_epoch: u64,
+    #[serde(default)]
+    pub committed: bool,
+    #[serde(default)]
+    pub tiers: Vec<ExtractionTierResultDto>,
+    /// Files the transaction created, lossy.
+    #[serde(default)]
+    pub new_files: Vec<String>,
+    /// `ApplyOutcome::format_output()`, verbatim.
+    #[serde(default)]
+    pub output_text: String,
 }

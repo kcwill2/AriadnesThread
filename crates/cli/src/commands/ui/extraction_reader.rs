@@ -188,6 +188,7 @@ impl EngineBackedExtractionReader {
             move_removals,
             copy_only: move_removals == 0,
             includes_unavailable: rows.iter().any(|row| row.includes_unavailable),
+            apply_token: String::new(),
         })
     }
 
@@ -423,6 +424,7 @@ fn honest_absent_dry_run(plan_id: &str, epoch: u64) -> ExtractionDryRunDto {
         move_removals: 0,
         copy_only: false,
         includes_unavailable: true,
+        apply_token: String::new(),
     }
 }
 

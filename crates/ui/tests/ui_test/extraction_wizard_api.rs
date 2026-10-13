@@ -111,6 +111,7 @@ fn sample_dry_run_dto() -> ExtractionDryRunDto {
         move_removals: 0,
         copy_only: true,
         includes_unavailable: false,
+        apply_token: String::new(),
     }
 }
 

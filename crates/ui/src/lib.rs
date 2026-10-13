@@ -12,6 +12,7 @@ pub use server::*;
 /// (W-2a) implements this trait against the routes seam; the routes module
 /// itself stays crate-internal.
 pub use routes::api_extraction::ExtractionManifestReader;
+pub use routes::api_extraction_apply::{ExtractionApplyRefusal, ExtractionPlanApplier};
 
 pub const INDEX_HTML: &str = include_str!("../assets/index.html");
 pub const THEMES_CSS: &str = include_str!("../assets/themes.css");

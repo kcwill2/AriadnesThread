@@ -13,6 +13,7 @@ pub use crate::routes::api_source::RepoInfoResponse;
 pub use crate::state::{AnalysisGeneration, UiState};
 
 use crate::routes::api_extraction::{api_extraction_dry_run, api_extraction_manifest};
+use crate::routes::api_extraction_apply::api_extraction_apply;
 use crate::routes::api_graph::{
     api_graph_call, api_graph_entrypoints, api_graph_include, api_graph_path, api_graph_search,
     api_graph_symbol, api_graph_traverse,
@@ -24,7 +25,7 @@ use crate::routes::api_payloads::{
     asset_traversal_js,
 };
 use crate::routes::api_source::{api_repo_info, api_source};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -79,6 +80,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/export", get(api_export))
         .route("/api/extraction/:plan_id/manifest", get(api_extraction_manifest))
         .route("/api/extraction/:plan_id/dry-run", get(api_extraction_dry_run))
+        .route("/api/extraction/:plan_id/apply", post(api_extraction_apply))
         .layer(CorsLayer::new().allow_origin(AllowOrigin::predicate(is_same_origin)))
         .with_state(state)
 }

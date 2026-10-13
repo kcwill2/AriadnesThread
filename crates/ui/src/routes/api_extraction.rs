@@ -56,9 +56,29 @@ pub(crate) async fn api_extraction_dry_run(
         Err(refused) => return refused,
     };
     match reader.dry_run(&plan_id) {
-        Some(dry_run) => (StatusCode::OK, Json(dry_run)).into_response(),
+        Some(mut dry_run) => {
+            dry_run.apply_token = approved_apply_token(&state, &plan_id);
+            (StatusCode::OK, Json(dry_run)).into_response()
+        }
         None => unknown_plan_response(&plan_id),
     }
+}
+
+/// C4 mint point (extraction-auto-apply A-3): after a `Some` dry-run
+/// answer, a live-epoch applier mints the single-use approval token for
+/// this plan into the response's `apply_token` field. Without an applier,
+/// or on an epoch mismatch, the field stays empty - the approval gate
+/// never fabricates a token. The value is a gate, not a credential: the
+/// server has no authentication by design and keeps the localhost bind
+/// default (A8).
+fn approved_apply_token(state: &UiState, plan_id: &str) -> String {
+    let Some(applier) = state.extraction_applier() else {
+        return String::new();
+    };
+    if applier.epoch() != state.analysis_epoch() {
+        return String::new();
+    }
+    applier.mint_apply_token(plan_id).unwrap_or_default()
 }
 
 /// C3 check order, shared by both handlers: no reader installed -> 503;
