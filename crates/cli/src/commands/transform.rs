@@ -134,7 +134,40 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     let model = artifacts.load_reduced_artifacts()?;
 
-    let extractor = ariadne_transform::IsolationEngine::new(&model);
+    println!("Applying {}...\n", plan_id);
+
+    let report = apply_plan_with(repo_path, &plan, &model)?;
+
+    println!("{}", report.outcome.format_output());
+
+    Ok(())
+}
+
+/// One apply transaction's report: the tier outcome plus the files the
+/// transaction created. Returned, never printed - the CLI wrapper prints
+/// it, the UI route serializes it.
+pub struct ApplyTransactionReport {
+    pub outcome: ariadne_validate::ApplyOutcome,
+    pub new_files: Vec<PathBuf>,
+}
+
+/// The transactional core every caller shares: engine extraction over
+/// `reduced_model`, the apply-identical rewrite targets, consumer
+/// discovery, `TransactionApplier::apply_with`, the three tiers, and
+/// commit-or-rollback with artifact records. `reduced_model` is a
+/// parameter on purpose: the CLI wrapper loads the artifact model
+/// (today's behavior) while the UI applier passes the generation's
+/// in-memory model - the exact model the approved dry-run was computed
+/// from (A6).
+pub fn apply_plan_with(
+    repo_path: &PathBuf,
+    plan: &ariadne_cluster::plan::OptimizationPlan,
+    reduced_model: &ariadne_graph::ReducedSemanticModel,
+) -> Result<ApplyTransactionReport> {
+    let repository = Repository::locate(repo_path)?;
+    let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
+
+    let extractor = ariadne_transform::IsolationEngine::new(reduced_model);
     // M23 T1/T7 (D-M23-3, D-M23-7 ii): the engine reads each extraction's
     // source file (via the catalog) and asks the PLAN-LANGUAGE extraction
     // backend to locate verbatim declaration bodies; unreadable files fall
@@ -143,17 +176,15 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
     let registry = crate::registry::default_registry();
     let text_extractor = crate::registry::plan_backend(&registry, &plan.target_file, |caps| caps.extraction, "extraction")?
         .extractor();
-    let extraction = extractor.extract(&plan, &source_reader, text_extractor);
+    let extraction = extractor.extract(plan, &source_reader, text_extractor);
 
-    let (symbol_name_to_header, generated_headers) = plan_rewrite_targets(&plan);
+    let (symbol_name_to_header, generated_headers) = plan_rewrite_targets(plan);
 
-    let consumers = find_plan_consumers(&repository, &plan)?;
+    let consumers = find_plan_consumers(&repository, plan)?;
 
     let rewriter =
         ariadne_transform::IncludeRewriter::new(symbol_name_to_header, generated_headers);
-    let migration = rewriter.build_preview(plan_id.to_string(), &consumers);
-
-    println!("Applying {}...\n", plan_id);
+    let migration = rewriter.build_preview(plan.id.0.clone(), &consumers);
 
     // M23 T7 (D-M23-7 ii): apply mutates directive text through the plan-
     // language rewriting backend; validate only orchestrates snapshot/
@@ -179,7 +210,7 @@ pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()> {
 
     commit_or_rollback(
         &artifacts,
-        plan_id,
+        &plan.id.0,
         &repository,
         &extraction,
         &migration,
@@ -349,7 +380,7 @@ fn commit_or_rollback(
     registry: &ariadne_lang::LanguageRegistry,
     plan_target_file: &std::path::Path,
     header_output_dir: &std::path::Path,
-) -> Result<()> {
+) -> Result<ApplyTransactionReport> {
     let mut tiers_passed = Vec::new();
 
     // M18.10 (§6.2 `validate::lib`): rollback fires ONLY on Fail — a Skipped
@@ -390,10 +421,12 @@ fn commit_or_rollback(
     }
 
     let outcome = ariadne_validate::ApplyOutcome::Committed { tiers_passed };
-    println!("{}", outcome.format_output());
     artifacts.save_transaction_artifacts(plan_id, &outcome)?;
 
-    Ok(())
+    Ok(ApplyTransactionReport {
+        outcome,
+        new_files: new_paths.to_vec(),
+    })
 }
 
 fn report_rollback(
@@ -403,13 +436,40 @@ fn report_rollback(
     tiers_passed: Vec<ariadne_validate::TierResult>,
     snapshot: &ariadne_validate::FileSnapshot,
     new_paths: &[PathBuf],
-) -> Result<()> {
+) -> Result<ApplyTransactionReport> {
     let outcome = ariadne_validate::ApplyOutcome::RolledBack {
         failed_tier,
         tiers_passed,
     };
-    println!("{}", outcome.format_output());
     ariadne_validate::TransactionApplier::rollback(snapshot, new_paths)?;
     artifacts.save_transaction_artifacts(plan_id, &outcome)?;
-    Ok(())
+    Ok(ApplyTransactionReport {
+        outcome,
+        new_files: new_paths.to_vec(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    /// Source-text lock (shape C1, hand A-2): the shared transactional core
+    /// must really exist in this file and must return its report instead of
+    /// printing it, so the extraction cannot silently regress into a
+    /// print-only wrapper. Needles are built with `format!` (the
+    /// `progress_contract_tests.rs:73` idiom) so this test's own source
+    /// cannot match itself, and no doc comment in this file may carry the
+    /// contiguous texts the needles spell.
+    #[test]
+    fn test_apply_plan_with_is_the_shared_transactional_core() {
+        let transform_source = include_str!("transform.rs");
+        let core_needle = format!("pub fn {}", "apply_plan_with");
+        assert!(
+            transform_source.contains(core_needle.as_str()),
+            "C1: transform.rs must define the shared transactional core apply_plan_with"
+        );
+        let report_needle = format!("pub struct {}", "ApplyTransactionReport");
+        assert!(
+            transform_source.contains(report_needle.as_str()),
+            "C1: the core must return ApplyTransactionReport, never print it"
+        );
+    }
 }
