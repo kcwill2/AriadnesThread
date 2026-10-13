@@ -215,8 +215,59 @@ indexing), inside non-timed command plumbing.
   are absent - inherent to the mandated single-test two-assert shape;
   documented under "Red evidence".
 
-## Landing record
+## Landing record (journal rider, D2)
 
-Filled in by the journal rider commit (D2): landing hash, gate 7/8/9
-verbatim results, `git show --stat` of the landing commit, the producer
-zero-diff proof line, and the final acceptance table.
+- Landing commit: `fdfe950` (parent `ff93508`), message verbatim from
+  gate 8. `commit_scoped.py` numstat digest:
+  `74  14  crates/cli/src/commands/transform.rs` and
+  `222  0  tasks/extraction-auto-apply-a2-journal.md`.
+- Gate 7 (with D1 staging route): the two paths staged via
+  `python tools/distill.py -- git add -- crates/cli/src/commands/transform.rs tasks/extraction-auto-apply-a2-journal.md`
+  (`### generic PASS (exit 0)`; git's informational LF/CRLF warning on the
+  journal's working copy only - the staged blob is what the guard
+  scanned), then `python tools/encoding_guard.py --staged` silent exit 0.
+- Gate 8: `python tools/commit_scoped.py --scope crates/cli/src/commands/transform.rs
+  --scope tasks/extraction-auto-apply-a2-journal.md -m "refactor(cli):
+  extract the apply_plan_with transactional core shared by CLI and UI"`
+  - the digest above; never `git add .`.
+- Gate 9: `python tools/encoding_guard.py --all` silent exit 0 post-commit.
+  This also discharges the byte-level coverage of duty 1's verdict file,
+  which was untracked at duty-1 guard time (it was scanned as tracked
+  content here, clean).
+- Acceptance 1: `git show --stat HEAD` at the landing commit shows
+  exactly `crates/cli/src/commands/transform.rs` (88 +- lines changed,
+  +74/-14) plus this journal (222 insertions). 2 files, 296 insertions,
+  14 deletions. Nothing else.
+- Acceptance 7: `git diff --name-only "ff93508..HEAD"` = exactly the two
+  touch-set paths. The m10/m20/m23 files appear in NO hunk of this
+  hand's range; ditto `tests/golden/**`, `tests/fixtures/**`,
+  `crates/validate/**`, `crates/transform/**`, `crates/artifact/**`,
+  assets, `Cargo.toml`, `Cargo.lock`, `tools/**`.
+- Producer zero-diff proof (bench stance): `git diff --numstat
+  "ff93508..HEAD" -- crates/cli/tests` returned EMPTY (capture 0 lines) -
+  the bench producer set is byte-identical across the landing range.
+  Combined with the DOCUMENTED_PHASES deterministic blocker at
+  `tools/bench_compare.py:84` (exit 2 before any timing comparison), NO
+  timing number is attributable to A-2; the reviewer hop carries the
+  exemption with this proof. `bench_compare.py` was not run in this hop.
+- Acceptance 3 end-run (mandated re-run "at preflight AND at the end"):
+  `git grep -c "apply_plan_with(" HEAD -- crates/cli/src/commands/transform.rs`
+  prints `HEAD:crates/cli/src/commands/transform.rs:2`.
+
+### Acceptance table (final)
+
+1. `git show --stat` = transform.rs + journal, exactly - MET.
+2. `apply_transform_plan` signature byte-identical to the start rev
+   (`pub fn apply_transform_plan(repo_path: &PathBuf, plan_id: &str) -> Result<()>`
+   at `:129` both sides) - MET.
+3. Census `apply_plan_with(` = 2 (definition + the wrapper's one call),
+   re-run at the end - MET.
+4. Gate 5 canonical line identical byte-for-byte to gate 2
+   (`18 passed / 0 failed / 0 ignored / 3 suites`) - MET.
+5. `python tools/hygiene_check.py` exit 0 - MET.
+6. `python tools/encoding_guard.py --all` exit 0 - MET.
+7. m10/m20/m23 in no hunk (landing range = the two touch-set paths) - MET.
+
+Out-of-scope observations: none new. The pre-existing R3 warn population
+and the `tools/bench_compare.py:84` DOCUMENTED_PHASES defect are
+unchanged and owned elsewhere (ledger dated rows).
