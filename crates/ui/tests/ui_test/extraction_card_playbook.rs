@@ -211,9 +211,12 @@ fn test_apply_recipe_is_honest() {
         "P9 amended: only tool apply, tool migrate and tool transform extract may be named as commands"
     );
     let legend = tab_slice(INDEX_HTML, "id=\"helpTab-legend\"", "id=\"helpTab-recipes\"");
+    // C8 amendment 1 (extraction-auto-apply A-5): the sentence this lock
+    // pinned is the copy the milestone deletes; the claim of record
+    // replaces it, mechanically opposed to the mandated copy flip.
     assert!(
-        legend.contains("never applies"),
-        "C7: the reworded sentence must still state that the UI never applies anything"
+        legend.contains("the UI applies with a dry-run first, validation in three tiers and automatic rollback"),
+        "A-5 C8 amendment 1: the reworded sentence must state the UI applies with a dry-run first, validation in three tiers and automatic rollback"
     );
     assert!(
         legend.contains("extraction-auto-apply"),
@@ -300,9 +303,12 @@ fn test_help_playbook_copy() {
         legend.contains("collapsed summary") && legend.contains("click"),
         "C7: help must explain the collapsed summary card and how to open it"
     );
+    // C8 amendment 2 (extraction-auto-apply A-5): the same flipped claim
+    // replaces the never-applies lock; the flip is the milestone's
+    // headline behavior and every other locked phrase below stays.
     assert!(
-        legend.contains("never applies"),
-        "C7: help must state the UI never applies anything itself"
+        legend.contains("the UI applies with a dry-run first, validation in three tiers and automatic rollback"),
+        "A-5 C8 amendment 2: help must state the UI applies with a dry-run first, validation in three tiers and automatic rollback"
     );
     assert!(
         legend.contains("three tiers") && legend.contains("rollback"),

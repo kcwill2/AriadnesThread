@@ -15,14 +15,19 @@
 // Singleton: the wizard is a single modal, so wizard-scoped element ids are
 // safe here (unlike the two-surface cards). All three shape-C7 resets are
 // live: modal open for a different plan, the 409 stale-generation refusal
-// (W6), and the payload-swap re-render path.
+// (W6), and the payload-swap re-render path. extraction-auto-apply adds
+// `applying` (the in-flight flag for the apply request) and `outcome` (the
+// 200 answer of the apply route): an outcome belongs to the generation
+// that produced it, so every reset path clears both through this one point.
 const wizardState = {
   planId: null,
   step: 0,
   selectedFile: null,
   manifest: null,
   dryRun: null,
-  error: null
+  error: null,
+  applying: false,
+  outcome: null
 };
 
 // Shape C1 step labels in flow order S0..S6. The wizard-step-list markup in
@@ -44,6 +49,8 @@ function resetWizardState(planId) {
   wizardState.manifest = null;
   wizardState.dryRun = null;
   wizardState.error = null;
+  wizardState.applying = false;
+  wizardState.outcome = null;
 }
 
 function findProposalForPlan(planId) {
@@ -278,7 +285,7 @@ async function enterWizardStep(stepIndex) {
     }
   }
   if (stepIndex === 5) {
-    document.getElementById('wizardStepContent5').innerHTML = renderWizardStepExecute(wizardState.planId);
+    renderWizardExecuteStepContent();
   }
   if (stepIndex === 6) {
     document.getElementById('wizardStepContent6').innerHTML = renderWizardStepAfterApply();
@@ -392,21 +399,174 @@ function renderWizardStepDryRun(dryRun) {
     '<div class="wizard-impact-line">The dry run changes nothing; tool apply performs the same computation before writing.</div>';
 }
 
-// Step S5 (shape C1/W5): the exact CLI recipe with the real plan id, the
-// --preview-first step, and the W4 sentence. The UI never runs these.
+// Step S5 (shape C1/W5 + extraction-auto-apply C7): the exact CLI recipe
+// with the real plan id, the --preview-first step, and the apply control.
+// A7: the control is enabled only with the dry run's single-use approval
+// token in hand; without one the step renders the dry-run-first
+// instruction and no apply request is possible. The copy claims exactly
+// what the shipped path does: the transactional applier writes the new
+// files, the three tiers validate and roll back automatically, and the
+// outcome is reported in S6.
+const DRY_RUN_FIRST_INSTRUCTION = 'Open the dry run first: the apply unlocks once the dry run returns its single-use approval token.';
+const APPLY_APPROVED_INSTRUCTION = 'The dry run approved this plan: applying writes the new files, validates in three tiers with automatic rollback, and reports the outcome in the After apply step.';
+const APPLY_INFLIGHT_COPY = 'Applying: the result lands in the After apply step when the transaction finishes.';
+
 function renderWizardStepExecute(planId) {
   const safePlanId = escapeHtml(planId || '');
+  const applyToken = wizardState.dryRun ? (wizardState.dryRun.apply_token || '') : '';
+  const approvalMissing = applyToken === '';
+  const inFlight = wizardState.applying === true;
+  const applyDisabled = approvalMissing || inFlight;
+  const instructionText = approvalMissing ? DRY_RUN_FIRST_INSTRUCTION : APPLY_APPROVED_INSTRUCTION;
+  const applyButton = '<div class="wizard-apply-row"><button type="button" class="btn-primary wizard-apply-button" id="wizardApplyBtn"' +
+    (applyDisabled ? ' disabled' : '') + '>' + (inFlight ? 'Applying' : 'Apply this plan') + '</button></div>';
+  const inflightLine = inFlight
+    ? '<div class="wizard-apply-inflight">' + escapeHtml(APPLY_INFLIGHT_COPY) + '</div>'
+    : '';
   return '<div class="wizard-step-title">Execute</div>' +
     '<div class="wizard-row"><span class="wizard-label">Preview first</span><code class="extraction-command">tool migrate &lt;repo-root&gt; --plan ' + safePlanId + ' --preview</code></div>' +
     '<div class="wizard-row"><span class="wizard-label">Generate</span><code class="extraction-command">tool transform extract &lt;repo-root&gt; --plan ' + safePlanId + '</code></div>' +
     '<div class="wizard-row"><span class="wizard-label">Full apply</span><code class="extraction-command">tool apply &lt;repo-root&gt; --plan ' + safePlanId + '</code></div>' +
     `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>` +
-    '<div class="wizard-impact-line">The UI shows this recipe and never runs it; run the preview first, then apply when you choose.</div>';
+    '<div class="wizard-apply-instruction">' + escapeHtml(instructionText) + '</div>' +
+    applyButton + inflightLine;
 }
 
-// Step S6 (shape C1): what the three tiers validate, what rollback restores
-// and where the artifacts land - the CLI behavior described, no UI surface.
+// Re-render S5 in place (entry, in-flight flip, refusal): the step body is
+// rebuilt from state every time so the apply control always reflects the
+// token, the in-flight flag and nothing stale.
+function renderWizardExecuteStepContent() {
+  document.getElementById('wizardStepContent5').innerHTML = renderWizardStepExecute(wizardState.planId);
+}
+
+// The apply request (extraction-auto-apply C7/C3): its own fetch site by
+// mandate, because the apply's 409 has two meanings (stale_generation and
+// apply_in_progress) the blanket-409 GET fetcher could not tell apart.
+// Every refusal code carries its own copy; the 200 stores the outcome and
+// advances to S6. A7 backstop: without a token nothing leaves the asset.
+async function applyExtractionPlan() {
+  const applyToken = wizardState.dryRun ? (wizardState.dryRun.apply_token || '') : '';
+  if (applyToken === '' || wizardState.applying) return;
+  wizardState.applying = true;
+  renderWizardExecuteStepContent();
+  let response = null;
+  try {
+    response = await fetch(extractionRouteUrl('/apply'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apply_token: applyToken })
+    });
+  } catch (networkError) {
+    wizardState.applying = false;
+    wizardState.error = 'the extraction route /apply is unreachable';
+    renderWizardError();
+    renderWizardExecuteStepContent();
+    return;
+  }
+  if (response.status === 200) {
+    const outcome = await response.json();
+    wizardState.applying = false;
+    wizardState.outcome = outcome;
+    wizardState.error = null;
+    renderWizardError();
+    showWizardStep(6);
+    enterWizardStep(6);
+    return;
+  }
+  const refusal = await response.json().catch(() => ({}));
+  wizardState.applying = false;
+  if (response.status === 409 && refusal.error === 'stale_generation') {
+    resetWizardState(wizardState.planId);
+    wizardState.error = 'stale analysis generation: the wizard reset to its first step. Reopen it from the card once the new analysis is ready.';
+    renderWizardError();
+    showWizardStep(wizardState.step);
+    return;
+  }
+  if (response.status === 409 && refusal.error === 'apply_in_progress') {
+    wizardState.error = 'another apply is running; try again in a moment';
+  } else if (response.status === 428) {
+    wizardState.error = 'the approval was not accepted: re-open the dry run to refresh the approval';
+  } else if (response.status === 500) {
+    wizardState.error = 'apply failed and the tree was rolled back: ' + (refusal.detail || 'no detail returned');
+  } else if (response.status === 503) {
+    wizardState.error = 'the analysis is reloading: wait for it to land, then re-open the dry run to approve again';
+  } else if (response.status === 404) {
+    wizardState.error = 'this plan is no longer offered by the current analysis: re-open the card to see the current plans';
+  } else {
+    wizardState.error = 'extraction /apply refused (HTTP ' + response.status + ')';
+  }
+  renderWizardError();
+  renderWizardExecuteStepContent();
+}
+
+// The S5 apply click (delegated: the step body re-renders per entry and
+// per state change). The disabled control is the A7 gate; the disabled
+// check here is a belt, not the lock.
+document.addEventListener('click', event => {
+  const applyControl = event.target.closest('#wizardApplyBtn');
+  if (applyControl && !applyControl.disabled) applyExtractionPlan();
+});
+
+// S6 tier display helpers: the DTO statuses are "pass"/"fail"/"skipped";
+// the step renders them as the verdict words with the shared semantic
+// colors (green commits, red refuses, amber waits, same meaning per theme).
+function wizardTierStatusText(status) {
+  if (status === 'pass') return 'PASS';
+  if (status === 'fail') return 'FAIL';
+  if (status === 'skipped') return 'SKIPPED';
+  return String(status || '').toUpperCase();
+}
+
+function wizardTierStatusClass(status) {
+  if (status === 'pass') return 'wizard-tier-pass';
+  if (status === 'fail') return 'wizard-tier-fail';
+  if (status === 'skipped') return 'wizard-tier-skipped';
+  return '';
+}
+
+// The honest rebuild sentence (shape C6): the front end cannot observe
+// the watcher, so it states the mechanism and the fallback instead of
+// claiming a rebuild it cannot know happened.
+const OUTCOME_REBUILD_SENTENCE = 'The background watcher re-analyzes the repository and this wizard resets when the new analysis lands; with watching disabled the analysis refreshes at the next UI start. The outcome record also lands under artifacts/transaction.';
+
+// The live outcome rows (shape C7/C6): the three tier results with their
+// reasons, the committed-vs-rolled-back verdict, the created files and the
+// verbatim server-rendered report. Every interpolated value passes through
+// escapeHtml; the report stays a pre block because it is verbatim text.
+function renderWizardStepOutcome(outcome) {
+  const tierRows = (outcome.tiers || []).map(function outcomeTierRow(tier) {
+    const statusText = wizardTierStatusText(tier.status);
+    const statusClass = wizardTierStatusClass(tier.status);
+    const reason = tier.detail
+      ? '<div class="wizard-outcome-reason">' + escapeHtml(tier.detail) + '</div>'
+      : '';
+    return '<div class="wizard-outcome-tier ' + statusClass + '"><span class="wizard-label">' +
+      escapeHtml(tier.tier) + '</span><span class="wizard-outcome-status">' + escapeHtml(statusText) +
+      '</span>' + reason + '</div>';
+  }).join('');
+  const verdictClass = outcome.committed ? 'wizard-tier-pass' : 'wizard-tier-fail';
+  const verdictText = outcome.committed
+    ? 'Committed: the new files are on disk and the outcome record landed under artifacts/transaction.'
+    : 'Rolled back: a failed tier restored the tree byte-identically; none of this apply remains on disk.';
+  const createdFileRows = (outcome.new_files || []).map(function createdFileRow(filePath) {
+    return '<div class="wizard-outcome-file"><code>' + escapeHtml(filePath) + '</code></div>';
+  }).join('');
+  return '<div class="wizard-step-title">After apply</div>' +
+    tierRows +
+    '<div class="wizard-outcome-verdict ' + verdictClass + '">' + escapeHtml(verdictText) + '</div>' +
+    '<div class="wizard-row"><span class="wizard-label">Files created</span></div>' +
+    (createdFileRows.length > 0 ? createdFileRows : '<em>no files created</em>') +
+    '<div class="wizard-row"><span class="wizard-label">Report</span></div>' +
+    '<div class="wizard-outcome-text"><pre>' + escapeHtml(outcome.output_text || '') + '</pre></div>' +
+    '<div class="wizard-impact-line">' + escapeHtml(OUTCOME_REBUILD_SENTENCE) + '</div>';
+}
+
+// Step S6 (shape C1 + extraction-auto-apply C7): live outcome rows once an
+// apply returned; until then the descriptive copy (what the three tiers
+// validate, what rollback restores and where the artifacts land) keeps the
+// step enterable before an apply.
 function renderWizardStepAfterApply() {
+  if (wizardState.outcome) return renderWizardStepOutcome(wizardState.outcome);
   return '<div class="wizard-step-title">After apply</div>' +
     '<div class="wizard-row"><span class="wizard-label">Tier 1</span><span class="wizard-value">Structural: the engine extraction reports no unit-graph errors or cycles.</span></div>' +
     '<div class="wizard-row"><span class="wizard-label">Tier 2</span><span class="wizard-value">Generated headers: every include a new file needs exists on disk.</span></div>' +

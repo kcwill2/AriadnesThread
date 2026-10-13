@@ -545,10 +545,10 @@ Cycle participation keeps your current Direction.</li>
             <li>Risk tiers (Conservative, Moderate, Aggressive) order plans by safety only; every plan the planner emits today is Conservative.</li>
             <li>The consumer TU count states how many translation units include the target and need re-validation after the plan is applied.</li>
             <li>Each card is a collapsed summary: plan id, target, symbol count, saving, and risk tier; click the summary to open the playbook detail, click again to collapse.</li>
-            <li>The playbook lists the suggested destination files with the symbols each should hold, plus the exact tool apply command &mdash; the UI never applies anything: this version never mutates the repository, and UI-triggered execution arrives with the follow-on extraction-auto-apply milestone.</li>
-            <li>Apply runs in the CLI: it validates the result in three tiers with automatic rollback; run tool migrate &lt;repo-root&gt; --plan PLAN-ID --preview first to see the consumer changes.</li>
+            <li>The playbook lists the suggested destination files with the symbols each should hold, plus the exact tool apply command &mdash; the UI applies with a dry-run first, validation in three tiers and automatic rollback, the execution path landed with the extraction-auto-apply milestone.</li>
+            <li>Apply runs the shared dry-run-then-apply path, from the wizard or the CLI: it writes the new files, validates the result in three tiers with automatic rollback, and reports the outcome; run tool migrate &lt;repo-root&gt; --plan PLAN-ID --preview first to see the proposed include changes.</li>
             <li>The Open wizard button opens a stepper over one plan: files to create, a per-file manifest with the symbols and the engine-sourced includes each new file needs, impact and risk, a dry run of every consumer rewrite, and the exact execute recipe.</li>
-            <li>The wizard is read-only: its manifest and dry-run answers come from the current analysis generation, and the UI never mutates the repository in this version. Execution stays the CLI recipe; the follow-on extraction-auto-apply milestone is where UI execution will live.</li>
+            <li>The wizard's manifest and dry-run answers come from the current analysis generation; its Execute step is the approval surface: the UI applies with a dry-run first, validation in three tiers and automatic rollback, the execution path of the extraction-auto-apply milestone.</li>
           </ul>
           <h5 class="help-section-title">Restore tab</h5>
           <p>A collapsed side panel (Node Inspector or Source Code) leaves a vertical restore tab on the canvas' right edge that brings it back.</p>

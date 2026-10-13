@@ -2291,5 +2291,31 @@
         color: var(--amber);
         margin: 4px 0;
       }
+      /* === EXTRACTION AUTO-APPLY (extraction-auto-apply A-5): the S5 apply
+         control with its disabled and in-flight states, and the S6 outcome
+         rows. One contiguous net-capped block (disciplined single-property
+         lines to honor the cap on this over-ceiling file); existing theme
+         tokens only, zero hex (theme_token_check --check-added is the
+         oracle). Verdict colors keep their semantic meaning per theme:
+         green commits, red refuses, amber waits. */
+      .wizard-apply-row { display: flex; gap: 8px; margin: 10px 0 6px; }
+      .wizard-apply-button[disabled] { opacity: 0.5; cursor: not-allowed; }
+      .wizard-apply-instruction { color: var(--text-muted); font-style: italic; margin: 4px 0; }
+      .wizard-apply-inflight { color: var(--amber); margin: 4px 0; }
+      .wizard-outcome-tier { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+      .wizard-outcome-status { font-weight: 600; }
+      .wizard-tier-pass { color: var(--green); }
+      .wizard-tier-fail { color: var(--red); }
+      .wizard-tier-skipped { color: var(--amber); }
+      .wizard-outcome-reason { color: var(--text-muted); }
+      .wizard-outcome-verdict { font-weight: 600; color: var(--text-main); margin: 6px 0; }
+      .wizard-outcome-file { color: var(--text-main); overflow-wrap: anywhere; }
+      .wizard-outcome-text {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+        overflow-x: auto;
+      }
 
 

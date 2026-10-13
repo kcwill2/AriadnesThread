@@ -12,7 +12,7 @@
 
 use crate::common;
 use ariadne_graph::{CallGraph, IncludeGraph};
-use ariadne_ui::{build_router, EXTRACTION_WIZARD_JS, HOTSPOTS_JS, INDEX_HTML};
+use ariadne_ui::{build_router, EXTRACTION_WIZARD_JS, HOTSPOTS_JS, INDEX_HTML, STYLES_CSS};
 use axum::http::{header, StatusCode};
 
 const WIZARD_SCRIPT_TAG: &str = "<script src=\"/app/extraction-wizard.js\"></script>";
@@ -341,10 +341,14 @@ fn test_wizard_step_manifest_fetches_per_step() {
         EXTRACTION_WIZARD_JS.contains("'/manifest'"),
         "extraction-wizard.js must build the manifest URL from '/api/extraction/' + plan id + '/manifest' (shape C2)"
     );
-    assert_eq!(
-        EXTRACTION_WIZARD_JS.matches("fetch(").count(),
-        1,
-        "the wizard must keep exactly one fetch call site (fetch handling in one place)"
+    // extraction-auto-apply A-5 (journal deviation D1): the apply POST
+    // rides its own fetch site by handoff mandate - its 409 carries two
+    // meanings the blanket-409 GET fetcher cannot tell apart (shape C7) -
+    // so the bound is now the GET fetcher plus exactly one sanctioned
+    // apply site. The GET-side assertions below keep the original lock.
+    assert!(
+        EXTRACTION_WIZARD_JS.matches("fetch(").count() <= 2,
+        "the wizard must keep its fetch handling to the GET fetcher plus the one apply POST site (fetch handling stays in named places only)"
     );
     let fetcher = wizard_function_body(EXTRACTION_WIZARD_JS, "fetchWizardRoute");
     assert!(
@@ -585,9 +589,13 @@ fn test_wizard_recipe_names_exactly_the_three_w5_verbs() {
 #[test]
 fn test_wizard_help_copy_names_the_execution_boundary() {
     let legend = wizard_tab_slice(INDEX_HTML, "id=\"helpTab-legend\"", "id=\"helpTab-recipes\"");
+    // C8 amendment 3 (extraction-auto-apply A-5): the never-mutates
+    // sentence is the copy this milestone flips; the claim of record
+    // replaces it and the extraction-auto-apply key below stays as
+    // provenance.
     assert!(
-        legend.contains("never mutates the repository"),
-        "the Hotspots help copy must state that the UI never mutates the repository in this version"
+        legend.contains("the UI applies with a dry-run first, validation in three tiers and automatic rollback"),
+        "the Hotspots help copy must state that the UI applies with a dry-run first, validation in three tiers and automatic rollback (extraction-auto-apply C8 amendment 3)"
     );
     assert!(
         legend.contains("extraction-auto-apply"),
@@ -606,4 +614,238 @@ fn test_wizard_help_copy_names_the_execution_boundary() {
             "every W-3b interpolated payload value must pass through an escaper, found raw {raw_interpolation}"
         );
     }
+}
+
+// ==== extraction-auto-apply A-5: the S5 approval surface, the S6 live ====
+// ==== outcome, the apply response mapping, and the style block.        ====
+
+/// A7 dry-run-first instruction, verbatim contract copy: the S5 renderer
+/// carries it whenever no approval token is in hand.
+const DRY_RUN_FIRST_INSTRUCTION: &str =
+    "Open the dry run first: the apply unlocks once the dry run returns its single-use approval token.";
+
+// Required A-5 test 1 (A7): the apply control is enabled only with the
+// dry run's approval token, and the C7 state slots exist and clear at the
+// single reset point (which every existing reset path already calls).
+#[test]
+fn test_execute_step_apply_control_requires_an_approval_token() {
+    let execute = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepExecute");
+    assert!(
+        execute.contains("wizardState.dryRun.apply_token") && execute.contains("disabled"),
+        "renderWizardStepExecute must gate its apply control on the dry-run apply_token"
+    );
+    assert!(
+        execute.contains("approvalMissing") && execute.contains("applyDisabled"),
+        "the apply control's enabled state must be keyed off the token through a named predicate"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("applying: false")
+            && EXTRACTION_WIZARD_JS.contains("outcome: null"),
+        "the wizard state must carry the applying and outcome slots (shape C7)"
+    );
+    let reset = wizard_function_body(EXTRACTION_WIZARD_JS, "resetWizardState");
+    assert!(
+        reset.contains("wizardState.applying = false")
+            && reset.contains("wizardState.outcome = null"),
+        "the single reset point must clear applying and outcome so every existing reset path clears both (shape C7)"
+    );
+}
+
+// Required A-5 test 2 (A7): without a token the step renders the
+// dry-run-first instruction.
+#[test]
+fn test_execute_step_shows_the_dry_run_first_instruction_without_a_token() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains(DRY_RUN_FIRST_INSTRUCTION),
+        "the execute step must instruct the user to open the dry run first when no token is present"
+    );
+    let execute = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepExecute");
+    assert!(
+        execute.contains("approvalMissing") && execute.contains("DRY_RUN_FIRST_INSTRUCTION"),
+        "the dry-run-first instruction must be the branch taken when the token is absent"
+    );
+}
+
+// Required A-5 test 3 (W5 survival after the S5 edit): the three verbs,
+// their order, the escaped plan id and the W4 sentence all survive.
+#[test]
+fn test_execute_step_keeps_the_three_verb_recipe() {
+    let execute = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepExecute");
+    let preview_first = execute
+        .find("tool migrate")
+        .expect("migrate verb present in the recipe");
+    let extract_at = execute
+        .find("tool transform extract")
+        .expect("transform extract verb present in the recipe");
+    let apply_at = execute.find("tool apply").expect("apply verb present in the recipe");
+    assert!(
+        preview_first < extract_at && extract_at < apply_at,
+        "the S5 edit must keep the recipe order: preview first, then transform extract, then the full apply"
+    );
+    assert!(
+        execute.contains("escapeHtml(planId || '')"),
+        "the S5 edit must keep the plan id interpolated through escapeHtml"
+    );
+    assert!(
+        execute.contains("COPY_VS_MOVE_SENTENCE"),
+        "the S5 edit must keep the locked W4 copy-vs-move sentence"
+    );
+}
+
+// Required A-5 test 4 (A5/S6): the live outcome rows - tiers, verdict,
+// created files, verbatim report - all escaped, and the descriptive copy
+// stays for the pre-apply entry.
+#[test]
+fn test_after_apply_step_renders_the_live_outcome_rows() {
+    let after_apply = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepAfterApply");
+    assert!(
+        after_apply.contains("renderWizardStepOutcome("),
+        "renderWizardStepAfterApply must render the outcome tiers, verdict and output_text"
+    );
+    assert!(
+        after_apply.contains("Rollback fires only on a failed tier"),
+        "the step keeps its descriptive copy when no outcome exists (it stays enterable before an apply)"
+    );
+    let outcome = wizard_function_body(EXTRACTION_WIZARD_JS, "renderWizardStepOutcome");
+    assert!(outcome.contains("tiers"), "the outcome renderer must read the tier rows");
+    for escaped in [
+        "escapeHtml(tier.tier)",
+        "escapeHtml(statusText)",
+        "escapeHtml(tier.detail)",
+        "escapeHtml(filePath)",
+        "escapeHtml(outcome.output_text",
+    ] {
+        assert!(
+            outcome.contains(escaped),
+            "the outcome renderer must interpolate {escaped} through the escaper (A9/A11 escape discipline)"
+        );
+    }
+    assert!(
+        outcome.contains("Committed") && outcome.contains("Rolled back"),
+        "the verdict line must state committed vs rolled back"
+    );
+    assert!(
+        outcome.contains("artifacts/transaction"),
+        "the S6 copy must state the outcome record lands under artifacts/transaction (shape C6)"
+    );
+}
+
+// Required A-5 test 5 (A9/A11): the ban - no raw outcome or applying
+// interpolation may ever enter the asset.
+#[test]
+fn test_every_outcome_interpolation_is_escaped() {
+    for raw_form in ["${outcome.", "${applying"] {
+        assert!(
+            !EXTRACTION_WIZARD_JS.contains(raw_form),
+            "the outcome path must interpolate no value raw, found {raw_form} (A9/A11)"
+        );
+    }
+}
+
+// Required A-5 test 6 (shape C7 mapping): the apply request is one named
+// function with its own fetch site, and every refusal code has its own
+// copy; the 200 path stores the outcome and advances to S6.
+#[test]
+fn test_apply_response_mapping_covers_every_refusal() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("async function applyExtractionPlan("),
+        "the apply request must be one named function applyExtractionPlan (shape section 9 binding name)"
+    );
+    let apply = wizard_function_body(EXTRACTION_WIZARD_JS, "applyExtractionPlan");
+    assert!(
+        apply.contains("extractionRouteUrl('/apply')")
+            && apply.contains("method: 'POST'")
+            && apply.contains("apply_token"),
+        "the apply must POST to the plan's /apply route with the dry run's token as the body (shape C3)"
+    );
+    assert!(
+        !apply.contains("fetchWizardRoute"),
+        "the apply must not ride the blanket-409 GET fetcher: its 409 has two meanings (handoff item 3)"
+    );
+    assert!(
+        apply.contains("stale_generation")
+            && apply.contains("resetWizardState(wizardState.planId)"),
+        "the apply's 409 stale_generation must ride the existing stale-generation reset (shape C7)"
+    );
+    assert!(
+        apply.contains("apply_in_progress")
+            && apply.contains("another apply is running; try again in a moment"),
+        "the apply_in_progress refusal must show its own sentence (shape C7)"
+    );
+    assert!(
+        apply.contains("status === 428")
+            && apply.contains("re-open the dry run to refresh the approval"),
+        "the 428 dry_run_required refusal must show the approval-refresh copy (shape C7)"
+    );
+    assert!(
+        apply.contains("status === 500") && apply.contains("refusal.detail"),
+        "the 500 apply_failed refusal must show the refusal's detail (journal deviation D3)"
+    );
+    assert!(
+        apply.contains("status === 503") && apply.contains("analysis is reloading"),
+        "the 503 analysis_loading refusal must state the analysis is reloading"
+    );
+    assert!(
+        apply.contains("status === 404"),
+        "the 404 unknown_plan refusal must have its own branch and copy (journal deviation D4)"
+    );
+    assert!(
+        apply.contains("is unreachable"),
+        "a network failure must reuse the existing unreachable-copy idiom"
+    );
+    assert!(
+        apply.contains("wizardState.outcome =")
+            && apply.contains("showWizardStep(6)")
+            && apply.contains("enterWizardStep(6)"),
+        "the 200 path stores the outcome and advances to S6 (shape C7)"
+    );
+}
+
+// Required A-5 test 7: the asset stays ASCII-only through the new apply
+// and outcome code (the existing idiom, restated at this hand).
+#[test]
+fn test_wizard_asset_stays_ascii_after_the_apply_surface() {
+    assert!(
+        EXTRACTION_WIZARD_JS.is_ascii(),
+        "extraction-wizard.js must stay pure ASCII (no byte above 0x7F) after the A-5 apply and outcome code"
+    );
+}
+
+// Required A-5 test 8: the contiguous A-5 style block exists, styles the
+// apply control, its disabled and in-flight states and the outcome rows,
+// adds zero hex and takes its colors from existing theme tokens (the
+// theme locks' assertion style; theme_token_check --check-added is the
+// milestone-level added-hex oracle).
+#[test]
+fn test_apply_outcome_style_block_adds_no_hex() {
+    let marker = "=== EXTRACTION AUTO-APPLY (extraction-auto-apply A-5)";
+    let at = STYLES_CSS.find(marker).unwrap_or_else(|| {
+        panic!("styles.css must carry the contiguous A-5 apply/outcome block behind its marker comment")
+    });
+    let block = &STYLES_CSS[at..];
+    assert!(
+        !block.contains('#'),
+        "the A-5 apply/outcome block must add zero hex literals (existing theme tokens only)"
+    );
+    for rule in [
+        ".wizard-apply-row {",
+        ".wizard-apply-button[disabled] {",
+        ".wizard-apply-instruction {",
+        ".wizard-apply-inflight {",
+        ".wizard-outcome-tier {",
+        ".wizard-tier-pass {",
+        ".wizard-tier-fail {",
+        ".wizard-tier-skipped {",
+        ".wizard-outcome-verdict {",
+        ".wizard-outcome-text {",
+    ] {
+        assert!(
+            block.contains(rule),
+            "the A-5 block must style {rule} (apply control, disabled state, in-flight state, outcome rows)"
+        );
+    }
+    assert!(
+        block.contains("var(--"),
+        "the A-5 block must take its colors from existing theme tokens"
+    );
 }
