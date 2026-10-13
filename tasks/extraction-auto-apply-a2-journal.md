@@ -215,6 +215,42 @@ indexing), inside non-timed command plumbing.
   are absent - inherent to the mandated single-test two-assert shape;
   documented under "Red evidence".
 
+### Appendix rider - disclosures carried from the A-2 final report
+(docs-only rider, landed by the A-3 hop, 2026-10-13; verdict finding 1
+remediation)
+
+Basis: A-2 verdict finding 1 (`tasks/extraction-auto-apply-a2-verdict.md`
+section 9) - the Deviations section above declares D1, D2 and O1 but
+omits two disclosures the implementer's final report made. This rider
+carries both into the journal of record; it is docs-only, adds no source
+change, and alters no existing journal claim.
+
+- O2 (observation, zero tree impact): the combined gate command that
+  chained `python tools/encoding_guard.py --staged` with a shell echo
+  marker in a single invocation was refused with the catch-all denial
+  `{"permission":"bash","pattern":"*","action":"deny","source":"global"}`
+  (boilerplate message, emitted regardless of the actual cause). Per the
+  refusal protocol each gate then ran independently: the guard ran alone
+  and exited 0 silent, then `commit_scoped.py` landed the commit. The
+  refused combined form executed nothing, so there was no tree impact.
+  The refusal class is environment-verified in the A-2 reviewer hop
+  (chained, piped and `python -c` forms each returned the same denial;
+  ledger dated row, M26 V3 recurrence) - verdict section 8, O2 row.
+- Phantom mid-session narration transparency note (zero tree impact): the
+  A-2 final report disclosed that part of its own mid-session narration
+  was phantom - it described actions that changed nothing. The tree
+  corroborates the "changed nothing" claim: exactly two commits, exactly
+  the two touch-set paths, exact per-commit stats, and every acceptance
+  item reproducing fresh (verdict section 8, phantom-narration row). The
+  note existed only in the final report; this rider moves it into the
+  journal of record.
+
+This rider touched no other journal content. The separate verdict
+finding 2 (the `commit_or_rollback`/`report_rollback` line-count erratum
+in the "Refactor" and "Hygiene" sections) is outside this rider's
+declared scope (finding 1 only, per the A-3 dispatch) and stands for
+remediation at the next authorized journal touch.
+
 ## Landing record (journal rider, D2)
 
 - Landing commit: `fdfe950` (parent `ff93508`), message verbatim from
