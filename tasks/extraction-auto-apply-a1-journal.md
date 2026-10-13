@@ -247,6 +247,13 @@ hand.
 
 ## Landing record (appended by the rider commit)
 
-- Landing hash: recorded by the journal rider commit (see git log).
-- Gate 7 digest (numstat from `commit_scoped.py`): see rider section
-  below, appended post-landing per deviation D6.
+- Landing hash: `907db9d` - `refactor(cli): extract the boot-progress
+  family into commands/ui/boot_progress.rs (ui.rs 986 -> 870)`.
+- Gate 7 digest (numstat from `commit_scoped.py`, verbatim):
+  `19  135  crates/cli/src/commands/ui.rs`
+  `210  2   crates/cli/src/commands/ui/boot_progress.rs`
+  `252  0   tasks/extraction-auto-apply-a1-journal.md`
+  Exactly the three touch-set files; acceptance 7 MET.
+- Gate 8 (`encoding_guard --all`, post-landing): exit 0 (silent).
+- Rider commit for this section: the scoped journal-only follow-up per
+  deviation D6 (W-3b `b8597f1` precedent).
