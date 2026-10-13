@@ -1,14 +1,15 @@
-use crate::commands::progress::{strip_stage_prefix, TerminalStepBars};
+// `TerminalStepBars` moved out with the bar renderer (A-1): the frozen
+// test modules import it from `crate::commands::progress` directly.
+use crate::commands::progress::strip_stage_prefix;
 use crate::commands::ui::boot_progress::BootStepSnapshot;
 use anyhow::{Context, Result};
 use ariadne_index::StageFingerprints;
 use ariadne_pipeline::{BootMilestone, LoadMilestone, Pipeline, ProgressEvent};
 use ariadne_ui::{GraphExportPayload, StageInfo, StageStatus, UiState};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // Re-exported after the verbatim move to `ui/stage_spans.rs`: EXACTLY the
 // names the frozen test modules import via `use super::{...}`, plus every
@@ -20,6 +21,14 @@ use stage_spans::{
     CALL_GRAPH_PHASE, COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
     PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, REDUCTION_PHASE, RUN_PHASES,
     STAGES_PER_RUN, SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
+};
+// Re-exported after the verbatim move to `ui/boot_progress.rs`: EXACTLY the
+// names the frozen test modules import via `use super::{...}`, plus every
+// name production code here still calls (child modules see parent-private
+// `use` bindings, so the frozen import lines stay UNEDITED).
+use boot_progress::{
+    build_boot_generation, drive_boot_build, make_bar_progress, make_boot_progress,
+    surface_boot_failure,
 };
 
 mod boot_progress;
@@ -707,128 +716,6 @@ fn spawn_watcher(
     });
 }
 
-/// Live per-step terminal bar renderer. TerminalStepBars is Send + Sync, so
-/// the closure satisfies ProgressFn's Send + Sync bound and may move into
-/// spawn_blocking; dropping the closure at the end of the build also drops
-/// the guard, which commits any bar line left open by a failed build.
-fn make_bar_progress() -> ProgressFn {
-    // Fresh stdout handle per build, exactly what `TerminalStepBars::new`
-    // builds internally.
-    make_bar_progress_with_sink(Arc::new(Mutex::new(std::io::stdout())))
-}
-
-/// Bar renderer onto a caller-owned byte sink: the test seam over the
-/// frozen `TerminalStepBars::with_sink` (boot-progress-visibility V1).
-pub(crate) fn make_bar_progress_with_sink(sink: Arc<Mutex<dyn Write + Send>>) -> ProgressFn {
-    let bars = TerminalStepBars::with_sink(sink);
-    Arc::new(move |report: ProgressReport| {
-        let step = step_percent(report.stage, report.percent);
-        bars.render(
-            report.stage,
-            STAGES_PER_RUN,
-            report.phase,
-            step,
-            &report.message,
-        );
-    })
-}
-
-/// Boot progress for the interactive server: mirrors the global percent into
-/// web `UiState` (browser bar unchanged) and drives the live per-step bar.
-fn make_boot_progress(state: Arc<UiState>) -> ProgressFn {
-    make_boot_progress_with_sink(state, Arc::new(Mutex::new(std::io::stdout())))
-}
-
-/// Boot progress whose bar renders onto a caller-owned sink: the test seam
-/// over `make_boot_progress` (boot-progress-visibility V1). Each report
-/// additionally advances the per-step row snapshot written into
-/// `progress.steps` (ui-progress-parity T2): `apply` is pure, so it runs
-/// OUTSIDE the state write lock and the rows join the existing four global
-/// writes in the SAME single write pass (I4: globals written exactly as
-/// before; the error arm and `swap_into_state` never touch rows, so rows
-/// freeze by construction - I6).
-pub(crate) fn make_boot_progress_with_sink(
-    state: Arc<UiState>,
-    sink: Arc<Mutex<dyn Write + Send>>,
-) -> ProgressFn {
-    let bar = make_bar_progress_with_sink(sink);
-    let snapshot = Mutex::new(BootStepSnapshot::seeded(STAGES_PER_RUN, &RUN_PHASES));
-    Arc::new(move |report: ProgressReport| {
-        let rows = snapshot
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .apply(&report);
-        {
-            let mut p = write_state(&state.progress);
-            p.state = "loading".to_string();
-            p.phase = report.phase.to_string();
-            p.message = report.message.clone();
-            p.percent = report.percent;
-            p.steps = rows;
-            p.total_stages = STAGES_PER_RUN;
-        }
-        bar(report);
-    })
-}
-
-/// Best-effort panic payload text: `panic!` carries `&str` or `String`;
-/// anything else degrades to a fixed marker, never silence (R8).
-fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(text) = payload.downcast_ref::<&str>() {
-        (*text).to_string()
-    } else if let Some(text) = payload.downcast_ref::<String>() {
-        text.clone()
-    } else {
-        "unknown panic payload".to_string()
-    }
-}
-
-/// Write the terminal error state for a failed or panicked boot (I11): the
-/// web UI leaves "loading" carrying the failure text. Committing any open
-/// bar line is the TerminalStepBars guard-drop's job, not this write's.
-fn surface_boot_failure(state: &UiState, text: String) {
-    let mut progress = write_state(&state.progress);
-    progress.state = "error".to_string();
-    progress.message = text;
-}
-
-/// Run the boot build to its terminal UI state, mirroring the
-/// `spawn_watcher` catch precedent so a dead boot is LOUD (I11, evidence
-/// E3: a swallowed panic left the UI serving a frozen loading row while
-/// the truth went to an unwatched console stderr). `Err` results and
-/// escaped panics both write web state `"error"` with the failure text and
-/// send `None` fingerprints, so the watcher parks instead of guarding a
-/// dead generation. The boot surface logs `error!` where the watcher warns
-/// (R8: never silent).
-fn drive_boot_build(
-    state: &Arc<UiState>,
-    fps_tx: tokio::sync::oneshot::Sender<Option<StageFingerprints>>,
-    build_fn: impl FnOnce() -> Result<UiBuildResult>,
-) {
-    let load_started = std::time::Instant::now();
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(build_fn)) {
-        Ok(Ok(out)) => {
-            crate::commands::progress::print_load_complete(load_started.elapsed());
-            let fps = swap_into_state(state, out);
-            let _ = fps_tx.send(Some(fps));
-        }
-        Ok(Err(e)) => {
-            // The progress Arc was consumed, so its guard has already
-            // committed any half-drawn bar line: errors print on a fresh one.
-            surface_boot_failure(state, e.to_string());
-            let _ = fps_tx.send(None);
-        }
-        Err(payload) => {
-            // `&*payload`, not `&payload`: a bare reference unsizes to a
-            // `dyn Any` view OF the box, not its contents (probe 2026-10-05).
-            let text = panic_payload_text(&*payload);
-            surface_boot_failure(state, text.clone());
-            tracing::error!("UI boot task panicked: {text}");
-            let _ = fps_tx.send(None);
-        }
-    }
-}
-
 /// S6 (AR-02): the UI binds localhost by default; `--expose <addr>` is the
 /// single opt-in to a wider bind address (LAN exposure warns at startup).
 pub fn resolve_bind_addr(expose: Option<&str>) -> String {
@@ -847,16 +734,6 @@ fn warn_if_expose_used(expose: Option<&str>) {
     eprintln!(
         "warning: --expose {addr} binds the UI beyond localhost: it has no authentication and is reachable from the local network"
     );
-}
-
-/// The generation boot swaps in: a plain payload build stamped with the
-/// `UiState` epoch boot's swap consumes. `new_loading` starts at epoch 0,
-/// so boot's swap installs generation epoch 1 (the wizard reader carries
-/// it; the watcher counts up from 2). R1 extraction from `run_ui`.
-fn build_boot_generation(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuildResult> {
-    let mut built = build_ui_payload(repo_path, progress)?;
-    built.install_epoch = 1;
-    Ok(built)
 }
 
 pub async fn run_ui(
@@ -963,6 +840,13 @@ pub async fn run_ui(
 // the production section at the FIRST `#[cfg(test)]` token.
 #[cfg(test)]
 use stage_spans::COLLATERAL_FILE_SPAN_END;
+
+// Test-only re-export: the frozen `boot_panic_tests.rs` imports
+// `make_boot_progress_with_sink` via `use super::{...}`; its only remaining
+// callers are that test module and the moved family itself. Same placement
+// rule.
+#[cfg(test)]
+use boot_progress::make_boot_progress_with_sink;
 
 #[cfg(test)]
 mod tests;
