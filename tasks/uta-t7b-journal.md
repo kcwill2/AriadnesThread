@@ -128,3 +128,23 @@ Canonical line (scoped --lib, rows 4+7+8+12 landed): 160 passed / 0 failed /
   (pre-existing warning, surfaced post-move).
 Canonical line (scoped --lib, rows 1-9,12): 167 passed / 0 failed / 0
   ignored / 1 suites.
+(row 11) TEST-MODULE MOVE: extraction_apply.rs sat at 999/1000 - its inline
+  `mod tests` (703 body lines) moved to ui/extraction_apply/tests.rs
+  (byte-safe script, per-line terminators preserved; `mod tests;` now
+  2 lines, source file 999 -> 295 lines). `super`/`super::super` semantics
+  unchanged. Deviations inside the move: the two include_str! paths gained
+  one `../` (file-relative), and one pre-existing unused-`state` warning
+  became `_state` (same one-char cleanup class as the cli_command_tests
+  mut). New pin green 1st run: `pin_failed_transaction_burns_the_token_and_
+  reports_failed_text` - a `.rs` target fails the core routing (matches the
+  row-5 unclaimed-backend family), Failed carries non-empty ASCII text, the
+  token is burned at consumption, and the same token retries as NotApproved.
+  Frozen greps intact: extraction_apply.rs 1 `apply_plan_with(`, transform.rs 2.
+(row 10) one pin green in extraction_reader.rs mod tests (no src change):
+  `pin_degraded_dry_run_is_honest_absent_and_never_cached` - reader over an
+  uncanonicalizable repo root: unknown plan -> None (404), shipped plan ->
+  the exact W3 honest-absent DTO (claim-free, copy_only false,
+  includes_unavailable true, no token, epoch verbatim), and the discovery
+  counter moves 1 -> 2 across two calls (never cached, R3 retryable).
+Canonical line (scoped --lib, rows 1-12): 169 passed / 0 failed / 0
+  ignored / 1 suites.

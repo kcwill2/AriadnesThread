@@ -838,4 +838,62 @@ mod tests {
             "a reader with no plans resolves no plan (route answers 404)"
         );
     }
+
+    // UTA-T7b row 10: dry-run degraded-mode (honest-absent) pins.
+
+    #[test]
+    fn pin_degraded_dry_run_is_honest_absent_and_never_cached() {
+        // A reader over a repo root that cannot be canonicalized: the
+        // cheap engine half completes (pure in-memory), the expensive
+        // consumer-discovery half bails honestly, and `dry_run` answers
+        // with the documented W3 honest-absent shape - never cached, so
+        // the discovery counter moves on EVERY call (R3 retryability).
+        let (_temp_dir, _state, _proposals, plans) = boot_swapped_fixture("basic");
+        let shipped = plans.first().expect("the fixture ships a plan").clone();
+        let plan_id = shipped.id.0.clone();
+        let ghost_root = {
+            let scratch = tempfile::tempdir().expect("scratch temp dir");
+            scratch.path().join("ghost_repo_that_does_not_exist")
+        };
+        let reader = EngineBackedExtractionReader::new(
+            7,
+            ghost_root,
+            vec![shipped],
+            Arc::new(ariadne_ui::AnalysisGeneration {
+                include_graph: IncludeGraph::new(),
+                reduced_model: ReducedSemanticModel::default(),
+                memo: Arc::new(LoadMemo::new()),
+            }),
+        );
+
+        assert_eq!(
+            reader.dry_run("no-such-plan"),
+            None,
+            "an unknown plan is a 404, never the honest-absent shape"
+        );
+
+        let first = reader.dry_run(&plan_id).expect("a degraded answer is still an answer");
+        assert_eq!(first.plan_id, plan_id);
+        assert_eq!(first.generation_epoch, 7, "the epoch is reported verbatim");
+        assert!(first.new_files.is_empty(), "nothing computed is claimed");
+        assert!(first.rewrites.is_empty(), "nothing computed is claimed");
+        assert!(!first.rewrites_truncated);
+        assert_eq!(first.move_removals, 0);
+        assert!(!first.copy_only, "a degraded run must not claim copy-only semantics");
+        assert!(first.includes_unavailable, "the W3 degradation flag is set");
+        assert!(first.apply_token.is_empty(), "the honest-absent shape mints no token");
+        assert_eq!(reader.consumer_discovery_runs(), 1);
+
+        let second = reader.dry_run(&plan_id).expect("the degraded answer is retryable");
+        assert_eq!(
+            reader.consumer_discovery_runs(),
+            2,
+            "honest-absent is never cached: the second call ran discovery again"
+        );
+        assert_eq!(second.plan_id, plan_id);
+        assert!(
+            second.includes_unavailable && second.apply_token.is_empty(),
+            "the retry answers with the same honest-absent shape"
+        );
+    }
 }
