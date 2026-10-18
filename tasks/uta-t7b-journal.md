@@ -71,3 +71,11 @@ Order followed: rows 1,2,3,5,6,13 first, then 4,7,8,9,10,11,12.
   Some(0), collateral_load None (no fabricated zero), repo_root ends with
   the located dir - all green.
 Canonical line (scoped --lib): 151 passed / 0 failed / 0 ignored / 1 suites.
+(row 4) two pins green in commands/plan.rs mod tests (no src change): empty
+  extends edge list == colocated_groups byte-for-byte (non-empty fixture, so
+  the equality is not vacuous); per-language edge filtering pinned - a mixed
+  scala/cpp fixture with a sealed Shape, intra-Scala extends edges + one
+  cross-language edge (cpp Widget -> scala Shape) yields exactly the
+  [Circle, Shape, Square] group, and the cross edge ALONE colocates nothing.
+  Helpers routing_over/group_id_strings/mixed_scala_cpp_catalog added in the
+  test module only.

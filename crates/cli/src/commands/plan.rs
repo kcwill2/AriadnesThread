@@ -438,4 +438,133 @@ mod tests {
             "a language no plugin claims must not produce a planning rejection"
         );
     }
+
+    // UTA-T7b row 4: `colocated_groups_with_edges` routing pins.
+
+    fn routing_over<'a>(
+        registry: &'a ariadne_lang::LanguageRegistry,
+        catalog: &'a BTreeMap<FileId, ariadne_lang::LanguageId>,
+    ) -> LanguageRoutingConstraints<'a> {
+        LanguageRoutingConstraints {
+            registry,
+            language_of_file: catalog,
+        }
+    }
+
+    fn group_id_strings(groups: &[Vec<ariadne_lang::SymbolId>]) -> Vec<Vec<String>> {
+        groups
+            .iter()
+            .map(|group| group.iter().map(|id| id.0.clone()).collect())
+            .collect()
+    }
+
+    fn mixed_scala_cpp_catalog(
+        scala_file: FileId,
+        cpp_file: FileId,
+    ) -> BTreeMap<FileId, ariadne_lang::LanguageId> {
+        let mut catalog: BTreeMap<FileId, ariadne_lang::LanguageId> = BTreeMap::new();
+        catalog.insert(scala_file, ariadne_lang::LanguageId::Scala);
+        catalog.insert(cpp_file, ariadne_lang::LanguageId::Cpp);
+        catalog
+    }
+
+    #[test]
+    fn pin_with_edges_empty_edge_input_equals_colocated_groups_byte_for_byte() {
+        // D-M23-8 fold: an empty extends channel must take the identical
+        // `colocated_groups` path (the dispatch must not even reach the
+        // per-language edge machinery). Non-empty result required, or the
+        // equality would be vacuous.
+        let scala_file = FileId::from_relative_path("src/main/scala/p/Legacy.scala");
+        let cpp_file = FileId::from_relative_path("include/all.h");
+        let registry = crate::registry::default_registry();
+        let catalog = mixed_scala_cpp_catalog(scala_file, cpp_file);
+        let dispatcher = routing_over(&registry, &catalog);
+        let records = vec![
+            symbol("p.Foo", "Foo", ariadne_lang::SymbolKind::Class, scala_file),
+            ariadne_lang::SymbolRecord {
+                name: "Foo".to_string(),
+                ..symbol("p.Foo$", "Foo$", ariadne_lang::SymbolKind::Object, scala_file)
+            },
+            symbol("Widget", "Widget", ariadne_lang::SymbolKind::Class, cpp_file),
+        ];
+
+        let plain = dispatcher.colocated_groups(&records);
+        let via_empty_edges = dispatcher.colocated_groups_with_edges(&records, &[]);
+        assert_eq!(
+            group_id_strings(&via_empty_edges),
+            group_id_strings(&plain),
+            "empty edges must yield the byte-identical colocated_groups answer"
+        );
+        assert_eq!(
+            group_id_strings(&plain),
+            vec![vec!["p.Foo".to_string(), "p.Foo$".to_string()]],
+            "the equality above must not be vacuous over an empty result"
+        );
+    }
+
+    #[test]
+    fn pin_with_edges_filters_edges_to_the_language_subset_they_live_in() {
+        // Per-language edge filtering: an edge reaches a plugin only when
+        // BOTH endpoints are records of that language's file subset. The
+        // cross-language edge (Widget -> m.Shape) must reach NEITHER the
+        // Scala plugin (Widget is not in the Scala subset: a misrouted
+        // channel would pull `Widget` into the sealed group) nor the C++
+        // one (Shape is not in the C++ subset; the C++ default ignores
+        // edges anyway).
+        let scala_file = FileId::from_relative_path("src/main/scala/m/Shapes.scala");
+        let cpp_file = FileId::from_relative_path("include/widget.h");
+        let registry = crate::registry::default_registry();
+        let catalog = mixed_scala_cpp_catalog(scala_file, cpp_file);
+        let dispatcher = routing_over(&registry, &catalog);
+
+        let sealed_shape = ariadne_lang::SymbolRecord {
+            modifiers: vec!["sealed".to_string()],
+            ..symbol("m.Shape", "Shape", ariadne_lang::SymbolKind::Trait, scala_file)
+        };
+        let circle = symbol("m.Circle", "Circle", ariadne_lang::SymbolKind::Struct, scala_file);
+        let square = symbol("m.Square", "Square", ariadne_lang::SymbolKind::Struct, scala_file);
+        let widget = symbol("Widget", "Widget", ariadne_lang::SymbolKind::Class, cpp_file);
+        let records = vec![sealed_shape, circle, square, widget];
+
+        let intra_scala_edges = vec![
+            (
+                ariadne_lang::SymbolId::new("m.Circle"),
+                ariadne_lang::SymbolId::new("m.Shape"),
+            ),
+            (
+                ariadne_lang::SymbolId::new("m.Square"),
+                ariadne_lang::SymbolId::new("m.Shape"),
+            ),
+        ];
+        let cross_language_edge = (
+            ariadne_lang::SymbolId::new("Widget"),
+            ariadne_lang::SymbolId::new("m.Shape"),
+        );
+
+        let mut all_edges = intra_scala_edges.clone();
+        all_edges.push(cross_language_edge.clone());
+        let groups = dispatcher.colocated_groups_with_edges(&records, &all_edges);
+        assert_eq!(
+            group_id_strings(&groups),
+            vec![vec![
+                "m.Circle".to_string(),
+                "m.Shape".to_string(),
+                "m.Square".to_string(),
+            ]],
+            "the sealed group carries exactly the intra-Scala edge children; \
+             Widget is never pulled across the language boundary"
+        );
+
+        // The cross-language edge ALONE must reach no plugin usefully: the
+        // Scala subset receives zero usable edges (Shape has no present
+        // child), the C++ subset none, and the sealed modifier alone is not
+        // a constraint - so no groups at all.
+        let cross_only =
+            dispatcher.colocated_groups_with_edges(&records, std::slice::from_ref(&cross_language_edge));
+        assert!(
+            cross_only.is_empty(),
+            "a cross-language edge alone must colocate nothing, got {:?}",
+            group_id_strings(&cross_only)
+        );
+    }
 }
