@@ -47,3 +47,62 @@ Work order: lang-scala, then lang, then lang-api.
   scanner unterminated-string divergence pinned on both sides, reported);
   no code fixes anywhere - items 2-23 are pins; two_old_deps expansion
   duplicate and sanitize `symbol` collision pinned as current behavior.
+
+## Deviations (with reasons)
+
+1. Harness-only red, not behavior: two new assert messages contained literal
+   `{`/`}` (Rust format strings) -> compile drift; reworded. testrun digest:
+   `parse format drift: no test result line matched the pinned parse spec`.
+2. Genuine pin-red (my misprediction, behavior correct): sanitize_symbol_stem
+   with a LEADING non-ASCII run returns "ber" for "\u{fc}ber" - the run
+   collapses to one underscore which the edge trim removes; only ALL-illegal
+   names reach the `symbol` fallback (the function's own docs say exactly
+   this). Re-pinned honestly with the corrected expectation.
+3. Item 23 phrasing `/a/../../b -> /`: the true current result is `/b` (the
+   second `..` is dropped at RootDir; the path stays re-rooted under `/`).
+   Pinned as `/b` - no escape above root is the invariant, not a literal
+   slash result.
+4. Encoding-gate sequencing mirrors the accepted UTA-T1/T2 shape:
+   commit_scoped stages internally, so `encoding_guard --all` (superset, CI
+   form) ran exit 0 pre-commit, plus `--staged` after the commit.
+
+## Report-flagged observations (report-only, no behavior touched)
+
+- The item-1 divergence is REAL and stands: M21 scanner stops an
+  unterminated single-quoted string at the newline; frozen m20
+  directive_parser runs it to EOF and swallows following directives. Both
+  pinned (`pin_scanner_unterminated_string_stops_at_newline`,
+  `pin_directive_parser_unterminated_string_runs_to_eof`); docs corrected to
+  reality; NOT unified per contract.
+- dependency_rewriter: `rewrite` with two old_deps hitting one statement
+  emits the new deps once per matching dep (duplicate new-import lines) -
+  sequential per-dep replay. Pinned (`pin_two_old_deps_on_one_statement_...`).
+  Owner may want a merge-once decision.
+- imports scan: a truncated `import a.b.{Old` (unclosed brace) absorbs every
+  later top-level identifier as a group member of base `a.b` through EOF -
+  bounded and total, but the rewriter would rewrite those phantom selectors.
+  Pinned; flagged for an owner policy decision (reject vs tolerate).
+- planning sanitize: any two all-non-ASCII symbol names collide on the
+  `symbol` fallback file stem (same stance as lang-cpp's private twin).
+  Pinned; collision disambiguation would be an owner decision.
+- resolver target grammar: a leading-dot spelling (`.com.example.X`) resolves
+  exactly like the plain one because the catalog trims edge dots - silent
+  acceptance of a malformed target. Pinned honestly.
+- Companion-object id `X$` filtering in consumer_discovery_targets keeps
+  companions out of probes (pre-existing doc'd behavior; the lang-scala
+  override already had a test - no new pin needed beyond item 22 coverage).
+
+## Gate record (verbatim digest lines)
+
+- Gate 1 (red): `parse format drift: no test result line matched the pinned
+  parse spec` (x1, harness); then `253 passed / 1 failed / 0 ignored /
+  1 suites` (sanitize misprediction); GREEN: `254 passed / 0 failed /
+  0 ignored / 2 suites`.
+- Gate 2 GREEN: `44 passed / 0 failed / 1 ignored / 2 suites`.
+- Gate 3 GREEN: `42 passed / 0 failed / 0 ignored / 5 suites`.
+- Gate 4 hygiene: exit 0 (`### generic PASS (exit 0)` via distiller; all R3
+  warns pre-existing, none on this hand's lines).
+- Gate 5 encoding: `--all` pre-commit exit 0 (0 findings); `--staged`
+  post-commit exit 0.
+- Gate 6 commit: 6531df0 (19 files, +624/-2; the -2 are the two replaced
+  scanner doc lines) + this journal-final rider commit.
