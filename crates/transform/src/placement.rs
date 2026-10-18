@@ -176,6 +176,40 @@ impl IncludeRewriter {
 mod tests {
     use super::*;
 
+    #[test]
+    fn pin_is_noop_is_order_sensitive() {
+        // UTA-T4 item 8 (characterization pin, reported not decided):
+        // is_noop compares the include lists with Vec equality, so a rewrite
+        // that only REORDERS the same includes is reported as a change.
+        // Pinned as-is; whether order-only rewrites should count as noop is
+        // a semantics decision owed by the owner, not made here.
+        let reordered = ConsumerRewrite {
+            consumer_file: std::path::PathBuf::from("src/order.cpp"),
+            old_includes: vec![
+                std::path::PathBuf::from("a.h"),
+                std::path::PathBuf::from("b.h"),
+            ],
+            new_includes: vec![
+                std::path::PathBuf::from("b.h"),
+                std::path::PathBuf::from("a.h"),
+            ],
+            side_effect_preservations: vec![],
+        };
+        assert!(
+            !reordered.is_noop(),
+            "pin: is_noop treats a reordering of the same includes as a rewrite"
+        );
+
+        let identical_order = ConsumerRewrite {
+            new_includes: reordered.old_includes.clone(),
+            ..reordered
+        };
+        assert!(
+            identical_order.is_noop(),
+            "same list in the same order stays a noop"
+        );
+    }
+
     // The plugin-driven diff-formatting tests (incl. the pre-M18.8b byte
     // baselines) moved verbatim to
     // `crates/transform/tests/placement_diff_test.rs` (M23 T3, D-M23-10):

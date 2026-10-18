@@ -37,6 +37,37 @@ fn dummy_model() -> ReducedSemanticModel {
     }
 }
 
+/// Model builder: a dummy model plus one Complete dependency edge per
+/// (source symbol name, destination symbol name) pair.
+fn model_with_edges(edges: &[(&str, &str)]) -> ReducedSemanticModel {
+    use ariadne_graph::reduced::ReducedSemanticEdge;
+    use ariadne_index::types::{DependencyKind, SymbolId};
+
+    let mut model = dummy_model();
+    for (src, dst) in edges {
+        model.edges.push(ReducedSemanticEdge {
+            src_symbol: SymbolId::new(*src),
+            dst_symbol: SymbolId::new(*dst),
+            kind: DependencyKind::Complete,
+        });
+    }
+    model
+}
+
+/// required_deps of one named unit as display strings, for readable
+/// `assert_eq!` against literal path lists.
+fn required_deps_of(result: &ExtractionResult, name: &str) -> Vec<String> {
+    result
+        .headers
+        .iter()
+        .find(|unit| unit.path == std::path::PathBuf::from(name))
+        .unwrap_or_else(|| panic!("unit {name} missing"))
+        .required_deps
+        .iter()
+        .map(|dep| dep.display().to_string())
+        .collect()
+}
+
 #[test]
 fn test_extract_basic() {
     use ariadne_cluster::plan::{PlanId, ProposedExtraction, RiskLevel};
@@ -188,10 +219,6 @@ fn test_acyclic_includes() {
     let fake_extractor = RecordingFakeExtractor::default();
     let result = extractor.extract(&plan, &no_sources, &fake_extractor);
 
-    // Check if there is an error
-    let has_errors = !result.errors.is_empty();
-
-    // Or if graph is acyclic
     let mut a_reqs_b = false;
     let mut b_reqs_a = false;
 
@@ -207,10 +234,123 @@ fn test_acyclic_includes() {
         }
     }
 
-    let has_cycle = a_reqs_b && b_reqs_a;
+    // UTA-T4 item 3 (authorized edit to this existing test): the old
+    // assertion was `has_errors || !has_cycle`. It passed for ANY unrelated
+    // error and for any fixture where the dependency walk silently
+    // collapsed, so it characterized nothing - the disjunction itself was
+    // the defect. The real behavior is now pinned exactly: mutual
+    // required_deps and exactly one cycle error carrying the engine's text.
     assert!(
-        has_errors || !has_cycle,
-        "Extractor must either emit an error or resolve the cycle"
+        a_reqs_b && b_reqs_a,
+        "the A<->B model edges must produce mutual required_deps: {:?}",
+        result.headers.iter().map(|u| (&u.path, &u.required_deps)).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        result.errors,
+        vec!["Cycle detected in generated headers".to_string()],
+        "the A<->B cycle fixture must emit exactly the cycle error, once"
+    );
+}
+
+#[test]
+fn extract_accepts_diamond_shape_without_cycle_error() {
+    // UTA-T4 item 3 companion pin: A->B, A->C, B->D, C->D is a DAG (a
+    // diamond, not a cycle). The engine must record the deps and stay
+    // silent - the old disjunctive assert would equally have passed a
+    // false cycle error on this legal shape.
+    let plan = plan_of(vec![
+        extraction("A", "a.h", None),
+        extraction("B", "b.h", None),
+        extraction("C", "c.h", None),
+        extraction("D", "d.h", None),
+    ]);
+    let model = model_with_edges(&[("A", "B"), ("A", "C"), ("B", "D"), ("C", "D")]);
+
+    let engine = IsolationEngine::new(&model);
+    let result = engine.extract(&plan, &no_sources, &RecordingFakeExtractor::default());
+
+    assert_eq!(
+        result.errors,
+        Vec::<String>::new(),
+        "a diamond is a DAG: no cycle error may be emitted"
+    );
+    assert_eq!(required_deps_of(&result, "a.h"), vec!["b.h".to_string(), "c.h".to_string()]);
+    assert_eq!(required_deps_of(&result, "b.h"), vec!["d.h".to_string()]);
+    assert_eq!(required_deps_of(&result, "c.h"), vec!["d.h".to_string()]);
+    assert!(required_deps_of(&result, "d.h").is_empty());
+}
+
+#[test]
+fn extract_reports_cycle_error_for_a_three_unit_cycle() {
+    // UTA-T4 item 9 pin: A->B->C->A across three generated units. The
+    // two-unit fixture walked a cycle of length 2; this drives the deeper
+    // DFS recursion path and pins the same single error message.
+    let plan = plan_of(vec![
+        extraction("A", "a.h", None),
+        extraction("B", "b.h", None),
+        extraction("C", "c.h", None),
+    ]);
+    let model = model_with_edges(&[("A", "B"), ("B", "C"), ("C", "A")]);
+
+    let engine = IsolationEngine::new(&model);
+    let result = engine.extract(&plan, &no_sources, &RecordingFakeExtractor::default());
+
+    assert_eq!(
+        result.errors,
+        vec!["Cycle detected in generated headers".to_string()],
+        "the 3-unit cycle must emit exactly one cycle error"
+    );
+    assert_eq!(required_deps_of(&result, "a.h"), vec!["b.h".to_string()]);
+    assert_eq!(required_deps_of(&result, "b.h"), vec!["c.h".to_string()]);
+    assert_eq!(required_deps_of(&result, "c.h"), vec!["a.h".to_string()]);
+}
+
+#[test]
+fn extract_ignores_model_edges_to_symbols_outside_the_plan() {
+    // UTA-T4 item 9 dep-not-a-unit pin: a model edge whose destination
+    // symbol is not extracted into any unit must produce no required_dep
+    // (the `symbol_to_unit.get(...).is_some()` skip branch) and no error.
+    let plan = plan_of(vec![extraction("A", "a.h", None)]);
+    let model = model_with_edges(&[("A", "Ghost")]);
+
+    let engine = IsolationEngine::new(&model);
+    let result = engine.extract(&plan, &no_sources, &RecordingFakeExtractor::default());
+
+    assert_eq!(result.errors, Vec::<String>::new());
+    assert!(
+        result.headers[0].required_deps.is_empty(),
+        "a dependency on a symbol no unit holds must not fake a dep: {:?}",
+        result.headers[0].required_deps
+    );
+}
+
+#[test]
+fn unit_cycle_check_survives_dep_that_is_not_a_unit() {
+    // UTA-T4 item 9 dep-not-a-unit pin (direct): required_deps may name a
+    // path that is not one of the units (adjacency lookup finds nothing).
+    // That must neither panic nor mask a real cycle elsewhere, and a graph
+    // of only dangling deps is no cycle.
+    let unit_with_deps = |path: &str, deps: &[&str]| GeneratedUnit {
+        path: std::path::PathBuf::from(path),
+        symbols: vec![],
+        required_deps: deps.iter().map(|dep| std::path::PathBuf::from(dep)).collect(),
+        primary_source_text: None,
+    };
+
+    let mixed = vec![
+        unit_with_deps("a.h", &["missing.h"]),
+        unit_with_deps("b.h", &["c.h"]),
+        unit_with_deps("c.h", &["b.h"]),
+    ];
+    assert!(
+        IsolationEngine::detect_cycles_in_units(&mixed),
+        "the real b.h<->c.h cycle must still be found despite a dangling dep elsewhere"
+    );
+
+    let only_dangling = vec![unit_with_deps("a.h", &["missing.h"])];
+    assert!(
+        !IsolationEngine::detect_cycles_in_units(&only_dangling),
+        "a dep that names no unit cannot form a cycle"
     );
 }
 

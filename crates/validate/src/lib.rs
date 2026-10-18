@@ -490,24 +490,18 @@ impl TierValidator {
 }
 
 #[cfg(test)]
+mod orchestration_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use ariadne_lang::{
-        CompilerValidator, GeneratedSourceFile, SourceExtractor, SymbolBody, SymbolKind,
-        ToolchainStatus,
-    };
-    use ariadne_transform::{ConsumerRewrite, ExtractedSymbol, GeneratedUnit};
+    use ariadne_lang::{CompilerValidator, ToolchainStatus};
+    use ariadne_transform::{ConsumerRewrite, GeneratedUnit};
 
-    // R2 keeps directive text out of this crate's sources, so the C++ shapes
-    // asserted here are assembled from a non-contiguous marker (the plugin
-    // crate owns the canonical form).
-    const DIRECTIVE: &str = concat!("#inc", "lude ");
-    fn include_of(target: &str) -> String {
-        format!("{DIRECTIVE}\"{target}\"")
-    }
-    fn consumer_source(target: &str) -> String {
-        format!("{}\nint main() {{}}", include_of(target))
-    }
+    // The applier-orchestration cluster (the neutral fakes, the apply_with
+    // writes/namespace/rollback tests, and the UTA-T4 item 5/6 coverage)
+    // lives in `orchestration_tests.rs` (UTA-T4: growth guard - lib.rs was
+    // one test module away of crossing the 1000-line hygiene ceiling).
 
     #[test]
     fn test_format_output() {
@@ -572,214 +566,9 @@ mod tests {
     // `crates/validate/tests/transaction_apply_test.rs` (M23 T3, D-M23-10):
     // it names the C++ plugin and lives outside the guard walk scope.
 
-    /// Neutral no-op rewriter: the orchestration coverage must hold without
-    /// any plugin directive text (the M18 transitional shim is retired).
-    struct NoTextMutationRewriter;
-
-    impl DependencyRewriter for NoTextMutationRewriter {
-        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
-            source.to_string()
-        }
-    }
-
-    /// Fake extractor whose bytes deliberately differ from anything a
-    /// preamble+body concat could produce: whatever lands on disk proves
-    /// `apply_with` delegates the generated text (invariant I3). Records the
-    /// `unit_namespace` inputs to lock the namespace seam rule.
-    #[derive(Default)]
-    struct RecordingDelegatingExtractor {
-        namespace_inputs: std::sync::Mutex<Vec<String>>,
-    }
-
-    impl RecordingDelegatingExtractor {
-        fn namespace_inputs(&self) -> Vec<String> {
-            self.namespace_inputs.lock().unwrap().clone()
-        }
-    }
-
-    impl SourceExtractor for RecordingDelegatingExtractor {
-        fn extract(
-            &self,
-            symbols: &[SymbolBody],
-            namespace: &str,
-            required_deps: &[String],
-        ) -> GeneratedSourceFile {
-            let mut content = format!("FAKE-UNIT ns={namespace}\n");
-            for dep in required_deps {
-                content.push_str(&format!("FAKE-DEP {dep}\n"));
-            }
-            for sym in symbols {
-                content.push_str("FAKE-BODY ");
-                content.push_str(&sym.body);
-                content.push('\n');
-            }
-            GeneratedSourceFile {
-                path: PathBuf::from("unused.fake"),
-                content,
-            }
-        }
-
-        fn unit_namespace(&self, source_text: &str) -> String {
-            self.namespace_inputs
-                .lock()
-                .unwrap()
-                .push(source_text.to_string());
-            "delegated_ns".to_string()
-        }
-    }
-
-    #[test]
-    fn apply_writes_generated_files_through_the_injected_extractor() {
-        // M23 T2 (I3): the extractor's bytes differ from any preamble+raw-body
-        // concat — `apply_with` must write exactly the extractor's rendering.
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path();
-
-        let extraction = ExtractionResult {
-            plan_id: "P1".into(),
-            headers: vec![GeneratedUnit {
-                path: "new.h".into(),
-                symbols: vec![ExtractedSymbol {
-                    name: "Widget".into(),
-                    qualified_id: "Widget".into(),
-                    kind: SymbolKind::Class,
-                    body: "class Widget {};".into(),
-                }],
-                required_deps: vec![PathBuf::from("dep.h")],
-                primary_source_text: Some("package demo\n".into()),
-            }],
-            errors: vec![],
-        };
-        let migration = MigrationPreview {
-            plan_id: "P1".into(),
-            rewrites: vec![],
-        };
-
-        let extractor = RecordingDelegatingExtractor::default();
-        let (_snap, _new_paths) = TransactionApplier::apply_with(
-            repo,
-            &extraction,
-            &migration,
-            &NoTextMutationRewriter,
-            &extractor,
-        )
-        .unwrap();
-
-        let written = fs::read_to_string(repo.join("generated/new.h")).unwrap();
-        assert_eq!(
-            written, "FAKE-UNIT ns=delegated_ns\nFAKE-DEP dep.h\nFAKE-BODY class Widget {};\n",
-            "generated bytes must be exactly the extractor's rendering"
-        );
-        assert_ne!(
-            written,
-            format!("{}\n", "class Widget {};"),
-            "the hand-rolled preamble+body concat must be gone"
-        );
-        assert_eq!(
-            extractor.namespace_inputs(),
-            vec!["package demo\n".to_string()],
-            "unit_namespace must be consulted with the unit's primary source text"
-        );
-    }
-
-    #[test]
-    fn apply_uses_empty_namespace_without_unit_source_text() {
-        // Mirrors the T1 engine rule on the applier side: `primary_source_text`
-        // `None` → no `unit_namespace` call, empty namespace (C++ bytes stay).
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path();
-
-        let extraction = ExtractionResult {
-            plan_id: "P1".into(),
-            headers: vec![GeneratedUnit {
-                path: "bare.h".into(),
-                symbols: vec![],
-                required_deps: vec![],
-                primary_source_text: None,
-            }],
-            errors: vec![],
-        };
-        let migration = MigrationPreview {
-            plan_id: "P1".into(),
-            rewrites: vec![],
-        };
-
-        let extractor = RecordingDelegatingExtractor::default();
-        TransactionApplier::apply_with(
-            repo,
-            &extraction,
-            &migration,
-            &NoTextMutationRewriter,
-            &extractor,
-        )
-        .unwrap();
-
-        assert!(extractor.namespace_inputs().is_empty());
-        assert_eq!(
-            fs::read_to_string(repo.join("generated/bare.h")).unwrap(),
-            "FAKE-UNIT ns=\n"
-        );
-    }
-
-    #[test]
-    fn apply_with_orchestrates_snapshot_write_and_rollback_only() {
-        // Retarget of the retired 3-arg shim test (M23 T2): `apply_with`
-        // still only orchestrates — the neutral rewriter leaves consumer
-        // text untouched, the extractor owns the generated text, and
-        // rollback restores everything.
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path();
-
-        let src_dir = repo.join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        let consumer = src_dir.join("main.cpp");
-        fs::write(&consumer, consumer_source("old.h")).unwrap();
-
-        let extraction = ExtractionResult {
-            plan_id: "P1".into(),
-            headers: vec![GeneratedUnit {
-                path: "new.h".into(),
-                symbols: vec![],
-                required_deps: vec![],
-                primary_source_text: None,
-            }],
-            errors: vec![],
-        };
-
-        let migration = MigrationPreview {
-            plan_id: "P1".into(),
-            rewrites: vec![ConsumerRewrite {
-                consumer_file: PathBuf::from("src/main.cpp"),
-                old_includes: vec![PathBuf::from("old.h")],
-                new_includes: vec![PathBuf::from("new.h")],
-                side_effect_preservations: vec![],
-            }],
-        };
-
-        let (snap, new_paths) = TransactionApplier::apply_with(
-            repo,
-            &extraction,
-            &migration,
-            &NoTextMutationRewriter,
-            &RecordingDelegatingExtractor::default(),
-        )
-        .unwrap();
-
-        // Created + rolled back, but consumer text untouched and the
-        // generated file is exactly the extractor's rendering.
-        assert_eq!(
-            fs::read_to_string(&consumer).unwrap(),
-            consumer_source("old.h")
-        );
-        assert_eq!(
-            fs::read_to_string(repo.join("generated/new.h")).unwrap(),
-            "FAKE-UNIT ns=\n"
-        );
-
-        TransactionApplier::rollback(&snap, &new_paths).unwrap();
-        assert!(TransactionApplier::verify_restored(&snap).is_ok());
-        assert!(!repo.join("generated/new.h").exists());
-    }
+    // The neutral rewriter/extractor fakes and the apply_with writes,
+    // namespace and rollback tests were moved verbatim to
+    // `orchestration_tests.rs` at UTA-T4 (growth guard).
 
     // ── M18.10: ValidationStatus::Skipped (§6.2 `validate::lib` row) ────────
 
@@ -925,5 +714,131 @@ mod tests {
                 "pre-existing behavior must survive for this toolchain case"
             );
         }
+    }
+
+    // ── UTA-T4 item 4: tier 1/2 pass-fail tables ─────────────────────────────
+
+    fn extraction_with_errors(errors: Vec<String>) -> ExtractionResult {
+        ExtractionResult {
+            plan_id: "P-TIER".into(),
+            headers: vec![],
+            errors,
+        }
+    }
+
+    fn extraction_requiring(dep: &str) -> ExtractionResult {
+        ExtractionResult {
+            plan_id: "P-TIER".into(),
+            headers: vec![GeneratedUnit {
+                path: "unit.h".into(),
+                symbols: vec![],
+                required_deps: vec![PathBuf::from(dep)],
+                primary_source_text: None,
+            }],
+            errors: vec![],
+        }
+    }
+
+    #[test]
+    fn structural_tier_passes_on_clean_extraction() {
+        assert_eq!(
+            TierValidator::validate_structural(&extraction_with_errors(vec![])),
+            TierResult {
+                tier: ValidationTier::Structural,
+                status: ValidationStatus::Pass,
+            }
+        );
+    }
+
+    #[test]
+    fn structural_tier_fails_with_joined_engine_errors() {
+        let result = TierValidator::validate_structural(&extraction_with_errors(vec![
+            "Cycle detected in generated headers".into(),
+            "second problem".into(),
+        ]));
+        assert_eq!(
+            result,
+            TierResult {
+                tier: ValidationTier::Structural,
+                // Pin the join shape too: tier text is what users read back.
+                status: ValidationStatus::Fail(
+                    "Cycle detected in generated headers, second problem".into()
+                ),
+            }
+        );
+        assert!(result.status.is_fail());
+    }
+
+    #[test]
+    fn generated_header_tier_passes_when_dep_lives_under_output_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+        fs::write(gen.join("dep.h"), "// dep\n").unwrap();
+
+        assert_eq!(
+            TierValidator::validate_generated_headers(&extraction_requiring("dep.h"), &gen),
+            TierResult {
+                tier: ValidationTier::GeneratedHeaders,
+                status: ValidationStatus::Pass,
+            }
+        );
+    }
+
+    #[test]
+    fn generated_header_tier_passes_when_dep_lives_only_under_parent() {
+        // The p2 branch: a dep resolved against the repo root (the parent
+        // of the generated dir in the staging scheme) must also Pass.
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+        fs::write(dir.path().join("dep.h"), "// dep at repo root\n").unwrap();
+
+        assert_eq!(
+            TierValidator::validate_generated_headers(&extraction_requiring("dep.h"), &gen),
+            TierResult {
+                tier: ValidationTier::GeneratedHeaders,
+                status: ValidationStatus::Pass,
+            }
+        );
+    }
+
+    #[test]
+    fn generated_header_tier_fails_when_dep_is_nowhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("generated");
+        fs::create_dir_all(&gen).unwrap();
+
+        let result = TierValidator::validate_generated_headers(
+            &extraction_requiring("ghost.h"),
+            &gen,
+        );
+        assert_eq!(
+            result,
+            TierResult {
+                tier: ValidationTier::GeneratedHeaders,
+                status: ValidationStatus::Fail("Missing include: ghost.h".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn generated_header_tier_no_parent_dir_falls_back_without_panicking() {
+        // The PathBuf::new() branch: an output dir with no parent (an
+        // empty path) must exercise the p2 fallback cleanly - a missing
+        // dep still fails with the standard message, never a panic.
+        let result = TierValidator::validate_generated_headers(
+            &extraction_requiring("uta_t4_no_parent_ghost.h"),
+            Path::new(""),
+        );
+        match &result.status {
+            ValidationStatus::Fail(msg) => assert_eq!(
+                msg,
+                "Missing include: uta_t4_no_parent_ghost.h",
+                "the no-parent branch still reports the missing dep"
+            ),
+            other => panic!("no-parent dir with a missing dep must Fail, got {other:?}"),
+        }
+        assert_eq!(result.tier, ValidationTier::GeneratedHeaders);
     }
 }
