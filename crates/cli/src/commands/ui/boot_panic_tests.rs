@@ -129,3 +129,32 @@ fn test_panicked_boot_commits_the_open_bar_line() {
         "exactly one commit newline, at the end"
     );
 }
+
+/// UTA-T7b row 3: `panic_payload_text` arm matrix - the two payload shapes
+/// `panic!` actually carries are extracted verbatim, anything else degrades
+/// to the fixed marker (never silence, R8).
+#[test]
+fn pin_panic_payload_text_string_and_foreign_payload_arms() {
+    use super::boot_progress::panic_payload_text;
+
+    let owned: String = "owned panic message".to_string();
+    assert_eq!(
+        panic_payload_text(&owned),
+        "owned panic message",
+        "the String payload arm must hand back the owned text verbatim"
+    );
+
+    let literal: &str = "static panic message";
+    assert_eq!(
+        panic_payload_text(&literal),
+        "static panic message",
+        "the &str payload arm must hand back the literal verbatim"
+    );
+
+    let foreign = 42u32;
+    assert_eq!(
+        panic_payload_text(&foreign),
+        "unknown panic payload",
+        "a non-string payload degrades to the fixed marker, never silence"
+    );
+}

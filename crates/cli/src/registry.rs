@@ -371,6 +371,73 @@ mod tests {
         }
     }
 
+    /// UTA-T7b row 5 (pin-with-report): the EXACT accepted set. Parsing is
+    /// `raw` OR `first-char-uppercased`, compared against the stored serde
+    /// names - so only the exact lowercase short forms and the exact
+    /// PascalCase serde names parse. Mixed/upper shapes such as `CPP` and
+    /// `sCaLa` are REJECTED (their first-char-uppercased form keeps the
+    /// rest of the case, `CPP`/`SCaLa`, which equals no stored name). The
+    /// legacy `..._case_insensitively` test above overclaims in its NAME;
+    /// its assertions stay true, this matrix is the truth of the contract.
+    #[test]
+    fn pin_parse_language_arg_exact_accepted_set_not_case_insensitive() {
+        // Accepted: exact lowercase short forms and exact serde names.
+        assert_eq!(parse_language_arg("cpp").unwrap(), SourceLanguage::Cpp);
+        assert_eq!(parse_language_arg("Cpp").unwrap(), SourceLanguage::Cpp);
+        assert_eq!(parse_language_arg("scala").unwrap(), SourceLanguage::Scala);
+        assert_eq!(parse_language_arg("Scala").unwrap(), SourceLanguage::Scala);
+        assert_eq!(parse_language_arg("other").unwrap(), SourceLanguage::Other);
+        assert_eq!(parse_language_arg("Other").unwrap(), SourceLanguage::Other);
+        // Rejected: the uppercase and mixed-case shapes the handoff names.
+        assert!(
+            parse_language_arg("CPP").is_err(),
+            "CPP is rejected: capitalizing keeps PP, matching no serde name"
+        );
+        assert!(
+            parse_language_arg("sCaLa").is_err(),
+            "sCaLa is rejected: capitalizing yields SCaLa, matching no serde name"
+        );
+        assert!(parse_language_arg("SCALA").is_err());
+        assert!(parse_language_arg("OTHER").is_err());
+    }
+
+    /// UTA-T7b row 5: both `plan_backend` honest errors, never a C++ default.
+    #[test]
+    fn pin_plan_backend_honest_errors_unclaimed_target_and_capability_off() {
+        let registry = default_registry();
+        // (1) a target no plugin claims names the target AND the stage.
+        let unclaimed = plan_backend(
+            &registry,
+            std::path::Path::new("src/unclaimed.rs"),
+            |caps| caps.extraction,
+            "extraction",
+        )
+        .err()
+        .expect("no registered detector claims `.rs`");
+        let unclaimed_text = unclaimed.to_string();
+        assert!(
+            unclaimed_text.contains("no language plugin claims the plan target src/unclaimed.rs")
+                && unclaimed_text.contains("cannot route the extraction backend"),
+            "the unclaimed-target error must name target and stage, got: {unclaimed_text}"
+        );
+        // (2) a claimed target whose plugin keeps the probed capability OFF
+        // gets the capability error. `requires_toolchain` is the honest
+        // off-bit: both shipped plugins keep it false (plan A3).
+        let capability_off = plan_backend(
+            &registry,
+            std::path::Path::new("a.cpp"),
+            |caps| caps.requires_toolchain,
+            "toolchain-tier",
+        )
+        .err()
+        .expect("Cpp keeps requires_toolchain false (A3)");
+        let capability_text = capability_off.to_string();
+        assert!(
+            capability_text.contains("plugin does not enable the toolchain-tier capability for plan target a.cpp"),
+            "the capability-off error must name the language, stage, and target, got: {capability_text}"
+        );
+    }
+
     // m19 capability-backend locks, EVOLVED at the T7 flip (D-M23-7 ii):
     // the pre-flip form asserted C++ as the SOLE claimant (Scala's false
     // plan:381 literals); the flip makes resolution language-scoped, so

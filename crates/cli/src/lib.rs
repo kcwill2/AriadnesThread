@@ -345,12 +345,30 @@ pub fn run_cli() -> Result<()> {
     Ok(())
 }
 
-fn dispatch_analyze(
+/// The repository-path decision `dispatch_analyze` makes before executing
+/// anything (UTA-T7b seam extraction, no behavior change): pure so the
+/// table is testable without running heavy analysis commands. `workers`
+/// rides through because the `Plain` lane alone consumes it, exactly like
+/// the pre-extraction body.
+#[derive(Debug, PartialEq, Eq)]
+enum AnalyzeRoute {
+    Load {
+        repo: PathBuf,
+        symbol: Option<String>,
+        file: Option<PathBuf>,
+    },
+    Plain {
+        repo: PathBuf,
+        workers: Option<usize>,
+    },
+    MissingRepo,
+}
+
+fn route_analyze(
     repo: Option<PathBuf>,
     workers: Option<usize>,
-    lang: Option<SourceLanguage>,
     command: Option<AnalyzeSubcommands>,
-) -> Result<()> {
+) -> AnalyzeRoute {
     match (repo, command) {
         (
             Some(repo_path),
@@ -359,25 +377,41 @@ fn dispatch_analyze(
                 symbol,
                 file,
             }),
-        ) => {
-            let r = if repo_path != load_repo {
+        ) => AnalyzeRoute::Load {
+            repo: if repo_path != load_repo {
                 load_repo
             } else {
                 repo_path
-            };
-            analyze_dependency_load(&r, symbol.as_deref(), file.as_deref())?;
-        }
+            },
+            symbol,
+            file,
+        },
         (None, Some(AnalyzeSubcommands::Load { repo, symbol, file })) => {
+            AnalyzeRoute::Load { repo, symbol, file }
+        }
+        (Some(repo_path), None) => AnalyzeRoute::Plain { repo: repo_path, workers },
+        (None, None) => AnalyzeRoute::MissingRepo,
+    }
+}
+
+fn dispatch_analyze(
+    repo: Option<PathBuf>,
+    workers: Option<usize>,
+    lang: Option<SourceLanguage>,
+    command: Option<AnalyzeSubcommands>,
+) -> Result<()> {
+    match route_analyze(repo, workers, command) {
+        AnalyzeRoute::Load { repo, symbol, file } => {
             analyze_dependency_load(&repo, symbol.as_deref(), file.as_deref())?;
         }
-        (Some(repo_path), None) => {
-            if let Some(w) = workers {
-                run_production_scale_analysis_filtered(&repo_path, Some(w), lang)?;
+        AnalyzeRoute::Plain { repo, workers } => {
+            if let Some(worker_count) = workers {
+                run_production_scale_analysis_filtered(&repo, Some(worker_count), lang)?;
             } else {
-                run_incremental_analysis_filtered(&repo_path, lang)?;
+                run_incremental_analysis_filtered(&repo, lang)?;
             }
         }
-        (None, None) => {
+        AnalyzeRoute::MissingRepo => {
             bail!("Repository path required for tool analyze command");
         }
     }
@@ -398,15 +432,35 @@ fn dispatch_explain(command: ExplainSubcommands) -> Result<()> {
     Ok(())
 }
 
-fn dispatch_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>) -> Result<()> {
+/// The repo-path decision of `dispatch_includes` (UTA-T7b seam extraction,
+/// no behavior change): the Explain subcommand carries its OWN repo and the
+/// positional is silently dropped for that lane (wildcard arm).
+#[derive(Debug, PartialEq, Eq)]
+enum IncludesRoute {
+    Explain { repo: PathBuf, file: PathBuf },
+    Graph { repo: PathBuf },
+    MissingRepo,
+}
+
+fn route_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>) -> IncludesRoute {
     match (repo, command) {
         (_, Some(IncludesSubcommands::Explain { repo, file })) => {
+            IncludesRoute::Explain { repo, file }
+        }
+        (Some(repo_path), None) => IncludesRoute::Graph { repo: repo_path },
+        (None, None) => IncludesRoute::MissingRepo,
+    }
+}
+
+fn dispatch_includes(repo: Option<PathBuf>, command: Option<IncludesSubcommands>) -> Result<()> {
+    match route_includes(repo, command) {
+        IncludesRoute::Explain { repo, file } => {
             explain_include_graph_for_file(&repo, &file)?;
         }
-        (Some(repo_path), None) => {
-            analyze_include_graph(&repo_path)?;
+        IncludesRoute::Graph { repo } => {
+            analyze_include_graph(&repo)?;
         }
-        (None, None) => {
+        IncludesRoute::MissingRepo => {
             bail!("Repository path required for tool includes command");
         }
     }
@@ -428,15 +482,33 @@ fn dispatch_query(command: QuerySubcommands) -> Result<()> {
     Ok(())
 }
 
-fn dispatch_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> Result<()> {
+/// The repo-path decision of `dispatch_plan` (UTA-T7b seam extraction, no
+/// behavior change): the Show subcommand carries its OWN repo and the
+/// positional is silently dropped for that lane (wildcard arm).
+#[derive(Debug, PartialEq, Eq)]
+enum PlanRoute {
+    Show { repo: PathBuf, id: String },
+    Plans { repo: PathBuf },
+    MissingRepo,
+}
+
+fn route_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> PlanRoute {
     match (repo, command) {
-        (_, Some(PlanSubcommands::Show { repo, id })) => {
+        (_, Some(PlanSubcommands::Show { repo, id })) => PlanRoute::Show { repo, id },
+        (Some(repo_path), None) => PlanRoute::Plans { repo: repo_path },
+        (None, None) => PlanRoute::MissingRepo,
+    }
+}
+
+fn dispatch_plan(repo: Option<PathBuf>, command: Option<PlanSubcommands>) -> Result<()> {
+    match route_plan(repo, command) {
+        PlanRoute::Show { repo, id } => {
             show_optimization_plan(&repo, &id)?;
         }
-        (Some(repo_path), None) => {
-            plan_extractions(&repo_path)?;
+        PlanRoute::Plans { repo } => {
+            plan_extractions(&repo)?;
         }
-        (None, None) => {
+        PlanRoute::MissingRepo => {
             bail!("Repository path required for tool plan command");
         }
     }
@@ -475,360 +547,4 @@ fn dispatch_ui(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-    use std::fs;
-
-    #[test]
-    fn test_cli_analyze_load() {
-        let args = vec!["tool", "analyze", "load", "my_repo", "--symbol", "MyClass"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Analyze {
-                repo,
-                workers: _,
-                lang: _,
-                command:
-                    Some(AnalyzeSubcommands::Load {
-                        repo: load_repo,
-                        symbol,
-                        file,
-                    }),
-            } => {
-                assert_eq!(repo, None);
-                assert_eq!(load_repo.to_str().unwrap(), "my_repo");
-                assert_eq!(symbol.unwrap(), "MyClass");
-                assert_eq!(file, None);
-            }
-            _ => panic!("Expected Analyze Load command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_explain_load() {
-        let args = vec![
-            "tool",
-            "explain",
-            "load",
-            "my_repo",
-            "--file",
-            "my_file.cpp",
-            "--source",
-            "Huge.h",
-        ];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Explain {
-                command:
-                    ExplainSubcommands::Load {
-                        repo,
-                        symbol,
-                        file,
-                        source,
-                    },
-            } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(symbol, None);
-                assert_eq!(file.unwrap().to_str().unwrap(), "my_file.cpp");
-                assert_eq!(source.unwrap(), "Huge.h");
-            }
-            _ => panic!("Expected Explain Load command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_plan() {
-        let args = vec!["tool", "plan", "my_repo"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Plan { repo, command } => {
-                assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
-                assert!(command.is_none());
-            }
-            _ => panic!("Expected Plan command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_plan_show() {
-        let args = vec!["tool", "plan", "show", "my_repo", "--id", "PLAN-001"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Plan {
-                repo: _,
-                command: Some(PlanSubcommands::Show { repo, id }),
-            } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(id, "PLAN-001");
-            }
-            _ => panic!("Expected Plan Show command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_transform_extract() {
-        let args = vec![
-            "tool",
-            "transform",
-            "extract",
-            "my_repo",
-            "--plan",
-            "PLAN-001",
-        ];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Transform {
-                command: TransformSubcommands::Extract { repo, plan },
-            } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(plan, "PLAN-001");
-            }
-            _ => panic!("Expected Transform Extract command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_migrate_preview() {
-        let args = vec![
-            "tool",
-            "migrate",
-            "my_repo",
-            "--plan",
-            "PLAN-001",
-            "--preview",
-        ];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Migrate {
-                repo,
-                plan,
-                preview,
-            } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(plan, "PLAN-001");
-                assert!(preview);
-            }
-            _ => panic!("Expected Migrate command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_migrate_no_preview_flag() {
-        let args = vec!["tool", "migrate", "my_repo", "--plan", "PLAN-001"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Migrate {
-                repo,
-                plan,
-                preview,
-            } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(plan, "PLAN-001");
-                assert!(!preview); // default is false
-            }
-            _ => panic!("Expected Migrate command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_apply() {
-        let args = vec!["tool", "apply", "my_repo", "--plan", "PLAN-001"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Apply { repo, plan } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-                assert_eq!(plan, "PLAN-001");
-            }
-            _ => panic!("Expected Apply command"),
-        }
-    }
-    #[test]
-    fn test_cli_measure() {
-        let args = vec!["tool", "measure", "my_repo"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Measure { repo } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-            }
-            _ => panic!("Expected Measure command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_compare() {
-        let args = vec!["tool", "compare", "before_dir", "after_dir"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Compare { before, after } => {
-                assert_eq!(before.to_str().unwrap(), "before_dir");
-                assert_eq!(after.to_str().unwrap(), "after_dir");
-            }
-            _ => panic!("Expected Compare command"),
-        }
-    }
-
-    #[test]
-    fn test_handle_measure() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
-        let temp = std::env::temp_dir().join(format!("ariadne_test_meas_{}", unique));
-        let repo_dir = temp.join("repo");
-        fs::create_dir_all(repo_dir.join("src")).unwrap();
-        fs::write(repo_dir.join("ariadne.toml"), "").unwrap();
-
-        let result = measure_build_performance(&repo_dir);
-        assert!(result.is_ok());
-
-        let _ = fs::remove_dir_all(temp);
-    }
-
-    #[test]
-    fn test_handle_compare() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_micros();
-        let temp = std::env::temp_dir().join(format!("ariadne_test_comp_{}", unique));
-
-        let before_dir = temp.join("before");
-        fs::create_dir_all(&before_dir).unwrap();
-
-        let after_dir = temp.join("after");
-        fs::create_dir_all(&after_dir).unwrap();
-
-        let result = compare_build_measurements(&before_dir, &after_dir);
-        // This will fail because there are no valid measurement artifacts,
-        // but for now the command doesn't even exist.
-        assert!(result.is_err());
-
-        let _ = fs::remove_dir_all(temp);
-    }
-
-    #[test]
-    fn test_cli_analyze_repo() {
-        let args = vec!["tool", "analyze", "my_repo"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Analyze {
-                repo,
-                workers,
-                lang: _,
-                command,
-            } => {
-                assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
-                assert_eq!(workers, None);
-                assert!(command.is_none());
-            }
-            _ => panic!("Expected Analyze command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_analyze_workers_flag() {
-        let args = vec!["tool", "analyze", "my_repo", "--workers", "32"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Analyze {
-                repo,
-                workers,
-                lang: _,
-                command,
-            } => {
-                assert_eq!(repo.unwrap().to_str().unwrap(), "my_repo");
-                assert_eq!(workers, Some(32));
-                assert!(command.is_none());
-            }
-            _ => panic!("Expected Analyze command with --workers"),
-        }
-    }
-
-    #[test]
-    fn test_handle_analyze() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let repo_dir = root.join("tests/fixtures/basic");
-
-        let result = run_incremental_analysis(&repo_dir).unwrap();
-        assert!(result.stats.total_tus > 0 || result.stats.total_tus == 0); // Just check it returned Ok
-    }
-
-    #[test]
-    fn test_cli_optimize() {
-        let args = vec!["tool", "optimize", "my_repo"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Optimize { repo } => {
-                assert_eq!(repo.to_str().unwrap(), "my_repo");
-            }
-            _ => panic!("Expected Optimize command"),
-        }
-    }
-
-    // AR-02 (S6): `tool ui` must accept `--expose <addr>` as the only opt-in
-    // to a non-localhost bind; omitting it keeps the 127.0.0.1 default.
-    #[test]
-    fn test_cli_ui_accepts_expose_flag() {
-        use clap::CommandFactory;
-        let parsed = Cli::command().try_get_matches_from(vec![
-            "tool", "ui", "my_repo", "--expose", "10.0.0.5",
-        ]);
-        assert!(
-            parsed.is_ok(),
-            "`tool ui --expose <addr>` must parse; got: {:?}",
-            parsed.err().map(|error| error.to_string())
-        );
-    }
-
-    #[test]
-    fn test_cli_ui_expose_flag_carries_address() {
-        let args = vec!["tool", "ui", "my_repo", "--expose", "10.0.0.5"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Ui { expose, .. } => {
-                assert_eq!(expose.as_deref(), Some("10.0.0.5"));
-            }
-            _ => panic!("Expected Ui command with --expose"),
-        }
-    }
-
-    #[test]
-    fn test_cli_ui_help_documents_expose_lan_warning() {
-        use clap::CommandFactory;
-        let mut root_command = Cli::command();
-        let ui_command = root_command
-            .find_subcommand("ui")
-            .expect("`ui` subcommand must exist");
-        let expose_flag = ui_command
-            .get_arguments()
-            .find(|arg| arg.get_long() == Some("expose"))
-            .expect("`ui` must carry a --expose flag");
-        let help_text = expose_flag
-            .get_help()
-            .map(|help| help.to_string())
-            .unwrap_or_default();
-        assert!(
-            help_text.contains("127.0.0.1") && help_text.contains("warn"),
-            "--expose help must state the localhost default and the exposure warning: {help_text}"
-        );
-    }
-
-    #[test]
-    fn test_cli_ui_without_expose_keeps_localhost_default() {
-        let args = vec!["tool", "ui", "my_repo"];
-        let cli = Cli::parse_from(args);
-        match cli.command.unwrap() {
-            Commands::Ui { expose, .. } => {
-                assert!(expose.is_none(), "no --expose means no bind override");
-                assert_eq!(resolve_bind_addr(expose.as_deref()), "127.0.0.1");
-            }
-            _ => panic!("Expected Ui command"),
-        }
-    }
-}
+mod cli_command_tests;

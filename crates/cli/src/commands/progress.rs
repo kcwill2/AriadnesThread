@@ -423,4 +423,55 @@ mod tests {
         assert_eq!(format_load_time(std::time::Duration::ZERO), "Load complete in 0.0s");
         assert_eq!(format_load_time(std::time::Duration::from_millis(12300)), "Load complete in 12.3s");
     }
+
+    /// UTA-T7b row 2: total == 0 is the honest "nothing to do, all done"
+    /// shape - 100% with a fully filled bar, never a divide-by-zero or an
+    /// empty frame.
+    #[test]
+    fn pin_format_progress_total_zero_reports_complete_full_bar() {
+        let block = '\u{2588}';
+        let out = format_progress(0, 0, "Indexing", "TUs");
+        assert_eq!(
+            out,
+            format!(
+                "Indexing [{}] 100% (0/0 TUs)",
+                block.to_string().repeat(20)
+            ),
+            "total==0 must render 100% over a full-width filled bar"
+        );
+    }
+
+    /// UTA-T7b row 2 (pin-with-report): the handoff name said `clamped`,
+    /// but the real behavior is UNCLAMPED - the percent goes past 100 and
+    /// the bar widens past the 20-cell nominal width (filled =
+    /// current*width/total, empty = saturating_sub so the bar never has
+    /// trailing spaces). Exact bytes pinned, no clamp exists.
+    #[test]
+    fn pin_progress_overshoot_unclamped() {
+        let block = '\u{2588}';
+        let out = format_progress(15, 10, "Indexing", "TUs");
+        assert_eq!(
+            out,
+            format!(
+                "Indexing [{}] 150% (15/10 TUs)",
+                block.to_string().repeat(30)
+            ),
+            "current>total today: percent = current*100/total with no 100 \
+             cap and a 30-cell frame (20*15/10), pinned as-is because no \
+             clamping exists"
+        );
+        assert_eq!(out.matches(block).count(), 30, "bar width = filled, unclamped");
+    }
+
+    /// UTA-T7b row 2: `strip_stage_prefix` edge table pinned on the four
+    /// directed shapes: `[k]` (no slash, untouched), `[k/n]x` (stripped,
+    /// one-space collapse), `[ ]` (close at index 2 but no slash), and an
+    /// unclosed bracket (returned whole).
+    #[test]
+    fn pin_strip_stage_prefix_edge_table() {
+        assert_eq!(strip_stage_prefix("[12]"), "[12]", "digit-only label has no slash: untouched");
+        assert_eq!(strip_stage_prefix("[1/2]x"), "x", "slash label strips, the single following space would collapse");
+        assert_eq!(strip_stage_prefix("[ ]"), "[ ]", "a bracket pair without a slash is not a stage label");
+        assert_eq!(strip_stage_prefix("[1/2"), "[1/2", "unclosed bracket returns the whole input");
+    }
 }
