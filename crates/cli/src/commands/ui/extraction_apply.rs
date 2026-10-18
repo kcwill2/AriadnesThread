@@ -240,8 +240,8 @@ fn tier_label_of(tier: &ValidationTier) -> &'static str {
     }
 }
 
-    /// A9: every DTO string is sanitized to ASCII; non-ASCII becomes `?`.
-    fn ascii_only(text: &str) -> String {
+/// A9: every DTO string is sanitized to ASCII; non-ASCII becomes `?`.
+fn ascii_only(text: &str) -> String {
     text.chars()
         .map(|ch| if ch.is_ascii() { ch } else { '?' })
         .collect()

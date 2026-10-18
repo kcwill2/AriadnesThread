@@ -168,7 +168,7 @@ pub struct BootStepSnapshot {
     total_stages: usize,
     rows: Vec<ProgressStepView>,
     /// Highest stage seen so far: frames for an earlier stage are stale
-    /// (defensive I3 guard; the producer stream is stage-monotone).
+    /// (the producer stream is stage-monotone).
     active_stage: Option<usize>,
     /// Mirrors `StepBarRenderer::finalized`: once the final step's 100%
     /// frame is seen, later frames can no longer commit or redraw it.
