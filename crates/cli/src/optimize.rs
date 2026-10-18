@@ -151,7 +151,10 @@ impl EndToEndOptimizer {
 
         // 6. Preview, apply, and validate safe plans
         let mut affected_consumer_files_set = HashSet::new();
-        let mut committed_transformations = 0;
+        // UTA-B8: the commit loop tracks the plans that actually committed,
+        // not just a count, so a middle-plan validation failure can no
+        // longer skew the residual arithmetic.
+        let mut committed_plans: Vec<OptimizationPlan> = Vec::new();
         let mut validation_passed_tus = 0;
         let mut validation_total_tus = 0;
         let mut build_passed = true;
@@ -161,21 +164,19 @@ impl EndToEndOptimizer {
             affected_consumer_files_set.extend(outcome.affected_source_paths);
             validation_total_tus += outcome.consumer_tus;
             if outcome.validation_passed {
-                committed_transformations += 1;
+                committed_plans.push(plan.clone());
                 validation_passed_tus += outcome.consumer_tus;
             } else {
                 build_passed = false;
             }
         }
+        let committed_transformations = committed_plans.len();
 
         // 7. Post-measurement (after)
         let after_measurement = measurer.measure_all(&build_discovery.translation_units)?;
 
-        let residual_collateral_load = residual_collateral_load(
-            &collateral_opportunities,
-            &safe_plans,
-            committed_transformations,
-        );
+        let residual_collateral_load =
+            residual_collateral_load(&collateral_opportunities, &committed_plans);
 
         let report = OptimizationReport {
             total_files,
@@ -445,18 +446,21 @@ fn apply_safe_plan(
     })
 }
 
+/// Residual collateral = the initial aggregate minus the reductions of the
+/// plans that ACTUALLY committed (UTA-B8). The old `take(count)` prefix
+/// assumption over `safe_plans` mis-stated the number whenever a plan
+/// after the first failed validation; callers now pass the committed set
+/// from the commit loop itself.
 fn residual_collateral_load(
     collateral_opportunities: &[CollateralOpportunity],
-    safe_plans: &[OptimizationPlan],
-    committed_transformations: usize,
+    committed_plans: &[OptimizationPlan],
 ) -> usize {
     let initial_collateral_sum: usize = collateral_opportunities
         .iter()
         .map(|o| o.collateral_symbols)
         .sum();
-    let reduced_collateral: usize = safe_plans
+    let reduced_collateral: usize = committed_plans
         .iter()
-        .take(committed_transformations)
         .map(|p| {
             p.collateral_load_before
                 .saturating_sub(p.collateral_load_after)
@@ -465,12 +469,14 @@ fn residual_collateral_load(
     initial_collateral_sum.saturating_sub(reduced_collateral)
 }
 
+/// Contract (UTA-B7a): Ok(()) means `report.json` was written. Serialization
+/// and write failures propagate - the former `if let Ok(json)` + `let _ =`
+/// pair reported unqualified success with no report on disk.
 fn save_optimization_report(repo_root: &Path, report: &OptimizationReport) -> Result<()> {
     let opt_dir = repo_root.join("artifacts").join("optimize");
     fs::create_dir_all(&opt_dir)?;
-    if let Ok(json) = serde_json::to_string_pretty(report) {
-        let _ = fs::write(opt_dir.join("report.json"), json);
-    }
+    let json = serde_json::to_string_pretty(report)?;
+    fs::write(opt_dir.join("report.json"), json)?;
     Ok(())
 }
 
@@ -641,6 +647,112 @@ mod tests {
                 collateral_symbols: 1,
             }],
             "Ghost (defining_file: None) must contribute nothing while Thing's collateral aggregation is unaffected"
+        );
+    }
+
+    fn plan_with_collateral(
+        plan_id: &str,
+        collateral_before: usize,
+        collateral_after: usize,
+    ) -> OptimizationPlan {
+        use ariadne_cluster::plan::PlanId;
+        OptimizationPlan {
+            id: PlanId(plan_id.to_string()),
+            target_file: PathBuf::from(format!("{plan_id}.h")),
+            target_file_id: FileId(1),
+            problem: String::new(),
+            collateral_load_before: collateral_before,
+            collateral_load_after: collateral_after,
+            proposed_extractions: vec![],
+            optimization_frontier: vec![],
+            risk: RiskLevel::Conservative,
+            validation_required_tus: vec![],
+            rationale: String::new(),
+        }
+    }
+
+    #[test]
+    fn residual_uses_actually_committed_plans_not_a_prefix() {
+        // UTA-B8: 3 plans, the MIDDLE one fails validation, so the commit
+        // loop commits plan-1 and plan-3 (count 2). The residual must
+        // subtract the committed reductions (90 + 270), never the first-N
+        // prefix of safe_plans (90 + 180).
+        let opportunities = vec![
+            CollateralOpportunity {
+                header_name: "a.h".into(),
+                collateral_symbols: 600,
+            },
+            CollateralOpportunity {
+                header_name: "b.h".into(),
+                collateral_symbols: 400,
+            },
+        ]; // initial collateral sum: 1000
+        let safe_plans = vec![
+            plan_with_collateral("plan-1", 100, 10), // reduction 90  - committed
+            plan_with_collateral("plan-2", 200, 20), // reduction 180 - FAILED validation
+            plan_with_collateral("plan-3", 300, 30), // reduction 270 - committed
+        ];
+        // Correct residual: 1000 - (90 + 270) = 640.
+        // The prefix assumption yields 1000 - (90 + 180) = 730 and
+        // misrepresents the remaining load. RED drove the old count-based
+        // signature (failing with 730); this pins the committed-plans form
+        // with the identical expected value.
+        let committed = [safe_plans[0].clone(), safe_plans[2].clone()];
+        assert_eq!(
+            residual_collateral_load(&opportunities, &committed),
+            640,
+            "residual must reflect the actually-committed plans (1 and 3), \
+             not the first-N prefix of safe_plans"
+        );
+        // Prefix sanity: when every plan commits, the readings agree.
+        assert_eq!(
+            residual_collateral_load(&opportunities, &safe_plans),
+            460,
+            "all three plans committed: 1000 - (90 + 180 + 270)"
+        );
+        assert_eq!(
+            residual_collateral_load(&opportunities, &[]),
+            1000,
+            "nothing committed: the initial collateral sum stands"
+        );
+    }
+
+    #[test]
+    fn save_optimization_report_surfaces_write_failure() {
+        // UTA-B7a: an unwritable report target must NOT report unqualified
+        // success. The write is blocked deterministically by occupying the
+        // report path itself with a directory (fs::write cannot succeed).
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let report = OptimizationReport {
+            total_files: 1,
+            total_tus: 1,
+            total_symbols: 0,
+            total_semantic_edges: 0,
+            collateral_opportunities: vec![],
+            safe_plans_available: 0,
+            affected_consumer_files: 0,
+            validation_passed_tus: 0,
+            validation_total_tus: 0,
+            build_passed: true,
+            frontend_cpu_before: Duration::from_secs(1),
+            frontend_cpu_after: Duration::from_secs(1),
+            committed_transformations: 0,
+            residual_collateral_load: 0,
+        };
+        fs::create_dir_all(dir.path().join("artifacts").join("optimize")).unwrap();
+        fs::create_dir(
+            dir.path()
+                .join("artifacts")
+                .join("optimize")
+                .join("report.json"),
+        )
+        .unwrap();
+        let outcome = save_optimization_report(dir.path(), &report);
+        assert!(
+            outcome.is_err(),
+            "a failed report write must surface as Err, never as Ok(()) \
+             with no report on disk (UTA-B7a)"
         );
     }
 }

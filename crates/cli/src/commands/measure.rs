@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_repo::Repository;
 use ariadne_report::ArtifactManager;
@@ -8,15 +8,23 @@ pub fn measure_build_performance(repo_path: &PathBuf) -> Result<ariadne_build::B
     let repository = Repository::locate(repo_path)?;
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
 
-    let repo_discovery = repository.discover().ok();
+    // UTA-B7c: a repository discovery failure fails the command loudly. The
+    // former `.ok()` degraded silently to building with no catalog view -
+    // zero TUs measured and Ok reported over a run that never saw the files.
+    let repo_discovery = repository
+        .discover()
+        .with_context(|| {
+            format!(
+                "repository discovery failed for measure at {}",
+                repository.root.display()
+            )
+        })?;
     // D22: registry unit-shaper selection by build markers at the repo root
     // (first-wins fallback preserved).
     let registry = crate::registry::default_registry();
-    let mut build_discoverer = BuildDiscoverer::new(&repository.root)
-        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root));
-    if let Some(ref disc) = repo_discovery {
-        build_discoverer = build_discoverer.with_repo_discovery(disc);
-    }
+    let build_discoverer = BuildDiscoverer::new(&repository.root)
+        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root))
+        .with_repo_discovery(&repo_discovery);
     let build_result = build_discoverer.discover()?;
 
     // M28 T4 DP-2: the load artifact persists the per-symbol SCALAR summary

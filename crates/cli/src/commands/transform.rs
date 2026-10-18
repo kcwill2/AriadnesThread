@@ -1,5 +1,5 @@
 use crate::commands::plan::plan_extractions;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_repo::{FileId, Repository};
 use ariadne_report::ArtifactManager;
@@ -227,10 +227,18 @@ fn load_plan_for_action(
     repo_path: &PathBuf,
     plan_id: &str,
 ) -> Result<ariadne_cluster::plan::OptimizationPlan> {
-    let plans = artifacts
-        .load_plan_artifacts()
-        .or_else(|_| plan_extractions(repo_path).map(|_| vec![]))
-        .unwrap_or_default();
+    // UTA-B7b: a failing replan surfaces its own root cause (chained with
+    // the artifact-load error that triggered it). The old
+    // `.or_else(..).unwrap_or_default()` erased it down to an empty plan
+    // list, so callers saw only the reload error. The replan-SUCCESS path
+    // keeps reloading the artifacts the replan just wrote.
+    let plans = artifacts.load_plan_artifacts().or_else(|load_err| {
+        plan_extractions(repo_path).map(|_replanned| Vec::new()).with_context(|| {
+            format!(
+                "plan replanning failed after plan artifacts were unavailable ({load_err})"
+            )
+        })
+    })?;
     let plans = if plans.is_empty() {
         artifacts.load_plan_artifacts()?
     } else {
@@ -470,6 +478,31 @@ mod tests {
         assert!(
             transform_source.contains(report_needle.as_str()),
             "C1: the core must return ApplyTransactionReport, never print it"
+        );
+    }
+
+    #[test]
+    fn load_plan_for_action_surfaces_replan_root_cause() {
+        // UTA-B7b: no plan artifacts exist (fresh repo), and the replan
+        // path points at a directory that never existed, so the replan
+        // fails fast with its own root cause in Repository::locate. That
+        // cause must survive in the surfaced error chain, not be erased to
+        // an empty plan list (whose reload error alone used to surface).
+        use super::load_plan_for_action;
+        use ariadne_report::ArtifactManager;
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let repository = ariadne_repo::Repository::locate(dir.path()).unwrap();
+        let artifacts = ArtifactManager::prepare_for_repo(&repository).unwrap();
+        let vanished_repo = dir.path().join("never-existed");
+        let err = load_plan_for_action(&artifacts, &vanished_repo, "plan-1")
+            .err()
+            .expect("a failing replan must surface as an error");
+        let chain = format!("{err:?}");
+        assert!(
+            chain.contains("Failed to locate repository path"),
+            "UTA-B7b: the replan root cause must survive in the error \
+             chain, got: {chain}"
         );
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ariadne_build::BuildDiscoverer;
 use ariadne_index::{contexts_fingerprint, contexts_material, Fingerprint};
 use ariadne_repo::{FileOwnership, OptimizationPolicy, Repository};
@@ -84,18 +84,26 @@ pub fn discover_repository_files(repo_path: &PathBuf) -> Result<()> {
 
 pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
     let repository = Repository::locate(repo_path)?;
-    let repo_discovery = repository.discover().ok();
+    // UTA-B7c: a discovery failure fails the command loudly. The former
+    // `.ok()` left this site with no catalog view and, one screen below,
+    // an empty hash list - a fingerprint computed over zero files and
+    // persisted as if discovery had succeeded.
+    let repo_discovery = repository
+        .discover()
+        .with_context(|| {
+            format!(
+                "repository discovery failed for build-context discovery at {}",
+                repository.root.display()
+            )
+        })?;
 
     // D22: the unit shaper is selected through the registry's marker-based
     // lookup against the repository root (first-wins fallback preserved).
     let registry = crate::registry::default_registry();
     let discoverer = BuildDiscoverer::new(&repository.root)
-        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root));
-    let build_result = if let Some(ref disc) = repo_discovery {
-        discoverer.with_repo_discovery(disc).discover()?
-    } else {
-        discoverer.discover()?
-    };
+        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root))
+        .with_repo_discovery(&repo_discovery);
+    let build_result = discoverer.discover()?;
 
     println!("Compilation contexts: {}", build_result.contexts.len());
     println!();
@@ -119,14 +127,10 @@ pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
     let hashes: Vec<_> = repo_discovery
-        .as_ref()
-        .map(|d| {
-            d.files
-                .iter()
-                .map(|f| (f.id, f.content_hash.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+        .files
+        .iter()
+        .map(|f| (f.id, f.content_hash.clone()))
+        .collect();
     let repo_fp = Fingerprint::inputs(&repository.root, &hashes);
     let contexts_fp = contexts_fingerprint(
         &repo_fp,
