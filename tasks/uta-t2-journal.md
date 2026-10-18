@@ -15,6 +15,58 @@ Implementer session started 2026-10-18.
   tokenizer/underflow_fix_tests.rs + parser/brace_depth_tests.rs inspected
   (byte-escape `specimen()` idiom adopted).
 
+## Deviations (with reasons)
+
+1. UTA-B3 "fix" not committed: the directed red never materialized (see
+   checkpoint 1); the guard would be a behavior no-op and TDD forbids
+   code without red. Boundary behavior pinned instead. Owner call needed to
+   downgrade UTA-B3 in the audit ledger (CONFIRMED -> NOT REPRODUCIBLE).
+2. Commit message wording: handoff text said "boundary fix"; the commit
+   carries locks, no logic change, so "fix" was changed to "locks" for
+   truthfulness. Scope and everything else verbatim.
+3. Gate 2 command as written (`--testfilter m18` on `-p ariadne-lang`) is
+   not valid cargo; the m18 parity suite lives in the
+   `ariadne-integration-tests` package. Ran the handoff intent as
+   `python tools/testrun.py --distill -- -p ariadne-integration-tests m18`
+   -> 30 passed / 0 failed / 0 ignored / 37 suites (parity holds; hand is
+   test-additive with zero src behavior change).
+4. Encoding-gate sequencing: commit_scoped stages internally, so
+   `encoding_guard --staged` cannot observe the window. Ran
+   `encoding_guard --all` (superset, CI form) exit 0 pre-commit, plus
+   `--staged` post-commit. Mirrors the UTA-T1 accepted sequencing.
+
+## Report-flagged observations (report-only, no behavior touched)
+
+- ParserCtx self-edge quirk: a definition at token index > 0 whose previous
+  token is punctuation (e.g. `::f()` at stream start) records
+  `f -> f Complete` via handle_variable_decl firing after
+  handle_global_function set current_function. Pinned verbatim.
+- Ctor-shape double record: `A a();` in a class yields BOTH
+  Holder->A and Holder::a->A Incomplete edges (member-signature misfire).
+  Pinned verbatim.
+- symbol_locator `#else` after a disabled `#if 0` masks the #else branch
+  too (compiler would see it). Conservative miss; pinned, owner decision.
+- pin_backend_missing_source_analyzes_empty pins the spec-adjudicated
+  backend.rs:189 empty-Ok swallow (loud name per handoff).
+- analyze_tu (analyzer) on a missing path is Err, NOT empty-Ok - no pin
+  of a swallow there; the lock documents the asymmetry with the backend.
+
+## Gate record
+
+1. `python tools/testrun.py --distill -- -p ariadne-lang-cpp`:
+   red-attempt run `159 passed / 0 failed / 0 ignored / 2 suites` (predicted
+   red absent), green `193 passed / 0 failed / 0 ignored / 2 suites`;
+   capture C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt
+2. m18 parity: `30 passed / 0 failed / 0 ignored / 37 suites` (see
+   deviation 3 for command shape).
+3. `python tools/hygiene_check.py` exit 0 (R1/R2 clean; the emitted R3
+   warns are all pre-existing files, none from this hand's new modules).
+4. `python tools/encoding_guard.py --all` exit 0 pre-commit; `--staged`
+   exit 0 after staging (deviation 4).
+5. `python tools/commit_scoped.py --scope "crates/lang-cpp/**" --scope
+   "tasks/uta-t2-journal.md"` -> commit 55262e8 (message per deviation 2),
+   18 files, +811/-0, all inside the touch-set.
+
 ## Checkpoints (one per green gate)
 
 - Item 1 (RED ATTEMPT - did not materialize): added directive_parser/
