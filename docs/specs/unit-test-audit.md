@@ -23,7 +23,11 @@ crop of silent-error-swallow sites.
   referenced symbol maps to a generated header; the comment says "find which
   old_include this symbol came from" but no provenance is checked. A consumer
   referencing symbols from one of two old includes silently loses the other.
-  Hand H4 fixes it.
+  Hand H4 CONFIRMED reachability upstream is missing: the origin datum
+  `ProposedExtraction.source_file` is dropped at engine/mod.rs before the
+  rewriter, so the fix needs an origin field + cli caller changes - shipped
+  as journal BLOCKER with the data-shape proposal (deferred, reviewer-
+  verified 8ef784a).
 - UTA-B2 `crates/index/src/fingerprint.rs:22` - CONFIRMED (AR-05 class).
   `contexts_material` returns `""` via `unwrap_or_default()` on serde failure
   (reachable: non-UTF-8 paths on Windows), making `contexts_fingerprint`
@@ -143,7 +147,7 @@ because scope is test-additive and per-crate gate cost is one distill run).
 
 | id | crate | claim | status |
 |----|-------|-------|--------|
-| UTA-B1 | transform | covered_old_includes drops unmapped includes | CONFIRMED -> H4 fix |
+| UTA-B1 | transform | covered_old_includes drops unmapped includes | CONFIRMED; H4 BLOCKER - fix needs cross-crate data-shape change (origin field on ExtractedSymbol/GeneratedUnit + cli callers); reviewer-verified blocker, deferred with journal analysis |
 | UTA-B2 | index | serde-fail empty fingerprint | CONFIRMED -> H5 fix |
 | UTA-B3 | lang-cpp | `#includemy` phantom include | NOT REPRODUCIBLE (H2 locks) |
 | UTA-B4 | graph | find_file_id nondeterministic match | CONFIRMED -> H1 fix |
