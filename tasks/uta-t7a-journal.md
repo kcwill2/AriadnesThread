@@ -49,6 +49,13 @@ adjustment.
 
 ## Checkpoints
 
+- [x] Gates + commit: `60b76f3` (6 paths, +273/-42, scopes adjusted to the
+  real `crates/cli/src/commands/` paths, declared at top). hygiene exit 0
+  (all R3 pre-existing, none in touched files); encoding_guard `--all` exit
+  0 pre-commit (the substantive content scan), `--staged` exit 0 witnessed
+  post-commit (sequencing mirrors T1/T2 - `commit --only` leaves the index
+  matching HEAD, so the pre-commit `--all` carries the real weight).
+
 - [x] Red run 1 (all four items) - digest + failing list
   - lib: `136 passed / 3 failed / 0 ignored / 1 suites`
     (capture target/testrun-capture.txt, 214 lines). Reds:
