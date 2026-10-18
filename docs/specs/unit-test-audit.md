@@ -29,9 +29,11 @@ crop of silent-error-swallow sites.
   (reachable: non-UTF-8 paths on Windows), making `contexts_fingerprint`
   run-invariant - stale-after-change detection silently dies. Hand H5 fixes
   it mirroring `cache.rs:61-111`.
-- UTA-B3 `crates/lang-cpp/src/directive_parser.rs:24` - CONFIRMED.
-  `starts_with("include")` without word boundary: `#includemy "a.h"` parses
-  as a real include (phantom dependency edge). Hand H2 fixes it.
+- UTA-B3 `crates/lang-cpp/src/directive_parser.rs:24` - DOWNGRADED to NOT
+  REPRODUCIBLE by hand H2's red discipline: the missing word boundary is real,
+  but line 28 requires the remainder after `include` to start with `"`/`<`,
+  so `#includemy "a.h"` can never produce a directive. Specimens ship as
+  regression locks; no code change.
 - UTA-B4 `crates/graph/src/graph.rs:135-155` - CONFIRMED.
   `find_file_id` returns the *first* HashMap-iteration match, so (a) two
   files sharing a basename resolve nondeterministically per process and
@@ -143,7 +145,7 @@ because scope is test-additive and per-crate gate cost is one distill run).
 |----|-------|-------|--------|
 | UTA-B1 | transform | covered_old_includes drops unmapped includes | CONFIRMED -> H4 fix |
 | UTA-B2 | index | serde-fail empty fingerprint | CONFIRMED -> H5 fix |
-| UTA-B3 | lang-cpp | `#includemy` phantom include | CONFIRMED -> H2 fix |
+| UTA-B3 | lang-cpp | `#includemy` phantom include | NOT REPRODUCIBLE (H2 locks) |
 | UTA-B4 | graph | find_file_id nondeterministic match | CONFIRMED -> H1 fix |
 | UTA-B5 | graph | recursive DFS stack risk + SCC undercount | CONFIRMED -> H1 fix |
 | UTA-B6 | scheduler | empty-fp checkpoint + swallowed save/first-error | CONFIRMED -> H5 |
