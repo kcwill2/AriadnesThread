@@ -7,7 +7,16 @@
 //! closing every icon route reference against the `file://` closed world
 //! (I6). The route contract itself lives in
 //! `test_icon_route_serves_brand_art_with_no_store` below, mirroring the
-//! raw-request style of `d27_node_provenance.rs`.
+//! raw-request style of `d27_node_provenance.rs`. Splash branding rides the
+//! same asset: the loading overlay IS the brand scene - a giant watermark
+//! over a token-painted labyrinth grid with a version corner and nothing
+//! else brand-shaped
+//! (`test_splash_screen_paints_watermark_grid_and_version_corner`), its one
+//! CSS animation respects reduced motion
+//! (`test_splash_motion_respects_reduced_motion`), the build version is
+//! injected into served and exported pages, and the standalone export drops
+//! every splash route reference as dead under file://
+//! (`test_standalone_export_closes_splash_brand_reference`).
 
 use crate::common;
 
@@ -75,6 +84,150 @@ fn test_page_head_marks_favicon_and_brand_img() {
     assert!(
         !styles.contains(".logo-badge svg"),
         "the retired bolt-only rule must be gone from the stylesheet"
+    );
+}
+
+#[test]
+fn test_splash_screen_paints_watermark_grid_and_version_corner() {
+    // The watermark IS the brand: the overlay fills its space with the art
+    // at 15% over a token-painted labyrinth grid and a radial pool of light,
+    // plus a build-version corner line and nothing else brand-shaped (the
+    // small lockup was retired - simplicity pass). The overlay's paint
+    // lives in the stylesheet (an inline background would outrank it).
+    let page = ariadne_ui::INDEX_HTML;
+    let overlay_start = page
+        .find("id=\"loadingOverlay\"")
+        .expect("the loading overlay must exist");
+    let watermark_tag = "<img class=\"splash-watermark\" src=\"/icon.svg\" alt=\"\">";
+    let watermark = page
+        .find(watermark_tag)
+        .expect("the overlay must carry the giant watermark <img>");
+    assert!(
+        watermark > overlay_start,
+        "the watermark must live inside the loading overlay"
+    );
+    let progress_row = page
+        .find("id=\"loadingProgress\"")
+        .expect("the progress bar must exist");
+    assert!(
+        watermark < progress_row,
+        "the watermark must sit ahead of the progress rows in overlay order"
+    );
+    assert!(
+        !page.contains("splash-mark")
+            && !page.contains("splash-wordmark")
+            && !page.contains("splash-brand"),
+        "the small icon and wordmark must be gone - the watermark is the only brand"
+    );
+    let overlay_head = &page[overlay_start..watermark];
+    assert!(
+        !overlay_head.contains("background: var(--bg-surface)"),
+        "the overlay background must move to the stylesheet to allow layered paint"
+    );
+    assert!(
+        page.contains("class=\"splash-track\""),
+        "the progress track row must carry the shimmer class"
+    );
+    assert!(
+        page.contains("<div class=\"splash-version\">v__ARIADNE_VERSION__</div>"),
+        "the overlay corner must carry the version placeholder"
+    );
+    assert!(
+        !page.contains("neonGradient"),
+        "the watermark must be served art, never inlined into the app page"
+    );
+    let styles = ariadne_ui::STYLES_CSS;
+    for token in [
+        "#loadingOverlay {",
+        "radial-gradient(",
+        "repeating-linear-gradient(",
+        ".splash-watermark {",
+        "opacity: 0.15;",
+        "z-index: -1;",
+        ".splash-version {",
+    ] {
+        assert!(
+            styles.contains(token),
+            "the stylesheet must carry the splash paint rule token: {token}"
+        );
+    }
+    assert!(
+        !styles.contains(".splash-mark")
+            && !styles.contains(".splash-wordmark")
+            && !styles.contains(".splash-brand"),
+        "the retired lockup rules must be gone from the stylesheet"
+    );
+}
+
+#[test]
+fn test_splash_motion_respects_reduced_motion() {
+    // Simplicity pass: the shimmer sweep is the splash's only motion (the
+    // mark pulse died with the small lockup) and it bows to the user's
+    // reduced-motion preference.
+    let styles = ariadne_ui::STYLES_CSS;
+    assert!(
+        styles.contains("@keyframes splash-shimmer")
+            && styles.contains("animation: splash-shimmer")
+            && styles.contains(".splash-track::after"),
+        "the track shimmer sweep must stay wired"
+    );
+    assert!(
+        !styles.contains("splash-breathe"),
+        "the retired mark-pulse keyframes must be gone"
+    );
+    assert!(
+        styles.contains("prefers-reduced-motion"),
+        "the shimmer must bow to the reduced-motion preference"
+    );
+}
+
+#[tokio::test]
+async fn test_served_index_injects_the_build_version() {
+    let app = ariadne_ui::build_router(common::loading_state());
+    let (status, _, body) = common::request_raw_body(app, "/").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let page = String::from_utf8(body).expect("the served page is UTF-8");
+    let versioned = format!("v{}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        page.contains(&versioned),
+        "the served splash must carry the crate version"
+    );
+    assert!(
+        !page.contains("__ARIADNE_VERSION__"),
+        "no version placeholder may survive into the served page"
+    );
+}
+
+#[test]
+fn test_standalone_export_injects_version_without_placeholders() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let out_path = temp_dir.path().join("versioned-standalone.html");
+    ariadne_ui::export_standalone_html(&common::empty_export_payload(), "", &out_path).unwrap();
+    let content = std::fs::read_to_string(&out_path).unwrap();
+    assert!(
+        content.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+        "the export splash must carry the crate version too"
+    );
+    assert!(
+        !content.contains("__ARIADNE_VERSION__"),
+        "the export must not ship the raw placeholder"
+    );
+}
+
+#[test]
+fn test_standalone_export_closes_splash_brand_reference() {
+    // file:// has no /icon.svg route and the overlay never shows there (no
+    // /status feed): the export drops the splash mark instead of inlining a
+    // second copy of the art (which would duplicate neonGradient/neonGlow).
+    let temp_dir = tempfile::tempdir().unwrap();
+    let out_path = temp_dir.path().join("splash-standalone.html");
+    ariadne_ui::export_standalone_html(&common::empty_export_payload(), "", &out_path).unwrap();
+    let content = std::fs::read_to_string(&out_path).unwrap();
+    // The `.splash-mark` stylesheet rule legitimately survives inlining; the
+    // closed-world hazard is only the route reference itself.
+    assert!(
+        !content.contains("src=\"/icon.svg\""),
+        "the standalone export must not leave the splash mark as a dangling route reference"
     );
 }
 

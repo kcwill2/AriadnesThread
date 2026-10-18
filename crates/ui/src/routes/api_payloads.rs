@@ -15,7 +15,7 @@ pub(crate) async fn api_index() -> axum::response::Response {
         .status(axum::http::StatusCode::OK)
         .header(axum::http::header::CACHE_CONTROL, "no-store")
         .header(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .body(axum::body::Body::from(crate::INDEX_HTML))
+        .body(axum::body::Body::from(crate::rendered_index_html()))
         // R5: infallible — static status/body pair
         .unwrap()
 }

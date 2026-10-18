@@ -187,6 +187,8 @@ async fn test_server_index_route() {
 
 #[tokio::test]
 async fn test_index_route_body_matches_bundled_index_html() {
+    // Contract amended with splash branding: the served page is the bundled
+    // INDEX_HTML with the build version injected (placeholder -> version).
     let app = build_router(common::ready_state(
         std::path::PathBuf::from("."),
         IncludeGraph::new(),
@@ -203,8 +205,8 @@ async fn test_index_route_body_matches_bundled_index_html() {
     );
     assert_eq!(
         body,
-        ariadne_ui::INDEX_HTML.as_bytes(),
-        "index route must serve the exact bundled INDEX_HTML"
+        ariadne_ui::rendered_index_html().into_bytes(),
+        "index route must serve the bundled INDEX_HTML with the build version injected"
     );
 }
 

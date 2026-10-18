@@ -12,7 +12,7 @@ use std::borrow::Cow;
 fn standalone_template() -> String {
     // Link order is themes.css (tokens) then styles.css (rules); inlining in
     // the same order preserves the token-before-rule cascade for the export.
-    let mut html = INDEX_HTML.replace(
+    let mut html = crate::rendered_index_html().replace(
         "<link rel=\"stylesheet\" href=\"/themes.css\">",
         &format!("<style>\n{}\n</style>", THEMES_CSS.trim_end()),
     );
@@ -31,6 +31,13 @@ fn standalone_template() -> String {
     html = html.replace(
         "<img class=\"brand-mark\" src=\"/icon.svg\" alt=\"Ariadne's Thread logo\">",
         ICON_SVG.trim_end(),
+    );
+    // The splash watermark is dropped, not inlined: with no /status feed a
+    // file:// page never shows the loading overlay, and an inline copy of
+    // the art would duplicate the neonGradient/neonGlow ids (shape D6).
+    html = html.replace(
+        "<img class=\"splash-watermark\" src=\"/icon.svg\" alt=\"\">",
+        "",
     );
     for (name, js) in [
         ("api.js", API_JS),

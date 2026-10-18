@@ -28,3 +28,12 @@ pub const MAIN_JS: &str = include_str!("../assets/main.js");
 pub const EXTRACTION_WIZARD_JS: &str = include_str!("../assets/extraction-wizard.js");
 pub const THEME_JS: &str = include_str!("../assets/theme.js");
 pub const ICON_SVG: &str = include_str!("../assets/icon.svg");
+
+/// Splash version corner token: the bundled asset stays build-invariant and
+/// every real page (served or exported) carries the crate version instead.
+pub const VERSION_PLACEHOLDER: &str = "__ARIADNE_VERSION__";
+
+/// The index page with the splash build-version corner injected.
+pub fn rendered_index_html() -> String {
+    INDEX_HTML.replace(VERSION_PLACEHOLDER, env!("CARGO_PKG_VERSION"))
+}

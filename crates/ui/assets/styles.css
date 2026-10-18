@@ -97,6 +97,55 @@
       color: var(--text-muted);
       font-family: monospace;
     }
+    #loadingOverlay {
+      background:
+        radial-gradient(circle at 50% 42%, var(--cyan-wash) 0%, transparent 55%),
+        repeating-linear-gradient(0deg, var(--cyan-wash) 0 2px, transparent 2px 112px),
+        repeating-linear-gradient(90deg, var(--cyan-wash) 0 2px, transparent 2px 112px),
+        repeating-linear-gradient(0deg, var(--cyan-wash-soft) 0 1px, transparent 1px 28px),
+        repeating-linear-gradient(90deg, var(--cyan-wash-soft) 0 1px, transparent 1px 28px),
+        var(--bg-surface);
+    }
+    .splash-watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(80vmin, 940px);
+      opacity: 0.15;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .splash-track {
+      position: relative;
+    }
+    .splash-track::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(105deg, transparent 35%, var(--cyan-wash) 50%, transparent 65%);
+      transform: translateX(-100%);
+      animation: splash-shimmer 1.6s ease-in-out infinite;
+    }
+    .splash-version {
+      position: absolute;
+      right: 14px;
+      bottom: 10px;
+      font-size: 10px;
+      font-family: monospace;
+      letter-spacing: 0.05em;
+      color: var(--text-sub);
+    }
+    @keyframes splash-shimmer {
+      to {
+        transform: translateX(100%);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .splash-track::after {
+        animation: none;
+      }
+    }
     /* VIEW SWITCHER TABS */
     .tabs {
       display: flex;
