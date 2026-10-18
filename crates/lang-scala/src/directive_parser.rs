@@ -441,4 +441,28 @@ mod tests {
         assert_eq!(parsed.len(), 1, "only the code after the closing quote");
         assert_eq!(parsed[0].raw_target, "com.example.models.Real");
     }
+
+    #[test]
+    fn pin_directive_parser_unterminated_string_runs_to_eof() {
+        assert!(
+            parse_import_directives("val a = \"unclosed\nimport com.example.Swallowed\n")
+                .is_empty(),
+            "UTA-T3 pin: this frozen text scanner keeps consuming a plain string \
+             ACROSS the newline to EOF, so directives on later lines are swallowed. \
+             The M21 scanner genuinely disagrees (it stops the string at the newline \
+             and would still tokenize the import) -- the divergence is reported, \
+             not unified (audit adjudication: pin both, doc follows reality)"
+        );
+    }
+
+    #[test]
+    fn pin_braced_wildcard_star_yields_package_wildcard_and_given_forms_are_noise() {
+        let parsed = parse_import_directives("import a.b.{_*, given}\n");
+        assert_eq!(parsed.len(), 1, "a lone `given` selector is dropped as noise (IV-2)");
+        assert_eq!((parsed[0].raw_target.as_str(), parsed[0].is_wildcard), ("a.b", true));
+        assert!(
+            parse_import_directives("import a.b.{given Ordering}\n").is_empty(),
+            "`given T` carries no plain dotted identifier and stays noise"
+        );
+    }
 }

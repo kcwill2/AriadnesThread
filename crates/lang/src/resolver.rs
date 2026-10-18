@@ -276,4 +276,47 @@ mod tests {
         let order = candidate_order(DirectiveStyle::Angled, &[PathBuf::from("inc")]);
         assert_eq!(order, vec![PathBuf::from("/repo/inc/hdr.h")]);
     }
+
+    #[test]
+    fn pin_unspecified_style_behaves_quoted_includer_dir_first() {
+        let order = candidate_order(DirectiveStyle::Unspecified, &[PathBuf::from("inc")]);
+        assert_eq!(
+            order,
+            vec![PathBuf::from("/repo/src/hdr.h"), PathBuf::from("/repo/inc/hdr.h")],
+            "only Angled skips the includer directory: the default Unspecified \
+             style behaves Quoted, includer dir first (Scala imports have no \
+             local/external spelling and still get source-relative search)"
+        );
+    }
+
+    #[test]
+    fn pin_absolute_search_path_reduces_in_root_and_keeps_out_of_root_verbatim() {
+        let order = candidate_order(
+            DirectiveStyle::Quoted,
+            &[PathBuf::from("/repo/inc"), PathBuf::from("/opt/sdk")],
+        );
+        assert_eq!(
+            order,
+            vec![
+                PathBuf::from("/repo/src/hdr.h"),
+                PathBuf::from("/repo/inc/hdr.h"),
+                PathBuf::from("/opt/sdk/hdr.h"),
+            ],
+            "an absolute search dir under repo_root is reduced to repository-\
+             relative form (strip_prefix), one outside is used verbatim - the \
+             join of an absolute normalized candidate replaces the root, so SDK \
+             dirs stay reachable"
+        );
+    }
+
+    #[test]
+    fn pin_neutral_directive_edge_kind_default_is_none() {
+        assert_eq!(
+            ParseOnlyResolver.directive_edge_kind(),
+            None,
+            "plan M20 D10: the default keeps the graph layer's own destination \
+             classification - only a plugin whose directives name a fixed \
+             relation overrides (Scala does, C++ keeps the default)"
+        );
+    }
 }

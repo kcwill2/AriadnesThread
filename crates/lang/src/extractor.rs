@@ -234,4 +234,25 @@ mod tests {
             "no source text: the producer's own passthrough survives"
         );
     }
+
+    #[test]
+    fn pin_neutral_extractor_defaults_find_nothing_and_stage_under_generated() {
+        assert!(
+            PassthroughProbe
+                .locate_symbol_bodies("class X {}", &[("X".to_string(), SymbolKind::Class)])
+                .is_empty(),
+            "D-M23-1 / I4: the default locates nothing - the engine keeps its \
+             placeholder body; only syntax-aware plugins (Scala) implement this"
+        );
+        assert!(
+            !PassthroughProbe.places_generated_units_in_place(),
+            "T8b: the default is `false` - copy semantics (C++) keep the `generated/` \
+             staging byte-identically (I1); move semantics must opt in explicitly"
+        );
+        assert_eq!(
+            PassthroughProbe.unit_namespace("package p"),
+            String::new(),
+            "D-M23-2: the neutral namespace seam answers empty"
+        );
+    }
 }

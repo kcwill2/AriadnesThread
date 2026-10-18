@@ -484,4 +484,29 @@ mod tests {
         assert_eq!(map[3], 6);
         assert_eq!(map[4], "ä→ok".len());
     }
+
+    #[test]
+    fn pin_truncated_group_swallows_remaining_idents_to_eof_bounded() {
+        let pass = scan_imports("import a.b.{Old\nclass Use\n");
+        assert_eq!(
+            pass.statements.len(),
+            1,
+            "the unclosed open brace never closes, so one statement owns the rest of the file"
+        );
+        let statement = &pass.statements[0];
+        assert_eq!(statement.end_tok, pass.tokens.len(), "bounded: the statement ends exactly at EOF");
+        let paths: Vec<Option<String>> =
+            statement.selectors.iter().map(|s| s.form.module_path()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                Some("a.b.Old".to_string()),
+                Some("a.b.class".to_string()),
+                Some("a.b.Use".to_string())
+            ],
+            "LOCK (documented consequence of the open brace): every following \
+             identifier becomes a group member of base `a.b` -- weird but total, \
+             and the rewrite scan always sees a bounded statement, never a hang"
+        );
+    }
 }

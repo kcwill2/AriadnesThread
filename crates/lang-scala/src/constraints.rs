@@ -287,4 +287,38 @@ mod tests {
             "D-M23-8: the with_edges path is a superset - companion logic is preserved"
         );
     }
+
+    #[test]
+    fn pin_companion_groups_independent_of_batch_permutation() {
+        fn batch() -> Vec<SymbolRecord> {
+            vec![
+                record("com.example.Foo", SymbolKind::Class),
+                SymbolRecord {
+                    name: "Bar".to_string(),
+                    ..record("com.example.Bar$", SymbolKind::Object)
+                },
+                record("com.example.Bar", SymbolKind::Class),
+                SymbolRecord {
+                    name: "Foo".to_string(),
+                    ..record("com.example.Foo$", SymbolKind::Object)
+                },
+            ]
+        }
+        let mut reversed = batch();
+        reversed.reverse();
+        let groups = group_ids(&ScalaClusteringConstraints.colocated_groups(&batch()));
+        let permuted = group_ids(&ScalaClusteringConstraints.colocated_groups(&reversed));
+        assert_eq!(
+            groups, permuted,
+            "BTreeSet-backed emission: batch order never changes the groups"
+        );
+        assert_eq!(
+            groups,
+            vec![
+                vec!["com.example.Bar".to_string(), "com.example.Bar$".to_string()],
+                vec!["com.example.Foo".to_string(), "com.example.Foo$".to_string()],
+            ],
+            "groups AND members emit in id order, deterministically"
+        );
+    }
 }

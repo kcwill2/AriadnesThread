@@ -177,4 +177,45 @@ mod tests {
         assert_eq!(hit.start_line, hit.end_line);
         assert_eq!(hit.raw_directive, "import a.b.C");
     }
+
+    #[test]
+    fn pin_neutral_consumer_discovery_targets_default_is_the_bare_file_name() {
+        assert_eq!(
+            InertRewriter.consumer_discovery_targets(
+                std::path::Path::new("a/b.h"),
+                &[],
+            ),
+            vec!["b.h".to_string()],
+            "I1: the neutral default probes with the target file's BARE name - \
+             today's C++ `#include \"<file>\"` scan spelling, byte-identical"
+        );
+        assert!(
+            InertRewriter.consumer_discovery_targets(std::path::Path::new("."), &[]).is_empty(),
+            "a path without a file name (`.`) yields NO probe strings rather than \
+             a bogus directory-name probe"
+        );
+    }
+
+    #[test]
+    fn pin_neutral_consumer_rewrite_spec_default_is_none() {
+        assert!(
+            InertRewriter.consumer_rewrite_spec(&[], &[], &[]).is_none(),
+            "the path payload keeps its path strings when the language cannot map \
+             them to directive identifiers (C++ behavior byte-identical)"
+        );
+    }
+
+    #[test]
+    fn pin_neutral_render_diff_default_uses_bare_marker_grammar() {
+        assert_eq!(
+            InertRewriter.render_diff(
+                &["old/x".to_string()],
+                &["new/x".to_string()],
+                &["kept/x".to_string()],
+            ),
+            " - old/x\n + new/x\n ~ kept/x\n",
+            "the language-neutral default is marker + dependency ONLY: no `#include` \
+             or `import` spelling leaks into the neutral trait (plan §7 R2)"
+        );
+    }
 }

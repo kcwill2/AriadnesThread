@@ -777,4 +777,28 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[test]
+    fn pin_detect_multi_plugin_returns_first_non_other_kind() {
+        let registry = LanguageRegistry::new()
+            .register(Box::new(MockPlugin::with_extension("one", LanguageId::Cpp)))
+            .register(Box::new(MockPlugin::with_extension("two", LanguageId::Scala)));
+        assert_eq!(registry.detect(Path::new("src/a.one")), SourceFileKind::Source);
+        assert_eq!(
+            registry.detect(Path::new("src/a.two")),
+            SourceFileKind::Source,
+            "the first plugin answers Other for `.two` and detection keeps walking \
+             to the first non-Other answer instead of stopping at the miss"
+        );
+        assert_eq!(registry.detect(Path::new("src/a.three")), SourceFileKind::Other);
+    }
+
+    #[test]
+    fn pin_root_entries_end_with_nonexistent_root_is_false() {
+        assert!(
+            !root_entries_end_with(Path::new("definitely-missing-repo-root-uta-t3"), ".proj"),
+            "fs::read_dir failure maps through unwrap_or(false): a missing root \
+             has no matching entries rather than panicking"
+        );
+    }
 }

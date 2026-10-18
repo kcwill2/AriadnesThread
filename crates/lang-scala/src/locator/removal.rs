@@ -294,4 +294,40 @@ mod tests {
             Some("package p\n\nval keep = 1\n")
         );
     }
+
+    #[test]
+    fn pin_removal_under_crlf_consumes_one_blank_separator_byte_exact() {
+        let source = "class A\r\n\r\nclass Drop\r\n\r\nval z\r\n";
+        assert_eq!(
+            remove(source, &["Drop"]).as_deref(),
+            Some("class A\r\n\r\nval z\r\n"),
+            "the CRLF blank separator counts as one blank line: its `\\r` is \
+             whitespace, so the whole `\\r\\n` line joins the removal span"
+        );
+    }
+
+    #[test]
+    fn pin_nested_block_comment_prelude_leaves_with_the_region() {
+        let source = "/** outer /* inner */ still prelude */\nclass Drop\n\nval keep = 1\n";
+        assert_eq!(
+            remove(source, &["Drop"]).as_deref(),
+            Some("val keep = 1\n"),
+            "block_comment_start is nesting-aware: it finds the outer opener that \
+             matches the final closer, so the whole doc block goes with the region"
+        );
+    }
+
+    #[test]
+    fn pin_unbalanced_comment_prelude_bails_and_a_dangling_closer_is_not_claimed() {
+        // Unbalanced OPENER: the scanner swallows the rest of the file into the
+        // comment, so the declaration is invisible and the WHOLE removal bails.
+        assert_eq!(remove("/* open /* inner */\nclass Drop\n", &["Drop"]), None);
+        // Unbalanced CLOSER: block_comment_start refuses, so the dangling `*/`
+        // is not comment prelude and stays in the file verbatim.
+        assert_eq!(
+            remove("val a = 1 */\nclass B\n", &["B"]).as_deref(),
+            Some("val a = 1 */\n"),
+            "the prelude walk only ever claims balanced block comments"
+        );
+    }
 }

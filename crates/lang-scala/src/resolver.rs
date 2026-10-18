@@ -397,4 +397,26 @@ mod tests {
             ResolveOutcome::External
         );
     }
+
+    #[test]
+    fn pin_edge_spellings_trailing_dot_whitespace_only_and_leading_dot_targets() {
+        assert_eq!(
+            resolve("com.example.models.", false),
+            ResolveOutcome::Wildcard(models_dir_ids()),
+            "strip_wildcard_suffix's trailing-dot clause reduces `pkg.` to the bare \
+             package -- identical answer to the undotted spelling"
+        );
+        assert_eq!(
+            resolve("   ", false),
+            ResolveOutcome::External,
+            "a whitespace-only target is empty after the trim: External, no lookup"
+        );
+        assert_eq!(
+            resolve(".com.example.models.Order", false),
+            resolve("com.example.models.Order", false),
+            "the catalog's unify_segments trims edge dots, so the leading-dot target \
+             resolves EXACTLY like the plain one (pinned current behavior, honest: \
+             neither first_path_segment nor the lookup rejects it)"
+        );
+    }
 }

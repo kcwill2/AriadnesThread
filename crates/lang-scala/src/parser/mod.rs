@@ -648,4 +648,79 @@ mod tests {
             "both sealed classes recorded"
         );
     }
+
+    #[test]
+    fn pin_dotted_parent_is_incomplete_then_import_match_makes_it_complete() {
+        let without = parse_src("package p\n\nclass X extends a.b.Base");
+        assert_eq!(
+            edge_keys(&without),
+            vec![("p.X".into(), "a.b.Base".into(), DependencyKind::Incomplete)],
+            "emit_parent_edge: a multi-segment parent guess keeps its full dotted text"
+        );
+        assert!(ref_ids(&without).is_empty(), "incomplete parents get no reference");
+        let pairs: Vec<(String, String)> = without
+            .extends_edges
+            .iter()
+            .map(|(sub, sup)| (sub.0.clone(), sup.0.clone()))
+            .collect();
+        assert_eq!(pairs, vec![("p.X".to_string(), "a.b.Base".to_string())]);
+
+        let with = parse_src("package p\n\nimport a.b.Base\n\nclass X extends a.b.Base");
+        assert_eq!(
+            edge_keys(&with),
+            vec![("p.X".into(), "a.b.Base".into(), DependencyKind::Complete)],
+            "the parent key matches a named-import target (imports value == full \
+             dotted chain) -> Complete edge"
+        );
+        assert_eq!(ref_ids(&with), ["a.b.Base"], "Complete parents also reference");
+    }
+
+    #[test]
+    fn pin_grouped_rename_maps_nothing_but_the_selected_name_resolves() {
+        let aliased = parse_src("package p\n\nimport a.b.{C => D}\n\nclass Use {\n  val d: D = null\n}");
+        assert!(
+            ref_ids(&aliased).is_empty() && aliased.edges.is_empty(),
+            "skip_rename_suffix consumes `=> D` without mapping it: the alias never resolves"
+        );
+        let selected = parse_src("package p\n\nimport a.b.{C => D}\n\nclass Use {\n  val c: C = null\n}");
+        assert_eq!(
+            edge_keys(&selected),
+            vec![("p.Use".into(), "a.b.C".into(), DependencyKind::Complete)],
+            "the selected (left) name is the mapped key"
+        );
+        assert_eq!(ref_ids(&selected), ["a.b.C"]);
+    }
+
+    #[test]
+    fn pin_group_wildcard_member_attributes_unresolved_names_to_the_base() {
+        let analysis = parse_src(
+            "package p\n\nimport a.b.{X, _}\n\nclass Use {\n  val x: X = null\n  val y: Y = null\n}",
+        );
+        assert_eq!(
+            edge_keys(&analysis),
+            vec![
+                ("p.Use".into(), "a.b.X".into(), DependencyKind::Complete),
+                ("p.Use".into(), "a.b.Y".into(), DependencyKind::Incomplete),
+            ],
+            "the group's `_` member sets wildcard_base = a.b (same scan path as \
+             `import a.b._`), so unresolved `Y` is attributed to a.b.Y"
+        );
+        assert_eq!(ref_ids(&analysis), ["a.b.X", "a.b.Y"]);
+    }
+
+    #[test]
+    fn pin_dedupe_extends_folds_the_with_repeated_same_parent_pair() {
+        let analysis = parse_src("package p\n\nclass Base\n\nclass X extends Base with Base");
+        let pairs: Vec<(String, String)> = analysis
+            .extends_edges
+            .iter()
+            .map(|(sub, sup)| (sub.0.clone(), sup.0.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("p.X".to_string(), "p.Base".to_string())],
+            "extends/with emit the identical pair twice; dedupe_extends folds it to one"
+        );
+        assert_eq!(edge_keys(&analysis).len(), 1, "the untyped channel folds too");
+    }
 }

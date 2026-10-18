@@ -356,4 +356,16 @@ mod tests {
         assert_eq!(consumed_end(&ranges, 2), Some(3));
         assert_eq!(consumed_end(&ranges, 3), None);
     }
+
+    #[test]
+    fn pin_grouped_wildcard_member_sets_wildcard_base_to_the_group_base() {
+        let scan_result = scan("import a.b.{X, _}\n");
+        assert_eq!(scan_result.named_imports.get("X").map(String::as_str), Some("a.b.X"));
+        assert_eq!(
+            scan_result.wildcard_base.as_deref(),
+            Some("a.b"),
+            "a `_` member inside a braced selector group sets the same \
+             single-active wildcard base (D16) as the trailing `._` spelling"
+        );
+    }
 }

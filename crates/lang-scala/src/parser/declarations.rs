@@ -432,4 +432,36 @@ mod tests {
         assert!(is_modifier_keyword("implicit"));
         assert!(!is_modifier_keyword("class"));
     }
+
+    #[test]
+    fn pin_scala2_angle_type_params_recognized_like_bracket_form() {
+        use crate::parser::tests::parse_src;
+        let bracket = parse_src("package p\n\nclass Box[T](val v: Int)");
+        let angle = parse_src("package p\n\nclass Box<T>(val v: Int)");
+        let ids = |analysis: &ariadne_lang::TuAnalysis| -> Vec<String> {
+            analysis.symbols.iter().map(|s| s.id.0.clone()).collect()
+        };
+        assert_eq!(ids(&bracket), vec!["p.Box".to_string()]);
+        assert_eq!(
+            ids(&angle),
+            ids(&bracket),
+            "skip_balanced_if_angle accepts both the Scala-2 <T> and Scala-3 [T] \
+             type-parameter heads: the recognized symbol set is identical"
+        );
+        assert_eq!(angle.symbols[0].kind, bracket.symbols[0].kind);
+    }
+
+    #[test]
+    fn pin_access_qualifier_bracket_is_consumed_and_sealed_still_records() {
+        use crate::parser::tests::parse_src;
+        let analysis = parse_src("package p\n\nprivate[p] sealed class C");
+        assert_eq!(analysis.symbols.len(), 1);
+        assert_eq!(analysis.symbols[0].id.0, "p.C");
+        assert_eq!(
+            analysis.symbols[0].modifiers,
+            vec!["sealed".to_string()],
+            "the modifier loop's bracket skip swallows the `private[p]` access \
+             qualifier, so the `sealed` keyword that follows is still recorded"
+        );
+    }
 }

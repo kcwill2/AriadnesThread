@@ -408,4 +408,18 @@ mod tests {
         assert!(!is_wildcard_attributable("buffer"));
         assert!(!is_wildcard_attributable("String"));
     }
+
+    #[test]
+    fn pin_member_access_segments_emit_no_reference_even_for_named_imports() {
+        use crate::parser::tests::parse_src;
+        let analysis =
+            parse_src("package p\n\nimport a.b.Widget\n\nclass Use {\n  val w = pkg.Widget.factory\n}");
+        assert!(
+            analysis.references.is_empty(),
+            "is_member_access: the segment right after a `.` is a qualified member \
+             name -- even a name that equals a named-import target (`Widget`) is \
+             suppressed, `pkg.Widget` is not the imported `Widget`"
+        );
+        assert!(analysis.edges.is_empty(), "suppressed references carry no edge either");
+    }
 }

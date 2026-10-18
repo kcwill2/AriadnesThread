@@ -1,7 +1,10 @@
 //! Offline-fidelity Scala token scanner (M21 T-A, D18).
 //!
 //! Hand-written, zero dependencies, deterministic, and total: invalid input
-//! never panics; unterminated constructs simply stop at EOF. Comment and
+//! never panics; every unterminated construct ends at its own boundary --
+//! an unterminated single-quoted string stops at its line's newline (see
+//! `scan_string_literal`), while comments and triple-quoted strings run to
+//! EOF. Comment and
 //! string content is *removed* by lexing, which is what makes the parser's
 //! negative guarantees (commented-out / quoted code yields nothing) fall out
 //! of structure rather than pattern-matching.
@@ -195,7 +198,12 @@ impl<'a> ScanCursor<'a> {
         })
     }
 
-    /// Consumes `"…"`, `"""…"""`; an unterminated literal runs to EOF.
+    /// Consumes `"..."` and `"""..."""`. An unterminated `"""..."""` runs to
+    /// EOF; an unterminated `"..."` stops at the newline that ends its line
+    /// -- it does NOT run to EOF (UTA-T3 doc correction; the old single
+    /// "runs to EOF" line was only true for the triple-quoted form. The
+    /// frozen `directive_parser` text scanner genuinely disagrees -- it runs
+    /// both forms to EOF -- and the divergence is pinned, not unified).
     fn scan_string_literal(&mut self) -> Option<()> {
         if self.peek(1) == Some('"') && self.peek(2) == Some('"') {
             self.advance();
@@ -417,5 +425,53 @@ mod tests {
         assert_eq!(chars[tokens[1].start], 'x');
         let spanned: String = chars[tokens[0].start..tokens[1].end].iter().collect();
         assert_eq!(spanned, "val\r\nx");
+    }
+
+    #[test]
+    fn pin_scanner_unterminated_string_stops_at_newline() {
+        assert_eq!(
+            kinds("val s = \"unclosed\nclass C"),
+            ["Ident(val)", "Ident(s)", "Punct(=)", "Literal", "Ident(class)", "Ident(C)"],
+            "UTA-T3 pin: an unterminated single-quoted string ends at the newline, \
+             NOT at EOF -- code on the following line still lexes (the corrected doc \
+             line claimed run-to-EOF for this form)"
+        );
+        assert_eq!(
+            kinds("val big = \"\"\"unclosed\nclass StillInside"),
+            ["Ident(val)", "Ident(big)", "Punct(=)", "Literal"],
+            "the triple-quoted form DOES run to EOF -- the doc claim was only true \
+             for this shape, pinned to keep the boundary of the correction honest"
+        );
+    }
+
+    #[test]
+    fn pin_char_literal_lookalike_lexes_the_quote_as_punctuation() {
+        assert_eq!(kinds("'x end"), ["Punct(')", "Ident(x)", "Ident(end)"]);
+    }
+
+    #[test]
+    fn pin_numeric_literal_greedy_tail_swallows_postfix_dot_member() {
+        assert_eq!(kinds("1.toString + 2.0f"), ["Literal", "Punct(+)", "Literal"]);
+    }
+
+    #[test]
+    fn pin_unicode_and_dollar_lead_identifiers_lex_as_single_idents() {
+        // The multibyte specimen is built from escapes: authored files stay pure ASCII.
+        let source = "class \u{dc}n\u{ef}c\u{f6}d\u{e9} $priv";
+        assert_eq!(
+            kinds(source),
+            ["Ident(class)", "Ident(\u{dc}n\u{ef}c\u{f6}d\u{e9})", "Ident($priv)"],
+            "is_ident_start accepts alphabetic (any script), '_' and '$'"
+        );
+    }
+
+    #[test]
+    fn pin_dangling_block_comment_closer_lexes_as_two_punctuation_tokens() {
+        assert_eq!(kinds("*/ a"), ["Punct(*)", "Punct(/)", "Ident(a)"]);
+    }
+
+    #[test]
+    fn pin_line_comment_at_eof_without_newline_terminates_scan_cleanly() {
+        assert_eq!(kinds("a // trailing note, no newline"), ["Ident(a)"]);
     }
 }

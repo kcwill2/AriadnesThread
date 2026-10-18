@@ -246,4 +246,27 @@ mod tests {
             "empty-after-sanitize falls back to `symbol`, like lang-cpp"
         );
     }
+
+    #[test]
+    fn pin_sanitize_symbol_stem_edge_collisions() {
+        // Multibyte specimens from escapes: authored file stays pure ASCII.
+        assert_eq!(sanitize_symbol_stem("\u{fc}ber"), "ber");
+        assert_eq!(sanitize_symbol_stem("\u{65e5}\u{672c}\u{8a9e}"), "symbol");
+        assert_eq!(
+            sanitize_symbol_stem("\u{65e5}\u{672c}\u{8a9e}"),
+            sanitize_symbol_stem("\u{d55c}\u{ad00}\u{ae00}"),
+            "LOCK (pinned collision): every fully non-ASCII name collapses to the \
+             same `symbol` fallback stem, so distinct symbols can collide in the \
+             target file name -- current behavior, reported, not fixed"
+        );
+        assert_eq!(
+            sanitize_symbol_stem("\u{fc}ber"),
+            "ber",
+            "RED-phase finding, pinned honestly: a LEADING non-ASCII run collapses \
+             to one underscore which the edge trim then removes -- only ALL-illegal \
+             names reach the `symbol` fallback, matching the function's own docs"
+        );
+        assert_eq!(sanitize_symbol_stem(":::"), "symbol", "operator names empty out");
+        assert_eq!(sanitize_symbol_stem("_x_"), "x", "edge underscores are trimmed");
+    }
 }

@@ -306,4 +306,21 @@ mod tests {
             FileId::from_relative_path("src/main/scala/com/example/Main.scala")
         );
     }
+
+    #[test]
+    fn pin_path_contains_components_is_case_insensitive_on_mixed_case_roots() {
+        assert!(
+            path_contains_components(Path::new("Src/MAIN/scala/App.scala"), &MAIN_SOURCE_ROOT),
+            "components are lowercased before the window match, so a mixed-case \
+             `Src/MAIN/scala` root still reads as the sbt main root"
+        );
+        assert!(
+            path_contains_components(Path::new("SRC/test/Scala/Spec.scala"), &TEST_SOURCE_ROOT),
+            "the test-root exclusion tag matches case-insensitively too"
+        );
+        assert!(
+            !path_contains_components(Path::new("src/main/scala"), &TEST_SOURCE_ROOT),
+            "a shorter-than-pattern path can never match the window"
+        );
+    }
 }

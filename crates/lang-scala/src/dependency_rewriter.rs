@@ -574,4 +574,47 @@ mod tests {
             )
             .is_none());
     }
+
+    #[test]
+    fn pin_multibyte_bytes_before_a_touched_import_survive_byte_exact() {
+        // Specimen from escapes (authored file stays pure ASCII): two-byte
+        // u-umlaut before the touched import, two-byte e-acute plus three-byte
+        // arrow inside a string after it -- char/byte offsets matter on both sides.
+        let source = "// \u{fc}ber note\nimport a.b.Old\n\nclass Use {\n  val label = \"caf\u{e9} \u{2192} v2\"\n}\n";
+        let out = rw(source, &["a.b.Old"], &["a.b.New"]);
+        assert_eq!(
+            out.replace("a.b.New", "a.b.Old"),
+            source,
+            "byte-preservation proof: the ONLY difference is the statement text -- \
+             the char_to_byte_map splice neither shifted nor corrupted any multibyte sequence"
+        );
+    }
+
+    #[test]
+    fn pin_export_statement_survivors_keep_the_export_keyword() {
+        assert_eq!(
+            rw("export a.b.{Old, Keep}\n", &["a.b.Old"], &["x.Y"]),
+            "export x.Y\nexport a.b.{Keep}\n",
+            "survivor_line and the new-dep lines both render with the statement's \
+             own keyword -- an export is never rewritten into an import"
+        );
+    }
+
+    #[test]
+    fn pin_two_old_deps_on_one_statement_replay_expansion_once_per_matching_dep() {
+        assert_eq!(
+            rw("import a.b.{Old1, Old2}\n", &["a.b.Old1", "a.b.Old2"], &["n.New"]),
+            "import n.New\nimport n.New\n",
+            "LOCK (current behavior): rewrite_for_dep runs sequentially per dep and \
+             re-scans after each, so dep 2 sees dep 1's expanded survivor statement \
+             (the grouped `import a.b.Old2`) and expands it too -- the new dep lands \
+             once per matching dep, an honest duplicate, not a merge"
+        );
+        assert_eq!(
+            rw("import a.b.{Old1, Old2}\n", &["a.b.Old1", "a.b.Old2"], &[]),
+            "",
+            "with empty new deps the first pass leaves the survivor statement and \
+             the second pass empties and line-deletes it"
+        );
+    }
 }

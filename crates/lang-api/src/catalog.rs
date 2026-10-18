@@ -461,4 +461,30 @@ mod tests {
             PathBuf::from("a/b/c")
         );
     }
+
+    #[test]
+    fn pin_normalize_relative_path_root_and_dot_edges() {
+        assert_eq!(
+            normalize_relative_path(Path::new("/a/../../b")),
+            PathBuf::from("/b"),
+            "the first `..` pops `a`, the second cannot resolve above RootDir and is \
+             dropped: the result stays re-rooted under `/`, never escaping to `../b`"
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("./a/./b/.")),
+            PathBuf::from("a/b"),
+            "leading AND trailing CurDir components are stripped from the key"
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("./")),
+            PathBuf::new(),
+            "a lone `.` normalizes to the empty path (it denotes the includer dir)"
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("../..")),
+            PathBuf::from("../.."),
+            "a pure ParentDir chain is kept verbatim: with no root to anchor to, \
+             the dots cannot collapse and must stay visible"
+        );
+    }
 }
