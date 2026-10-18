@@ -483,3 +483,6 @@ fn word_at<'t>(tokens: &'t [RawToken], index: usize) -> Option<&'t str> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod scan_branch_tests;

@@ -126,3 +126,9 @@ mod tests {
         assert_eq!(directives[0].raw_path, "ok.h");
     }
 }
+
+#[cfg(test)]
+mod boundary_tests;
+
+#[cfg(test)]
+mod column_tests;

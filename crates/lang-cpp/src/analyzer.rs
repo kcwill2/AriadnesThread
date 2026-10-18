@@ -391,3 +391,6 @@ mod tests {
         assert_eq!(direct, via_trait);
     }
 }
+
+#[cfg(test)]
+mod tu_io_pin_tests;

@@ -504,3 +504,6 @@ mod characterization_tests;
 
 #[cfg(test)]
 mod brace_depth_tests;
+
+#[cfg(test)]
+mod handle_branch_tests;

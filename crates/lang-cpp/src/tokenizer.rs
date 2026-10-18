@@ -468,4 +468,7 @@ mod raw_string_tests;
 mod underflow_fix_tests;
 
 #[cfg(test)]
+mod literal_position_tests;
+
+#[cfg(test)]
 mod fixture_parity_tests;

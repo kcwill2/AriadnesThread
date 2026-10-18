@@ -516,3 +516,6 @@ mod fake_process_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod flag_and_source_pins;

@@ -90,3 +90,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod sanitize_pin_tests;

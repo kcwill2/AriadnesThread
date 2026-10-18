@@ -50,3 +50,6 @@ pub use shaper::CppUnitShaper;
 pub fn cpp_default_shaper() -> &'static CppUnitShaper {
     &CppUnitShaper
 }
+
+#[cfg(test)]
+mod extension_case_matrix_tests;
