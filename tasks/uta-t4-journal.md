@@ -180,12 +180,26 @@ pre-existing tests byte-untouched outside item 3's authorized block.
 - `python tools/encoding_guard.py --staged` -> see below (post-commit).
 - Commit: `python tools/commit_scoped.py --scope "crates/transform/**"
   --scope "crates/validate/**" --scope "tasks/uta-t4-journal.md" -m ...`
-  (message per handoff gate 5).
+  (message per handoff gate 5). Landed `8ef784a`: 6 paths, all in-set:
+  transform tests.rs +147/-7, write.rs +163/-0, placement.rs +34/-0,
+  validate lib.rs +138/-223, orchestration_tests.rs +537/-0 (new),
+  journal +196/-0.
+- Encoding gates: `--all` exit 0 BEFORE the commit (covers the real
+  content, including the byte-fidelity of the moved comment characters);
+  `--staged` exit 0 after the commit (index empty post-commit, so the
+  meaningful witness is --all, run again after too: exit 0). Sequencing
+  deviation 4 applies.
+- Message truthfulness note (self-reported): gate 5's verbatim message
+  says "include provenance", but item 1 shipped as a journal BLOCKER per
+  the handoff's STOP branch - the provenance analysis lives in the journal,
+  no compute_rewrite change shipped. The handoff mandated the exact command
+  ("Commit: <verbatim>"), so it ran verbatim; the reviewer should weigh the
+  T2-accepted truthfulness-deviation precedent against it.
 
 ## Disk-state inventory (at completion)
 
-- Modified: crates/transform/src/engine/tests.rs (+154/-24), engine/write.rs
-  (+163/-0), placement.rs (+34/-0), crates/validate/src/lib.rs (+131/-230),
+- Modified: crates/transform/src/engine/tests.rs (+147/-7), engine/write.rs
+  (+163/-0), placement.rs (+34/-0), crates/validate/src/lib.rs (+138/-223),
   tasks/uta-t4-journal.md (new).
 - New: crates/validate/src/orchestration_tests.rs (537 lines).
 - Untouched: placement.rs compute_rewrite region (item 1 BLOCKER), all
