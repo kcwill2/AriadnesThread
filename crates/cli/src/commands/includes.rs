@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use ariadne_graph::IncludeGraph;
 use ariadne_lang::DependencyVocabulary;
 use ariadne_pipeline::Pipeline;
 use ariadne_repo::FileId;
@@ -135,21 +136,38 @@ pub fn analyze_include_graph(repo_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn explain_include_graph_for_file(repo_path: &PathBuf, file_path: &PathBuf) -> Result<()> {
-    let mut pipeline = Pipeline::new(repo_path, None)?;
-    let (graph, _closures) = pipeline.get_or_build_include_graph()?;
+/// Normalizes an `explain` target into the hash input the graph keys use
+/// (backslashes folded to forward slashes, lossy UTF-8). Extracted as a pure
+/// seam (UTA-T7b row 8) so the fallback id's identity is pinned without a
+/// live graph.
+fn explain_fallback_file_id(file_path: &PathBuf) -> FileId {
+    let rel_str = file_path.to_string_lossy().replace('\\', "/");
+    FileId::from_relative_path(&rel_str)
+}
 
+/// The three outcomes of `explain` target resolution: a registered id found
+/// by the graph's two-pass lookup, the hash-fallback id when it survives
+/// registration, and the honest bail. Extracted (UTA-T7b row 8) so all
+/// three arms are testable without booting the pipeline; the emission order
+/// (lookup first, registration check second) is unchanged.
+fn resolve_explain_target(graph: &IncludeGraph, file_path: &PathBuf) -> Result<FileId> {
     let target_id = match graph.find_file_id(file_path) {
         Some(id) => id,
-        None => {
-            let rel_str = file_path.to_string_lossy().replace('\\', "/");
-            FileId::from_relative_path(&rel_str)
-        }
+        None => explain_fallback_file_id(file_path),
     };
 
     if !graph.file_paths.contains_key(&target_id) {
         bail!("File {:?} not found in repository include graph", file_path);
     }
+
+    Ok(target_id)
+}
+
+pub fn explain_include_graph_for_file(repo_path: &PathBuf, file_path: &PathBuf) -> Result<()> {
+    let mut pipeline = Pipeline::new(repo_path, None)?;
+    let (graph, _closures) = pipeline.get_or_build_include_graph()?;
+
+    let target_id = resolve_explain_target(&graph, file_path)?;
 
     let tree_str = graph.format_explain(target_id);
     print!("{}", tree_str);
@@ -238,6 +256,77 @@ mod tests {
         assert_eq!(
             aggregate_kind_label("Local", scala),
             "Local Package Aggregations"
+        );
+    }
+
+    // UTA-T7b row 8: explain target-resolution seam pins.
+
+    #[test]
+    fn pin_explain_fallback_file_id_hashes_the_normalized_path() {
+        // Backslash spellings must hash as the forward-slash repo-relative
+        // form (the registration key space), and provably NOT as the raw
+        // backslash string - the replace is load-bearing.
+        let windows_spelling = PathBuf::from("src\\nested\\thing.h");
+        assert_eq!(
+            explain_fallback_file_id(&windows_spelling),
+            FileId::from_relative_path("src/nested/thing.h")
+        );
+        assert_ne!(
+            explain_fallback_file_id(&windows_spelling),
+            FileId::from_relative_path("src\\nested\\thing.h"),
+            "without the normalization the Windows spelling would hash to a \
+             different (never-registered) id"
+        );
+    }
+
+    #[test]
+    fn pin_resolve_explain_target_bails_verbatim_for_an_unregistered_target() {
+        // The honest bail: Debug-quoted path, fixed suffix, and the target's
+        // fallback id is NOT fabricated into a success (an empty graph can
+        // never contain it).
+        let graph = IncludeGraph::default();
+        let missing = PathBuf::from("src/ghost.h");
+        let error = resolve_explain_target(&graph, &missing)
+            .err()
+            .expect("unregistered target must not resolve");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "File {:?} not found in repository include graph",
+                missing
+            )
+        );
+    }
+
+    #[test]
+    fn pin_resolve_explain_target_uses_lookup_first_fallback_id_second() {
+        // Arm 1: a registered path resolves through find_file_id (exact and
+        // basename spellings both reach the same id).
+        let registered_id = FileId::from_relative_path("src/real.h");
+        let mut graph = IncludeGraph::default();
+        graph.register_file(registered_id, PathBuf::from("src/real.h"));
+        assert_eq!(
+            resolve_explain_target(&graph, &PathBuf::from("src/real.h")).unwrap(),
+            registered_id
+        );
+        assert_eq!(
+            resolve_explain_target(&graph, &PathBuf::from("real.h")).unwrap(),
+            registered_id,
+            "basename lookup resolves without ever reaching the fallback"
+        );
+
+        // Arm 2: find_file_id misses (different registered path value), yet
+        // the fallback hash id IS registered - resolution succeeds with the
+        // fallback id. This is the only way the fallback arm can succeed,
+        // pinned deliberately.
+        let fallback_id = FileId::from_relative_path("a/b.h");
+        let mut crossed = IncludeGraph::default();
+        crossed.register_file(fallback_id, PathBuf::from("x/y/z.h"));
+        assert_eq!(
+            resolve_explain_target(&crossed, &PathBuf::from("a/b.h")).unwrap(),
+            fallback_id,
+            "the fallback id wins when find_file_id misses but the id is \
+             registered under a different path value"
         );
     }
 }

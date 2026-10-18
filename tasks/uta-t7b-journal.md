@@ -79,3 +79,26 @@ Canonical line (scoped --lib): 151 passed / 0 failed / 0 ignored / 1 suites.
   [Circle, Shape, Square] group, and the cross edge ALONE colocates nothing.
   Helpers routing_over/group_id_strings/mixed_scala_cpp_catalog added in the
   test module only.
+(row 12) seam extraction (journaled, behavior-preserving): index_progress_inputs
+  -> Option<(done,total)> selecting TuIndex|TuStarted with the verbatim pair;
+  index_progress_cb keeps the sole print_progress call (grep lock intact).
+  Two pins: selection table exact (0,0 and 15/10 pass through unnormalized)
+  + every non-TU event (CollateralFile, both LoadMilestones, both
+  BootMilestones) yields None.
+(row 7) seam extraction (journaled, behavior-preserving): render_not_found /
+  file_path_map / render_symbol_report / render_dependencies_report /
+  render_users_report; commands keep lookup order (file_map built only after
+  a hit - no new ArtifactManager::init side effect on a miss) and print the
+  rendered lines unchanged. Five pins: not-found single-line text, full
+  report scaffold order with (none) placeholders, unmapped FileId 16-hex raw
+  rows (definition + users), named-vs-dangling dependency rows, users
+  mapped/unmapped/none arms.
+(row 8) seam extraction (journaled, behavior-preserving):
+  explain_fallback_file_id + resolve_explain_target (lookup, then fallback,
+  then registration check, then verbatim bail; emission order untouched).
+  Three pins: backslash spelling hashes as the normalized forward-slash form
+  (and provably not as the raw string), verbatim bail text on an empty graph,
+  and resolution order - registered exact/basename wins, fallback id only
+  ever wins when it itself is registered (constructed crossed fixture).
+Canonical line (scoped --lib, rows 4+7+8+12 landed): 160 passed / 0 failed /
+  0 ignored / 1 suites (filter runs: pin_with_edges 2/0, includes 9/0).

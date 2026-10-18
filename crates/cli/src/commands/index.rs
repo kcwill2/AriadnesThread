@@ -30,14 +30,26 @@ fn report_index_result(pipeline: &Pipeline, index_result: &IndexResult) {
     println!("  {}", index_result.incomplete_edges);
 }
 
+/// Which progress events the `index` command's terminal bar consumes, and
+/// with which (done, total) pair. Extracted as a pure seam (UTA-T7b row 12)
+/// so the event-selection table is pinned without a live terminal; the
+/// callback below stays the single place that calls `print_progress`.
+fn index_progress_inputs(event: &ProgressEvent) -> Option<(usize, usize)> {
+    match event {
+        ProgressEvent::TuIndex { done, total }
+        | ProgressEvent::TuStarted { done, total, .. } => Some((*done, *total)),
+        ProgressEvent::CollateralFile { .. }
+        | ProgressEvent::LoadMilestone(_)
+        | ProgressEvent::BootMilestone(_) => None,
+    }
+}
+
 fn index_progress_cb(event: &ProgressEvent) {
     // V3 rider (open Q8 default): TuStarted drives the same terminal bar as
     // the terminal TuIndex; the path itself is a UI affordance, so `tool
     // index` behavior stays neutral.
-    if let ProgressEvent::TuIndex { done, total } | ProgressEvent::TuStarted { done, total, .. } =
-        event
-    {
-        crate::commands::progress::print_progress(*done, *total, "Indexing translation units", "TUs")
+    if let Some((done, total)) = index_progress_inputs(event) {
+        crate::commands::progress::print_progress(done, total, "Indexing translation units", "TUs")
     }
 }
 
@@ -105,4 +117,78 @@ pub fn get_or_build_reduced_model(
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let model = pipeline.get_or_build_reduced()?;
     Ok((pipeline.repo.clone(), model))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::index_progress_inputs;
+    use ariadne_pipeline::{BootMilestone, LoadMilestone, ProgressEvent};
+    use std::path::PathBuf;
+
+    #[test]
+    fn pin_index_progress_inputs_selects_both_tu_events_with_exact_pair() {
+        // V3 rider pin: BOTH the legacy terminal TuIndex and the per-TU
+        // TuStarted feed the bar with their verbatim (done, total) - the
+        // seam is a pure selection table, no normalization, no clamping
+        // (overshoot passes through untouched, matching format_progress).
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::TuIndex { done: 7, total: 24 }),
+            Some((7, 24))
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::TuStarted {
+                done: 3,
+                total: 24,
+                source: PathBuf::from("src/thing.cpp"),
+            }),
+            Some((3, 24)),
+            "TuStarted must feed the same bar; the source path is a UI-only \
+             affordance the terminal callback ignores"
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::TuIndex { done: 15, total: 10 }),
+            Some((15, 10)),
+            "done>total must pass through the seam unchanged"
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::TuIndex { done: 0, total: 0 }),
+            Some((0, 0)),
+            "total==0 is still consumed (renders 100%% complete downstream)"
+        );
+    }
+
+    #[test]
+    fn pin_index_progress_inputs_ignores_every_non_tu_event() {
+        // The load-stage and boot events must never move the `index` bar:
+        // CollateralFile, both LoadMilestones, and both BootMilestones.
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::CollateralFile { done: 5, total: 9 }),
+            None,
+            "collateral progress belongs to the load command, not `tool index`"
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::LoadMilestone(
+                LoadMilestone::SymbolsAnalyzed { symbols: 12 },
+            )),
+            None
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::LoadMilestone(
+                LoadMilestone::ArtifactsSaved,
+            )),
+            None
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::BootMilestone(
+                BootMilestone::DiscoveryHashed { done: 4, total: None },
+            )),
+            None
+        );
+        assert_eq!(
+            index_progress_inputs(&ProgressEvent::BootMilestone(
+                BootMilestone::IncludeScan { done: 2, total: 8 },
+            )),
+            None
+        );
+    }
 }
