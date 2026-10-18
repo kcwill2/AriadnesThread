@@ -104,5 +104,5 @@ Work order: lang-scala, then lang, then lang-api.
   warns pre-existing, none on this hand's lines).
 - Gate 5 encoding: `--all` pre-commit exit 0 (0 findings); `--staged`
   post-commit exit 0.
-- Gate 6 commit: 6531df0 (19 files, +624/-2; the -2 are the two replaced
-  scanner doc lines) + this journal-final rider commit.
+- Gate 6 commit: 6531df0 (19 files, +619/-2 per `git show --stat`; the -2
+  are the two replaced scanner doc lines) + journal rider commits.
