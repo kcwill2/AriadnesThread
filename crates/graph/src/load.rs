@@ -697,6 +697,14 @@ mod memo_perf;
 #[path = "load_vocabulary_tests.rs"]
 mod vocabulary;
 
+/// UTA-T1 degeneracy suite: pins the `include_load == total_load` identity
+/// of `compute_load` (UTA-P row, owner decision pending; the
+/// `extraction_impact` guard rows are already locked by
+/// `test_impact_guards_return_none` in the impact suite).
+#[cfg(test)]
+#[path = "load_degeneracy_tests.rs"]
+mod degeneracy;
+
 /// AR-07 by-id suite: locks the `analyze_symbol_load_by_id` /
 /// `symbol_id_by_name` seam (audit P1 part 1) — parity with the name entry,
 /// resolution semantics (id-string OR record-name match), and the exact

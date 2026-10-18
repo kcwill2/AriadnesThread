@@ -788,4 +788,175 @@ mod tests {
         let users_a = reduced.get_users(&SymbolId::new("A"));
         assert_eq!(users_a.len(), 2);
     }
+
+    // UTA-T1 items 11 and 15 (hand H1): D-M23-8 side channels, edge-kind
+    // precedence in both orders, and the find_symbol duplicate-name pin.
+    fn plain_record(id: &str, kind: SymbolKind, modifiers: Vec<String>) -> SymbolRecord {
+        SymbolRecord {
+            id: SymbolId::new(id),
+            name: id.to_string(),
+            kind,
+            owning_file: FileId::from_relative_path("src/main.scala"),
+            declarations: vec![],
+            definition: None,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn reduce_folds_extends_edges_and_sealed_symbols_side_channels() {
+        let tu_a = TuAnalysis {
+            tu_file_id: FileId::from_relative_path("src/sub.scala"),
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Scala,
+            symbols: vec![
+                plain_record(
+                    "sub",
+                    SymbolKind::Trait,
+                    vec!["sealed".to_string()],
+                ),
+                plain_record("sup", SymbolKind::Trait, Vec::new()),
+            ],
+            declarations: vec![],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+            extends_edges: vec![(SymbolId::new("sub"), SymbolId::new("sup"))],
+        };
+        let tu_b = TuAnalysis {
+            tu_file_id: FileId::from_relative_path("src/other.scala"),
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Scala,
+            symbols: vec![
+                plain_record(
+                    "sub",
+                    SymbolKind::Trait,
+                    vec!["sealed".to_string()],
+                ),
+                plain_record("other", SymbolKind::Trait, Vec::new()),
+            ],
+            declarations: vec![],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![],
+            // Duplicate (sub, sup) across TUs plus a second pair: the
+            // channel must come out deduplicated and ascending.
+            extends_edges: vec![
+                (SymbolId::new("sub"), SymbolId::new("sup")),
+                (SymbolId::new("other"), SymbolId::new("sup")),
+            ],
+        };
+
+        let index = IndexResult::new(
+            PathBuf::from("/test"),
+            vec![tu_a, tu_b],
+        );
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        assert_eq!(
+            reduced.extends_edges,
+            vec![
+                (SymbolId::new("other"), SymbolId::new("sup")),
+                (SymbolId::new("sub"), SymbolId::new("sup")),
+            ],
+            "extends_edges is a deduplicated, ascending (subtype, supertype) channel"
+        );
+        assert_eq!(
+            reduced.sealed_symbols,
+            vec![SymbolId::new("sub")],
+            "sealed modifiers fold into a deduplicated ascending side channel, \
+             never into the frozen symbol records"
+        );
+    }
+
+    #[test]
+    fn merge_tu_edges_keeps_complete_kind_when_seen_first() {
+        // The existing suite pins Incomplete-then-Complete (upgrade wins);
+        // this locks the opposite arrival order: a later Incomplete edge
+        // must NOT demote an already-Complete pair.
+        let f1 = FileId::from_relative_path("a.cpp");
+        let f2 = FileId::from_relative_path("b.cpp");
+        let edge = |kind: DependencyKind| SemanticEdge {
+            src_symbol: SymbolId::new("A"),
+            dst_symbol: SymbolId::new("B"),
+            kind,
+            src_file: f1,
+            dst_file: f2,
+        };
+        let tu_complete_first = TuAnalysis {
+            tu_file_id: f1,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![],
+            declarations: vec![],
+            edges: vec![edge(DependencyKind::Complete)],
+            references: vec![],
+            call_sites: vec![],
+            extends_edges: Vec::new(),
+        };
+        let tu_incomplete_second = TuAnalysis {
+            tu_file_id: f2,
+            context_name: "test".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![],
+            declarations: vec![],
+            edges: vec![edge(DependencyKind::Incomplete)],
+            references: vec![],
+            call_sites: vec![],
+            extends_edges: Vec::new(),
+        };
+
+        let index = IndexResult::new(
+            PathBuf::from("/test"),
+            vec![tu_complete_first, tu_incomplete_second],
+        );
+        let reduced = ReducedSemanticModel::reduce(&index);
+
+        assert_eq!(reduced.edges.len(), 1, "one merged pair");
+        assert_eq!(
+            reduced.edges[0].kind,
+            DependencyKind::Complete,
+            "Complete must win regardless of arrival order"
+        );
+    }
+
+    #[test]
+    fn find_symbol_with_duplicate_name_returns_the_first_btreemap_key() {
+        // Two distinct ids share the NAME "dup". The id-key lookup misses,
+        // the value scan walks BTreeMap key order ascending - pin that the
+        // FIRST key wins deterministically, and that an exact id query
+        // still routes straight to its own record.
+        let mut model = ReducedSemanticModel::default();
+        for id in ["b_dup", "a_dup"] {
+            model.symbols.insert(
+                SymbolId::new(id),
+                ReducedSymbolRecord {
+                    id: SymbolId::new(id),
+                    name: "dup".to_string(),
+                    kind: SymbolKind::Function,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+        }
+
+        let found = model
+            .find_symbol("dup")
+            .expect("a name-duplicate record is found");
+        assert_eq!(
+            found.id,
+            SymbolId::new("a_dup"),
+            "name lookup over duplicate names must pin to the ascending \
+             BTreeMap's first key"
+        );
+        assert_eq!(
+            model
+                .find_symbol("b_dup")
+                .expect("exact id-key lookup is unaffected")
+                .id,
+            SymbolId::new("b_dup")
+        );
+    }
 }

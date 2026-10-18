@@ -584,4 +584,332 @@ mod tests {
         assert_eq!(leaves, vec![f3]);
         assert_eq!(hubs, vec![f2]); // f2 has degree 2
     }
+
+    // UTA-T1 items 3-4 (hand H1): behavior pins for the ReducedSemanticModel
+    // traversal surface. Chain A -> B -> C plus the B self-loop and the
+    // edge-free registered symbol D.
+    fn symbol(name: &str) -> SymbolId {
+        SymbolId::new(name)
+    }
+
+    fn dependency(from: &str, to: &str) -> crate::ReducedSemanticEdge {
+        crate::ReducedSemanticEdge {
+            src_symbol: symbol(from),
+            dst_symbol: symbol(to),
+            kind: ariadne_index::types::DependencyKind::Incomplete,
+        }
+    }
+
+    fn chain_selfloop_isolate_model() -> ReducedSemanticModel {
+        let mut model = ReducedSemanticModel::default();
+        for name in ["A", "B", "C", "D"] {
+            model.symbols.insert(
+                symbol(name),
+                crate::ReducedSymbolRecord {
+                    id: symbol(name),
+                    name: name.to_string(),
+                    kind: ariadne_index::types::SymbolKind::Function,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+        }
+        model.edges = vec![
+            dependency("A", "B"),
+            dependency("B", "C"),
+            dependency("B", "B"),
+        ];
+        model
+    }
+
+    #[test]
+    fn reduced_traverse_neighborhood_snapshots_directions_and_depths() {
+        let model = chain_selfloop_isolate_model();
+        let center = symbol("B");
+
+        // Every direction at depth 0 yields the center alone - and the
+        // center's own self-loop IS an induced edge of that one-node set.
+        for direction in [
+            TraversalDirection::Outgoing,
+            TraversalDirection::Incoming,
+            TraversalDirection::Both,
+        ] {
+            let hood = model.traverse_neighborhood(&center, 0, direction);
+            assert_eq!(hood.nodes, vec![symbol("B")], "depth 0 {direction:?}");
+            assert_eq!(
+                hood.edges,
+                vec![(symbol("B"), symbol("B"))],
+                "depth 0 {direction:?} keeps the self-loop as an induced edge"
+            );
+        }
+
+        for depth in [1usize, 2usize] {
+            let outgoing =
+                model.traverse_neighborhood(&center, depth, TraversalDirection::Outgoing);
+            assert_eq!(
+                outgoing.nodes,
+                vec![symbol("B"), symbol("C")],
+                "outgoing depth {depth}"
+            );
+            assert_eq!(
+                outgoing.edges,
+                vec![(symbol("B"), symbol("B")), (symbol("B"), symbol("C"))],
+                "outgoing depth {depth}"
+            );
+
+            let incoming =
+                model.traverse_neighborhood(&center, depth, TraversalDirection::Incoming);
+            assert_eq!(
+                incoming.nodes,
+                vec![symbol("A"), symbol("B")],
+                "incoming depth {depth}"
+            );
+            assert_eq!(
+                incoming.edges,
+                vec![(symbol("A"), symbol("B")), (symbol("B"), symbol("B"))],
+                "incoming depth {depth}"
+            );
+
+            let both = model.traverse_neighborhood(&center, depth, TraversalDirection::Both);
+            assert_eq!(both.nodes, vec![symbol("A"), symbol("B"), symbol("C")]);
+            assert_eq!(
+                both.edges,
+                vec![
+                    (symbol("A"), symbol("B")),
+                    (symbol("B"), symbol("B")),
+                    (symbol("B"), symbol("C")),
+                ],
+                "both depth {depth}"
+            );
+        }
+
+        // The isolate is its own closed neighborhood at any direction/depth.
+        for direction in [
+            TraversalDirection::Outgoing,
+            TraversalDirection::Incoming,
+            TraversalDirection::Both,
+        ] {
+            let hood = model.traverse_neighborhood(&symbol("D"), 2, direction);
+            assert_eq!(hood.nodes, vec![symbol("D")], "isolate {direction:?}");
+            assert!(hood.edges.is_empty(), "isolate {direction:?}");
+        }
+    }
+
+    #[test]
+    fn reduced_shortest_dependency_path_locks_path_identity_and_misses() {
+        let model = chain_selfloop_isolate_model();
+
+        let a_to_c = model
+            .shortest_dependency_path(&symbol("A"), &symbol("C"))
+            .expect("A reaches C through B");
+        assert_eq!(a_to_c, vec![symbol("A"), symbol("B"), symbol("C")]);
+
+        // X == X short-circuits to [X] even without any self-edge.
+        assert_eq!(
+            model.shortest_dependency_path(&symbol("A"), &symbol("A")),
+            Some(vec![symbol("A")])
+        );
+
+        // The isolate has no path in either direction.
+        assert_eq!(
+            model.shortest_dependency_path(&symbol("A"), &symbol("D")),
+            None
+        );
+        assert_eq!(
+            model.shortest_dependency_path(&symbol("D"), &symbol("A")),
+            None
+        );
+    }
+
+    // UTA-T1 item 10 (hand H1): get_entrypoints pins for all three
+    // implementations - tie order (degree desc, then id asc), truncation,
+    // the all-cycle graph (zero roots), and the unresolved-only graph
+    // (leaf + root, no degrees).
+
+    fn include_edge_file(
+        source: FileId,
+        destination: Option<FileId>,
+        line: u32,
+    ) -> IncludeEdge {
+        IncludeEdge {
+            source,
+            destination,
+            context_name: "entrypoints".into(),
+            source_location: SourceLocation::new(line, 1),
+            kind: IncludeKind::Local,
+            raw_path: "target.h".into(),
+            resolved_path: None,
+            language: crate::types::LanguageId::cpp(),
+        }
+    }
+
+    #[test]
+    fn include_graph_entrypoints_lock_tie_order_and_truncation() {
+        // 1 and 2 fan into 4 and 5; 3 is a registered isolate. Degrees:
+        // 1, 2, 4, 5 all tie at 2 (ascending ids break the tie), 3 has 0.
+        let mut graph = IncludeGraph::new();
+        for id in 1..=5u64 {
+            graph.register_file(FileId(id), PathBuf::from(format!("e{id}.h")));
+        }
+        graph.add_edge(include_edge_file(FileId(1), Some(FileId(4)), 1));
+        graph.add_edge(include_edge_file(FileId(1), Some(FileId(5)), 2));
+        graph.add_edge(include_edge_file(FileId(2), Some(FileId(4)), 3));
+        graph.add_edge(include_edge_file(FileId(2), Some(FileId(5)), 4));
+
+        let (roots, leaves, hubs) = graph.get_entrypoints(2);
+        assert_eq!(roots, vec![FileId(1), FileId(2)], "roots tie-break asc");
+        assert_eq!(leaves, vec![FileId(3), FileId(4)], "leaves tie-break asc");
+        assert_eq!(hubs, vec![FileId(1), FileId(2)], "hubs: degree desc then asc");
+    }
+
+    #[test]
+    fn include_graph_unresolved_only_edges_yield_root_and_leaf_without_degree() {
+        // An unresolved edge (destination None) contributes its source as a
+        // node but no degree: the file is simultaneously root and leaf.
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(9), PathBuf::from("solo.h"));
+        graph.add_edge(include_edge_file(FileId(9), None, 1));
+
+        let (roots, leaves, hubs) = graph.get_entrypoints(10);
+        assert_eq!(roots, vec![FileId(9)]);
+        assert_eq!(leaves, vec![FileId(9)]);
+        assert_eq!(hubs, vec![FileId(9)]);
+    }
+
+    #[test]
+    fn pin_parallel_directive_edges_count_toward_degree() {
+        // Pin (semantics undecided, reported): a.h holds TWO include
+        // directives for the same target b.h (distinct lines, so
+        // `add_edge` keeps both records) and b.h includes c.h once.
+        // `get_entrypoints` counts EDGE RECORDS, not distinct pairs: file 2
+        // sits at degree 3 and outranks file 1 (degree 2). Under
+        // distinct-pair degrees files 1 and 2 would tie at 2 and the id
+        // tie-break would rank 1 first - the exact difference this pin
+        // locks.
+        let mut graph = IncludeGraph::new();
+        for id in 1..=3u64 {
+            graph.register_file(FileId(id), PathBuf::from(format!("p{id}.h")));
+        }
+        graph.add_edge(include_edge_file(FileId(1), Some(FileId(2)), 1));
+        graph.add_edge(include_edge_file(FileId(1), Some(FileId(2)), 2));
+        graph.add_edge(include_edge_file(FileId(2), Some(FileId(3)), 3));
+
+        let (roots, leaves, hubs) = graph.get_entrypoints(10);
+        assert_eq!(roots, vec![FileId(1)]);
+        assert_eq!(leaves, vec![FileId(3)]);
+        assert_eq!(
+            hubs,
+            vec![FileId(2), FileId(1), FileId(3)],
+            "the duplicate directive inflates file 2's degree above file 1's"
+        );
+    }
+
+    #[test]
+    fn reduced_model_entrypoints_lock_tie_order_truncation_and_all_cycle() {
+        // Tie order + truncation: s1/s2 fan into s4/s5, s0 registered but
+        // edge-free - all four fanning symbols tie at degree 2.
+        let mut model = ReducedSemanticModel::default();
+        for name in ["s0", "s1", "s2", "s4", "s5"] {
+            model.symbols.insert(
+                symbol(name),
+                crate::ReducedSymbolRecord {
+                    id: symbol(name),
+                    name: name.to_string(),
+                    kind: ariadne_index::types::SymbolKind::Function,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+        }
+        model.edges = vec![
+            dependency("s1", "s4"),
+            dependency("s1", "s5"),
+            dependency("s2", "s4"),
+            dependency("s2", "s5"),
+        ];
+
+        let (roots, leaves, hubs) = model.get_entrypoints(2);
+        assert_eq!(roots, vec![symbol("s0"), symbol("s1")]);
+        assert_eq!(leaves, vec![symbol("s0"), symbol("s4")]);
+        assert_eq!(hubs, vec![symbol("s1"), symbol("s2")]);
+
+        // The all-cycle graph has no roots and no leaves.
+        let mut cyclic = ReducedSemanticModel::default();
+        for name in ["ca", "cb", "cc"] {
+            cyclic.symbols.insert(
+                symbol(name),
+                crate::ReducedSymbolRecord {
+                    id: symbol(name),
+                    name: name.to_string(),
+                    kind: ariadne_index::types::SymbolKind::Function,
+                    defining_file: None,
+                    declarations: Vec::new(),
+                    definition: None,
+                    declaring_files: Vec::new(),
+                },
+            );
+        }
+        cyclic.edges = vec![
+            dependency("ca", "cb"),
+            dependency("cb", "cc"),
+            dependency("cc", "ca"),
+        ];
+        let (roots, leaves, hubs) = cyclic.get_entrypoints(10);
+        assert!(roots.is_empty(), "every node has inbound edges");
+        assert!(leaves.is_empty(), "every node has outbound edges");
+        assert_eq!(hubs, vec![symbol("ca"), symbol("cb"), symbol("cc")]);
+    }
+
+    #[test]
+    fn call_graph_entrypoints_lock_tie_order_truncation_and_all_cycle() {
+        // Tie order + truncation: c1/c2 call t4/t5, node n0 is a registered
+        // node with no edges (CallGraph::get_entrypoints seeds from `nodes`).
+        let call_node = |name: &str| crate::CallNode {
+            symbol_id: symbol(name),
+            name: name.to_string(),
+            owning_file: FileId(7),
+            location: None,
+        };
+        let call_graph = |calls: &[(&str, &str)], extras: &[&str]| {
+            let mut graph = CallGraph {
+                nodes: extras
+                    .iter()
+                    .map(|name| call_node(name))
+                    .collect(),
+                edges: calls
+                    .iter()
+                    .map(|(caller, callee)| crate::CallEdge {
+                        caller: symbol(caller),
+                        callee: symbol(callee),
+                        call_count: 1,
+                        call_locations: Vec::new(),
+                    })
+                    .collect(),
+            };
+            for (caller, callee) in calls {
+                graph.nodes.push(call_node(caller));
+                graph.nodes.push(call_node(callee));
+            }
+            graph
+        };
+
+        let (roots, leaves, hubs) = call_graph(
+            &[("c1", "t4"), ("c1", "t5"), ("c2", "t4"), ("c2", "t5")],
+            &["n0"],
+        )
+        .get_entrypoints(2);
+        assert_eq!(roots, vec![symbol("c1"), symbol("c2")]);
+        assert_eq!(leaves, vec![symbol("n0"), symbol("t4")]);
+        assert_eq!(hubs, vec![symbol("c1"), symbol("c2")]);
+
+        let (roots, leaves, hubs) =
+            call_graph(&[("ra", "rb"), ("rb", "rc"), ("rc", "ra")], &[]).get_entrypoints(10);
+        assert!(roots.is_empty(), "every caller is also called");
+        assert!(leaves.is_empty(), "every callee also calls");
+        assert_eq!(hubs, vec![symbol("ra"), symbol("rb"), symbol("rc")]);
+    }
 }

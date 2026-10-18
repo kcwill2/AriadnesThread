@@ -86,4 +86,29 @@ mod tests {
         assert_eq!(closure.transitive_includes, vec![f1, f2]);
         assert_eq!(closure.closure_size, 2);
     }
+
+    #[test]
+    fn include_closure_empty_and_direct_only_shapes() {
+        // UTA-T1 item 15 (hand H1): the constructor degenerate rows -
+        // an all-empty closure and a direct-only closure, whose
+        // closure_size stays 0 because size counts TRANSITIVE only.
+        let empty = IncludeClosure::new(FileId(1), Vec::new(), Vec::new());
+        assert_eq!(empty.file_id, FileId(1));
+        assert!(empty.direct_includes.is_empty());
+        assert!(empty.transitive_includes.is_empty());
+        assert_eq!(empty.closure_size, 0);
+
+        let direct_only =
+            IncludeClosure::new(FileId(1), vec![FileId(3), FileId(2), FileId(3)], Vec::new());
+        assert_eq!(
+            direct_only.direct_includes,
+            vec![FileId(2), FileId(3)],
+            "direct includes are still sorted and deduplicated"
+        );
+        assert!(direct_only.transitive_includes.is_empty());
+        assert_eq!(
+            direct_only.closure_size, 0,
+            "closure_size is the transitive count - direct entries never add to it"
+        );
+    }
 }

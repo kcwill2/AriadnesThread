@@ -152,6 +152,49 @@ fn seed_uncalled_function_nodes(
     }
 }
 
+/// Runs one root's explicit-stack walk to completion (UTA-B5, hand H1). A
+/// frame is `(node, cursor into adj[node])`; consuming one edge slot
+/// reproduces the retired recursive body's three steps verbatim -
+/// on-path neighbor -> the current path cut is a cycle; unvisited
+/// neighbor -> enter and descend (the parent keeps its cursor, so siblings
+/// resume after the child, exactly like call return); exhausted frame ->
+/// retire and pop the path. No recursion: deep call chains cannot overflow
+/// the OS stack. Mirrors the `explore_frames` machine in `closures.rs`.
+#[allow(clippy::too_many_arguments)]
+fn explore_call_frames(
+    frames: &mut Vec<(SymbolId, usize)>,
+    adj: &std::collections::HashMap<SymbolId, Vec<SymbolId>>,
+    visited: &mut std::collections::HashSet<SymbolId>,
+    path: &mut Vec<SymbolId>,
+    path_position: &mut std::collections::HashMap<SymbolId, usize>,
+    cycles: &mut Vec<Vec<SymbolId>>,
+) {
+    while let Some(frame) = frames.last_mut() {
+        let node = frame.0.clone();
+        let cursor = frame.1;
+        let neighbors = adj.get(&node).map(Vec::as_slice).unwrap_or(&[]);
+        if cursor < neighbors.len() {
+            frame.1 += 1;
+            let neighbor = neighbors[cursor].clone();
+            if let Some(&position) = path_position.get(&neighbor) {
+                cycles.push(path[position..].to_vec());
+                continue;
+            }
+            if visited.insert(neighbor.clone()) {
+                path_position.insert(neighbor.clone(), path.len());
+                path.push(neighbor.clone());
+                frames.push((neighbor, 0));
+            }
+            continue;
+        }
+        frames.pop();
+        let retired = path
+            .pop()
+            .expect("frames and path are entered and retired together");
+        path_position.remove(&retired);
+    }
+}
+
 impl CallGraph {
     pub fn build_from_index(
         index_result: &ariadne_index::IndexResult,
@@ -188,6 +231,18 @@ impl CallGraph {
         self.edges.iter().filter(|e| e.caller == *symbol).collect()
     }
 
+    /// Enumerates the call-graph cycles, normalized (each cycle rotated so
+    /// its smallest `SymbolId` leads, list sorted and deduped).
+    ///
+    /// UTA-B5 (hand H1): the walk runs on an explicit frame stack mirroring
+    /// the `explore_frames` machine in `closures.rs` - no recursion, so deep
+    /// call chains cannot overflow the OS stack (IV-7 lock: the 100 000-node
+    /// fused chain fixture completes on a 64 KiB thread). The traversal
+    /// semantics are the retired recursive DFS's verbatim (same root order,
+    /// same neighbor order, same global-visited skip, same path-cut cycles);
+    /// only the call stack was replaced, plus the O(depth) on-path scan
+    /// became an O(1) `path_position` lookup, which is why the deep-chain
+    /// fixture is now also linear-time.
     pub fn detect_recursion_cycles(&self) -> Vec<Vec<SymbolId>> {
         use std::collections::{HashMap, HashSet};
 
@@ -198,45 +253,36 @@ impl CallGraph {
                 .push(edge.callee.clone());
         }
 
-        let mut cycles = Vec::new();
-        let mut visited = HashSet::new();
-        let mut path = Vec::new();
+        let mut cycles: Vec<Vec<SymbolId>> = Vec::new();
+        let mut visited: HashSet<SymbolId> = HashSet::new();
+        // The current walk path, plus each member's position on it: the
+        // back-edge cut `path[position..]` stays O(cycle length) instead of
+        // re-scanning the path per examined edge.
+        let mut path: Vec<SymbolId> = Vec::new();
+        let mut path_position: HashMap<SymbolId, usize> = HashMap::new();
 
-        fn dfs(
-            node: &SymbolId,
-            adj: &HashMap<SymbolId, Vec<SymbolId>>,
-            visited: &mut HashSet<SymbolId>,
-            path: &mut Vec<SymbolId>,
-            cycles: &mut Vec<Vec<SymbolId>>,
-        ) {
-            if let Some(idx) = path.iter().position(|x| x == node) {
-                cycles.push(path[idx..].to_vec());
-                return;
+        let mut roots: Vec<SymbolId> = adj.keys().cloned().collect();
+        roots.sort();
+
+        for root in &roots {
+            if visited.contains(root) {
+                continue;
             }
-
-            if visited.contains(node) {
-                return;
-            }
-
-            visited.insert(node.clone());
-            path.push(node.clone());
-
-            if let Some(neighbors) = adj.get(node) {
-                for neighbor in neighbors {
-                    dfs(neighbor, adj, visited, path, cycles);
-                }
-            }
-
-            path.pop();
-        }
-
-        let mut keys: Vec<_> = adj.keys().cloned().collect();
-        keys.sort();
-
-        for node in &keys {
-            if !visited.contains(node) {
-                dfs(node, &adj, &mut visited, &mut path, &mut cycles);
-            }
+            // Enter the root exactly as the recursive body's head did for
+            // the root call (the path is always empty between roots).
+            visited.insert(root.clone());
+            path_position.insert(root.clone(), path.len());
+            path.push(root.clone());
+            let mut frames: Vec<(SymbolId, usize)> = vec![(root.clone(), 0)];
+            explore_call_frames(
+                &mut frames,
+                &adj,
+                &mut visited,
+                &mut path,
+                &mut path_position,
+                &mut cycles,
+            );
+            debug_assert!(path.is_empty(), "each root's walk unwinds fully");
         }
 
         for cycle in &mut cycles {
@@ -244,7 +290,7 @@ impl CallGraph {
                 .iter()
                 .enumerate()
                 .min_by(|(_, a), (_, b)| a.cmp(b))
-                .expect("cycles are pushed as path[idx..] slices, which are never empty")
+                .expect("cycles are pushed as path[position..] slices, which are never empty")
                 .0;
             cycle.rotate_left(min_idx);
         }
@@ -443,6 +489,99 @@ mod tests {
         assert_eq!(cycles.len(), 2);
     }
 
+    // UTA-B5 (hand H1) fixtures. Mirrors the M23.5 IV-7 pattern from
+    // crates/graph/tests/cycle_groups_test.rs: small-stack thread for the
+    // depth stress, directly-built CallGraphs for the enumeration shapes.
+    const SMALL_STACK_BYTES: usize = 64 * 1024;
+    const CALL_CHAIN_LEN: usize = 100_000;
+
+    fn plain_call_edge(caller: &str, callee: &str) -> CallEdge {
+        CallEdge {
+            caller: SymbolId::new(caller),
+            callee: SymbolId::new(callee),
+            call_count: 1,
+            call_locations: Vec::new(),
+        }
+    }
+
+    fn graph_of_calls(calls: &[(&str, &str)]) -> CallGraph {
+        CallGraph {
+            nodes: Vec::new(),
+            edges: calls
+                .iter()
+                .map(|(caller, callee)| plain_call_edge(caller, callee))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn two_scc_graph_enumerates_every_cycle_once_in_normalized_order() {
+        // A<->B and C<->D joined by B->C: two disjoint cycles, neither may
+        // be missed nor reported twice, and each must come out rotated to
+        // its smallest member with the list sorted.
+        let graph = graph_of_calls(&[
+            ("A", "B"),
+            ("B", "A"),
+            ("B", "C"),
+            ("C", "D"),
+            ("D", "C"),
+        ]);
+
+        let cycles = graph.detect_recursion_cycles();
+        assert_eq!(
+            cycles,
+            vec![
+                vec![SymbolId::new("A"), SymbolId::new("B")],
+                vec![SymbolId::new("C"), SymbolId::new("D")],
+            ],
+            "the two-SCC graph must enumerate ALL cycles exactly once each, \
+             each rotated to its smallest member, list sorted"
+        );
+    }
+
+    #[test]
+    fn deep_call_chain_cycle_detection_completes_on_small_stack() {
+        // IV-7 style lock (cycle_groups_test.rs:105): a 100 000-node fused
+        // call chain on a 64 KiB thread. The retired recursive DFS
+        // stack-overflows it (red evidence: aborted test binary); an
+        // iterative frame machine completes.
+        let spawned = std::thread::Builder::new()
+            .stack_size(SMALL_STACK_BYTES)
+            .spawn(detect_deep_chain_cycles)
+            .expect("deep-chain stress thread spawns with the requested stack size");
+        let cycles = spawned
+            .join()
+            .expect("deep-chain stress thread completed without panicking");
+        assert_eq!(
+            cycles.len(),
+            1,
+            "the fused 100 000-node chain has exactly one cycle"
+        );
+        assert_eq!(
+            cycles[0].len(),
+            CALL_CHAIN_LEN,
+            "the single cycle covers every chain member"
+        );
+    }
+
+    /// Builds f0 -> f1 -> ... -> f99999 -> f0 and runs cycle detection.
+    /// Runs on the caller's thread so the test controls the stack size.
+    fn detect_deep_chain_cycles() -> Vec<Vec<SymbolId>> {
+        let mut edges = Vec::with_capacity(CALL_CHAIN_LEN);
+        for position in 0..CALL_CHAIN_LEN {
+            let next = (position + 1) % CALL_CHAIN_LEN;
+            edges.push(plain_call_edge(
+                &format!("f{position}"),
+                &format!("f{next}"),
+            ));
+        }
+        CallGraph {
+            nodes: Vec::new(),
+            edges,
+        }
+        .detect_recursion_cycles()
+    }
+
     #[test]
     fn test_shortest_call_path() {
         let (index, model) = setup();
@@ -527,6 +666,76 @@ mod tests {
             "Should map both call sites to the same callee"
         );
         assert_eq!(callers[0].call_count, 2, "Should have 2 calls");
+    }
+
+    #[test]
+    fn pin_call_edge_without_caller_node() {
+        // UTA-T1 item 5 (hand H1): pin the CURRENT `record_call_site` shape
+        // when `site.caller_symbol` is absent from `model.symbols`. The edge
+        // is still recorded (and the callee gets a node), but the caller-node
+        // insert is gated on `model.symbols.get(&caller)`, so the caller
+        // never gets a CallNode - the edge floats without a caller node.
+        let main_file = FileId::from_relative_path("main.cpp");
+        let ghost_caller = SymbolId::new("GhostCaller");
+        let known_callee = SymbolId::new("KnownCallee");
+
+        let tu = TuAnalysis {
+            tu_file_id: main_file.clone(),
+            context_name: "pin".into(),
+            language: ariadne_repo::SourceLanguage::Cpp,
+            symbols: vec![SymbolRecord {
+                id: known_callee.clone(),
+                name: "KnownCallee".into(),
+                kind: SymbolKind::Function,
+                owning_file: main_file.clone(),
+                declarations: vec![],
+                definition: None,
+
+                modifiers: Vec::new(),
+            }],
+            declarations: vec![],
+            edges: vec![],
+            references: vec![],
+            call_sites: vec![CallSite {
+                caller_symbol: ghost_caller.clone(),
+                callee_name: "KnownCallee".into(),
+                location: FileLocation {
+                    file_id: main_file.clone(),
+                    line: 7,
+                    column: 1,
+                },
+            }],
+
+            extends_edges: Vec::new(),
+        };
+        let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
+        let model = ReducedSemanticModel::reduce(&index_result);
+
+        let graph = CallGraph::build_from_index(&index_result, &model);
+
+        let ghost_outgoing = graph.callees_of(&ghost_caller);
+        assert_eq!(
+            ghost_outgoing.len(),
+            1,
+            "the edge is recorded even though the caller is unknown to the model"
+        );
+        assert_eq!(ghost_outgoing[0].callee, known_callee);
+        assert_eq!(ghost_outgoing[0].call_count, 1);
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.symbol_id == known_callee),
+            "the resolved callee always gets a CallNode"
+        );
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .all(|node| node.symbol_id != ghost_caller),
+            "pin: an unregistered caller gets no CallNode - the edge floats \
+             without a caller node (reported for an owner decision)"
+        );
     }
 
     #[test]

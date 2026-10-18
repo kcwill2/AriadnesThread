@@ -340,3 +340,148 @@ mod tests {
         assert!(!formatted.contains("imported  by"));
     }
 }
+
+/// UTA-T1 item 9 (hand H1): behavior pins for the two `explain_*` entry
+/// points around `source_filter` - a hit picks the matching collateral
+/// source, a miss errors with `No matching collateral source found`, and a
+/// collateral source with no include path from the target errors with
+/// `No include path found to collateral source`.
+#[cfg(test)]
+mod source_filter_pins {
+    use super::*;
+    use crate::reduced::ReducedSymbolRecord;
+    use ariadne_index::types::SymbolKind;
+    use std::collections::BTreeMap;
+
+    fn record(name: &str, defining_file: FileId) -> ReducedSymbolRecord {
+        ReducedSymbolRecord {
+            id: SymbolId::new(name),
+            name: name.to_string(),
+            kind: SymbolKind::Function,
+            defining_file: Some(defining_file),
+            declarations: Vec::new(),
+            definition: None,
+            declaring_files: Vec::new(),
+        }
+    }
+
+    /// root.h -> mid.h carries `Root` (semantic), `Mid` and `Stray`.
+    /// `Stray`'s defining file is elsewhere.h - REGISTERED but with no
+    /// include path from either graph file - the reachable/unreachable
+    /// collateral pair the filter and both error strings are pinned on.
+    fn reachable_and_stray_fixture() -> (IncludeGraph, ReducedSemanticModel) {
+        let mut ig = IncludeGraph::new();
+        ig.register_file(FileId(1), PathBuf::from("root.h"));
+        ig.register_file(FileId(2), PathBuf::from("mid.h"));
+        ig.register_file(FileId(9), PathBuf::from("elsewhere.h"));
+        ig.add_edge(crate::types::IncludeEdge {
+            source: FileId(1),
+            destination: Some(FileId(2)),
+            context_name: String::new(),
+            source_location: crate::types::SourceLocation::new(1, 1),
+            kind: crate::types::IncludeKind::Local,
+            raw_path: "mid.h".to_string(),
+            resolved_path: None,
+            language: crate::types::LanguageId::cpp(),
+        });
+
+        let mut model = ReducedSemanticModel {
+            repo_root: PathBuf::from("/"),
+            symbols: BTreeMap::new(),
+            edges: vec![],
+            tu_usage: BTreeMap::new(),
+            file_symbols: BTreeMap::new(),
+            extends_edges: Vec::new(),
+            sealed_symbols: Vec::new(),
+        };
+        model
+            .symbols
+            .insert(SymbolId::new("Root"), record("Root", FileId(1)));
+        model
+            .symbols
+            .insert(SymbolId::new("Mid"), record("Mid", FileId(2)));
+        model
+            .symbols
+            .insert(SymbolId::new("Stray"), record("Stray", FileId(9)));
+        model.file_symbols.insert(FileId(1), vec![SymbolId::new("Root")]);
+        model.file_symbols.insert(
+            FileId(2),
+            vec![SymbolId::new("Mid"), SymbolId::new("Stray")],
+        );
+        (ig, model)
+    }
+
+    #[test]
+    fn file_lane_filter_hit_renders_the_reachable_collateral() {
+        let (ig, model) = reachable_and_stray_fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let explanation = analyzer
+            .explain_file_load(Path::new("root.h"), Some("mid"))
+            .expect("mid.h is a collateral source reachable by include path");
+        assert_eq!(explanation.collateral_source, "mid.h");
+        assert_eq!(explanation.path, vec!["root.h", "mid.h"]);
+        assert_eq!(explanation.collateral_symbols_count, 1);
+        assert!(explanation.reason.starts_with("mid.h is included by root.h."));
+    }
+
+    #[test]
+    fn file_lane_filter_miss_locks_matching_error_string() {
+        let (ig, model) = reachable_and_stray_fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let error = analyzer
+            .explain_file_load(Path::new("root.h"), Some("no-such-source"))
+            .expect_err("a filter matching no collateral path must error");
+        assert_eq!(error.to_string(), "No matching collateral source found");
+    }
+
+    #[test]
+    fn file_lane_locks_no_include_path_error_string() {
+        // No filter: `largest_collateral_source` is elsewhere.h (the
+        // path-ascending tie-break puts it before mid.h), and no include
+        // path reaches it - the second "No ..." error string.
+        let (ig, model) = reachable_and_stray_fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let error = analyzer
+            .explain_file_load(Path::new("root.h"), None)
+            .expect_err("the largest collateral is unreachable");
+        assert_eq!(
+            error.to_string(),
+            "No include path found to collateral source"
+        );
+    }
+
+    #[test]
+    fn symbol_lane_filter_hit_prefixes_the_display_path_with_the_target_name() {
+        let (ig, model) = reachable_and_stray_fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let explanation = analyzer
+            .explain_symbol_load("Root", Some("mid"))
+            .expect("mid.h is a collateral source reachable by include path");
+        assert_eq!(explanation.collateral_source, "mid.h");
+        assert_eq!(explanation.path, vec!["Root", "root.h", "mid.h"]);
+        assert!(explanation.reason.starts_with("mid.h is included by root.h."));
+    }
+
+    #[test]
+    fn symbol_lane_locks_both_error_strings() {
+        let (ig, model) = reachable_and_stray_fixture();
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+
+        let miss = analyzer
+            .explain_symbol_load("Root", Some("no-such-source"))
+            .expect_err("filter miss must error");
+        assert_eq!(miss.to_string(), "No matching collateral source found");
+
+        let unreachable = analyzer
+            .explain_symbol_load("Root", Some("elsewhere"))
+            .expect_err("unreachable collateral must error");
+        assert_eq!(
+            unreachable.to_string(),
+            "No include path found to collateral source"
+        );
+    }
+}

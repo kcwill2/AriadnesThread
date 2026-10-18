@@ -256,3 +256,10 @@ fn assemble_closures(
     }
     closures
 }
+
+/// UTA-T1 item 13 depth-stress suite (hand H1): 64 KiB-thread pins on the
+/// frame machine and the public pipeline; deviation rationale in the
+/// module header there.
+#[cfg(test)]
+#[path = "closures_tests.rs"]
+mod tests;

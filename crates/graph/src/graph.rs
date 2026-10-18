@@ -132,6 +132,13 @@ impl IncludeGraph {
     }
 
     /// Finds a FileId by matching filename or relative path.
+    /// UTA-B4 (hand H1): deterministic two-pass resolution. Pass 1 - an
+    /// exact full-path match wins over ANY basename match; pass 2 - among
+    /// basename matches the smallest FileId wins (`FileId: Ord`). Both passes
+    /// scan the whole map, so the retired first-match-in-HashMap-order rule
+    /// (which flipped per process run on basename collisions and let a
+    /// basename hit beat a later exact hit) cannot reappear; the result is
+    /// independent of registration order and hash seeds.
     pub fn find_file_id(&self, path_or_name: &Path) -> Option<FileId> {
         #[cfg(test)]
         self.find_file_id_scans.fetch_add(1, Ordering::Relaxed);
@@ -141,17 +148,31 @@ impl IncludeGraph {
             .and_then(|s| s.to_str())
             .unwrap_or("");
 
+        // Pass 1: exact full-path match (smallest FileId if a path was
+        // registered under several ids - deterministic for the same reason
+        // pass 2 is).
+        let mut exact_match: Option<FileId> = None;
         for (&id, path) in &self.file_paths {
-            if path == path_or_name || path.to_string_lossy() == target_str {
-                return Some(id);
-            }
-            if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                if fname == target_name {
-                    return Some(id);
-                }
+            if (path == path_or_name || path.to_string_lossy() == target_str)
+                && exact_match.is_none_or(|current| id < current)
+            {
+                exact_match = Some(id);
             }
         }
-        None
+        if let Some(id) = exact_match {
+            return Some(id);
+        }
+
+        // Pass 2: basename match, smallest FileId wins.
+        let mut best_basename_match: Option<FileId> = None;
+        for (&id, path) in &self.file_paths {
+            if path.file_name().and_then(|s| s.to_str()) == Some(target_name)
+                && best_basename_match.is_none_or(|current| id < current)
+            {
+                best_basename_match = Some(id);
+            }
+        }
+        best_basename_match
     }
 
     /// Test-only: tally of `find_file_id` scans on this graph; the by-id
@@ -810,6 +831,70 @@ mod tests {
         )
         .unwrap();
         assert_eq!(default_json, all_reject_json);
+    }
+
+    /// UTA-B4 red pin (hand H1): `find_file_id` must resolve deterministically
+    /// - an exact-path match always beats any basename match, and among
+    /// basename-only matches the smallest FileId wins. The retired
+    /// single-pass first-match rule was HashMap-iteration dependent, so a
+    /// basename-collision fixture like this flipped per process run. Each
+    /// trial builds a FRESH graph (every fresh `HashMap` draws a new random
+    /// seed), so the old rule faces a coin flip per trial while the fixed
+    /// rule is order-independent by construction. 32 trials put the old
+    /// rule's survival odds at ~2^-32.
+    #[test]
+    fn find_file_id_prefers_full_path_then_smallest_file_id_deterministically() {
+        for _trial in 0..32 {
+            let graph = util_collision_graph_registered_a_first();
+            assert_eq!(
+                graph.find_file_id(Path::new("b/util.h")),
+                Some(FileId(2)),
+                "the exact path b/util.h must resolve to the b entry even when \
+                 a/util.h was registered first (and shares the basename)"
+            );
+            assert_eq!(
+                graph.find_file_id(Path::new("a/util.h")),
+                Some(FileId(1)),
+                "the exact path a/util.h must resolve to the a entry"
+            );
+            assert_eq!(
+                graph.find_file_id(Path::new("util.h")),
+                Some(FileId(1)),
+                "a basename-only query ties between FileId(1) and FileId(2); \
+                 the smallest FileId must win deterministically"
+            );
+            // Repeated calls on the same graph agree.
+            assert_eq!(
+                graph.find_file_id(Path::new("util.h")),
+                graph.find_file_id(Path::new("util.h")),
+            );
+
+            // Re-registering in the opposite order resolves to the same ids.
+            let flipped = util_collision_graph_registered_b_first();
+            assert_eq!(
+                flipped.find_file_id(Path::new("util.h")),
+                graph.find_file_id(Path::new("util.h")),
+                "re-registration order must not move the resolution"
+            );
+            assert_eq!(
+                flipped.find_file_id(Path::new("b/util.h")),
+                Some(FileId(2))
+            );
+        }
+    }
+
+    fn util_collision_graph_registered_a_first() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(1), PathBuf::from("a/util.h"));
+        graph.register_file(FileId(2), PathBuf::from("b/util.h"));
+        graph
+    }
+
+    fn util_collision_graph_registered_b_first() -> IncludeGraph {
+        let mut graph = IncludeGraph::new();
+        graph.register_file(FileId(2), PathBuf::from("b/util.h"));
+        graph.register_file(FileId(1), PathBuf::from("a/util.h"));
+        graph
     }
 
     #[test]
