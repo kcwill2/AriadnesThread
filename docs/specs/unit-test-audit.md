@@ -87,8 +87,9 @@ pin current behavior with a named test and list them as findings:
 - `crates/transform/src/engine/write.rs:11-52` absolute/`..` unit.path can
   escape output dir (H4: add containment rejection - this one is a fix,
   silent out-of-dir writes are not defensible).
-- `crates/worker-core` shard tmp-name race (H5: include pid/millesecond in
-  tmp name - fix).
+- `crates/worker-core` shard tmp-name race: DOWNGRADED by H5 - pid+counter
+  tmp naming verified byte-identical since 0861db0 (pre-existing fix); lock
+  shipped, no code change.
 - `crates/cluster/src/planner.rs:477` per-candidate SCC rebuild (perf,
   H6: report only).
 - `crates/graph/src/builder.rs:89-92` `Err(_) => continue` on unreadable
@@ -124,7 +125,8 @@ the reviewer adjudicates. Report-only anything outside the touch-set.
 - H4 `uta-t4` transform + validate: fix UTA-B1 + write-path containment; add
   tier-validator, move-removal, rollback-mismatch, cycle-pinning tests.
   Touch: crates/transform, crates/validate.
-- H5 `uta-t5` scheduler + worker-core + index: fix UTA-B2, tmp-race; test
+- H5 `uta-t5` scheduler + worker-core + index: fix UTA-B2 (+B6 surfacing);
+  tmp-race row shipped as lock (downgraded); test
   UTA-B6 paths, pool first-error, TuTask::cmp, format boundaries, shard
   clamps, tu_store corrupt/concurrency. Touch: crates/scheduler,
   crates/worker-core, crates/index.
@@ -148,11 +150,11 @@ because scope is test-additive and per-crate gate cost is one distill run).
 | id | crate | claim | status |
 |----|-------|-------|--------|
 | UTA-B1 | transform | covered_old_includes drops unmapped includes | CONFIRMED; H4 BLOCKER - fix needs cross-crate data-shape change (origin field on ExtractedSymbol/GeneratedUnit + cli callers); reviewer-verified blocker, deferred with journal analysis |
-| UTA-B2 | index | serde-fail empty fingerprint | CONFIRMED -> H5 fix |
+| UTA-B2 | index | serde-fail empty fingerprint | FIXED by H5 3e48c51 (fail-closed material) |
 | UTA-B3 | lang-cpp | `#includemy` phantom include | NOT REPRODUCIBLE (H2 locks) |
-| UTA-B4 | graph | find_file_id nondeterministic match | CONFIRMED -> H1 fix |
-| UTA-B5 | graph | recursive DFS stack risk + SCC undercount | CONFIRMED -> H1 fix |
-| UTA-B6 | scheduler | empty-fp checkpoint + swallowed save/first-error | CONFIRMED -> H5 |
+| UTA-B4 | graph | find_file_id nondeterministic match | FIXED by H1 994e5c3 |
+| UTA-B5 | graph | recursive DFS stack risk + SCC undercount | FIXED by H1 994e5c3 (iterative frames); fed-diamond undercount residual deferred |
+| UTA-B6 | scheduler | empty-fp checkpoint + swallowed save/first-error | FIXED (surfacing) by H5 3e48c51; counts-to-CLI-report half deferred (cli struct-literal coupling) |
 | UTA-B7 | cli | save/replan/discovery error swallows | CONFIRMED -> H7 |
 | UTA-B8 | cli | residual assumes committed-prefix | CONFIRMED -> H7 fix |
 | UTA-P* | various | pin-only adjudications above | PIN |
