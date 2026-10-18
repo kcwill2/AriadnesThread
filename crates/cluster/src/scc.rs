@@ -453,3 +453,91 @@ mod tests {
         assert_eq!(lengths, vec![2, 2]);
     }
 }
+
+#[cfg(test)]
+mod order_and_seed_shape_pins {
+    //! UTA-T6 item 7 (pin-only): the cross-SCC output ORDER of the frame
+    //! machine over a fixed fixture, asserted exactly (whole-vector
+    //! equality plus repeated-run byte equality through Debug rendering),
+    //! and the duplicate-seed behavior of the seed loop.
+
+    use super::*;
+    use ariadne_index::types::DependencyKind;
+    use ariadne_repo::FileId;
+
+    fn edge(src: &str, dst: &str) -> SemanticEdge {
+        SemanticEdge {
+            src_symbol: SymbolId::new(src),
+            dst_symbol: SymbolId::new(dst),
+            kind: DependencyKind::Complete,
+            src_file: FileId::from_relative_path("order-pin-fixture"),
+            dst_file: FileId::from_relative_path("order-pin-fixture"),
+        }
+    }
+
+    fn group(names: &[&str]) -> SymbolScc {
+        SymbolScc {
+            symbols: names.iter().map(|name| SymbolId::new(*name)).collect(),
+        }
+    }
+
+    #[test]
+    fn acyclic_chain_emits_reverse_topological_order_exactly() {
+        // A -> B -> C with seeds [A, B, C]: the frame machine retires the
+        // deepest vertex first, so the emitted order is exactly C, B, A -
+        // not just "some order of three singletons" (which is all the older
+        // length-sort assertions pinned).
+        let seeds = vec![SymbolId::new("A"), SymbolId::new("B"), SymbolId::new("C")];
+        let edges = vec![edge("A", "B"), edge("B", "C")];
+
+        let sccs = compute_symbol_sccs(&seeds, &edges);
+        assert_eq!(sccs, vec![group(&["C"]), group(&["B"]), group(&["A"])]);
+
+        let rendered = format!("{sccs:?}");
+        for _ in 0..4 {
+            assert_eq!(sccs, compute_symbol_sccs(&seeds, &edges));
+            assert_eq!(rendered, format!("{:?}", compute_symbol_sccs(&seeds, &edges)));
+        }
+    }
+
+    #[test]
+    fn cycle_then_detached_seed_emit_exact_order_with_sorted_members() {
+        // A <-> B <-> C cycle entered first, detached D after: the cycle
+        // group emits first (retired at seed A) with its members sorted
+        // lexicographically, then D. Duplicate seeds B, C are skipped as
+        // already indexed, proving the seed loop never double-emits.
+        let seeds = vec![
+            SymbolId::new("A"),
+            SymbolId::new("D"),
+            SymbolId::new("B"),
+            SymbolId::new("C"),
+        ];
+        let edges = vec![
+            edge("A", "B"),
+            edge("B", "C"),
+            edge("C", "A"),
+            edge("D", "C"),
+        ];
+
+        let sccs = compute_symbol_sccs(&seeds, &edges);
+        assert_eq!(
+            sccs,
+            vec![group(&["A", "B", "C"]), group(&["D"])],
+            "pin: exact cross-SCC emission order - cycle group (sorted \
+             members) retires at seed A's root, D emits last; the later \
+             already-indexed seeds B and C emit nothing"
+        );
+    }
+
+    #[test]
+    fn duplicate_seeds_in_the_input_slice_emit_each_vertex_once() {
+        let seeds = vec![SymbolId::new("A"), SymbolId::new("A"), SymbolId::new("B")];
+        let sccs = compute_symbol_sccs(&seeds, &[]);
+        assert_eq!(
+            sccs,
+            vec![group(&["A"]), group(&["B"])],
+            "pin: a repeated seed is skipped as already indexed - no \
+             duplicate singleton groups"
+        );
+    }
+}

@@ -718,6 +718,8 @@ fn merge_colocated_batches(batches: &mut Vec<Vec<SymbolId>>, colocated_groups: &
 }
 
 #[cfg(test)]
+mod uta_t6_pins;
+#[cfg(test)]
 mod planning_gap_tests {
     use super::*;
     use ariadne_graph::reduced::ReducedSymbolRecord;

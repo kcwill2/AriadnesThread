@@ -384,3 +384,79 @@ impl ArtifactManager {
         self.load_plan_artifacts()
     }
 }
+
+#[cfg(test)]
+mod streaming_write_tests {
+    //! UTA-T6 item 3 (pin-only): the two failure arms of
+    //! `write_streaming_atomic`. The emit-error arm must remove the staged
+    //! file and leave the prior artifact bytes intact; the rename-failure arm
+    //! must surface the error and leave the target untouched.
+
+    use super::write_streaming_atomic;
+    use anyhow::anyhow;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    fn staged_tmp_count(dir: &std::path::Path) -> usize {
+        fs::read_dir(dir)
+            .expect("staging dir readable")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count()
+    }
+
+    #[test]
+    fn emit_error_removes_staged_tmp_and_preserves_prior_bytes() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("report.bin");
+        fs::write(&target, b"PRIOR-BYTES").unwrap();
+
+        let outcome = write_streaming_atomic(&target, |writer| {
+            writer
+                .write_all(b"partial-payload-that-must-not-survive")
+                .expect("staged file accepts writes before the deliberate failure");
+            Err(anyhow!("emit closure failed on purpose"))
+        });
+
+        assert!(outcome.is_err(), "an emit Err must propagate");
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"PRIOR-BYTES",
+            "a failed streaming write must leave the prior artifact bytes intact"
+        );
+        assert_eq!(
+            staged_tmp_count(dir.path()),
+            0,
+            "the emit-error arm must remove the staged temp file"
+        );
+    }
+
+    #[test]
+    fn rename_failure_surfaces_and_leaves_target_and_staged_file() {
+        // Rename-fail pin: the target is an existing directory, so the final
+        // rename can never succeed on any supported platform. Pinned current
+        // behavior: the error surfaces, the target stays untouched, and the
+        // staged temp file is LEFT BEHIND - the cleanup arm covers only the
+        // emit-error path (pin of an admitted wart, not an endorsement).
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("blocked");
+        fs::create_dir(&target).unwrap();
+
+        let outcome = write_streaming_atomic(&target, |writer| {
+            writer.write_all(b"never-renamed").unwrap();
+            Ok(())
+        });
+
+        assert!(
+            outcome.is_err(),
+            "renaming a file over a directory must fail the write, got Ok"
+        );
+        assert!(target.is_dir(), "the target dir must survive untouched");
+        assert_eq!(
+            staged_tmp_count(dir.path()),
+            1,
+            "pin: the rename-failure arm currently leaves the staged tmp file on disk"
+        );
+    }
+}

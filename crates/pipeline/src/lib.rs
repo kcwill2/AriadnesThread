@@ -711,3 +711,6 @@ mod internal_tests;
 
 #[cfg(test)]
 mod stage_load_tests;
+
+#[cfg(test)]
+mod uta_t6_pins;
