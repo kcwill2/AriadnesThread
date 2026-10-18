@@ -102,3 +102,29 @@ Canonical line (scoped --lib): 151 passed / 0 failed / 0 ignored / 1 suites.
   ever wins when it itself is registered (constructed crossed fixture).
 Canonical line (scoped --lib, rows 4+7+8+12 landed): 160 passed / 0 failed /
   0 ignored / 1 suites (filter runs: pin_with_edges 2/0, includes 9/0).
+(row 9) seam extractions (journaled, behavior-preserving):
+  - expose_warning_text split (warning bytes out of the eprintln call site;
+    warn_if_expose_used stays the single emitter, "warning:"/"--expose"
+    literals kept inside the ui.rs production section for the S6 grep lock).
+  - drive_stage_frames(ProgressFn, &mut dyn FnMut(StageCall)->StageOutcome):
+    nine-frame emission order + per-call short-circuit moved behind a stub
+    advance; run_pipeline_stages is a thin adapter (the five ensure_*/
+    get_or_build_reduced calls, byte-identical frames).
+  - boot_progress_tests: seam_stage_frames() drives the REAL seam once with
+    the pinned Load-arm events; stage_one_to_four_frames and
+    stage_five_calibrated_frames both derive from it (hand-copied frames
+    gone; the 13-globals stage-5 assert now checks derived data).
+  - pins: exact nine-frame shape + five-call order + model passthrough;
+    short-circuit at every stage (frames left + calls consumed); expose
+    warning verbatim bytes (0.0.0.0 + trimmed 10.0.0.5) and the two None
+    arms; proposal_basename whole-path fallback ("", "..", ".").
+  DEVIATION (forced): the frozen ratchet
+    boot_progress.rs::test_ui_rs_is_under_the_extraction_ceiling demands
+    ui.rs <= 880 lines (base 877). The seam therefore lives in
+    ui/boot_progress.rs (the sanctioned extraction target per the W-2a F2
+    family-move + stage_spans precedents), re-exported into ui via the
+    existing boot_progress use line. ui.rs 877 -> 842 lines.
+  Small cleanup: moved test file cli_command_tests.rs lost one stale `mut`
+  (pre-existing warning, surfaced post-move).
+Canonical line (scoped --lib, rows 1-9,12): 167 passed / 0 failed / 0
+  ignored / 1 suites.

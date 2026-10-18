@@ -1,9 +1,10 @@
 use super::{
-    make_boot_progress, read_state, stage_progress_callback, stage_report, stage_start_percent,
-    step_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT, CALL_GRAPH_PHASE, COLLATERAL_PHASE,
-    JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT, PAYLOAD_ASSEMBLED_PERCENT,
-    PLANNING_EXTRACTIONS_PERCENT, ProgressFn, ProgressReport, REDUCTION_PHASE, RUN_PHASES,
-    STAGES_PER_RUN, TU_INDEX_PHASE,
+    drive_stage_frames, make_boot_progress, read_state, stage_progress_callback, stage_report,
+    stage_end_percent, stage_start_percent, step_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT,
+    CALL_GRAPH_PHASE, COLLATERAL_PHASE,
+    JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
+    PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, ProgressFn, ProgressReport,
+    REDUCTION_PHASE, RUN_PHASES, STAGES_PER_RUN, StageCall, StageOutcome, TU_INDEX_PHASE,
 };
 use super::boot_progress::BootStepSnapshot;
 use crate::commands::progress::{strip_stage_prefix, STEP_BAR_WIDTH, TerminalStepBars};
@@ -25,78 +26,90 @@ fn seeded_snapshot() -> BootStepSnapshot {
     BootStepSnapshot::seeded(STAGES_PER_RUN, &RUN_PHASES)
 }
 
-/// Stage 1..4 start/end frames, verbatim in `run_pipeline_stages` order
-/// (messages included). The stage-5 frames follow in `boot_replay_stream`.
-fn stage_one_to_four_frames() -> Vec<ProgressReport> {
-    vec![
-        stage_report(1, 0, ARTIFACTS_PHASE, "Hashing sources"),
-        stage_report(1, 20, ARTIFACTS_PHASE, "Include graph ready"),
-        stage_report(2, 20, TU_INDEX_PHASE, "Parsing sources"),
-        stage_report(2, 40, TU_INDEX_PHASE, "Index complete"),
-        stage_report(3, 40, REDUCTION_PHASE, "Deduplicating"),
-        stage_report(3, 60, REDUCTION_PHASE, "Model reduced"),
-        stage_report(4, 60, CALL_GRAPH_PHASE, "Constructing"),
-        stage_report(4, 80, CALL_GRAPH_PHASE, "Call graph ready"),
-    ]
-}
-
-/// The pinned stage-5 calibrated sequence, replayed through the REAL
-/// emission machinery: static milestones via `stage_report` with the
-/// production percents, pipeline events through `stage_progress_callback`
-/// (the mapping frozen by
-/// `progress_contract_tests::test_stage_five_milestone_sequence_is_monotonic_and_contained`:
-/// globals 80, 81, 81x5, 82, 85, 85, 85, 86, 99, 100).
-fn stage_five_calibrated_frames() -> Vec<ProgressReport> {
+/// The `run_pipeline_stages` emission derived from the REAL seam (UTA-T7b
+/// row 9): one `drive_stage_frames` run with a stubbed advance that answers
+/// Ack/Model and fires the pinned stage-5 pipeline events through the same
+/// sink inside its Load arm - the exact cold-rebuild interleaving of the
+/// stage-5 static frames with the callback-mapped events. 16 frames:
+/// stages 1..4 start/end (7), stage-5 start, the 7 load events, and the
+/// "Collateral mapped" repeat.
+fn seam_stage_frames() -> Vec<ProgressReport> {
     let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = collected.clone();
     let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
     let mut event_cb = stage_progress_callback(progress.clone());
+    let mut advance = |stage_call: StageCall| -> anyhow::Result<StageOutcome> {
+        match stage_call {
+            StageCall::Reduced => Ok(StageOutcome::Model(Default::default())),
+            StageCall::Load => {
+                event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
+                    symbols: 21,
+                }));
+                for done in 0..=4 {
+                    event_cb(&ProgressEvent::CollateralFile { done, total: 4 });
+                }
+                event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::IncludeGraph | StageCall::Index | StageCall::CallGraph => {
+                Ok(StageOutcome::Ack)
+            }
+        }
+    };
+    drive_stage_frames(&progress, &mut advance).expect("stub advance never fails");
+    let frames = collected.lock().unwrap().clone();
+    frames
+}
 
-    progress(stage_report(
-        5,
-        stage_start_percent(5),
-        COLLATERAL_PHASE,
-        "Load analysis",
-    ));
-    event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
-        symbols: 21,
-    }));
-    for done in 0..=4 {
-        event_cb(&ProgressEvent::CollateralFile { done, total: 4 });
-    }
-    event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::ArtifactsSaved));
-    progress(stage_report(
-        5,
-        ARTIFACTS_SAVED_PERCENT,
-        COLLATERAL_PHASE,
-        "Collateral mapped",
-    ));
-    progress(stage_report(
-        5,
-        PLANNING_EXTRACTIONS_PERCENT,
-        COLLATERAL_PHASE,
-        "Planning extractions",
-    ));
-    progress(stage_report(
-        5,
-        JUSTIFYING_SYMBOLS_PERCENT,
-        COLLATERAL_PHASE,
-        "Justifying symbols...",
-    ));
-    progress(stage_report(
-        5,
-        JUSTIFICATION_COMPLETE_PERCENT,
-        COLLATERAL_PHASE,
-        "Symbols justified",
-    ));
-    progress(stage_report(
-        5,
-        PAYLOAD_ASSEMBLED_PERCENT,
-        COLLATERAL_PHASE,
-        "Payload assembled",
-    ));
+/// The 4 stage-5 static frames `build_ui_payload` emits AFTER the seam
+/// returns (they are not part of `run_pipeline_stages`).
+fn build_payload_tail_frames() -> Vec<ProgressReport> {
+    vec![
+        stage_report(
+            5,
+            PLANNING_EXTRACTIONS_PERCENT,
+            COLLATERAL_PHASE,
+            "Planning extractions",
+        ),
+        stage_report(
+            5,
+            JUSTIFYING_SYMBOLS_PERCENT,
+            COLLATERAL_PHASE,
+            "Justifying symbols...",
+        ),
+        stage_report(
+            5,
+            JUSTIFICATION_COMPLETE_PERCENT,
+            COLLATERAL_PHASE,
+            "Symbols justified",
+        ),
+        stage_report(
+            5,
+            PAYLOAD_ASSEMBLED_PERCENT,
+            COLLATERAL_PHASE,
+            "Payload assembled",
+        ),
+    ]
+}
 
-    let reports = collected.lock().unwrap().clone();
+/// Stage 1..4 start/end frames in production order: the stage-1 START frame
+/// ("Hashing sources") belongs to `build_ui_payload`; the remaining 7 come
+/// from the real `drive_stage_frames` seam, not a hand copy.
+fn stage_one_to_four_frames() -> Vec<ProgressReport> {
+    let mut frames = vec![stage_report(1, 0, ARTIFACTS_PHASE, "Hashing sources")];
+    frames.extend(seam_stage_frames()[..7].to_vec());
+    frames
+}
+
+/// The pinned stage-5 calibrated sequence: stage-5 frames of the real seam
+/// replay (static milestones through `drive_stage_frames`, pipeline events
+/// through `stage_progress_callback`), plus the `build_ui_payload` tail.
+/// The mapping is frozen by
+/// `progress_contract_tests::test_stage_five_milestone_sequence_is_monotonic_and_contained`:
+/// globals 80, 81, 81x5, 82, 85, 85, 85, 86, 99, 100.
+fn stage_five_calibrated_frames() -> Vec<ProgressReport> {
+    let mut reports = seam_stage_frames()[7..].to_vec();
+    reports.extend(build_payload_tail_frames());
     let pinned_globals: Vec<usize> = reports.iter().map(|r| r.percent).collect();
     assert_eq!(
         pinned_globals,
@@ -558,4 +571,141 @@ fn test_boot_progress_snapshot_writes_active_row() {
     assert_eq!(p.percent, 26);
     assert_eq!(p.phase, TU_INDEX_PHASE);
     assert_eq!(p.message, "6/24 TUs");
+}
+
+// UTA-T7b row 9: `drive_stage_frames` seam pins.
+
+fn report_shape(frames: &[ProgressReport]) -> Vec<(usize, usize, String)> {
+    frames
+        .iter()
+        .map(|frame| (frame.stage, frame.percent, frame.message.clone()))
+        .collect()
+}
+
+#[test]
+fn pin_drive_stage_frames_emits_the_nine_frames_around_the_five_calls() {
+    // One seam run with a recording stub: exactly the five stage calls in
+    // production order, exactly the nine static frames at the calibrated
+    // percents, and the Reduced model passed straight back out.
+    let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = collected.clone();
+    let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+    let mut calls: Vec<&'static str> = Vec::new();
+    let mut advance = |stage_call: StageCall| -> anyhow::Result<StageOutcome> {
+        match stage_call {
+            StageCall::IncludeGraph => {
+                calls.push("include-graph");
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Index => {
+                calls.push("index");
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Reduced => {
+                calls.push("reduced");
+                Ok(StageOutcome::Model(ariadne_graph::ReducedSemanticModel {
+                    repo_root: PathBuf::from("sentinel-root"),
+                    ..Default::default()
+                }))
+            }
+            StageCall::CallGraph => {
+                calls.push("call-graph");
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Load => {
+                calls.push("load");
+                Ok(StageOutcome::Ack)
+            }
+        }
+    };
+    let model = drive_stage_frames(&progress, &mut advance).expect("stub advance never fails");
+
+    assert_eq!(
+        calls,
+        vec!["include-graph", "index", "reduced", "call-graph", "load"],
+        "the seam drives exactly the five stages in production order"
+    );
+    assert_eq!(
+        model.repo_root,
+        PathBuf::from("sentinel-root"),
+        "the seam returns the model the advance produced for Reduced, untouched"
+    );
+    assert_eq!(
+        report_shape(&collected.lock().unwrap().clone()),
+        vec![
+            (1, stage_end_percent(1), "Include graph ready".to_string()),
+            (2, stage_start_percent(2), "Parsing sources".to_string()),
+            (2, stage_end_percent(2), "Index complete".to_string()),
+            (3, stage_start_percent(3), "Deduplicating".to_string()),
+            (3, stage_end_percent(3), "Model reduced".to_string()),
+            (4, stage_start_percent(4), "Constructing".to_string()),
+            (4, stage_end_percent(4), "Call graph ready".to_string()),
+            (5, stage_start_percent(5), "Load analysis".to_string()),
+            (5, ARTIFACTS_SAVED_PERCENT, "Collateral mapped".to_string()),
+        ],
+        "the nine stage frames keep their exact production order and percents"
+    );
+}
+
+#[derive(Debug)]
+enum StageCallFailure {
+    IncludeGraph,
+    Index,
+    Reduced,
+    CallGraph,
+    Load,
+}
+
+#[test]
+fn pin_drive_stage_frames_short_circuits_before_the_next_frame() {
+    // Each stage failure stops the run with its own last frame: a failure
+    // consumes no further calls and emits no further frames (the former
+    // per-call `?` semantics).
+    for (fail_at, expected_prefix_len) in [
+        (StageCallFailure::IncludeGraph, 0usize),
+        (StageCallFailure::Index, 2),
+        (StageCallFailure::Reduced, 4),
+        (StageCallFailure::CallGraph, 6),
+        (StageCallFailure::Load, 8),
+    ] {
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut calls: usize = 0;
+        let mut advance = |stage_call: StageCall| -> anyhow::Result<StageOutcome> {
+            calls += 1;
+            let failing = match (&fail_at, &stage_call) {
+                (StageCallFailure::IncludeGraph, StageCall::IncludeGraph)
+                | (StageCallFailure::Index, StageCall::Index)
+                | (StageCallFailure::Reduced, StageCall::Reduced)
+                | (StageCallFailure::CallGraph, StageCall::CallGraph)
+                | (StageCallFailure::Load, StageCall::Load) => true,
+                _ => false,
+            };
+            if failing {
+                anyhow::bail!("stage failed");
+            }
+            match stage_call {
+                StageCall::Reduced => Ok(StageOutcome::Model(Default::default())),
+                _ => Ok(StageOutcome::Ack),
+            }
+        };
+        let error = drive_stage_frames(&progress, &mut advance)
+            .err()
+            .expect("the failing stage must abort the run");
+        assert_eq!(error.to_string(), "stage failed");
+        assert_eq!(
+            report_shape(&collected.lock().unwrap().clone()).len(),
+            expected_prefix_len,
+            "failure at the {:?} stage must leave exactly {} frames",
+            fail_at,
+            expected_prefix_len
+        );
+        assert_eq!(
+            calls,
+            expected_prefix_len / 2 + 1,
+            "the run must stop AT the failing stage call, never reaching \
+             the next one"
+        );
+    }
 }

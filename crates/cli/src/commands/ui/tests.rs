@@ -151,3 +151,45 @@ fn test_run_ui_binds_resolved_addr_never_hardcoded_wildcard() {
         "--expose use must print a LAN-exposure warning at startup (S6)"
     );
 }
+
+// UTA-T7b row 9: expose-warning text split + proposal basename pins.
+
+#[test]
+fn pin_expose_warning_text_verbatim_and_inactive_shapes() {
+    // The R8 warning wording, now split out of the eprintln call site. The
+    // wildcard spelling lives ONLY in test code (the S6 production grep
+    // above keeps it out of ui.rs itself).
+    assert_eq!(
+        super::expose_warning_text(Some("0.0.0.0")).as_deref(),
+        Some(
+            "warning: --expose 0.0.0.0 binds the UI beyond localhost: it has \
+             no authentication and is reachable from the local network"
+        )
+    );
+    assert_eq!(
+        super::expose_warning_text(Some(" 10.0.0.5 ")).as_deref(),
+        Some(
+            "warning: --expose 10.0.0.5 binds the UI beyond localhost: it has \
+             no authentication and is reachable from the local network"
+        ),
+        "the warning names the TRIMMED address, matching resolve_bind_addr"
+    );
+    assert_eq!(super::expose_warning_text(None), None);
+    assert_eq!(
+        super::expose_warning_text(Some("   ")),
+        None,
+        "a blank --expose value warns nothing (same inactive shape as None)"
+    );
+}
+
+#[test]
+fn pin_proposal_basename_falls_back_to_whole_path_when_unnamed() {
+    use std::path::Path;
+    // Normal paths lose their directories; component-less paths (empty,
+    // `..`, `.`) have no file_name and the WHOLE path is the fallback
+    // (mirrors dto.rs path_basename).
+    assert_eq!(super::proposal_basename(Path::new("src/nested/thing.h")), "thing.h");
+    assert_eq!(super::proposal_basename(Path::new("")), "");
+    assert_eq!(super::proposal_basename(Path::new("..")), "..");
+    assert_eq!(super::proposal_basename(Path::new(".")), ".");
+}

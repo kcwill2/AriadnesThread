@@ -373,7 +373,7 @@ fn test_cli_ui_expose_flag_carries_address() {
 #[test]
 fn test_cli_ui_help_documents_expose_lan_warning() {
     use clap::CommandFactory;
-    let mut root_command = Cli::command();
+    let root_command = Cli::command();
     let ui_command = root_command
         .find_subcommand("ui")
         .expect("`ui` subcommand must exist");

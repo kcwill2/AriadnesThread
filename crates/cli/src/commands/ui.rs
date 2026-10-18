@@ -27,8 +27,8 @@ use stage_spans::{
 // name production code here still calls (child modules see parent-private
 // `use` bindings, so the frozen import lines stay UNEDITED).
 use boot_progress::{
-    build_boot_generation, drive_boot_build, make_bar_progress, make_boot_progress,
-    surface_boot_failure,
+    build_boot_generation, drive_boot_build, drive_stage_frames, make_bar_progress,
+    make_boot_progress, surface_boot_failure, StageCall, StageOutcome,
 };
 
 mod boot_progress;
@@ -120,79 +120,35 @@ fn stage_report(
     }
 }
 
-/// Drive the five artifact-backed stages, emitting start/end milestones that
-/// keep every percent inside the span owned by its `[k/5]` step label.
-/// I5 (V1): the stage-1 START frame now belongs to `build_ui_payload`; every
-/// frame emitted here stays byte-identical in order.
+/// Drive the five artifact-backed stages (seam in `boot_progress.rs`,
+/// UTA-T7b row 9) against the live pipeline. I5 (V1): the stage-1 START
+/// frame belongs to `build_ui_payload`; frame order here is byte-identical.
 fn run_pipeline_stages(
     pipeline: &mut Pipeline,
     progress: &ProgressFn,
 ) -> Result<ariadne_graph::ReducedSemanticModel> {
-    pipeline.ensure_include_graph()?;
-    progress(stage_report(
-        1,
-        stage_end_percent(1),
-        ARTIFACTS_PHASE,
-        "Include graph ready",
-    ));
-    progress(stage_report(
-        2,
-        stage_start_percent(2),
-        TU_INDEX_PHASE,
-        "Parsing sources",
-    ));
-    pipeline.ensure_index()?;
-    progress(stage_report(
-        2,
-        stage_end_percent(2),
-        TU_INDEX_PHASE,
-        "Index complete",
-    ));
-    progress(stage_report(
-        3,
-        stage_start_percent(3),
-        REDUCTION_PHASE,
-        "Deduplicating",
-    ));
-    let reduced_model = pipeline.get_or_build_reduced()?;
-    progress(stage_report(
-        3,
-        stage_end_percent(3),
-        REDUCTION_PHASE,
-        "Model reduced",
-    ));
-    progress(stage_report(
-        4,
-        stage_start_percent(4),
-        CALL_GRAPH_PHASE,
-        "Constructing",
-    ));
-    pipeline.ensure_callgraph()?;
-    progress(stage_report(
-        4,
-        stage_end_percent(4),
-        CALL_GRAPH_PHASE,
-        "Call graph ready",
-    ));
-    progress(stage_report(
-        5,
-        stage_start_percent(5),
-        COLLATERAL_PHASE,
-        "Load analysis",
-    ));
-    pipeline.ensure_load()?;
-    // A4: on a cold rebuild the pipeline callback has already emitted the
-    // "Load artifacts saved" milestone at 85; this frame repeats that
-    // percent under the stage's own label. On a warm load-stage reuse no
-    // pipeline events fire at all, so this is the only load-complete marker
-    // and the bar honestly jumps 80 -> 85 once the cached stage returned.
-    progress(stage_report(
-        5,
-        ARTIFACTS_SAVED_PERCENT,
-        COLLATERAL_PHASE,
-        "Collateral mapped",
-    ));
-    Ok(reduced_model)
+    let mut advance = |stage_call| -> Result<StageOutcome> {
+        match stage_call {
+            StageCall::IncludeGraph => {
+                pipeline.ensure_include_graph()?;
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Index => {
+                pipeline.ensure_index()?;
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Reduced => Ok(StageOutcome::Model(pipeline.get_or_build_reduced()?)),
+            StageCall::CallGraph => {
+                pipeline.ensure_callgraph()?;
+                Ok(StageOutcome::Ack)
+            }
+            StageCall::Load => {
+                pipeline.ensure_load()?;
+                Ok(StageOutcome::Ack)
+            }
+        }
+    };
+    drive_stage_frames(progress, &mut advance)
 }
 
 /// Map one pipeline `ProgressEvent` onto the stage-owned report. A4: the
@@ -734,13 +690,22 @@ pub fn resolve_bind_addr(expose: Option<&str>) -> String {
 
 /// S6: an active `--expose` widens the bind beyond localhost; the R8
 /// never-silent rule puts that trade on the console at every such boot.
+/// The wording itself lives in `expose_warning_text` (UTA-T7b row 9 split)
+/// so the exact bytes are pinned without launching the server; this stays
+/// the single emission point.
 fn warn_if_expose_used(expose: Option<&str>) {
-    let Some(addr) = expose.map(str::trim).filter(|addr| !addr.is_empty()) else {
-        return;
-    };
-    eprintln!(
+    if let Some(text) = expose_warning_text(expose) {
+        eprintln!("{}", text);
+    }
+}
+
+/// The R8 warning line for an active `--expose` argument (trimmed; blank is
+/// "not active"), or None when nothing is exposed.
+fn expose_warning_text(expose: Option<&str>) -> Option<String> {
+    let addr = expose.map(str::trim).filter(|addr| !addr.is_empty())?;
+    Some(format!(
         "warning: --expose {addr} binds the UI beyond localhost: it has no authentication and is reachable from the local network"
-    );
+    ))
 }
 
 pub async fn run_ui(

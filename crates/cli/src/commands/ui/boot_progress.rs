@@ -27,6 +27,104 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// One unit of artifact-backed work requested by [`drive_stage_frames`].
+/// Extracted from `ui.rs` (UTA-T7b row 9) under the ui.rs <=880 extraction
+/// ceiling, following the boot_progress-family move precedent.
+pub enum StageCall {
+    IncludeGraph,
+    Index,
+    Reduced,
+    CallGraph,
+    Load,
+}
+
+/// What an advance returns for a [`StageCall`]: plain acknowledgement, or
+/// the reduced model the Reduced stage must hand back.
+pub enum StageOutcome {
+    Ack,
+    Model(ariadne_graph::ReducedSemanticModel),
+}
+
+/// Drive the five artifact-backed stages, emitting start/end milestones that
+/// keep every percent inside the span owned by its `[k/5]` step label.
+/// I5 (V1): the stage-1 START frame now belongs to `build_ui_payload`; every
+/// frame emitted here stays byte-identical in order. The stage work itself
+/// happens in `advance`; a failed call aborts before any later frame (the
+/// former `?`-short-circuit on each pipeline call is preserved).
+pub fn drive_stage_frames(
+    progress: &ProgressFn,
+    advance: &mut dyn FnMut(StageCall) -> Result<StageOutcome>,
+) -> Result<ariadne_graph::ReducedSemanticModel> {
+    advance(StageCall::IncludeGraph)?;
+    progress(super::stage_report(
+        1,
+        super::stage_end_percent(1),
+        super::ARTIFACTS_PHASE,
+        "Include graph ready",
+    ));
+    progress(super::stage_report(
+        2,
+        super::stage_start_percent(2),
+        super::TU_INDEX_PHASE,
+        "Parsing sources",
+    ));
+    advance(StageCall::Index)?;
+    progress(super::stage_report(
+        2,
+        super::stage_end_percent(2),
+        super::TU_INDEX_PHASE,
+        "Index complete",
+    ));
+    progress(super::stage_report(
+        3,
+        super::stage_start_percent(3),
+        super::REDUCTION_PHASE,
+        "Deduplicating",
+    ));
+    let reduced_model = match advance(StageCall::Reduced)? {
+        StageOutcome::Model(model) => model,
+        StageOutcome::Ack => unreachable!("Reduced stage must return the model"),
+    };
+    progress(super::stage_report(
+        3,
+        super::stage_end_percent(3),
+        super::REDUCTION_PHASE,
+        "Model reduced",
+    ));
+    progress(super::stage_report(
+        4,
+        super::stage_start_percent(4),
+        super::CALL_GRAPH_PHASE,
+        "Constructing",
+    ));
+    advance(StageCall::CallGraph)?;
+    progress(super::stage_report(
+        4,
+        super::stage_end_percent(4),
+        super::CALL_GRAPH_PHASE,
+        "Call graph ready",
+    ));
+    progress(super::stage_report(
+        5,
+        super::stage_start_percent(5),
+        super::COLLATERAL_PHASE,
+        "Load analysis",
+    ));
+    advance(StageCall::Load)?;
+    // A4: on a cold rebuild the pipeline callback has already emitted the
+    // "Load artifacts saved" milestone at 85; this frame repeats that
+    // percent under the stage's own label. On a warm load-stage reuse no
+    // pipeline events fire at all, so this is the only load-complete marker
+    // and the bar honestly jumps 80 -> 85 once the cached stage returned.
+    progress(super::stage_report(
+        5,
+        super::ARTIFACTS_SAVED_PERCENT,
+        super::COLLATERAL_PHASE,
+        "Collateral mapped",
+    ));
+    Ok(reduced_model)
+}
+
 /// Live per-step terminal bar renderer. TerminalStepBars is Send + Sync, so
 /// the closure satisfies ProgressFn's Send + Sync bound and may move into
 /// spawn_blocking; dropping the closure at the end of the build also drops
