@@ -109,4 +109,4 @@ Tests run with `cargo test`; the canonical one-line summary comes from `python t
 
 ## License
 
-Not yet declared. See `Intent.md` for the project's purpose and design philosophy in full.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
