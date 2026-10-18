@@ -148,3 +148,28 @@ Canonical line (scoped --lib, rows 1-9,12): 167 passed / 0 failed / 0
   counter moves 1 -> 2 across two calls (never cached, R3 retryable).
 Canonical line (scoped --lib, rows 1-12): 169 passed / 0 failed / 0
   ignored / 1 suites.
+
+## Closeout
+
+- Canonical full-suite line: `177 passed / 0 failed / 8 ignored / 8 suites`
+  (T7a baseline 147/0/8/8; +30 pins, ignores/suites unchanged).
+- Gates: hygiene_check R1/R2 clean (all R3 warns pre-existing or the one
+  `bar`-wording reword that removed my hit; zero R3 hits in any line added
+  by this hand), encoding_guard --all silent, frozen greps verified through
+  their own tests (S6 bind/warning lock, first-frame lock, apply_plan_with
+  1x/2x lock, print_progress/TuIndex lock, boot family lock, ui.rs <= 880
+  ratchet - ui.rs 877 -> 842).
+- Hygiene tail-cleanup after the final full run: query.rs carry-over loop
+  bindings renamed (`r` -> `artifact`, `u` -> `user_file`) after the
+  post-move scanner surfaced them; query pins re-run green (5/0).
+- Not done deliberately: no production behavior changed anywhere (ALL-PINS);
+  the legacy `parse_language_arg_accepts_serde_names_case_insensitively`
+  NAME left as-is (assertions true; honest matrix pin beside it); the
+  subrepo-positional silent-precedence asymmetry pinned, not fixed.
+- REPORTED deviations: (1) overshoot UNCLAMPED (pin named accordingly,
+  handoff name said "clamped"); (2) `parse_language_arg` is case-STRICT
+  (only exact lowercase + exact serde names); (3) subrepo positional
+  silently wins in analyze (path comparison) AND includes/plan (wildcard
+  drop, no comparison at all); (4) row-9 seam machinery lives in
+  ui/boot_progress.rs because the frozen ui.rs <= 880 ratchet forbade the
+  growth (sanctioned move precedent; ui.rs shrank to 842).

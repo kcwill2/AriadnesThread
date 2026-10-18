@@ -20,8 +20,8 @@ fn file_path_map(repo_path: &PathBuf) -> HashMap<FileId, String> {
     let mut map = HashMap::new();
     if let Ok(manager) = ArtifactManager::init(repo_path) {
         if let Ok(records) = manager.load_repository_artifacts() {
-            for r in records {
-                map.insert(r.id, r.path.to_string_lossy().into_owned());
+            for artifact in records {
+                map.insert(artifact.id, artifact.path.to_string_lossy().into_owned());
             }
         }
     }
@@ -64,10 +64,10 @@ fn render_symbol_report(
     if users.is_empty() {
         lines.push("    (none)".to_string());
     } else {
-        for u in users {
-            match file_map.get(&u) {
+        for user_file in users {
+            match file_map.get(&user_file) {
                 Some(path) => lines.push(format!("    {}", path)),
-                None => lines.push(format!("    {}", u)),
+                None => lines.push(format!("    {}", user_file)),
             }
         }
     }
@@ -103,10 +103,10 @@ fn render_users_report(
     if users.is_empty() {
         lines.push("  (none)".to_string());
     } else {
-        for u in users {
-            match file_map.get(&u) {
+        for user_file in users {
+            match file_map.get(&user_file) {
                 Some(path) => lines.push(format!("  {}", path)),
-                None => lines.push(format!("  {}", u)),
+                None => lines.push(format!("  {}", user_file)),
             }
         }
     }
