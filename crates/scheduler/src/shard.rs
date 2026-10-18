@@ -679,4 +679,33 @@ mod tests {
         assert_eq!(direct_model.tu_usage, sharded_model_4.tu_usage);
         assert_eq!(direct_model.file_symbols, sharded_model_4.file_symbols);
     }
+
+    // ---- UTA-T5 item 7: constructor clamps + partition range ---------------
+
+    #[test]
+    fn partitioner_and_reducer_clamp_zero_counts_to_one() {
+        assert_eq!(HashPartitioner::new(0).num_partitions, 1);
+        assert_eq!(HashPartitioner::new(1).num_partitions, 1);
+        assert_eq!(ShardedReducer::new(0).num_reducers, 1);
+        assert_eq!(ShardedReducer::new(3).num_reducers, 3);
+    }
+
+    #[test]
+    fn partition_key_stays_in_range_over_a_hundred_keys() {
+        for num_partitions in [1usize, 2, 7, 64] {
+            let partitioner = HashPartitioner::new(num_partitions);
+            for key in 0u64..100 {
+                let partition = partitioner.partition_key(&key);
+                assert!(
+                    partition < num_partitions,
+                    "partition {partition} out of range for {num_partitions} partitions (key {key})"
+                );
+            }
+        }
+        // The zero-clamped partitioner keeps every key in the range [0, 1).
+        let clamped = HashPartitioner::new(0);
+        for key in 0u64..100 {
+            assert_eq!(clamped.partition_key(&key), 0);
+        }
+    }
 }

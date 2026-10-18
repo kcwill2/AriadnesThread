@@ -196,4 +196,62 @@ mod tests {
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.total_tasks(), 2);
     }
+
+    // ---- UTA-T5 item 8: cost estimation edges + context propagation --------
+
+    #[test]
+    fn estimate_tu_cost_empty_file_floors_at_one_and_directories_use_metadata_size() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::write(root.join("empty.cpp"), b"").unwrap();
+        assert_eq!(estimate_tu_cost(root, &make_tu("empty.cpp")), 1);
+
+        // A directory path takes the SAME metadata branch (Ok) as files:
+        // cost is the reported size floored at 1, never the missing-file
+        // Err branch. (Windows reports 0 for directories, hence the floor.)
+        let directory_cost = estimate_tu_cost(root, &make_tu(""));
+        let reported_len = std::fs::metadata(root).unwrap().len() as usize;
+        assert_eq!(directory_cost, reported_len.max(1));
+    }
+
+    #[test]
+    fn from_translation_units_with_context_propagates_measured_costs_and_context() {
+        use std::collections::HashMap;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::write(root.join("small.cpp"), b"12345").unwrap();
+        std::fs::write(root.join("middle.cpp"), b"1234567890").unwrap();
+        std::fs::write(root.join("large.cpp"), vec![b'0'; 30]).unwrap();
+
+        let empty_discovery = ariadne_repo::RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files: vec![],
+            ownership_summary: HashMap::new(),
+            policy_summary: HashMap::new(),
+        };
+        let store_ctx = Some(crate::tu_store::TuStoreContext::new(
+            &empty_discovery,
+            vec![],
+        ));
+
+        let tus = vec![
+            make_tu("small.cpp"),
+            make_tu("middle.cpp"),
+            make_tu("large.cpp"),
+        ];
+        let mut queue =
+            PrioritizedTuQueue::from_translation_units_with_context(root, tus, store_ctx);
+        assert_eq!(queue.total_tasks(), 3);
+
+        // Real temp-file sizes drive real priorities: 30 > 10 > 5 pops first.
+        let mut costs = Vec::new();
+        let mut contexts_attached = Vec::new();
+        while let Some(task) = queue.pop_next() {
+            costs.push(task.estimated_cost);
+            contexts_attached.push(task.context.is_some());
+        }
+        assert_eq!(costs, vec![30, 10, 5]);
+        assert_eq!(contexts_attached, vec![true, true, true]);
+    }
 }

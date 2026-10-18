@@ -648,4 +648,33 @@ mod dispatch_contract_tests {
             "the merged analysis is stamped with the unit's own file id"
         );
     }
+
+    // ---- UTA-T5 item 11: body-only arm on a missing file (pin + report) ----
+
+    #[test]
+    fn pin_body_only_missing_file_analyzes_empty() {
+        // Pins TODAY's adjudicated body-only behavior (UTA-T5 item 11,
+        // report-flagged): a unit whose source file is missing on disk is
+        // read with `unwrap_or_default()` and analyzed as EMPTY SOURCE,
+        // returning Ok with nothing, NOT an error. (The store-context arm
+        // differs by design: it records an unreadable-hash sentinel in the
+        // fingerprint - see `tu_store::compute_tu_closure_plugin`.)
+        let registry =
+            LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new()));
+        let backend = PluginWorkerBackend::new(&registry);
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        // src/ghost.cpp is deliberately NOT written to the repo.
+
+        let task = tu_task(6401, "src/ghost.cpp", None);
+        let analysis = backend
+            .analyze_task(&task, repo.path())
+            .expect("the body-only arm pins a missing file to empty-Ok, never Err");
+        assert_eq!(analysis.tu_file_id, FileId::from_relative_path("src/ghost.cpp"));
+        assert!(analysis.symbols.is_empty(), "missing source yields zero symbols");
+        assert!(analysis.edges.is_empty(), "missing source yields zero edges");
+        assert!(
+            analysis.references.is_empty(),
+            "missing source yields zero references"
+        );
+    }
 }

@@ -401,6 +401,236 @@ mod fake_process_tests {
             "each task must execute exactly once when no backend failure occurs"
         );
     }
+
+    // ---- UTA-T5 item 4 (UTA-B6): two-permanent-failure fatal-path shape ----
+
+    struct TwoFatalBackend {
+        fatal_task_ids: [usize; 2],
+        successful_executions: Arc<AtomicUsize>,
+    }
+
+    impl WorkerBackend for TwoFatalBackend {
+        fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+            if self.fatal_task_ids.contains(&task.task_id) {
+                return Err(anyhow!(
+                    "simulated permanent crash for task {}",
+                    task.task_id
+                ));
+            }
+            self.successful_executions.fetch_add(1, Ordering::SeqCst);
+            Ok(TuAnalysis {
+                tu_file_id: task.tu.file_id,
+                context_name: task.tu.context_name.clone(),
+                ..Default::default()
+            })
+        }
+    }
+
+    fn assert_names_exactly_one_fatal(err_text: &str, first: usize, second: usize) {
+        let names_first = err_text.contains(&format!("Task {first}"));
+        let names_second = err_text.contains(&format!("Task {second}"));
+        assert!(
+            names_first ^ names_second,
+            "the pool must keep exactly the FIRST fatal error, got: {err_text}"
+        );
+        assert!(
+            err_text.contains("failed after 0 retries"),
+            "the fatal error must state the exhausted retry budget: {err_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_permanent_failures_surface_only_the_first_error_while_successes_complete() {
+        // 3 workers, fatal tasks carry the two highest costs: the two
+        // workers that draw them send one error each and break, and under
+        // EVERY interleaving at least one survivor drains all three good
+        // tasks exactly once.
+        let tus = vec![
+            TuTask {
+                task_id: 9501,
+                tu: make_tagged_tu("fatal_a.cpp"),
+                estimated_cost: 60,
+                context: None,
+            },
+            TuTask {
+                task_id: 9502,
+                tu: make_tagged_tu("fatal_b.cpp"),
+                estimated_cost: 50,
+                context: None,
+            },
+            TuTask {
+                task_id: 9503,
+                tu: make_tagged_tu("good_a.cpp"),
+                estimated_cost: 40,
+                context: None,
+            },
+            TuTask {
+                task_id: 9504,
+                tu: make_tagged_tu("good_b.cpp"),
+                estimated_cost: 30,
+                context: None,
+            },
+            TuTask {
+                task_id: 9505,
+                tu: make_tagged_tu("good_c.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
+        ];
+        let mut queue = PrioritizedTuQueue::new(tus);
+        let successful_executions = Arc::new(AtomicUsize::new(0));
+        let pool = WorkerPool::new(
+            TwoFatalBackend {
+                fatal_task_ids: [9501, 9502],
+                successful_executions: Arc::clone(&successful_executions),
+            },
+            WorkerPoolConfig {
+                num_workers: 3,
+                max_retries: 0,
+                ..Default::default()
+            },
+        );
+        let repo = tempfile::tempdir().expect("repo tempdir");
+
+        let err = pool
+            .run_worker_pool(repo.path(), &mut queue)
+            .await
+            .expect_err("any exhausted-retry task must make the run Err");
+        assert_names_exactly_one_fatal(&format!("{err:#}"), 9501, 9502);
+        assert_eq!(
+            successful_executions.load(Ordering::SeqCst),
+            3,
+            "non-failing tasks must still run to completion alongside the fatal pair"
+        );
+        assert!(
+            queue.is_empty(),
+            "the survivor must drain every remaining task"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_is_restored_with_residue_when_both_workers_break_on_fatal_tasks() {
+        // 2 workers, BOTH top-cost tasks are fatal: each worker sends its
+        // error and breaks, leaving the lower-cost good task unpopped. The
+        // caller's queue must be restored holding that residue (characterized
+        // here because pre-UTA-B6 the restore had no assertion at all).
+        let tus = vec![
+            TuTask {
+                task_id: 9601,
+                tu: make_tagged_tu("fatal_a.cpp"),
+                estimated_cost: 60,
+                context: None,
+            },
+            TuTask {
+                task_id: 9602,
+                tu: make_tagged_tu("fatal_b.cpp"),
+                estimated_cost: 50,
+                context: None,
+            },
+            TuTask {
+                task_id: 9603,
+                tu: make_tagged_tu("good_solo.cpp"),
+                estimated_cost: 30,
+                context: None,
+            },
+        ];
+        let mut queue = PrioritizedTuQueue::new(tus);
+        let successful_executions = Arc::new(AtomicUsize::new(0));
+        let pool = WorkerPool::new(
+            TwoFatalBackend {
+                fatal_task_ids: [9601, 9602],
+                successful_executions: Arc::clone(&successful_executions),
+            },
+            WorkerPoolConfig {
+                num_workers: 2,
+                max_retries: 0,
+                ..Default::default()
+            },
+        );
+        let repo = tempfile::tempdir().expect("repo tempdir");
+
+        let err = pool
+            .run_worker_pool(repo.path(), &mut queue)
+            .await
+            .expect_err("exhausted retries must surface an error");
+        assert_names_exactly_one_fatal(&format!("{err:#}"), 9601, 9602);
+        assert_eq!(
+            successful_executions.load(Ordering::SeqCst),
+            0,
+            "characterization: with no surviving worker the good task is not starved silently - \
+             it remains queued for the caller to retry"
+        );
+        assert_eq!(queue.len(), 1, "the unpopped residue must be restored");
+        let residue = queue.pop_next().expect("restored queue holds the residue");
+        assert_eq!(
+            residue.task_id, 9603,
+            "the restored task must be the good task verbatim"
+        );
+        assert!(queue.is_empty());
+    }
+
+    // ---- UTA-T5 item 9: empty queue + zero-worker clamp --------------------
+
+    #[tokio::test]
+    async fn empty_queue_run_returns_ok_empty_and_leaves_the_queue_empty() {
+        let mut queue = PrioritizedTuQueue::new(vec![]);
+        let pool = WorkerPool::new(
+            TagBySourcePathBackend,
+            WorkerPoolConfig {
+                num_workers: 2,
+                max_retries: 0,
+                ..Default::default()
+            },
+        );
+        let repo = tempfile::tempdir().expect("repo tempdir");
+
+        let analyses = pool
+            .run_worker_pool(repo.path(), &mut queue)
+            .await
+            .expect("an empty queue is a clean Ok(empty) run, not an error");
+        assert!(analyses.is_empty());
+        assert!(queue.is_empty());
+        assert_eq!(queue.total_tasks(), 0);
+    }
+
+    #[tokio::test]
+    async fn zero_worker_config_clamps_to_one_worker_and_drains_the_queue() {
+        let tus = vec![
+            TuTask {
+                task_id: 9701,
+                tu: make_tagged_tu("zero_a.cpp"),
+                estimated_cost: 20,
+                context: None,
+            },
+            TuTask {
+                task_id: 9702,
+                tu: make_tagged_tu("zero_b.cpp"),
+                estimated_cost: 10,
+                context: None,
+            },
+        ];
+        let mut queue = PrioritizedTuQueue::new(tus);
+        let total_executions = Arc::new(AtomicUsize::new(0));
+        let pool = WorkerPool::new(
+            CountingBackend {
+                total_executions: Arc::clone(&total_executions),
+            },
+            WorkerPoolConfig {
+                num_workers: 0,
+                max_retries: 0,
+                ..Default::default()
+            },
+        );
+        let repo = tempfile::tempdir().expect("repo tempdir");
+
+        let analyses = pool
+            .run_worker_pool(repo.path(), &mut queue)
+            .await
+            .expect("num_workers: 0 must clamp to one draining worker");
+        assert_eq!(analyses.len(), 2);
+        assert_eq!(total_executions.load(Ordering::SeqCst), 2);
+        assert!(queue.is_empty());
+    }
 }
 
 #[cfg(test)]

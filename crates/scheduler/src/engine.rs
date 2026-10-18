@@ -126,6 +126,61 @@ fn shard_prepass(
     Ok(prepass)
 }
 
+/// Envelope each fresh analysis with the fingerprint the prepass claimed for
+/// its file id, persist it, and move the analysis into `completed_analyses`.
+///
+/// UTA-B6 surfacing (replaces the `unwrap_or_default()` + `let _ =` swallows):
+/// * an analysis whose `tu_file_id` was never claimed by this shard run is
+///   NOT checkpointed (an empty fingerprint would fake a valid envelope);
+///   the incident is warned per unit and counted.
+/// * a failed `save_shard` is warned with its IO error and counted; the
+///   analysis itself is still valid, so the run continues (a lost checkpoint
+///   costs a re-analysis next run, never a wrong answer).
+///
+/// Run-level incident totals are warned as one aggregate line when nonzero.
+fn persist_shard_checkpoints(
+    new_analyses: Vec<TuAnalysis>,
+    pending_fingerprints: &mut HashMap<u64, String>,
+    checkpoint_dir: &Path,
+    completed_analyses: &mut Vec<TuAnalysis>,
+) {
+    let mut skipped_foreign = 0usize;
+    let mut save_failures = 0usize;
+    for analysis in new_analyses {
+        let claimed_fingerprint = pending_fingerprints.remove(&analysis.tu_file_id.0);
+        let Some(fingerprint) = claimed_fingerprint else {
+            skipped_foreign += 1;
+            eprintln!(
+                "ariadne-scheduler: WARNING: dropping shard checkpoint for foreign TU file id \
+                 {} (no prepass claim; an empty fingerprint would fake a valid envelope); \
+                 the analysis itself still flows into the reduction",
+                analysis.tu_file_id.0
+            );
+            completed_analyses.push(analysis);
+            continue;
+        };
+        let checkpoint = ShardCheckpoint {
+            fingerprint,
+            analysis: analysis.clone(),
+        };
+        if let Err(save_error) = save_shard(checkpoint_dir, &checkpoint) {
+            save_failures += 1;
+            eprintln!(
+                "ariadne-scheduler: WARNING: shard checkpoint save failed for TU file id \
+                 {}: {save_error}; the analysis itself still flows into the reduction",
+                analysis.tu_file_id.0
+            );
+        }
+        completed_analyses.push(analysis);
+    }
+    if skipped_foreign > 0 || save_failures > 0 {
+        eprintln!(
+            "ariadne-scheduler: WARNING: shard checkpoint incidents this run: \
+             {skipped_foreign} skipped-foreign, {save_failures} failed saves"
+        );
+    }
+}
+
 /// The plugin that owns a unit's language; an unclaimed path is a clear
 /// "unhandled language" error (§3.3 fact 3), never a silent C++ analysis.
 fn plugin_for_tu<'a>(
@@ -264,17 +319,12 @@ impl<'a> ProductionAnalyzer<'a> {
             let new_analyses = pool.run_worker_pool(&self.repo.root, &mut queue).await?;
             peak_mem = pool.peak_memory_bytes();
 
-            for analysis in new_analyses {
-                let fingerprint = pending_fingerprints
-                    .remove(&analysis.tu_file_id.0)
-                    .unwrap_or_default();
-                let checkpoint = ShardCheckpoint {
-                    fingerprint,
-                    analysis: analysis.clone(),
-                };
-                let _ = save_shard(&checkpoint_dir, &checkpoint);
-                completed_analyses.push(analysis);
-            }
+            persist_shard_checkpoints(
+                new_analyses,
+                &mut pending_fingerprints,
+                &checkpoint_dir,
+                &mut completed_analyses,
+            );
         }
 
         // Sharded reduction across partitions
@@ -459,5 +509,219 @@ mod tests {
         assert_eq!(res2.stats.reused_tus, 2);
         assert_eq!(res2.stats.reanalyzed_tus, 0);
         assert_eq!(res1.reduced_model.symbols, res2.reduced_model.symbols);
+    }
+
+    // ---- UTA-T5 item 3 (UTA-B6): checkpoint-loop failure surfacing ---------
+
+    /// Two-unit C++ fixture shared by the checkpoint-loop tests.
+    fn production_pin_fixture(
+        root: &std::path::Path,
+    ) -> (
+        Repository,
+        RepositoryDiscoveryResult,
+        BuildDiscoveryResult,
+    ) {
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("a.cpp"), "class Alpha {};").unwrap();
+        fs::write(src_dir.join("b.cpp"), "class Beta { Alpha a; };").unwrap();
+        let records = ["src/a.cpp", "src/b.cpp"]
+            .iter()
+            .enumerate()
+            .map(|(index, rel)| ariadne_repo::FileRecord {
+                id: FileId::from_relative_path(rel),
+                path: PathBuf::from(rel),
+                canonical_path: root.join(rel),
+                kind: ariadne_repo::FileKind::Source,
+                size: 100,
+                ownership: ariadne_repo::FileOwnership::Repository,
+                optimization_policy: ariadne_repo::OptimizationPolicy::Optimizable,
+                content_hash: format!("pin-hash-{index}"),
+                language: ariadne_repo::SourceLanguage::Cpp,
+            })
+            .collect();
+        let repo_discovery = RepositoryDiscoveryResult {
+            root: root.to_path_buf(),
+            files: records,
+            ownership_summary: HashMap::new(),
+            policy_summary: HashMap::new(),
+        };
+        let cmd = CompileCommand {
+            directory: root.to_path_buf(),
+            file: PathBuf::from("src/a.cpp"),
+            command: None,
+            arguments: vec![],
+            context_name: "default".into(),
+            output: None,
+        };
+        let build_discovery = BuildDiscoveryResult {
+            repo_root: root.to_path_buf(),
+            contexts: vec![],
+            translation_units: ["src/a.cpp", "src/b.cpp"]
+                .iter()
+                .map(|rel| TranslationUnit {
+                    file_id: FileId::from_relative_path(rel),
+                    source_path: PathBuf::from(rel),
+                    context_name: "default".into(),
+                    compile_command: cmd.clone(),
+                    language: Default::default(),
+                })
+                .collect(),
+        };
+        (
+            Repository {
+                root: root.to_path_buf(),
+            },
+            repo_discovery,
+            build_discovery,
+        )
+    }
+
+    fn pin_registry() -> Arc<LanguageRegistry> {
+        Arc::new(
+            LanguageRegistry::new().register(Box::new(ariadne_lang_cpp::CppPlugin::new())),
+        )
+    }
+
+    #[tokio::test]
+    async fn foreign_tu_file_id_is_never_checkpointed_with_an_empty_fingerprint() {
+        use crate::queue::TuTask;
+
+        // A backend that answers every task with a foreign unit's file id:
+        // the checkpoint loop must not write an envelope for an id this shard
+        // run never claimed (the empty `unwrap_or_default()` fingerprint).
+        struct ForeignIdBackend;
+        impl WorkerBackend for ForeignIdBackend {
+            fn analyze_task(&self, task: &TuTask, _repo_root: &Path) -> Result<TuAnalysis> {
+                Ok(TuAnalysis {
+                    tu_file_id: FileId::from_relative_path("foreign/ghost.cpp"),
+                    context_name: task.tu.context_name.clone(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (repo, repo_discovery, build_discovery) = production_pin_fixture(root);
+        let checkpoint_dir = root.join("artifacts").join("shards");
+
+        let analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
+            .with_checkpoint_dir(checkpoint_dir.clone())
+            .with_registry(pin_registry())
+            .with_backend(Arc::new(ForeignIdBackend));
+        let result = analyzer.analyze().await.unwrap();
+
+        // The foreign analyses still flow through the reduction (no data
+        // loss from skipping the checkpoint write).
+        assert_eq!(result.stats.progress_completed, 2);
+        assert_eq!(result.index_result.tu_analyses.len(), 2);
+
+        // But no shard may be written under an unclaimed id.
+        let foreign_id = FileId::from_relative_path("foreign/ghost.cpp");
+        assert!(
+            load_shard(&checkpoint_dir, foreign_id).is_none(),
+            "a foreign tu_file_id must not be checkpointed with the \
+             unwrap_or_default() empty fingerprint"
+        );
+        let json_shards: Vec<std::path::PathBuf> = fs::read_dir(&checkpoint_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.to_string_lossy().ends_with(".json"))
+            .collect();
+        assert!(
+            json_shards.is_empty(),
+            "no shard may be written for an unclaimed analysis: {json_shards:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_save_failure_surfaces_but_does_not_kill_the_run() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (repo, repo_discovery, build_discovery) = production_pin_fixture(root);
+        let checkpoint_dir = root.join("artifacts").join("shards");
+        fs::create_dir_all(&checkpoint_dir).unwrap();
+
+        // A directory squatting on a.cpp's shard path makes fs::rename fail
+        // there (EISDIR on unix, ERROR_ACCESS_DENIED on Windows) while b.cpp
+        // saves normally.
+        let a_id = FileId::from_relative_path("src/a.cpp");
+        let blocked_path = checkpoint_dir.join(format!("{}.json", a_id.0));
+        fs::create_dir_all(&blocked_path).unwrap();
+
+        let analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery)
+            .with_checkpoint_dir(checkpoint_dir.clone())
+            .with_registry(pin_registry());
+        let result = analyzer
+            .analyze()
+            .await
+            .expect("a failed checkpoint save must not fail the whole analysis");
+
+        // Both units still complete and reduce.
+        assert_eq!(result.stats.progress_completed, 2);
+
+        // The blocked shard stayed absent (the rename never replaced the
+        // directory); the healthy shard saved normally. The incident itself
+        // surfaces as a WARNING on stderr (non-silent channel; see journal
+        // for why the count is not a return-value field).
+        assert!(
+            blocked_path.is_dir(),
+            "a failed save must leave the target untouched, not a partial shard"
+        );
+        let b_id = FileId::from_relative_path("src/b.cpp");
+        let saved = load_shard(&checkpoint_dir, b_id).expect("the healthy shard must be saved");
+        assert!(!saved.fingerprint.is_empty(), "saved fingerprints stay honest");
+    }
+
+    // ---- UTA-T5 item 6: stat formatting boundaries + peak floor ------------
+
+    #[test]
+    fn format_memory_boundary_table() {
+        assert_eq!(ProductionAnalysisStats::format_memory(0), "0 B");
+        assert_eq!(ProductionAnalysisStats::format_memory(1023), "1023 B");
+        assert_eq!(ProductionAnalysisStats::format_memory(1024), "1.0 KB");
+        assert_eq!(ProductionAnalysisStats::format_memory(1_048_575), "1024.0 KB");
+        assert_eq!(ProductionAnalysisStats::format_memory(1_048_576), "1.0 MB");
+        assert_eq!(ProductionAnalysisStats::format_memory(1_073_741_823), "1024.0 MB");
+        assert_eq!(ProductionAnalysisStats::format_memory(1_073_741_824), "1.0 GB");
+    }
+
+    #[test]
+    fn format_elapsed_boundary_table() {
+        assert_eq!(
+            ProductionAnalysisStats::format_elapsed(Duration::from_secs_f64(0.0)),
+            "0.00s"
+        );
+        // Just under a minute: still seconds-formatted with 2 decimals.
+        assert_eq!(
+            ProductionAnalysisStats::format_elapsed(Duration::from_secs_f64(59.99)),
+            "59.99s"
+        );
+        // Exactly a minute flips to the minute form.
+        assert_eq!(
+            ProductionAnalysisStats::format_elapsed(Duration::from_secs(60)),
+            "1m 0s"
+        );
+        assert_eq!(
+            ProductionAnalysisStats::format_elapsed(Duration::from_secs(522)),
+            "8m 42s"
+        );
+    }
+
+    #[test]
+    fn peak_memory_floor_is_one_megabyte_when_nothing_was_measured() {
+        let dir = tempdir().unwrap();
+        let (repo, repo_discovery, build_discovery) = production_pin_fixture(dir.path());
+        let analyzer = ProductionAnalyzer::new(&repo, &repo_discovery, &build_discovery);
+        // A run whose pool never measured (empty backend path): the reported
+        // peak floors at 1 MB instead of an honest-looking zero.
+        let floored = analyzer.build_analysis_stats(2, 2, 0, 0, Duration::ZERO, 0, 2);
+        assert_eq!(floored.peak_memory_bytes, 1024 * 1024);
+        // Anything above the floor is reported verbatim.
+        let measured =
+            analyzer.build_analysis_stats(2, 2, 0, 5 * 1024 * 1024, Duration::ZERO, 0, 2);
+        assert_eq!(measured.peak_memory_bytes, 5 * 1024 * 1024);
     }
 }

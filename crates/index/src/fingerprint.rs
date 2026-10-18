@@ -18,8 +18,23 @@ pub fn hash_parts(parts: &[&str]) -> String {
 /// Deterministic serialization of the build discovery used as the contexts
 /// stage material. Must stay identical everywhere the contexts fingerprint is
 /// derived (scheduler incremental path and the pipeline alike).
-pub fn contexts_material(contexts: &[CompilationContext], tus: &[TranslationUnit]) -> String {
-    serde_json::to_string(&(contexts, tus)).unwrap_or_default()
+///
+/// Generic over `Serialize` (mirroring the AR-05 seam at `cache.rs::context_
+/// hash_of`) so tests can inject a serialization failure without a feature
+/// flag; concrete callers pass `&[CompilationContext]`/`&[TranslationUnit]`.
+///
+/// Fail-closed (UTA-B2): a serialization failure yields a distinctive
+/// `SERIALIZE-FAILED:<error>` material instead of `unwrap_or_default()`'s
+/// empty string. The material stays deterministic for identical inputs, can
+/// never equal an honestly serialized material, and differs across distinct
+/// serializer errors, so a failing discovery invalidates (stale -> rebuild)
+/// rather than silently reusing stale stage artifacts.
+pub fn contexts_material(
+    contexts: &[impl serde::Serialize],
+    tus: &[impl serde::Serialize],
+) -> String {
+    serde_json::to_string(&(contexts, tus))
+        .unwrap_or_else(|error| format!("SERIALIZE-FAILED:{error}"))
 }
 
 pub fn contexts_fingerprint(repository_fingerprint: &str, material: &str) -> String {
@@ -169,5 +184,83 @@ mod tests {
     fn test_hash_parts_deterministic() {
         assert_eq!(hash_parts(&["a", "b"]), hash_parts(&["a", "b"]));
         assert_ne!(hash_parts(&["ab"]), hash_parts(&["a", "b"]));
+    }
+
+    // ---- UTA-B2: contexts_material must fail closed on serialization ------
+    // Failure-seam style mirrors cache.rs AR-05 (`InjectedUnserializableContext`).
+
+    /// Test-only slice element whose `Serialize` impl always fails, injecting
+    /// the serialization-failure branch of `contexts_material` without a
+    /// feature flag. The carried label makes distinct failing states produce
+    /// distinct serializer errors.
+    #[derive(Debug)]
+    struct InjectedUnserializableContext(&'static str);
+
+    impl serde::Serialize for InjectedUnserializableContext {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            _serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom(self.0))
+        }
+    }
+
+    fn empty_tus() -> &'static [TranslationUnit] {
+        &[]
+    }
+
+    #[test]
+    fn contexts_material_surfaces_serialize_failure_instead_of_empty_string() {
+        let failing = [InjectedUnserializableContext(
+            "injected serialize failure (UTA-B2 regression seam) alpha",
+        )];
+        let material = contexts_material(&failing, empty_tus());
+        assert!(
+            material.starts_with("SERIALIZE-FAILED"),
+            "a discovery whose serialization fails must not masquerade as the \
+             honest-empty material: {material:?}"
+        );
+        // Determinism: the same failing inputs reproduce the same material,
+        // so the contexts fingerprint stays a function of the inputs.
+        assert_eq!(material, contexts_material(&failing, empty_tus()));
+    }
+
+    #[test]
+    fn contexts_material_distinct_failures_do_not_share_one_material() {
+        // The empty-string bug made EVERY failing discovery share one
+        // material, so stale-after-change detection died silently.
+        let alpha = [InjectedUnserializableContext(
+            "injected serialize failure (UTA-B2 regression seam) alpha",
+        )];
+        let beta = [InjectedUnserializableContext(
+            "injected serialize failure (UTA-B2 regression seam) beta",
+        )];
+        assert_ne!(
+            contexts_material(&alpha, empty_tus()),
+            contexts_material(&beta, empty_tus()),
+            "two different failing discovery states must not collide on one material"
+        );
+    }
+
+    #[test]
+    fn contexts_material_failure_fingerprint_differs_from_honest_states() {
+        let failing = [InjectedUnserializableContext(
+            "injected serialize failure (UTA-B2 regression seam) alpha",
+        )];
+        let failing_material = contexts_material(&failing, empty_tus());
+        let honest_empty_material =
+            contexts_material(&[] as &[CompilationContext], empty_tus());
+        let repository = "repo-fp";
+        assert_ne!(
+            contexts_fingerprint(repository, &failing_material),
+            contexts_fingerprint(repository, &honest_empty_material),
+            "a failing discovery must not fingerprint like an honestly empty one"
+        );
+        assert_ne!(
+            contexts_fingerprint(repository, &failing_material),
+            contexts_fingerprint(repository, ""),
+            "a failing discovery must not fingerprint like the legacy \
+             unwrap_or_default() empty string (fail-closed: stale -> rebuild)"
+        );
     }
 }

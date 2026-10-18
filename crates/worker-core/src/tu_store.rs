@@ -702,4 +702,13 @@ mod tests {
         let (ok_analysis, _fp) = full_analysis(&ok_tu, root, &ctx).unwrap();
         assert!(ok_analysis.symbols.iter().any(|s| s.name == "Ok"));
     }
+
+    // UTA-T5 pin modules (concurrency lock, corrupt-shard, edge_destinations,
+    // fingerprint_scoped_context) live in `t5_pins` below - moved out when
+    // this file approached the 1000-line hygiene ceiling; the child module
+    // keeps access to the private seams these tests exercise.
 }
+
+#[cfg(test)]
+#[path = "tu_store_t5_pins.rs"]
+mod t5_pins;
