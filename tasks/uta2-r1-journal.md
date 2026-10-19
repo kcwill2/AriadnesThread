@@ -210,3 +210,12 @@ weakened.
   `INDEX_HTML` import in export.rs; unused `gen` parameter in the
   header-based `build_subtree_nodes` (kept for signature symmetry; the
   header builder genuinely does not read the generation).
+
+## Witness rider (post-commit)
+- Scoped commit: `af8a997` (base 19349b3), 14 paths, all inside the
+  touch-set: 2 src files (api_graph.rs, api_source.rs), 10 ui_test files
+  (incl. the new `static_html_standalone_export.rs`), this journal.
+- `commit_scoped.py` stages and commits atomically (no interleaved
+  staging window), so the encoding witnesses ran against the committed
+  state: `encoding_guard.py --all` exit 0 (covers the committed blobs)
+  and `--staged` exit 0 (clean index), mirroring the T5/T6 pattern.
