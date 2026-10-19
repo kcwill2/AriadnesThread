@@ -472,3 +472,6 @@ mod literal_position_tests;
 
 #[cfg(test)]
 mod fixture_parity_tests;
+
+#[cfg(test)]
+mod raw_string_multibyte_tests;

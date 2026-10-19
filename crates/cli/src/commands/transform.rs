@@ -505,4 +505,77 @@ mod tests {
              chain, got: {chain}"
         );
     }
+
+    /// UTA2-R5 row 5: table-driven coverage of the three action arms
+    /// (`extract_plan_headers`, `build_migration_preview`,
+    /// `apply_transform_plan`) for honest Err reporting. The verification
+    /// survey found m20's integration characterization already locks the
+    /// unknown-plan and missing-repo Err arms for `build_migration_preview`
+    /// and `apply_transform_plan`, but ZERO behavioral coverage for the
+    /// `transform extract` arm (only the clap parse-shape test). This table
+    /// drives all three arms through the two scenarios the m20 rows pin for
+    /// its two functions, so every arm owns its honest-failure contract
+    /// inside the crate.
+    #[test]
+    fn every_action_arm_reports_honest_err_without_a_repository_or_a_plan() {
+        use super::{apply_transform_plan, build_migration_preview, extract_plan_headers};
+        use std::path::{Path, PathBuf};
+
+        type ArmOutcome = anyhow::Result<()>;
+        let arms: Vec<(&'static str, Box<dyn Fn(&Path, &str) -> ArmOutcome>)> = vec![
+            (
+                "transform extract",
+                Box::new(|repo, plan| extract_plan_headers(&PathBuf::from(repo), plan)),
+            ),
+            (
+                "migrate preview",
+                Box::new(|repo, plan| build_migration_preview(&PathBuf::from(repo), plan, false)),
+            ),
+            (
+                "apply",
+                Box::new(|repo, plan| apply_transform_plan(&PathBuf::from(repo), plan)),
+            ),
+        ];
+
+        // Scenario 1 - unlocatable repository path: every arm must bail on
+        // Repository::locate with the frozen user-facing text (the same
+        // contract m20 pins for its two arms; extract joins the table).
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_micros();
+        let missing_root =
+            std::env::temp_dir().join(format!("uta2-r5-arm-none-located-{unique}"));
+        assert!(
+            !missing_root.exists(),
+            "fixture precondition: the missing path must not exist"
+        );
+        for (arm_name, check_arm) in &arms {
+            let locate_error = check_arm(&missing_root, "PLAN-999")
+                .err()
+                .unwrap_or_else(|| panic!("'{arm_name}' must fail on an unlocatable path"));
+            let rendered = format!("{locate_error:#}");
+            assert!(
+                rendered.contains("Failed to locate repository path"),
+                "'{arm_name}' must surface the frozen locate failure, got: {rendered}"
+            );
+        }
+
+        // Scenario 2 - a locatable but artifact-free repository: no plan can
+        // ever resolve, so every arm must still report an Err (never a
+        // vacuous Ok), carrying a real message.
+        let empty_repo = tempfile::tempdir().expect("fresh temp repo dir");
+        for (arm_name, check_arm) in &arms {
+            let empty_repo_error = check_arm(empty_repo.path(), "PLAN-999")
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("'{arm_name}' must not report Ok when no plan artifacts exist")
+                });
+            let rendered = format!("{empty_repo_error:#}");
+            assert!(
+                !rendered.trim().is_empty(),
+                "'{arm_name}' must carry a real failure message, got an empty one"
+            );
+        }
+    }
 }

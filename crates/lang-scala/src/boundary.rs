@@ -16,3 +16,6 @@ pub const EXTERNAL_PATH_MARKERS: &[&str] = &["lib", "target", ".ivy2", ".cache"]
 pub(crate) fn is_external_boundary_component(component: &str) -> bool {
     EXTERNAL_PATH_MARKERS.contains(&component)
 }
+
+#[cfg(test)]
+mod boundary_pin_tests;

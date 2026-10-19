@@ -562,3 +562,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod plugin_probe_arm_tests;
