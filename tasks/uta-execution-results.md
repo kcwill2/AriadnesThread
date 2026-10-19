@@ -449,3 +449,338 @@ H5 downgrade. **Owed at closeout (fresh session):** `testrun.py --baseline`,
 worktree-census-clean check, and the deferred-findings rows routed in each hand's
 verdict (see per-hand sections).
 
+---
+
+# Round 2 (UTA2) - Hand R1 (uta2-r1) gated - reviewer addendum (2026-10-19)
+
+Scope: reviewer's fresh gate evidence for Round-2 hand R1 `uta2-r1`, commits
+`af8a997` + `64314d7` (journal rider) on handoff base `19349b3` (commit parent is
+`89fb908` - the sibling `uta2-r2` tools hand landed between; sequencing artifact,
+the hand's two commits are exactly the declared ones). Shipped by a SUCCESSOR
+session after the original implementer died with tests authored / src uncommitted
+(recovery trail: journal "Successor session completion log" + consumer-greps + the
+MECHANISM CORRECTION section). Verdict: `tasks/uta2-r1-verdict.md` - **APPROVED**
+(4 non-blocking findings, none required changes).
+
+## Acceptance criteria vs observed evidence
+
+| # | Criterion (handoff gates + running contract) | Observed | Evidence line (verbatim) |
+|---|---|---|---|
+| 1 | Scoped ui suite green, expected 369/0/0/3 | PASS | `python tools/testrun.py --distill -- -p ariadne-ui` -> `### cargo test PASS (exit 0) [capture: C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt, 406 lines]` / `369 passed / 0 failed / 0 ignored / 3 suites`; arithmetic: journal red `358 passed / 11 failed / 0 ignored / 2 suites` + zero deletions = 369 (all 11 reds converted) |
+| 2 | ui_smoke real boot of changed endpoints | PASS | `python tools/distill.py -- python tools/ui_smoke.py` -> `ui_smoke: PASS` / `boot+route checks clean (cold fixture, attempt 1, 1.0s)` (direct invocation refused - allowlist shape, mirrors the implementer's journal note) |
+| 3 | Per-commit review oldest-first | PASS | `af8a997` reviewed file-by-file (`git show` per path; 14 files, +1844/-117); `64314d7` journal-only (+9); 117 deletions are the replaced pre-fix emission code + the renamed test's 200-only bodies (strengthened, handoff-authorized) + the relocated standalone-export test - zero weakened assertions (graph_api.rs diff audited hunk-by-hunk) |
+| 4 | Commit-vs-touch-set (`crates/ui/**` + journal) | PASS | `git diff --name-only af8a997^..64314d7` -> 14 paths: 2 src (`routes/api_graph.rs`, `routes/api_source.rs`) + 10 ui_test files + journal; NO assets JS, NO `crates/graph`, NO Cargo files, frozen harness `common.rs` NOT in the commit |
+| 5 | UTB-1/2 fix quality: ONE numeric-sorted node set driving nodes AND edges | PASS | `closure_node_ids` = closure \ dep \ file_paths-unregistered, `sort_unstable_by_key(\|id\| id.0)` ascending; edges iterate the ordered slice gated by `node_set.contains(&target)` -> ghost/deps impossible as source OR target; deterministic edge order via AR-09 sorted+dedup adjacency (`graph.rs:233-240`, locked by `ar09_adjacency_equivalence_test`); old closure-based functions REPLACED (no dual representation); pins: exact edge set `["4->5"]` over ghost fixture, byte-equal twin builds, literal `[3,8,16,23,31,42,47,61]` |
+| 6 | MECHANISM CORRECTION (seed-exclusion convention) independently verified | PASS - TRUE | `closures_tests.rs:88-98` locks "a member's closure never contains itself" -> handoff's literal dep-red cannot fail; real orphan channel is nodes=`closure ∩ file_paths` vs edges testing bare closure; journal recorded this BEFORE fixing; shipped red asserts both directions + never-references-dep |
+| 7 | UTB-3 sorted repo-relative values + consumer-grep claims | PASS | `api_repo_info` emits sorted `strip_prefix(repo_root)` values; reviewer spot-checks: `extensions/**` has exactly ONE `file_paths` occurrence (`extension.ts:18` type annotation, no reader); `m16_traversal_test.rs:142` existence-only; other integration hits are `IncludeGraph.file_paths` plumbing; ui assets grep `repo-info|file_paths` -> no files found; red genuine (pre-fix `["12","3","9"]`) |
+| 8 | UTB-4 rank-order restoration + extraction equivalence | PASS | `traversal.rs:256-264` degree-desc/id-asc + truncate-after-sort; handler maps `hubs_ids` through `element_by_id` (rank order restored); roots/leaves loop moved verbatim (identical guards) -> behavior-equivalent extraction; consumer allowance verified: `api.js:343-346` `.map` on object -> always error branch; hub comparisons sorted (`graph_api.rs:283`) or existence-only; `limit=1` pin `"2"` survives honestly (fixture rank #1, degree 2; rank sequence `[2,7,1,30]` observable vs emission `[1,2,7,30]`) |
+| 9 | THE THREE RE-PINS - each a broken-test re-pin, never a weakening | ACCEPTED x3 | (1) `keys.sort()` vs unsorted literal is self-contradictory - re-pin holds the same 7-key set, reviewer verified the new literal is correctly sorted; (2) `sorted_node_ids` lexicographic (`traversal_matrix.rs:125-129`, `"30"<"4"`) can never equal `["4","5","30"]` - re-pin pins RAW emission order (stronger); (3) A2 rule verified: `load.rs:336-357` drops any defining file equal to a SEED file WHOLESALE, locks at `load_justification_tests.rs:433/:479` - old expectations provably wrong, override intent preserved via untouched `analyzed_symbol_ids` asserts |
+| 10 | graph_arms_matrix fixture deviation + harness untouched | PASS (accepted) | `common::ready_state` hardwires `empty_reduced_model()` (`common.rs:215-228`) - trap claim TRUE; `arms_state` builds via `UiState::new_loaded` with the target model (`graph_arms_matrix.rs:114-128`); `common.rs` absent from the commit (criterion 4); zero assertion changes |
+| 11 | static_html split verbatim + 9th asset row + registration | PASS | `test_standalone_export_inlines_all_split_assets` body matches the removed hunk line-for-line in `static_html_standalone_export.rs`; `main.rs` registers all 7 new modules; asset table `[(&str,&str,&str); 8] -> 9` with `/app/traversal.js`+`TRAVERSAL_JS` inserted, no existing row edited |
+| 12 | Hygiene gate exit 0 | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)`; warned lines in the two touched files all sit OUTSIDE every modified hunk (hunk-header audit - git blame denied by allowlist) -> journal's "all pre-existing R3" claim verified |
+| 13 | Encoding gate exit 0 | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)`, capture 0 lines |
+| 14 | Tool suite (CI) green | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 274 tests in 22.454s` / `OK` - the +42 over the T7b-era 232 belong to the sibling `uta2-r2` hand (`89fb908`), not this hand (zero tools paths here) |
+| 15 | Report-evidence check (digest-shaped, distilling entry points) | PASS | Journal red/green canonical lines + capture paths + witness rider, zero raw dumps; scoped commit via `commit_scoped.py` (2 declared scopes) |
+| 16 | Deviations independently adjudicated (D1-D10) | ACCEPTED x10 | Verdict table: D1 mechanism-correction red shape, D2 file_paths sort, D3 UTB-4 FIX branch, D4 fixture via new_loaded, D5-D7 the three re-pins, D8 R1 extraction, D9 R2 split, D10 ui_smoke via distill |
+
+## Not run (explicit statement)
+
+- `python tools/testrun.py --baseline`, `python tools/bench_compare.py`: NOT run at
+  this hand (T1-T7b precedent; orchestrator's fresh-session milestone-closeout
+  gates). NOTE for closeout: Round 2 is live, so the ledger's "CLOSED 2026-10-19"
+  track row requires a re-closeout with a NEW ANCHOR after R2/R3 land.
+  `ui_smoke.py` WAS run this hand (named by the running contract).
+- `encoding_guard.py --staged`: vacuous post-commit (clean tree); superseded by the
+  `--all` run at HEAD (strict superset).
+- `golden_guard.py`: not applicable (prose lock clause; enforced via the deletion
+  audit, criterion 3 - all existing locks green in the fresh 369/0).
+
+## Refusals observed (configuration note, not skipped gates)
+
+Catch-all deny boilerplate (`{"permission":"bash","pattern":"*","action":"deny",
+"source":"global"}`) hit five shapes this review: `hygiene_check.py; echo
+"$LASTEXITCODE"`-style chains, `unittest ... 2>&1 | Select-Object -Last 3`,
+`Get-Content -Tail` (file reads moved to the Read tool), `git blame` x2 (warned
+lines adjudicated via diff hunk headers instead), and a plain `encoding_guard.py
+--all` first attempt inside a denied compound that was then rerun plain (exit 0).
+Every gate reran in permitted shapes - hygiene/encoding exit codes witnessed via
+`distill.py` digests; no gate skipped.
+
+## Reviewer artifacts + ledger routing
+
+`tasks/uta2-r1-verdict.md` + this addendum LEFT UNTRACKED per T1-T7b precedent
+(reviewer git-write denied). Closeout rows: verdict finding 2's owner-decision
+quirk pins (`file_count` undercount `api_graph.rs:672`, collateral
+`is_necessary=true`, ghost-in-collateral asymmetry, dead Err arm, `api.js:343-346`
+entrypoints-modal-never-renders bug, `ready_state_with_model` proposal,
+pre-existing ui-lib warnings) -> deferred-findings.
+
+---
+
+# Round 2 (UTA2) - Hand R2 (uta2-r2) gated - reviewer addendum (2026-10-19)
+
+Scope: reviewer's fresh gate evidence for Round-2 hand R2 `uta2-r2`, commits
+`89fb908` + `536a399` + `7a1ff41` + `eaeaf2d` (journal closeout) on base
+`19349b3`. The sibling R1 ui commits `af8a997`/`64314d7` interleave in history
+and were excluded - only the four named commits' diffs reviewed. Verdict:
+`tasks/uta2-r2-verdict.md` - **APPROVED** (2 minor findings, none blocking;
+all 4 deviations ACCEPTED).
+
+## Acceptance criteria vs observed evidence
+
+| # | Criterion (handoff gates + task contract) | Observed | Evidence line (verbatim) |
+|---|---|---|---|
+| 1 | Canonical tools suite green, expected 296 | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 22.676s` / `OK` (matches journal's `Ran 296 tests in 24.283s / OK`; 232 floor only grew) |
+| 2 | Per-commit review oldest-first | PASS | `git log --oneline 19349b3..HEAD` -> the four named commits + interleaved `af8a997`/`64314d7` (excluded, declared); each named commit reviewed via `git show` + per-file diffs + `--numstat` |
+| 3 | Commit-vs-touch-set (`tools/*.py`, `tools/*_tests.py`, journal; NO crates/**) | PASS | per-commit `git show --stat`: journal x4, 3 fixed scripts, 6 existing test files, 1 new test file - 14 paths total, all in-set; zero `crates/**` in ANY of the four |
+| 4 | Growth-only: 232 -> 296, zero existing tests edited | PASS | `--numstat` deletions column = 0 for EVERY `*_tests.py` across all four commits; 13 deletions total, all inside the three fixed scripts; arithmetic 232+19+23+22=296 reconciles with the executed line |
+| 5 | UTB-5 fix: non-numeric AND non-finite -> exit 2 ERROR, never traceback | PASS | live probe on a temp copy of the REAL `tools/bench_baseline.json` planted with `"abc"` (untracked phase) + `float("nan")` (tracked phase): rc=2 + `ERROR baseline entry ... has unusable phase value(s) ... nan is not finite / 'abc' is not a number`; whole-object screening; `compare_medians` untouched -> prior 46 semantics preserved; docstring/USAGE_TEXT exit-2 lines match observed behavior |
+| 6 | UTB-6 fix + error-class judgment | PASS (GitError reuse accepted) | live subprocess CLI in throwaway git repo: rc=2 + `ERROR baseline file tools/theme_token_baseline.json must contain a JSON object, got list` (names file/requirement/actual type); except tuple stays narrow by design; in-suite witnesses are process-level (`subprocess.run([sys.executable, TOOL_PATH, ...])`) |
+| 7 | UTB-7: nan+inf rejected at both CLIs; poll guard live + cannot regress bounded behavior | PASS | live argv witnesses `rc=2` x4 (`ERROR --timeout must be a finite number > 0, got nan\|inf`; `ERROR --timeout must be a positive finite number of seconds`); guard fires only for non-finite/non-positive - finite budgets fall through byte-unchanged; guard removal re-reds the forbidden-sleep test |
+| 8 | package_offline fake-subprocess fidelity (first-ever suite) | PASS | all 23 tests checked against `package_offline.py` call sites: SystemExit fail-fast msg shape, reuse `calls == []` vs build argv prefix+`--bin` pairs+cwd, ordered npm/vsce/npx argv lists incl. npx spelling + node_modules skip, real zip/tar.gz round-trip reads + stale replacement, `--no-archive` wiring, argparse exit 2; naming wart pinned via returned path + disclosed |
+| 9 | Pins rows 5-10 honest | PASS | row 9 code-verified (`fnmatchcase` at commit_scoped.py:94 crosses `/`), honest names + two-dir e2e witness; row 7 swallow matches checkpoint_guard.py:294-302 with closed-fence control; row 10 which()-resolved argv is true production behavior (`setup_dev_env.py:70`); rows 5/6/8 verified at testrun.py:147 / distill / encoding_guard usage paths |
+| 10 | Row-11 pins + mixing deviation | ACCEPTED | shipped in `89fb908` as `+151/-0` (build-fail EXIT_INTERNAL_ERROR+tail, retry exhaustion/mid-loop/non-retryable break) - pure addition, forced by file-scoped commits, disclosed |
+| 11 | Hygiene gate exit 0 | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)`; R3-only, zero warns in this hand's touched/created files; file-size lock tail-read: bench_compare_tests.py 924 < 1000, ui_smoke_tests.py 579, package_offline_tests.py 461 |
+| 12 | Encoding gate exit 0 over tracked content | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)`, capture 0 lines - strict-superset witness for the hand's declared `--staged` sequencing (accepted precedent chain incl. R1 rider `64314d7`) |
+| 13 | Report-evidence check (digest-shaped) | PASS | journal carries red/green canonical `Ran N ... FAILED/OK` lines + counts, zero raw dumps; gate commands are the handoff's own discover form (D2); commit via `commit_scoped.py` in-declared scopes |
+| 14 | Deviations independently adjudicated (4) | ACCEPTED x4 | D1 row-11 mixing (file-scoped commits, pure insertion); D2 per-file discover shape (identical engine, direct invocation off allowlist); D3 setup_dev_env test-side correction (code-proven truth; zero production edits); D4 `--staged`->`--all` sequencing (T1-T7b/R1 precedent; reviewer fresh `--all` exit 0 at HEAD) |
+
+## Not run (explicit statement)
+
+- `python tools/testrun.py --baseline` (drives `cargo test --workspace`,
+  source-verified): NOT run at this hand - Round-2 R2 declares "Gates:
+  unittest discover, no cargo" and zero non-Python paths exist in any of the
+  four commits (criterion 3). Owed at UTA2 closeout per T1-T7b/R1 precedent;
+  nothing here substitutes.
+- `python tools/ui_smoke.py` (full boot) and `python tools/bench_compare.py`
+  (full bench): cargo-bound, not required by this milestone's gates; replaced
+  by this review's live argv rejection witnesses + injected-runner compare
+  witness (no cargo launched) and the suites' 38/54-file coverage.
+- `encoding_guard.py --staged`: vacuous post-commit (clean tree); superseded
+  by the `--all` run at HEAD (criterion 12).
+- `golden_guard.py`: not applicable (prose lock clause: growth-only + <1000
+  lines, enforced via the zero-deletion test audit + tail-reads, criteria 4/11).
+
+## Refusals observed (configuration note, not skipped gates)
+
+Catch-all deny boilerplate (`{"permission":"bash","pattern":"*","action":"deny","source":"global"}`) hit five shapes this review: `git show --name-only --format="COMMIT %h <rev>"` and `git show --stat --format=...` (plain `git show --stat <rev>` ran fine), `;`-chained `$LASTEXITCODE` echoes and `python -c` (exit codes then witnessed via `python tools/distill.py -- python ...` digests: `### generic PASS (exit 0)` x2), `unittest ... | Select-Object -Last 3` (plain form ran, full `Ran 296 ... OK` quoted), `python tasks/<script>.py` (reviewer probe reran via the sanctioned `distill.py --` entry point), and `Remove-Item`/`cmd /c del` (probe scratch neutralized to 2-line comments instead - `tasks/r2-probe.py`, `tasks/r2-probe-driver.py` left untracked for closeout cleanup, verdict finding 2). Every expected gate ran; no gate skipped.
+
+## Reviewer artifacts + ledger routing
+
+`tasks/uta2-r2-verdict.md` + this addendum LEFT UNTRACKED per precedent
+(reviewer git-write denied). Closeout rows (deferred-findings): 
+`create_archive` with_suffix dotted-stem naming + dead `archive_base` local;
+fnmatch single-star `*`-crosses-`/` owner decision; checkpoint_guard
+unclosed-fence swallow; `--update-baseline` merge of corrupt foreign entries
+(rejected exit-2 downstream, no crash). Journal arithmetic: row-7 pin count
+"+4" is actually +5 (verdict finding 1, bookkeeping only).
+
+---
+
+# Round 2 (UTA2) - Hand R3 (uta2-r3) gated - reviewer addendum (2026-10-19)
+
+Scope: reviewer's fresh gate evidence for Round-2 hand R3 `uta2-r3`, single commit
+`b43d6da` on base `eaeaf2d` (HEAD at review time == the commit; tree dirty only in this
+results file + untracked reviewer artifacts). Verdict: `tasks/uta2-r3-verdict.md` -
+**APPROVED** (3 minor findings, none blocking; all 3 deviations ACCEPTED).
+
+## Acceptance criteria vs observed evidence
+
+| # | Criterion (handoff gates + task contract) | Observed | Evidence line (verbatim) |
+|---|---|---|---|
+| 1 | Scoped repo suite green, expected 38/0/0/5 | PASS | `python tools/testrun.py --distill --timeout 240 -- -p ariadne-repo` -> `### cargo test PASS (exit 0) [capture: C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt, 69 lines]` / `38 passed / 0 failed / 0 ignored / 5 suites`; arithmetic 27 baseline + 11 new = 38 |
+| 2 | Scoped lang-api suite green, expected 47/0/0/5 | PASS | `python tools/testrun.py --distill --timeout 240 -- -p ariadne-lang-api` -> `### cargo test PASS (exit 0) [capture: ...\target\testrun-capture.txt, 78 lines]` / `47 passed / 0 failed / 0 ignored / 5 suites` (42 + 5 pins) |
+| 3 | Per-commit review, single commit | PASS | `git log --oneline eaeaf2d..HEAD` -> single `b43d6da`; full `git show` reviewed file-by-file; +774/-2 - the 2 deletions are exactly the `use std::collections::HashMap;` line and the unguarded `stack.push(path);` |
+| 4 | Commit-vs-touch-set (`crates/repo/**`, `crates/lang-api/**` + tests dirs, journal) | PASS | `git diff --name-only eaeaf2d..HEAD` -> 8 paths: 4 repo src, 2 repo tests, 1 lang-api src, journal; nothing outside; no Cargo/other-crate/tools |
+| 5 | UTB-8 fix plan-literal (canonical visited set, push-time, raw fallback per file-side precedent) | PASS | discovery.rs hunk: root canonicalized at seed; dir admitted only on first-sight `insert(canonicalize().unwrap_or_else(\|_\| path.clone()))`; RAW path pushed, so `strip_prefix(root)` -> FileId/record paths unchanged; file-side precedent at :79 (base :70 as handoff cites); root-seed closes alias-to-root at push time |
+| 6 | FileId/record set unchanged on loop-free trees | PASS | m00 golden-baseline + facts-path parity + ar27 byte lock all green: `python tools/testrun.py --distill --timeout 240 -- -p ariadne-integration-tests --test m0_skeleton_test --test m00_golden_baseline_test --test m00_facts_path_parity_test` -> `5 passed / 0 failed / 0 ignored / 3 suites` |
+| 7 | Loop test genuine: real junction, bounded watchdog, cannot hang rerun, cannot pass vacuously | PASS | Watchdog read directly: spawned thread + `recv_timeout(15s)`, timeout arms panic, libtest process exits over orphan thread; reran `python tools/testrun.py -- -p ariadne-repo --test uta2_r3_symlink_loop_test -- --nocapture` -> `test discovery_terminates_on_directory_loop_and_records_loop_target_once ... ok ... finished in 0.02s` / `1 passed / 0 failed / 0 ignored / 1 suites` - NO skip eprintln, so the loop-creation arm genuinely ran; assertion requires the loop target recorded EXACTLY once (`["sub/inner.cpp"]`) |
+| 8 | Red evidence (pre-fix) acceptable bounded demonstration | PASS (D3 accepted) | Journal red `0 passed / 1 failed / 0 ignored / 1 suites` with the 70-level duplicate-record shape (OS path ceiling truncated before the 15s bound); failing assertion IS the regression assertion; pre-fix duplicate outcome mechanically necessary from base unguarded push; both red shapes fail the same assert from the same missing-set cause; journal transparent that the handoff's anticipated timeout shape did not trip on this host - adjudicated, not blocker |
+| 9 | Policy keyword matrix complete vs production table | PASS | policy.rs:25-41 table = 5 third-party + 6 generated keywords; pin covers ALL 11 at leading + mid-path, folded case, whole-component anti-pins, first-match positional precedence, keyword-loop-before-contract (`vendor/public/x.h` -> ThirdParty); contract near-misses (`public/x.h`, `publicsneak`, `publicx`) verified against the two arms at :45 |
+| 10 | is_toolchain dead-arm REPORT independently confirmed | PASS | `classify_ownership_and_policy(` grep: exactly ONE production call site (discovery.rs:87, hardcoded `false`); arm semantics pinned; wiring/removal routed to owner |
+| 11 | FileKind matrix + case-folding divergence pinned EXACTLY | PASS | 3-row spot-check against code: `.H` -> from_path folds (types.rs:49) -> Header, `is_includable_header` ends_with case-SENSITIVE (:201) -> false; `.hh` -> Header/false; dotfile `.h` -> Other (no Path extension) yet includable TRUE; divergence reported, NOT unified, per handoff |
+| 12 | Walk-polarity characterization pins + no unification | PASS (D1 accepted) | Silent arm (`Err(_) => continue` empty-Ok) + loud arm (share_mode(0) abort surfacing `Failed to read file for hashing` + offender) shipped; `entry?`/`metadata?` adjacency-argument deviation ACCEPTED on merit (metadata/open immune to share locks; dangling links die at is_file/is_dir; deletion race would be flaky - violates T7a deterministic-injection doctrine); policy proposal journal-only, code untouched |
+| 13 | locate Err context text lock verbatim | PASS | lib.rs:29 `format!("Failed to locate repository path: {:?}", ...)`; pin asserts context + Debug-rendered path - `{:?}` assert deviation (D2) accepted: Debug IS the contract |
+| 14 | Catalog pins honest (by_basename order / boundary / empty rules / canonical arm) | PASS | `entry().or_insert` at catalog.rs:50-54 - first-insert-wins; pin asserts DIFFERENT winners under flipped orders (honest, not key-internal); `models.User` vs `xmodels.User` boundary hand-traced on BOTH arms (`.{suffix}` requires the dot); `"" . / ..` -> empty match nothing (:126-130, :195-200); `by_path` `..`-collapse rel + canonical arms match code |
+| 15 | Hygiene gate exit 0 | PASS | `python tools/hygiene_check.py` direct -> R3 warn-only, clean return; hits in touched files (`catalog.rs:188 c`, `lib.rs:94-98 res`) are pre-existing lines OUTSIDE every commit hunk - journal claim verified |
+| 16 | Encoding gate exit 0 over tracked content | PASS | `python tools/encoding_guard.py --all` -> no output, clean exit |
+| 17 | Tool suite (CI) green | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 23.910s` / `OK` |
+| 18 | Report-evidence check (digest-shaped, distilling entry points) | PASS (findings 1-2) | Journal gate record: verbatim canonical lines + capture path (gate 1) + skip/disposition sections, zero raw dumps; gap: integration-suites claim not journalled as run (closed by criterion 6 here); gate-2 capture path omitted |
+| 19 | Deviations independently adjudicated (3) | ACCEPTED x3 | D1 entry?/metadata? adjacency argument (mechanics re-derived); D2 `{:?}` assert shape (test-side, truthful contract); D3 bounded-red via duplicate blow-up (assert-sensitive, mechanically necessary pre-fix, host-truncated infinity) |
+
+## Not run (explicit statement)
+
+- `python tools/testrun.py --baseline`, `python tools/ui_smoke.py`,
+  `python tools/bench_compare.py`: NOT run at this hand (per-hand precedent
+  T1-T7b/R1/R2; AGENTS.md sizing rule - workspace-wide gates belong to the
+  fresh-session closeout). OWED at UTA2 closeout. Nothing here substitutes.
+- `encoding_guard.py --staged`: vacuous post-commit (clean tree); superseded
+  by the `--all` run at HEAD (criterion 16).
+- `golden_guard.py`: not applicable; byte-lock equivalent (ar27 + m00 golden
+  suites) run fresh, green (criteria 1/6).
+
+## Refusals observed (configuration note, not skipped gates)
+
+Catch-all deny boilerplate (`{"permission":"bash","pattern":"*","action":"deny",
+"source":"global"}`) hit two shapes: `;`-chained hygiene/encoding invocations with
+`echo $LASTEXITCODE` (BOTH gates reran plain - clean returns are the exit-0 signal
+per R1/R2 precedent) and a compound `cmd /c` junction-creation probe (superseded by
+the nocapture loop-test rerun, which exercises the test's own junction path -
+strictly better evidence). Every expected gate ran; no gate skipped.
+
+## Reviewer artifacts + ledger routing
+
+`tasks/uta2-r3-verdict.md` + this addendum LEFT UNTRACKED per precedent
+(reviewer git-write denied). Closeout deferred-findings rows from this hand:
+`is_toolchain` dead-arm wiring/removal; FileKind-vs-includable header case-fold
+unification; walk polarity unification proposal (journal item 4); by_basename
+key-internal tie-break (B4-class); alias-first-walked LIFO determinism on
+case-insensitive filesystems (journal's reviewer-candidate row).
+
+---
+
+# Round 2 (UTA2) - Hand R4 (uta2-r4) gated - reviewer addendum (2026-10-19)
+
+Scope: reviewer's fresh gate evidence for Round-2 hand R4 `uta2-r4`, single commit
+`59abbf0` on base `b43d6da` (HEAD at review time == the commit; tree dirty only in
+this results file + untracked reviewer artifacts). Verdict:
+`tasks/uta2-r4-verdict.md` - **APPROVED** (1 minor finding, none blocking; all
+deviations ACCEPTED).
+
+## Acceptance criteria vs observed evidence
+
+| # | Criterion (handoff gates + running contract) | Observed | Evidence line (verbatim) |
+|---|---|---|---|
+| 1 | worker-core scoped suite green, expected 21/0/0/2 | PASS | `python tools/testrun.py --distill -- -p ariadne-worker-core` -> `### cargo test PASS (exit 0) [capture: C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt, 35 lines]` / `21 passed / 0 failed / 0 ignored / 2 suites` (19 baseline + 2 pins) |
+| 2 | scheduler 42/0/0/2 | PASS | same shape -> `42 passed / 0 failed / 0 ignored / 2 suites` (capture 66 lines; 40 + 2 pins) |
+| 3 | build 31/0/0/2 | PASS | -> `31 passed / 0 failed / 0 ignored / 2 suites` (capture 44 lines; 28 + 3 pins) |
+| 4 | cluster 68/0/0/8 | PASS | -> `68 passed / 0 failed / 0 ignored / 8 suites` (capture 117 lines; 67 + 1 pin) |
+| 5 | artifact 58/0/0/2 | PASS | -> `58 passed / 0 failed / 0 ignored / 2 suites` (capture 74 lines; 57 + 1 pin) |
+| 6 | transform 33/0/0/4 | PASS | -> `33 passed / 0 failed / 0 ignored / 4 suites` (capture 59 lines; 32 + 1 pin) |
+| 7 | lang 45/0/1/2 (1 ignore pre-existing) | PASS | -> `45 passed / 0 failed / 1 ignored / 2 suites` (capture 59 lines; ignore count unchanged from 44/0/1/2 baseline) |
+| 8 | validate 33/0/0/5 | PASS | -> `33 passed / 0 failed / 0 ignored / 5 suites` (capture 65 lines; 31 + 2 pins) |
+| 9 | Purely-additive claim | PASS | `git diff --numstat b43d6da..59abbf0` -> deletions column = 0 on ALL 16 files; the 6 touched production files carry only `#[cfg(test)] mod` decls; the 3 inline additions (plan.rs/extractor.rs/placement.rs) are appended `#[cfg(test)]` modules; 7 new files test-only -> zero production lines |
+| 10 | Commit-vs-touch-set + MUST-NOT (repo/lang-api/ui/cli/graph/lang-cpp/lang-scala) | PASS | `git diff --name-only b43d6da..59abbf0` -> 16 paths, all inside the 8 `crates/*/src/**` trees + journal; the seven protected crates appear NOWHERE; message matches gate-10 `-m` literal |
+| 11 | worker-core drop-pin honesty (contract item 2) | PASS | `tu_store.rs:295-305`: both Resolved/Wildcard arms `path_by_id.get(&id)`-gated, miss pushes NOTHING (no counter/warn/error); on-disk fallback ONLY in `External\|Unresolved` arm (:315-319) - pin's post-discovery ghost-hunk + root-wide search paths prove non-reachability; verbatim name + Wildcard survivor-order + all-unknown boundary |
+| 12 | build precedence genuinely conflicting (contract item 3) | PASS | scenario (a) root-valid + both losers unparseable -> Ok (ladder short-circuits at `exists()`, discovery.rs:78-82, losers never read); scenario (b) root absent + build/ malformed + out/ VALID -> Err names build rung (text at :113), Ok branch panics on fall-through; measure pin matches measure.rs:153-198 line-for-line (wall-clock copy :186-188, 1ms floor, 0 preprocessing, 1MiB mock, exit 0) |
+| 13 | artifact "eight is the full set" grep-lock + honest per-variant pin (contract item 4) | PASS | reviewer grep: `pub fn load_*_checked` == exactly 8 defs, transform_io 0; each variant's first statement `self.check_manifest("<stage>",..)?` at discovery_io:71/143, index_io:64, graph_io:85/243/290, metrics_io:323/383 (journal's cites exact); test drives ALL EIGHT by name, asserts exact verdict (`stale artifact for stage '%s': input fingerprint mismatch` = Display manager.rs:39 + reason :157) + StaleArtifact downcast, payload-free dirs locking manifest-before-payload. Finding 1: journal's "exactly 8 production call sites" misses the 9th caller `stage_is_fresh` (manager.rs:137-138) - wording only, equivalence locked per-variant regardless |
+| 14 | validate pins == uta-t4 reviewer observations (contract item 5) | PASS | T4 verdict rows (:232-235) map 1:1; capture is bare `std::io::Result` `fs::read(p)?` all-or-nothing (lib.rs:102-112); `capture(...)?` at :178 precedes the ONLY `rolled_back_error` call at :197 -> no "rolled back" decoration possible; count = entries+new_paths = 2+1 = 3 (:288); rollback (:297-321) file-only, `generated/deep/nested` survives |
+| 15 | Report-only trio NOT fixed (contract item 6) | PASS | zero production hunks (criterion 9); journal Reports carry dropped-id counter (UTA-B6 class), wall-clock-as-CPU + `simulated`-flag owner decision, and `verify_restored` dir blindness (true by construction: lib.rs:323-331 fingerprints file entries only) |
+| 16 | before->after reproduction (contract item 7) | PASS | all 8 journal baselines + 13 shipped pin fns == observed totals exactly (criteria 1-8) |
+| 17 | Hygiene gate exit 0 | PASS | `python tools/hygiene_check.py` (R3 warn-only listing) + `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 173 lines); the 4 warns inside touched FILES (discovery.rs:320, plan.rs:74, validate lib.rs:104, tu_store.rs:54/61/62) all sit OUTSIDE every commit hunk - journal claim verified; zero R1/R2 findings |
+| 18 | Encoding gate exit 0 + pure-ASCII additions | PASS | `python tools/encoding_guard.py --all` -> no output + `### generic PASS (exit 0)` (capture 0 lines); byte scan of `git show 59abbf0` added lines -> `added-lines-with-non-ascii-bytes: 0` |
+| 19 | Tool suite (CI) green | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 21.606s` / `OK` |
+| 20 | Report-evidence check (digest-shaped, distilling entry points) | PASS | Journal gate record: canonical lines per crate + capture path + exit witnesses + skip/disposition sections, zero raw dumps; gates run via `testrun.py --distill`, witnesses via `distill.py` |
+| 21 | Deviations independently adjudicated | ACCEPTED | D1 blocker-file over read-only-dir: t5 precedent exists (`tu_store_t5_pins.rs:128`), Windows read-only advisory for own writes, pinned contract unchanged; D2 `--staged`->`--all` sequencing (commit_scoped atomic; reviewer fresh `--all` exit 0 supersedes; T1-R3 precedent); D3 cluster comment-only U+2192->words rewrite + re-run (ASCII scan + fresh 68/0/0/8); compile-only harness reds (Arc coercion, expect_err Debug) noted - no production line, final green |
+
+## Not run (explicit statement)
+
+- `python tools/testrun.py --baseline`, `python tools/ui_smoke.py`,
+  `python tools/bench_compare.py`: NOT run at this hand (per-hand precedent
+  T1-T7b/R1-R3; AGENTS.md sizing rule; R5 still mutates the tree). OWED at
+  UTA2 closeout. Nothing here substitutes.
+- `encoding_guard.py --staged`: vacuous post-commit (clean tree); superseded
+  by the `--all` run at HEAD (criterion 18).
+- `golden_guard.py`: not applicable; zero-deletion audit + green round-1
+  suites (baseline-count arithmetic) are the byte-lock evidence.
+
+## Refusals observed (configuration note, not skipped gates)
+
+Catch-all deny boilerplate (`{"permission":"bash","pattern":"*","action":"deny",
+"source":"global"}`) hit two shapes: a `;`-chained `git log ...; git show --stat
+... | Select-Object` (reran as two plain quoted-rev calls) and direct
+`python tasks/uta2-r4-review-scan.py` (reran via the sanctioned
+`python tools/distill.py -- python tasks/uta2-r4-review-scan.py` ->
+`### generic PASS (exit 0)` + `added-lines-with-non-ascii-bytes: 0`). All
+expected gate evidence obtained; no gate skipped. Reviewer scratch
+`tasks/uta2-r4-review-scan.py` left untracked for closeout cleanup.
+
+## Reviewer artifacts + ledger routing
+
+`tasks/uta2-r4-verdict.md` + this addendum LEFT UNTRACKED per precedent
+(reviewer git-write denied). Closeout deferred-findings rows from this hand:
+dropped-id surfaced counter (UTA-B6 class); wall-clock-as-CPU attribution /
+`simulated` flag on TuMeasurement (owner decision); validate rollback
+created-dir set untracked -> `verify_restored` dir blindness;
+`format_summary` field-set collision note (UI grouping); verdict finding 1
+journal wording ("exactly 8 call sites" -> 8 gated variants + `stage_is_fresh`).
+
+# Round 2 (UTA2) - Hand R5 (uta2-r5) gated - reviewer addendum (2026-10-19)
+
+Scope: reviewer's fresh gate evidence for Round-2 hand R5 `uta2-r5`, single commit
+`765df7b` on base `59abbf0` (HEAD at review time == the commit; tree dirty only in
+this results file + untracked reviewer artifacts). Verdict:
+`tasks/uta2-r5-verdict.md` - **APPROVED** (3 minor findings, none blocking; both
+deviations ACCEPTED on independent merits).
+
+## Acceptance criteria vs observed evidence
+
+| # | Criterion (handoff gates + running contract) | Observed | Evidence line (verbatim) |
+|---|---|---|---|
+| 1 | graph scoped suite green, expected 174/0/0/12 | PASS | `python tools/testrun.py --distill -- -p ariadne-graph` -> `### cargo test PASS (exit 0) [capture: C:\Users\Kurt\Code\AriadnesThread\target\testrun-capture.txt, 256 lines]` / `174 passed / 0 failed / 0 ignored / 12 suites` (170 baseline + 4 pins; suite 11+1 = new tests-dir file) |
+| 2 | lang-cpp 201/0/0/2 | PASS | same shape -> `201 passed / 0 failed / 0 ignored / 2 suites` (capture 277 lines; 193 + 8 pins: 5 tokenizer + 3 probe) |
+| 3 | lang-scala 257/0/0/2 | PASS | -> `257 passed / 0 failed / 0 ignored / 2 suites` (capture 270 lines; 254 + 3 pins) |
+| 4 | cli 178/0/8/8 (8 ignores pre-existing benches) | PASS | -> `178 passed / 0 failed / 8 ignored / 8 suites` (capture 254 lines; 177 T7b count + 1 arm-table test) |
+| 5 | Pure-additive claim | PASS | `git diff --numstat 59abbf0..765df7b` -> deletions column = 0 on ALL 9 files; the 3 touched src files (tokenizer.rs, plugin.rs, boundary.rs) carry only trailing `#[cfg(test)] mod` decls (3/0 each); transform.rs +73 = single hunk appended inside inline `mod tests`; 4 new test files + journal test-only |
+| 6 | Commit-vs-touch-set + MUST-NOT (other crates; no src logic) | PASS | `git diff --name-status 59abbf0..765df7b` -> 9 paths, all test-side inside the 4 declared crates (tests-dir file sanctioned by the handoff's "tests dir only" clause); repo/lang-api/worker-core/etc. appear NOWHERE; message = handoff `-m` + truth-adjust "+ transform arm table" |
+| 7 | graph 4 pins match `graph.rs:321` behavior (contract item 1) | PASS | seed-exclusion from `transitive_includes` fixed by BFS-oracle doc (:264-268, SCC DP byte-equivalence locked) -> `len()==2` pin correct; `tu_list.sort()` :355 pinned ascending vs descending input; `closures.get` skip :342 pinned via map-equality + neither-key-nor-consumer; empty-in both graphs; planner.rs:171 None-arm cite verified |
+| 8 | multibyte raw-string pins honest (contract item 2) | PASS | specimen char `String::from_utf8(vec![0xC3, 0xA9])` - pure-ASCII authoring (raw_string_multibyte_tests.rs:9), encoding `--all` exit 0; `raw_string_open("\"abc", 0) == false` verbatim (:50-53 vs guard :328); no-brace-leak = :348 "Emits NO tokens"; char columns 19/11/6 hand-traced (byte-view would say 20); glued `e-acuteR` probe discriminates byte-vs-char (0xA9 != R); run-drop rule documented :207-208, pinned not unified |
+| 9 | probe Available-arm + deviation honest pin + Missing-lock byte-held (contract item 3) | PASS | independent probe `python tools/distill.py -- cargo test -p ariadne-lang-cpp -- --version` -> FAIL (exit 101) + `error: Unrecognized option: 'version'` (libtest rejects --version as journalled); probe plugin.rs:77-93 never inspects status, `.unwrap_or(binary)` :88 -> current_exe pin `Available(exe_text)` exact is the honest landed behavior; cmd.exe pin recomputes banner from an independent spawn (no machine literal); findstr.exe deterministic empty-stdout pin; Missing lock plugin.rs:349 outside all hunks (0 deletions) |
+| 10 | boundary frozen-4 + 14-row near-miss table (contract item 4) | PASS | content+order+len-4 pin vs doc :8 and `contains` predicate :16-18; 14 rows hand-verified false (superstring/case/truncation/dot-absence/whitespace/empty), handoff's `targets`/`LIB` present |
+| 11 | ROW-5 verification independently confirmed (contract item 5) | PASS | `cli_command_tests.rs:97/:119/:162` are `Cli::parse_from` shape asserts only; T7b route seams cover analyze/includes/plan only (lib.rs:349/:435/:485); 4 m20 rows exist (m20 file :136/:150/:235/:249) covering preview/apply Err arms, none extract; repo grep: `extract_plan_headers` only definition + lib.rs:521 dispatch + new test -> zero prior behavioral coverage; new table test drives all 3 arms x 2 scenarios, frozen "Failed to locate repository path" per arm (same class as T7a :503) + never-vacuous-Ok |
+| 12 | Hygiene gate exit 0 | PASS | `python tools/hygiene_check.py` R3-warn-only listing + `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 175 lines); zero warns inside any committed file |
+| 13 | Encoding gate exit 0 + ASCII additions | PASS | `python tools/encoding_guard.py --all` silent + `### generic PASS (exit 0)` (capture 0 lines); byte-escape construction verified at source (vec![0xC3, 0xA9]), no literals |
+| 14 | Tool suite (CI) green | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 25.295s` / `OK` |
+| 15 | Report-evidence check (digest-shaped, distilling entry points) | PASS | journal: canonical lines + capture paths + dispositions, zero raw dumps; gates via `testrun.py --distill` |
+| 16 | Deviations independently adjudicated | ACCEPTED | D1 libtest-banner expectation not reproducible (rustc 1.99.0): ACCEPTED - mechanism reproduced by reviewer probe, pin is exact landed behavior, banner arm separately pinned, drift-flagged; D2 specimen mis-authoring (fixture-only): ACCEPTED, with verdict finding 2 (pin1 comment still cites the older glued-free specimen text) |
+
+## Not run (explicit statement)
+
+- `python tools/testrun.py --baseline`, `python tools/ui_smoke.py`,
+  `python tools/bench_compare.py`: NOT run at this hand (all-hand precedent
+  T1-T7b/R1-R4; AGENTS.md sizing rule). R5 is the FINAL round-2 hand - the
+  round-2 closeout now OWNS these with the new anchor. Nothing here
+  substitutes.
+- `encoding_guard.py --staged`: vacuous post-commit (clean tree); superseded
+  by the `--all` run at HEAD (criterion 13).
+- `golden_guard.py`: not applicable; zero-deletion audit + green round-1
+  suites (baseline-count arithmetic) are the byte-lock evidence.
+
+## Refusals observed (configuration note, not skipped gates)
+
+Catch-all deny boilerplate (`{"permission":"bash","pattern":"*","action":"deny",
+"source":"global"}`) hit three compound shapes: `git show ... | Select-String`,
+`git ls-files | Select-String`, `Get-Item ... | Select-Object` - each replaced by
+plain quoted-rev `git show` calls or the Read/Glob/Grep tools. All expected gate
+evidence obtained; no gate skipped. No reviewer scratch created this hand.
+
+## Reviewer artifacts + ledger routing
+
+`tasks/uta2-r5-verdict.md` + this addendum LEFT UNTRACKED per precedent
+(reviewer git-write denied). Closeout deferred-findings rows from this hand:
+`probe_compiler_status` exit-status blind spot (documented, now visible);
+`extract_plan_headers` no-replan-fallback asymmetry (owner look); glued-run
+drop rule pinned-not-unified note; report-stat correction (+680, not +777);
+pin1 comment correction (raw_string_multibyte_tests.rs:24); platform-gate note
+for cmd.exe/findstr.exe probe pins if non-Windows CI ever lands.
+
+# ALL HANDS - UTA2 Round 2 gate summary (R1..R5, 2026-10-19)
+
+ALL FIVE ROUND-2 HANDS GATED **APPROVED**: R1 ui `af8a997`+`64314d7` (UTB-1/2/3
+fixed + UTB-4 rank-order restored; 369/0/0/3), R2 tools `7a1ff41`+`eaeaf2d`
+(UTB-5/6/7 fixed + package_offline suite; tools anchor grew to `Ran 296 / OK`),
+R3 repo+lang-api `b43d6da` (UTB-8 visited-set fixed; repo 38/0/0/5, lang-api
+47/0/0/5), R4 sweep-B `59abbf0` (8 crates +13 pins, +1355/-0 purely additive),
+R5 sweep-A `765df7b` (+16 pins across graph/lang-cpp/lang-scala/cli, +680/-0
+purely additive). Anchors after round 2: ui 369/0/0/3; graph 174/0/0/12;
+lang-cpp 201/0/0/2; lang-scala 257/0/0/2; cli 178/0/8/8; repo 38/0/0/5;
+lang-api 47/0/0/5; worker-core 21/0/0/2; scheduler 42/0/0/2; build 31/0/0/2;
+cluster 68/0/0/8; artifact 58/0/0/2; transform 33/0/0/4; lang 45/0/1/2;
+validate 33/0/0/5; tools `Ran 296 tests / OK`. Round-2 totals: 8 UTB bugs
+(UTB-1..8) all fixed+gated; UTB-4 resolved by rank-order restoration; 15
+report-only owner decisions routed to the ledger. OWED at UTA2 closeout
+(fresh session): `--baseline` run, `ui_smoke`, `bench_compare`, ledger/memory
+re-closeout with new anchor, verdict-artifact commits, reviewer-scratch
+cleanup (`tasks/r2-probe-driver.py`, `tasks/r2-probe.py`,
+`tasks/uta2-r4-review-scan.py`).
+

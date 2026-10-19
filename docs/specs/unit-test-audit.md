@@ -274,3 +274,21 @@ Round-2 hands (same gated pipeline, sequential):
   Available arm; lang-scala boundary.rs marker pin; cli transform action-
   arm verification. Gates: `-p ariadne-graph`, `-p ariadne-lang-cpp`,
   `-p ariadne-lang-scala`, `-p ariadne-cli`.
+
+### Round-2 outcome (closed 2026-10-19)
+
+All five hands APPROVED (R1 successor hand after a context-wall death,
+recovered journal-first; verdicts tasks/uta2-r*-verdict.md). UTB statuses:
+UTB-1/2/3/4 FIXED by R1 `af8a997` (induced edges over the node set, sorted
+subtree emission, repo-relative sorted file_paths, rank-ordered top_hubs);
+UTB-5/6/7 FIXED by R2 `89fb908` (exit-2 contracts + isfinite gates);
+UTB-8 FIXED by R3 `b43d6da` (canonical visited set; junction-loop red).
+R4 `59abbf0` + R5 `765df7b` shipped pins only (13 + 16) plus owner reports:
+worker-core unknown-id drop needs a surfaced counter; build simulation
+attributes wall-clock as front-end CPU; validate verify_restored can't see
+rollback's created dirs; scan_quote glued-run drop; extract_plan_headers
+lacks the replan fallback; api.js showEntrypoints object-vs-array modal bug;
+file_count off-by-one; collateral is_necessary hardcoded; dead Err arm;
+ready_state empty-model trap. New census:
+`1830 passed / 0 failed / 13 ignored / 119 suites` + tools `Ran 296 OK`;
++76 rust and +64 python test functions this round.
