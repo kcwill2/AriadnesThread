@@ -123,7 +123,7 @@ fn pin_lang_filtered_index_keeps_units_and_writes_no_full_fingerprint_manifest()
     assert_eq!(
         index.tu_analyses.len(),
         2,
-        "pin: the Cpp filter retains both C++ units"
+        "pin: the language filter retains both discoverable units"
     );
     assert!(
         !filtered

@@ -96,3 +96,5 @@ changes); every adjudicated smell gets an honest named pin + report.
   exit 0 with the scope pre-staged via the distill entry point for a
   meaningful staged-blob scan; encoding_guard --all exit 0; one scoped
   commit via commit_scoped over the handoff's five globs.
+- Closeout rider (base 2a8e9dc, R2): the workspace guard `core_crates_do_not_name_languages` flagged the pin assert message at `crates/pipeline/src/uta_t6_pins.rs:126` for naming a language; reworded that single string literal to "pin: the language filter retains both discoverable units", no other byte touched (`SourceLanguage::Cpp` enum path stays, exempt via neutral vocab).
+- Rider gates: Red reproduced (`0 passed / 1 failed`, offender `crates/pipeline:126`); Green pipeline `46 passed / 0 failed / 4 ignored / 9 suites` (baseline unchanged) and guard `1 passed / 0 failed / 0 ignored / 37 suites`; hygiene_check exit 0 (R3 warns all pre-existing); encoding_guard --all exit 0.
