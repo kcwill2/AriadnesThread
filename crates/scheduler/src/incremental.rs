@@ -352,3 +352,7 @@ mod tests {
         assert_eq!(result2.stats.reanalyzed_tus, 1);
     }
 }
+
+#[cfg(test)]
+#[path = "uta2_r4_pins.rs"]
+mod uta2_r4_pins;

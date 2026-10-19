@@ -20,6 +20,8 @@ mod payload_reshape_tests;
 mod tests;
 #[cfg(test)]
 mod uta_t6_pin_tests;
+#[cfg(test)]
+mod uta2_r4_pin_tests;
 
 /// An artifact that cannot be trusted: missing manifest, mismatched input
 /// fingerprint, mismatched repository root, or a different analysis version.

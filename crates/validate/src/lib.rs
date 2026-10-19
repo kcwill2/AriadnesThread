@@ -493,6 +493,9 @@ impl TierValidator {
 mod orchestration_tests;
 
 #[cfg(test)]
+mod uta2_r4_pins;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use ariadne_lang::{CompilerValidator, ToolchainStatus};

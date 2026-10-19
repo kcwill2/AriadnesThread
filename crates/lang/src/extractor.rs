@@ -256,3 +256,114 @@ mod tests {
         );
     }
 }
+
+/// UTA2-R4 item 7 (docs/specs/unit-test-audit.md Round 2): direct pin of
+/// `render_unit` - the single emitter's namespace routing and header-layout
+/// pass-through, observed through an instrumented extractor that renders a
+/// deterministic mini-header shape.
+#[cfg(test)]
+mod uta2_r4_render_pins {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Extractor double rendering a deterministic mini-header so every
+    /// input seam (namespace, deps, bodies) is visible in the emitted
+    /// layout, plus a call log for `unit_namespace` (the D-M23-2 rule is
+    /// about WHEN the hook runs, not just what it answers).
+    struct LayoutProbe {
+        namespace_hook_calls: Mutex<Vec<String>>,
+    }
+
+    impl LayoutProbe {
+        fn new() -> Self {
+            Self {
+                namespace_hook_calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn hook_calls(&self) -> Vec<String> {
+            self.namespace_hook_calls.lock().unwrap().clone()
+        }
+    }
+
+    impl SourceExtractor for LayoutProbe {
+        fn extract(
+            &self,
+            symbols: &[SymbolBody],
+            namespace: &str,
+            required_deps: &[String],
+        ) -> GeneratedSourceFile {
+            let mut content = format!("<header ns=\"{namespace}\">\n");
+            for dep in required_deps {
+                content.push_str(&format!("  <dep src=\"{dep}\"/>\n"));
+            }
+            for symbol in symbols {
+                content.push_str(&format!("  <body name=\"{}\">{}</body>\n", symbol.name, symbol.body));
+            }
+            content.push_str("</header>");
+            GeneratedSourceFile {
+                path: PathBuf::from("unused.h"),
+                content,
+            }
+        }
+
+        fn unit_namespace(&self, source_text: &str) -> String {
+            self.namespace_hook_calls
+                .lock()
+                .unwrap()
+                .push(source_text.to_string());
+            format!("ns::{source_text}")
+        }
+    }
+
+    fn probe_bodies(names: &[&str]) -> Vec<SymbolBody> {
+        names
+            .iter()
+            .map(|name| SymbolBody {
+                name: name.to_string(),
+                body: format!("struct {name};"),
+            })
+            .collect()
+    }
+
+    fn probe_paths(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn pin_render_unit_routes_namespace_and_returns_extract_bytes_verbatim() {
+        let probe = LayoutProbe::new();
+        let unit_paths = probe_paths(&["gen/a.h", "gen/b.h"]);
+
+        // With a primary source text: the hook IS consulted, its answer is
+        // what `extract` sees, the default imports hook passes the engine's
+        // unit paths through, and `render_unit` returns the extract content
+        // unchanged - byte pass-through, no emitter-side decoration.
+        let rendered = render_unit(&probe, &probe_bodies(&["Alpha", "Beta"]), Some("SRC-TXT"), &unit_paths);
+        assert_eq!(
+            rendered,
+            "<header ns=\"ns::SRC-TXT\">\n  <dep src=\"gen/a.h\"/>\n  \
+             <dep src=\"gen/b.h\"/>\n  <body name=\"Alpha\">struct Alpha;</body>\n  \
+             <body name=\"Beta\">struct Beta;</body>\n</header>",
+            "pin: the emitted layout is exactly the extractor's bytes with the \
+             hooked namespace and passed-through deps/bodies in input order"
+        );
+        assert_eq!(probe.hook_calls(), vec!["SRC-TXT".to_string()]);
+
+        // Without a primary source text (placeholder-only render): the
+        // D-M23-2 rule bites at the CALL level - the hook is NOT consulted
+        // at all and the namespace `extract` sees is empty.
+        let probe_without = LayoutProbe::new();
+        let rendered =
+            render_unit(&probe_without, &probe_bodies(&["Solo"]), None, &probe_paths(&["gen/z.h"]));
+        assert_eq!(
+            rendered,
+            "<header ns=\"\">\n  <dep src=\"gen/z.h\"/>\n  \
+             <body name=\"Solo\">struct Solo;</body>\n</header>"
+        );
+        assert!(
+            probe_without.hook_calls().is_empty(),
+            "pin: unit_namespace must NOT be called when there is no source text"
+        );
+    }
+}

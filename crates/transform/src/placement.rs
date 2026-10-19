@@ -372,3 +372,51 @@ mod tests {
     }
 
 }
+
+/// UTA2-R4 item 6 (docs/specs/unit-test-audit.md Round 2): completes the
+/// `is_noop` truth table. The round-1 pins covered (identical, empty
+/// preservations) = true and (reordered, empty) = false; the missing row is
+/// IDENTICAL lists carrying NON-EMPTY `side_effect_preservations`.
+#[cfg(test)]
+mod uta2_r4_truth_table_pin {
+    use super::*;
+
+    fn rewrite_with(
+        old_includes: &[&str],
+        new_includes: &[&str],
+        preservations: &[&str],
+    ) -> ConsumerRewrite {
+        ConsumerRewrite {
+            consumer_file: std::path::PathBuf::from("src/row.cpp"),
+            old_includes: old_includes.iter().map(std::path::PathBuf::from).collect(),
+            new_includes: new_includes.iter().map(std::path::PathBuf::from).collect(),
+            side_effect_preservations: preservations
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn pin_is_noop_false_for_identical_lists_carrying_preservations() {
+        // The completing row: old == new AND preservations non-empty is NOT
+        // a noop - the preservation alone counts as a change the preview
+        // reports, even though no include line differs.
+        let identical_with_preservations =
+            rewrite_with(&["thing.h"], &["thing.h"], &["thing.h"]);
+        assert!(
+            !identical_with_preservations.is_noop(),
+            "pin: identical include lists with non-empty preservations is a change"
+        );
+
+        // The preservation need not even name an include of this rewrite:
+        // ANY non-empty preservation list fails the noop gate.
+        let foreign_preservation = rewrite_with(&["thing.h"], &["thing.h"], &["legacy_side_effects.h"]);
+        assert!(!foreign_preservation.is_noop());
+
+        // The completing row's twin (control, restating the round-1 row):
+        // the very same lists with the preservation dropped ARE a noop -
+        // the preservations alone flip the verdict.
+        assert!(rewrite_with(&["thing.h"], &["thing.h"], &[]).is_noop());
+    }
+}

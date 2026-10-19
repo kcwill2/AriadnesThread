@@ -26,3 +26,7 @@ impl<T: WorkerBackend + ?Sized> WorkerBackend for Arc<T> {
         T::analyze_task(self, task, repo_root)
     }
 }
+
+#[cfg(test)]
+#[path = "worker_backend_uta2_r4_pins.rs"]
+mod uta2_r4_pins;

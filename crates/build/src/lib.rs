@@ -10,3 +10,6 @@ pub use types::{BuildDiscoveryResult, CompilationContext, CompileCommand, Transl
 
 #[cfg(test)]
 mod uta_t6_pins;
+
+#[cfg(test)]
+mod uta2_r4_pins;

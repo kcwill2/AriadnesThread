@@ -712,3 +712,7 @@ mod tests {
 #[cfg(test)]
 #[path = "tu_store_t5_pins.rs"]
 mod t5_pins;
+
+#[cfg(test)]
+#[path = "uta2_r4_pins.rs"]
+mod uta2_r4_pins;

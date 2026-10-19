@@ -271,3 +271,59 @@ Validation required:
         );
     }
 }
+
+/// UTA2-R4 item 4 (docs/specs/unit-test-audit.md Round 2): one-shape lock
+/// for `format_summary` - the compact id/counts line is THE summary shape.
+#[cfg(test)]
+mod format_summary_uta2_r4_pin {
+    use super::*;
+
+    fn plan_named(id: &str, before: usize, after: usize) -> OptimizationPlan {
+        OptimizationPlan {
+            id: PlanId(id.to_string()),
+            target_file: PathBuf::from("thing.h"),
+            target_file_id: FileId::from_relative_path("thing.h"),
+            problem: "unused by the summary".to_string(),
+            collateral_load_before: before,
+            collateral_load_after: after,
+            proposed_extractions: vec![],
+            optimization_frontier: vec![],
+            risk: RiskLevel::Moderate,
+            validation_required_tus: vec![],
+            rationale: "unused by the summary".to_string(),
+        }
+    }
+
+    #[test]
+    fn pin_format_summary_single_shape() {
+        // The one shape: `{id}: {before} -> {after} symbols` - ASCII arrow
+        // and NO thousands separators, unlike format_detail (comma groups
+        // and its own non-ASCII arrow, both locked by the round-1 test).
+        assert_eq!(
+            plan_named("PLAN-042", 4382, 1140).format_summary(),
+            "PLAN-042: 4382 -> 1140 symbols"
+        );
+        // Boundary: zero counts keep the same shape.
+        assert_eq!(
+            plan_named("PLAN-Z", 0, 0).format_summary(),
+            "PLAN-Z: 0 -> 0 symbols"
+        );
+        // Single-line lock: no newline ever enters the summary.
+        assert!(!plan_named("PLAN-042", 1_250_000, 7).format_summary().contains('\n'));
+
+        // The summary keys on id + the two counts ONLY: two plans differing
+        // in every other field must summarize identically.
+        let mut twin = plan_named("PLAN-042", 4382, 1140);
+        twin.problem = "a completely different problem".to_string();
+        twin.risk = RiskLevel::Aggressive;
+        twin.target_file = PathBuf::from("elsewhere.h");
+        twin.rationale = "different rationale".to_string();
+        twin.proposed_extractions = vec![ProposedExtraction {
+            symbol_name: "Any".to_string(),
+            symbol_id: SymbolId::new("sym_any"),
+            target_header: PathBuf::from("any.h"),
+            source_file: None,
+        }];
+        assert_eq!(twin.format_summary(), plan_named("PLAN-042", 4382, 1140).format_summary());
+    }
+}
