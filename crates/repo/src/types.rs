@@ -71,6 +71,119 @@ impl FileKind {
     }
 }
 
+#[cfg(test)]
+mod file_kind_matrix_tests {
+    use super::{is_includable_header, FileKind};
+    use std::path::Path;
+
+    fn kind_of(name: &str) -> FileKind {
+        FileKind::from_path(Path::new(name))
+    }
+
+    /// UTA2-R3 item 3: lowercase extension matrix through `from_path`,
+    /// including the no-extension, dotfile, and multi-dot shapes.
+    #[test]
+    fn pin_file_kind_lowercase_extension_matrix() {
+        let cases: Vec<(&str, FileKind)> = vec![
+            ("a.cpp", FileKind::Source),
+            ("a.cc", FileKind::Source),
+            ("a.cxx", FileKind::Source),
+            ("a.c", FileKind::Source),
+            ("a.h", FileKind::Header),
+            ("a.hpp", FileKind::Header),
+            ("a.hxx", FileKind::Header),
+            ("a.hh", FileKind::Header),
+            ("a.inl", FileKind::Header),
+            ("a.ipp", FileKind::Header),
+            ("a.scala", FileKind::ScalaSource),
+            ("a.sc", FileKind::ScalaScript),
+            ("a.sbt", FileKind::BuildDefinition),
+            ("a.mill", FileKind::BuildDefinition),
+            ("a.txt", FileKind::Other),
+            ("a.rs", FileKind::Other),
+            ("Makefile", FileKind::Other),
+            ("a", FileKind::Other),
+            // A leading-dot name carries no extension for Path: dotfiles
+            // are Other, never Header, even when the whole name looks like
+            // one (".h" alone is ALSO Other through from_path - note this
+            // CONTRASTS with is_includable_header, which reads the file NAME
+            // and calls ".h" a header; see the divergence pin below).
+            (".h", FileKind::Other),
+            (".gitignore", FileKind::Other),
+            ("a.b.cpp", FileKind::Source),
+            ("a.h.rs", FileKind::Other),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(kind_of(name), expected, "FileKind::from_path({name:?})");
+        }
+    }
+
+    /// UTA2-R3 item 3: `from_path` case-FOLDS the extension before matching,
+    /// so every upper/mixed-case form keeps its lowercase kind - including
+    /// `.H`, which becomes Header here while staying NON-includable.
+    #[test]
+    fn pin_file_kind_case_matrix_is_folded_insensitive() {
+        let cases: Vec<(&str, FileKind)> = vec![
+            ("a.CPP", FileKind::Source),
+            ("a.CC", FileKind::Source),
+            ("a.CXX", FileKind::Source),
+            ("a.C", FileKind::Source),
+            ("a.H", FileKind::Header),
+            ("a.HPP", FileKind::Header),
+            ("a.HXX", FileKind::Header),
+            ("a.HH", FileKind::Header),
+            ("a.INL", FileKind::Header),
+            ("a.IPP", FileKind::Header),
+            ("a.SCALA", FileKind::ScalaSource),
+            ("a.SC", FileKind::ScalaScript),
+            ("a.SBT", FileKind::BuildDefinition),
+            ("a.MILL", FileKind::BuildDefinition),
+            ("a.Sc", FileKind::ScalaScript),
+            ("a.Mill", FileKind::BuildDefinition),
+            ("a.Cc", FileKind::Source),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(kind_of(name), expected, "FileKind::from_path({name:?})");
+        }
+    }
+
+    /// UTA2-R3 item 3 (REPORT): case-sensitivity DIVERGENCE between the two
+    /// header vocabularies. `from_path` folds case; `is_includable_header`
+    /// is a case-SENSITIVE ends_with on `.h`/`.hpp`/`.hxx`. Result:
+    /// `.H`, `.HH`, `.HPP`, `.HXX`, `.INL`, `.IPP` are Header (analyzable)
+    /// yet NOT includable, and `.hh`/`.inl`/`.ipp` are Header even in
+    /// lowercase but never includable (deliberate E-I9 scope). Pinned
+    /// exactly here; unifying the two vocabularies is an owner decision.
+    #[test]
+    fn pin_kind_vs_includable_header_case_sensitivity_divergence() {
+        let matrix: Vec<(&str, FileKind, bool)> = vec![
+            ("a.h", FileKind::Header, true),
+            ("a.hpp", FileKind::Header, true),
+            ("a.hxx", FileKind::Header, true),
+            ("a.H", FileKind::Header, false),
+            ("a.HPP", FileKind::Header, false),
+            ("a.HXX", FileKind::Header, false),
+            ("a.hh", FileKind::Header, false),
+            ("a.HH", FileKind::Header, false),
+            ("a.inl", FileKind::Header, false),
+            ("a.INL", FileKind::Header, false),
+            ("a.ipp", FileKind::Header, false),
+            ("a.cc", FileKind::Source, false),
+            // The dotfile contrast: Other for the kind system, header for
+            // the includable predicate (ends_with on the bare name).
+            (".h", FileKind::Other, true),
+        ];
+        for (name, expected_kind, expected_includable) in matrix {
+            assert_eq!(kind_of(name), expected_kind, "FileKind::from_path({name:?})");
+            assert_eq!(
+                is_includable_header(Path::new(name)),
+                expected_includable,
+                "is_includable_header({name:?})"
+            );
+        }
+    }
+}
+
 /// E-I9 (plan 1790521470000): needs-sets carry includable headers only —
 /// `.h`/`.hpp`/`.hxx`, case-sensitive, mirroring the ui node-kind detection
 /// in `dto.rs`. `.ipp`/`.inl` template-impl files are deliberately OUT for

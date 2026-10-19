@@ -103,4 +103,29 @@ mod tests {
         assert_eq!(gen_file.ownership, FileOwnership::Generated);
         assert_eq!(gen_file.optimization_policy, OptimizationPolicy::Frozen);
     }
+
+    /// UTA2-R3 item 5: lock the locate bad-path Err context text. Downstream
+    /// surfaces (H7a's cli cause-chaining) build on this exact wording; a
+    /// rename here is a contract change, not a refactor.
+    #[test]
+    fn locate_bad_path_error_context_text_is_locked() {
+        let missing = tempdir().unwrap().path().join("uta2-r3-no-such-repo");
+        let outcome = Repository::locate(&missing);
+        let err = outcome
+            .err()
+            .expect("locating a missing path must fail (canonicalize rejects it)");
+        let chain = format!("{err:?}");
+        assert!(
+            chain.contains("Failed to locate repository path:"),
+            "the locate error must carry the pinned context, got: {chain}"
+        );
+        // The context embeds the path via `{:?}` (Debug), i.e. quoted with
+        // backslashes escaped on Windows - pinned as rendered, not lossy.
+        let echoed_path = format!("{:?}", missing);
+        assert!(
+            chain.contains(&echoed_path),
+            "the context must echo the offending path in its exact Debug \
+             rendering ({echoed_path:?}), got: {chain}"
+        );
+    }
 }

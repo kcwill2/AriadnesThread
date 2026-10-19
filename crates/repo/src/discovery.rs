@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +37,12 @@ pub(crate) fn discover_repository_files_with_progress(
 ) -> Result<Vec<FileRecord>> {
     let mut files = Vec::new();
     let mut hashed_so_far = 0usize;
+    // UTB-8: a junction/symlink back into an ancestor makes the stack walk
+    // unbounded. A directory is admitted only when its canonical form has
+    // not been walked yet; canonicalize failure falls back to the raw path,
+    // mirroring the file-side precedent below (discovery.rs file branch).
+    let mut walked_dirs: HashSet<PathBuf> = HashSet::new();
+    walked_dirs.insert(root.canonicalize().unwrap_or_else(|_| root.to_path_buf()));
     let mut stack = vec![root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
@@ -60,7 +66,10 @@ pub(crate) fn discover_repository_files_with_progress(
             }
 
             if path.is_dir() {
-                stack.push(path);
+                let walked_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if walked_dirs.insert(walked_key) {
+                    stack.push(path);
+                }
             } else if path.is_file() {
                 let kind = FileKind::from_path(&path);
                 // M19.3 (ruling 3): neutral analyzability predicate - includes

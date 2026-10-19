@@ -305,6 +305,113 @@ mod tests {
         assert_eq!(catalog.len(), 2);
     }
 
+    /// UTA2-R3 item 6 (REPORT, B4-class): `by_basename` collision resolution
+    /// is FIRST-INSERT-WINS over caller insertion order - reversing the input
+    /// flips the winner. It is deterministic today only because discovery
+    /// path-sorts records before catalog construction. A caller building the
+    /// catalog from an unsorted source inherits the UTA-B4 nondeterminism
+    /// class; making the winner key-internal (e.g. FileId tie-break, as H1's
+    /// graph fix did) is an owner decision, not this hand's.
+    #[test]
+    fn pin_by_basename_collision_resolved_by_insertion_order() {
+        let alpha = record("a/hash.h");
+        let beta = record("b/hash.h");
+        let ascending = FileCatalog::from_records(&[alpha.clone(), beta.clone()]);
+        let descending = FileCatalog::from_records(&[beta.clone(), alpha.clone()]);
+        assert_eq!(
+            ascending.by_basename("hash.h"),
+            Some(alpha.id),
+            "first inserted wins"
+        );
+        assert_eq!(
+            descending.by_basename("hash.h"),
+            Some(beta.id),
+            "the winner follows insertion order, not key order"
+        );
+    }
+
+    /// UTA2-R3 item 6: the same first-insert-wins rule governs the module
+    /// key - two extensions of one module name share one key and the first
+    /// inserted extension variant answers, in either construction order.
+    #[test]
+    fn pin_by_module_path_collision_keeps_first_extension_variant() {
+        let scala = record("com/example/models/User.scala");
+        let java = record("com/example/models/User.java");
+        let scala_first = FileCatalog::from_records(&[scala.clone(), java.clone()]);
+        assert_eq!(
+            scala_first.by_module_path("com.example.models.User"),
+            Some(scala.id)
+        );
+        let java_first = FileCatalog::from_records(&[java.clone(), scala.clone()]);
+        assert_eq!(
+            java_first.by_module_path("com.example.models.User"),
+            Some(java.id)
+        );
+    }
+
+    /// UTA2-R3 item 6: component-boundary suffix pin in the handoff's own
+    /// shape - `models.User` must hit the genuine `models` file only, never
+    /// the `xmodels` neighbor, on BOTH matching arms (file-level suffix and
+    /// package-dir parent).
+    #[test]
+    fn pin_suffix_boundary_models_user_never_hits_xmodels_user() {
+        let models_user = record("src/models/User.scala");
+        let xmodels_user = record("src/xmodels/User.scala");
+        let catalog = FileCatalog::from_records(&[models_user.clone(), xmodels_user.clone()]);
+        assert_eq!(
+            catalog.by_module_path_suffix("models.User"),
+            vec![models_user.id],
+            "the `x` prefix must not smuggle `xmodels` past the boundary check"
+        );
+        assert_eq!(
+            catalog.by_module_path_suffix("xmodels.User"),
+            vec![xmodels_user.id],
+            "the converse query is equally boundary-exact"
+        );
+        assert_eq!(
+            catalog.by_module_path_suffix("models"),
+            vec![models_user.id],
+            "the package-dir (parent) arm is boundary-checked the same way"
+        );
+    }
+
+    /// UTA2-R3 item 6: the empty-query rule covers every query that
+    /// `unify_segments` normalizes to the empty string - `.`, `/`, and a
+    /// lone `..` (the '.'-trim eats it) - not just the literal "".
+    #[test]
+    fn pin_suffix_lookup_empty_after_separator_and_dot_normalization() {
+        let catalog = FileCatalog::from_records(&scala_tree_records());
+        for emptyish in ["", ".", "/", ".."] {
+            assert!(
+                catalog.by_module_path_suffix(emptyish).is_empty(),
+                "query {emptyish:?} unifies to empty and must match nothing, \
+                 not every record"
+            );
+        }
+    }
+
+    /// UTA2-R3 item 6: the `by_path` canonical fallback arm is keyed through
+    /// the same dot-collapsing `canonical_key`, so an absolute candidate
+    /// carrying `..` resolves there too (the rel arm misses it, the
+    /// canonical arm catches it).
+    #[test]
+    fn pin_by_path_canonical_arm_collapses_parent_dir_candidates() {
+        let mut entry = record("include/thing.h");
+        entry.canonical_path = PathBuf::from("/repo/abs/thing.h");
+        let id = entry.id;
+        let catalog = FileCatalog::from_records(&[entry]);
+        assert_eq!(
+            catalog.by_path(Path::new("include/../include/thing.h")),
+            Some(id),
+            "rel arm after collapsing"
+        );
+        assert_eq!(
+            catalog.by_path(Path::new("/repo/abs/../abs/thing.h")),
+            Some(id),
+            "canonical fallback arm after collapsing"
+        );
+    }
+
     #[test]
     fn empty_catalog() {
         let catalog = FileCatalog::from_records(&[]);
