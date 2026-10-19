@@ -204,3 +204,73 @@ tmp-race (pre-existing). DEFERRED with evidence:
   inflation; call edges with caller-less nodes (pinned).
 - closeout rider shipped: bench_compare phase label matched to the M23.5
   `detect_cycle_groups` producer rename (pre-existing gate drift).
+
+## Round 2 (added 2026-10-19)
+
+Angles round 1 couldn't reach: the ui crate (its round-1 audit died), the
+Python tooling suite, the integration-seam layer, and below-cutoff residuals.
+Four read-only audits returned; suspects verified by orchestrator code-read
+where marked ORCH.
+
+New confirmed bugs (round-2 tag `UTB-`):
+- UTB-1 (ORCH) ui `api_graph.rs:811-830` vs `:749-756` -
+  `build_subtree_edges_from_closure` iterates the FULL closure while nodes
+  exclude the traversal dep: emitted `actual_subtree` edges can reference a
+  node absent from their own node list (orphan edges for cytoscape). Hand R1.
+- UTB-2 (ORCH) ui `api_graph.rs:754,817` - subtree nodes/edges built by
+  HashSet iteration, unsorted: JSON array order varies per process - the
+  UTA-B4 nondeterminism class recurring ui-side, uncatchable today because
+  the endpoint has zero tests. Hand R1 fixes (sort by FileId).
+- UTB-3 (ORCH) ui `api_source.rs:72-81` - `/api/repo-info` `file_paths`
+  documented "relative paths" returns numeric FileId strings
+  (`id.0.to_string()`), defeating the endpoint's stated cross-environment
+  purpose; zero tests existed. Hand R1 fixes (map keys() -> values()).
+- UTB-4 ui `api_graph.rs:273-289` - `top_hubs` degree-rank order from
+  `get_entrypoints` silently replaced by payload emission order (in-code
+  comment admits the skipped re-sort). Hand R1: fix iff JS consumers allow,
+  else loud pin + report.
+- UTB-5 tools `bench_compare.py:519` - non-numeric baseline phase value ->
+  uncaught ValueError traceback where module contract promises exit 2
+  internal error. Hand R2 fixes (validate -> exit 2).
+- UTB-6 tools `theme_token_check.py:143,160` + `:211` except-tuple -
+  non-dict baseline JSON -> uncaught AttributeError, contract broken. Hand
+  R2 fixes.
+- UTB-7 tools NaN-timeout holes - `ui_smoke.parse_arguments:101-110` +
+  `poll_until_ready:246` (NaN deadline never reached -> infinite hang) and
+  `bench_compare._positive_float:556-563` (NaN/inf accepted). Hand R2
+  fixes (reject nan/inf).
+- UTB-8 (ORCH) repo `discovery.rs:40-63` - stack walk follows symlinked
+  directories with no visited set: a directory loop is an INFINITE walk
+  (hang). Hand R3 fixes (canonical-path visited set) + platform-conditional
+  loop test (junction on Windows, symlink on unix, graceful skip when the
+  environment forbids creation, per T7a share_mode precedent).
+
+Pin-and-report class (behavior current, wrong-ish, or owner-decision):
+worker-core `tu_store.rs:295-305` silent drop of Resolved/Wildcard ids
+missing from `path_by_id` (R4 pin + surface-count report); lang-api
+`catalog.rs:98-101` by_basename first-insert-wins (R3 pin); `is_toolchain`
+dead arm (R3 report); repo walk error-polarity contradiction at :43-45 vs
+:49/:75 (deferred sibling, R3 pins both sides + journal proposal);
+entrypoints rank-order fallback covered under UTB-4.
+
+Round-2 hands (same gated pipeline, sequential):
+- R1 `uta2-r1` ui: fixes UTB-1/2/3 (+UTB-4 decision) + traversal endpoint /
+  repo-info / symbol-call-arm / etag-refresh tests (audit rows 1-13).
+  Gate: `-p ariadne-ui`.
+- R2 `uta2-r2` tools: fixes UTB-5/6/7 + package_offline fake-subprocess
+  suite + error-path pins (rows 5-20 selectively). Gates: unittest
+  discover, no cargo.
+- R3 `uta2-r3` repo + lang-api: fix UTB-8; pin by_basename/by_module_path_
+  suffix/by_path; policy keyword + FileKind extension matrices; locate Err
+  text; walk-polarity characterization pins. Gates: `-p ariadne-repo`,
+  `-p ariadne-lang-api`.
+- R4 `uta2-r4` sweep-B remainder: worker-core drop pin; scheduler
+  incremental IO; build candidate roots/malformed-JSON/measure-fallback;
+  cluster format_summary; artifact checked-variants; transform is_noop
+  completion; lang render_unit; WorkerBackend spy; validate observations.
+  Gates: one distill per touched crate (<=10).
+- R5 `uta2-r5` sweep-A remainder: graph `map_aggregation_consumers`
+  (zero-coverage function); lang-cpp raw_string_open multibyte + probe
+  Available arm; lang-scala boundary.rs marker pin; cli transform action-
+  arm verification. Gates: `-p ariadne-graph`, `-p ariadne-lang-cpp`,
+  `-p ariadne-lang-scala`, `-p ariadne-cli`.
