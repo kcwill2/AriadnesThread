@@ -546,5 +546,46 @@ class DistillBaselineExitHonestyTests(unittest.TestCase):
         self.assertIn("usage error", standard_out + standard_err)
 
 
+class CargoMissingTests(unittest.TestCase):
+    """Audit row 5: a missing cargo executable stays a usage-class failure.
+    run_cargo_command turns the OSError into 'cannot run cargo' on stderr
+    and main() exits 2 -- never a traceback, never the drift line."""
+
+    def test_cargo_missing_oserror_exits_two_and_names_cargo(self):
+        with mock.patch.object(testrun.subprocess, "run",
+                               side_effect=OSError(2, "no cargo on PATH")):
+            error_stream = io.StringIO()
+            with contextlib.redirect_stderr(error_stream):
+                return_code = testrun.main([])
+        self.assertEqual(2, return_code)
+        self.assertIn("cannot run cargo", error_stream.getvalue())
+
+
+class CaptureWithoutDistillTests(unittest.TestCase):
+    """Audit row 5: --capture without --distill is accepted-and-ignored.
+    The capture file is a distill-mode artifact; raw mode must stay raw."""
+
+    def test_capture_path_parsed_without_distill_flag(self):
+        options = testrun.parse_arguments(["--capture", "somewhere.txt"])
+        self.assertEqual("somewhere.txt", options.capture_path)
+        self.assertFalse(options.distill)
+
+    def test_capture_without_distill_writes_no_file_and_verdicts_normally(self):
+        def fake_run(cargo_args, timeout_seconds):
+            return testrun.RunOutcome(text=MULTI_SUITE_OUTPUT, timed_out=False)
+
+        with tempfile.TemporaryDirectory() as holder:
+            capture = Path(holder) / "cap.txt"
+            with mock.patch.object(testrun, "run_cargo_command", fake_run):
+                with contextlib.redirect_stdout(io.StringIO()) as standard_out:
+                    return_code = testrun.main(["--capture", str(capture)])
+            self.assertEqual(0, return_code)
+            self.assertFalse(capture.exists())
+            self.assertEqual(
+                "12 passed / 0 failed / 1 ignored / 3 suites",
+                last_stdout_line(standard_out.getvalue()),
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

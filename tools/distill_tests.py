@@ -203,5 +203,21 @@ class UsageAndTimeoutTests(unittest.TestCase):
             self.assertTrue(Path(capture).exists())
 
 
+class ChildOSErrorTests(unittest.TestCase):
+    """Audit row 6: a child that cannot be launched (OSError from
+    subprocess.run) is a usage-class failure -- exit 2, NOT the verdict
+    exit 1 that a merely failing child gets. A crashed-not-run child must
+    never masquerade as a verdict."""
+
+    def test_child_oserror_exits_two_usage_class_not_one(self):
+        with mock.patch.object(distill.subprocess, "run",
+                               side_effect=OSError(2, "no such executable")):
+            error_stream = io.StringIO()
+            with contextlib.redirect_stderr(error_stream):
+                return_code = distill.main(["--", "definitely-not-installed"])
+        self.assertEqual(2, return_code)
+        self.assertIn("cannot run child", error_stream.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

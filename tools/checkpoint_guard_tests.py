@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -309,6 +310,64 @@ class ModuleContractTests(unittest.TestCase):
              "python tools/checkpoint_guard.py status"],
             parsed.commands,
         )
+
+
+class ScopedCommandVerdictTests(unittest.TestCase):
+    """Audit row 7: run_scoped_command's two failure verdict rows -- the
+    TIMEOUT gate-budget and the ERROR(OSError) not-runnable class -- pin the
+    exact shapes the resume report renders."""
+
+    def test_timeout_verdict_row(self):
+        with mock.patch.object(
+                checkpoint_guard.subprocess, "run",
+                side_effect=subprocess.TimeoutExpired(cmd="python slow.py",
+                                                      timeout=600)):
+            verdict = checkpoint_guard.run_scoped_command(
+                "python slow.py", Path.cwd())
+        self.assertEqual("red TIMEOUT", verdict.verdict)
+        self.assertIn("no result after 600s", verdict.tail)
+
+    def test_oserror_verdict_row(self):
+        with mock.patch.object(
+                checkpoint_guard.subprocess, "run",
+                side_effect=OSError(2, "The system cannot find the file")):
+            verdict = checkpoint_guard.run_scoped_command(
+                "python gone.py", Path.cwd())
+        self.assertEqual("red ERROR", verdict.verdict)
+        self.assertIn("system cannot find", verdict.tail)
+
+
+class HandoffParsePinTests(unittest.TestCase):
+    """Audit row 7 pins AS-IS (advisory; behavior, not a fix request): an
+    unclosed fence leaves the parser inside the fence forever, and the
+    inside-fence branch does not unwrap bullet/backtick forms -- so a
+    bullet-style command after an unclosed fence is SWALLOWED. The
+    closed-fence contrast is part of the pin, as is --spec duplicate
+    last-wins versus --scope/--cmd accumulation."""
+
+    HEAD_LINES = ["# handoff", "", "## Gates", "", "```text",
+                  "python tools/gate_one.py"]
+
+    def test_unclosed_fence_swallows_later_bullet_commands(self):
+        lines = self.HEAD_LINES + ["", "- `python tools/gate_two.py`"]
+        self.assertEqual(["python tools/gate_one.py"],
+                         checkpoint_guard._extract_command_lines(lines))
+
+    def test_closed_fence_extracts_bullet_commands_afterwards(self):
+        lines = self.HEAD_LINES + ["```", "",
+                                   "- `python tools/gate_two.py`"]
+        self.assertEqual(
+            ["python tools/gate_one.py", "python tools/gate_two.py"],
+            checkpoint_guard._extract_command_lines(lines))
+
+    def test_duplicate_spec_flag_last_wins_scopes_and_cmds_accumulate(self):
+        parsed = checkpoint_guard.parse_resume_arguments([
+            "--spec", "first.md", "--scope", "alpha/**",
+            "--cmd", "python one.py", "--scope", "beta/**",
+            "--cmd", "python two.py", "--spec", "second.md"])
+        self.assertEqual("second.md", parsed.spec)
+        self.assertEqual(["alpha/**", "beta/**"], parsed.scopes)
+        self.assertEqual(["python one.py", "python two.py"], parsed.commands)
 
 
 if __name__ == "__main__":

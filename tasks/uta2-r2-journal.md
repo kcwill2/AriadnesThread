@@ -115,3 +115,43 @@ plus the two hygiene gates.
   "ariadne-offline-0.1.zip"); works but the dotted suffix truncation is a
   wart. Also `archive_base` in create_archive is computed and never used.
   Tests pin the CURRENT naming by consuming create_archive's return value.
+
+## Checkpoint 5 - error-path pins (handoff items 5-11) + canonical gate
+
+- Row 5 testrun (+3): cargo-missing OSError -> exit 2 with "cannot run cargo"
+  on stderr; --capture without --distill parsed-but-ignored pin (no capture
+  file written, raw mode verdicts normally).
+- Row 6 distill (+1): child OSError -> exit 2 usage class, explicitly not
+  the verdict exit 1.
+- Row 7 checkpoint_guard (+4): run_scoped_command "red TIMEOUT" / "red
+  ERROR" verdict rows; unclosed-fence SWALLOW pin with the closed-fence
+  contrast (inside-fence branch never unwraps bullet/backtick forms);
+  parse_resume_arguments duplicate --spec last-wins vs --scope/--cmd
+  accumulation. All as-is characterization, none a fix request.
+- Row 8 encoding_guard (+4): --root without value exit 2; --root missing
+  dir / plain-file both usage; outside-a-git-repo -> exit 2 "git plumbing
+  failed".
+- Row 9 commit_scoped (+3): fnmatch '/'-crossing pinned AS-IS and named
+  honestly (single-star crosses directory separators; literal prefix
+  isolation survives; two-dir fake repo witness: scope "crates/alpha/*"
+  commits ONLY crates/alpha/**). Advisory note for the spec: the crossing
+  is safe in practice only because of the prefix, worth an owner decision
+  if "**" vs "*" semantics ever get tightened.
+- Row 10 setup_dev_env (+6): main() flag->argv wiring table (rustup
+  components launched at the shutil.which RESULT path - one expected-value
+  correction during red-checking, test-side only), npm ci-vs-install
+  lockfile branch, --no-locked, --skip-npm (require_npm False recorded),
+  --build appends cargo build --release, problem-list prints and exits 1
+  without running anything.
+- Row 11 ui_smoke: shipped in commit 89fb908 (build-fail EXIT_INTERNAL_ERROR
+  + tail; retry-loop exhaustion/mid-loop-pass/non-retryable-break pins).
+- No pins failed on first run EXCEPT the honest expected-value correction
+  above; pins pin, they do not fix. Where the pinned behavior is wrong-ish
+  (unclosed-fence swallow, single-star crossing) the test names say so.
+- Canonical gate: `python -m unittest discover -s tools -p "*_tests.py"` ->
+  `Ran 296 tests in 21.863s` / `OK`. Floor 232 -> 296, monotonically grown
+  across checkpoints (232 -> 251 -> 296), no existing test edited or
+  weakened.
+- Concurrent-session note: R1 ui hand landed af8a997/64314d7 on main after
+  my 89fb908; my scopes (tools/** + this journal) never intersect; no
+  index.lock collisions encountered.

@@ -158,5 +158,38 @@ def make_repo_at(root):
     git(root, "config", "user.name", "Guard Tests")
 
 
+class UsageAndNonRepoTests(unittest.TestCase):
+    """Audit row 8: the --root usage failures and the outside-a-git-repo
+    error class."""
+
+    def test_root_flag_without_value_exits_two(self):
+        with tempfile.TemporaryDirectory() as holder:
+            code, out = run_guard(Path(holder), "--all", "--root")
+        self.assertEqual(2, code)
+        self.assertIn("--root requires a path", out)
+
+    def test_root_pointing_at_missing_path_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as holder:
+            missing = str(Path(holder) / "no-such-dir")
+            code, out = run_guard(Path(holder), "--all", "--root", missing)
+        self.assertEqual(2, code)
+        self.assertIn("usage:", out)
+
+    def test_root_pointing_at_a_plain_file_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as holder:
+            not_a_dir = Path(holder) / "file.txt"
+            not_a_dir.write_text("x\n", encoding="utf-8")
+            code, out = run_guard(Path(holder), "--all", "--root",
+                                  str(not_a_dir))
+        self.assertEqual(2, code)
+        self.assertIn("usage:", out)
+
+    def test_run_outside_git_repo_exits_two_naming_git_plumbing(self):
+        with tempfile.TemporaryDirectory() as holder:
+            code, out = run_guard(Path(holder), "--all")
+        self.assertEqual(2, code)
+        self.assertIn("git plumbing failed", out)
+
+
 if __name__ == "__main__":
     unittest.main()

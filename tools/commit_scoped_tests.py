@@ -249,5 +249,45 @@ class FailureDiagnosticTests(unittest.TestCase):
         self.assertEqual(head_before, git(root, "rev-parse", "HEAD"))
 
 
+class FnmatchCrossDirectoryPinTests(unittest.TestCase):
+    """Audit row 9, pinned AS-IS (advisory owner-decision class, no fix
+    requested): scope_matches uses fnmatch.fnmatchcase, whose `*` DOES match
+    the path separator -- so a written-as-one-level pattern like
+    `crates/demo/*` really matches arbitrarily nested paths. Honest
+    characterization: the name says which surprise is being locked, and the
+    end-to-end test records exactly which paths commit from a two-directory
+    fake repo."""
+
+    def test_single_star_crosses_directory_separators(self):
+        self.assertTrue(commit_scoped.scope_matches(
+            "crates/demo/*", "crates/demo/src/lib.rs"))
+        self.assertTrue(commit_scoped.scope_matches(
+            "tools/*.py", "tools/nested/deep_test.py"))
+
+    def test_literal_prefix_isolation_survives_the_star_crossing(self):
+        # The separator-crossing star can never escape the literal directory
+        # prefix in front of it -- that is what keeps single-star scopes
+        # safe in practice despite the crossing.
+        self.assertFalse(commit_scoped.scope_matches(
+            "crates/demo/*", "crates/other/src/lib.rs"))
+        self.assertFalse(commit_scoped.scope_matches(
+            "crates/demo/*", "docs/demo/lib.rs"))
+
+    def test_two_directory_repo_commits_only_the_scoped_directory(self):
+        root = make_repo()
+        write_file(root, "crates/alpha/src/deep.py", "ALPHA = 1\n")
+        write_file(root, "crates/beta/src/deep.py", "BETA = 1\n")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "seed two dirs")
+        write_file(root, "crates/alpha/src/deep.py", "ALPHA = 2\n")
+        write_file(root, "crates/beta/src/deep.py", "BETA = 2\n")
+        code, _, err = run_tool(
+            root, "--scope", "crates/alpha/*",
+            "--lock-retry-delay", FAST_LOCK_DELAY, "-m", "alpha only")
+        self.assertEqual(0, code, err)
+        committed = git(root, "show", "--name-only", "--format=", "HEAD")
+        self.assertEqual(["crates/alpha/src/deep.py"], committed.split())
+
+
 if __name__ == "__main__":
     unittest.main()

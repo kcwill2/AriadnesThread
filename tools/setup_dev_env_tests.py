@@ -5,9 +5,13 @@ These tests cover the pure decision logic only; no network fetch, npm run,
 or cargo invocation happens here.
 """
 
+import contextlib
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -77,6 +81,100 @@ class LayoutConstantsTests(unittest.TestCase):
 
     def test_extension_dir_contains_package_manifest(self):
         self.assertTrue((setup_dev_env.EXTENSION_DIR / "package.json").exists())
+
+
+class MainWiringTests(unittest.TestCase):
+    """Audit row 10: main()'s flag->argv wiring table plus the problem-list
+    exit 1. run/which/find_npm/check_toolchain are monkeypatched; nothing
+    external (rustup, cargo, npm, network) ever runs."""
+
+    def setUp(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.ext_dir = Path(holder.name) / "extension"
+        self.ext_dir.mkdir()
+        self.recorded_runs = []
+        self.recorded_require_npm = []
+
+        def fake_run(cmd, cwd=None):
+            self.recorded_runs.append([str(token) for token in cmd])
+
+        def fake_which(name):
+            return "/bin/rustup" if name == "rustup" else None
+
+        def healthy_toolchain(require_npm):
+            self.recorded_require_npm.append(require_npm)
+            return []
+
+        patches = [
+            mock.patch.object(setup_dev_env, "EXTENSION_DIR", self.ext_dir),
+            mock.patch.object(setup_dev_env, "run", fake_run),
+            mock.patch.object(setup_dev_env, "find_npm", lambda: "/bin/npm"),
+            mock.patch.object(setup_dev_env.shutil, "which",
+                              side_effect=fake_which),
+            mock.patch.object(setup_dev_env, "check_toolchain",
+                              healthy_toolchain),
+        ]
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _main(self, argv):
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            return_code = setup_dev_env.main(argv)
+        return return_code, captured.getvalue()
+
+    def test_default_flags_run_the_locked_wired_sequence(self):
+        return_code, _output = self._main([])
+        self.assertEqual(0, return_code)
+        self.assertEqual(self.recorded_runs, [
+            # ensure_rust_components launches the shutil.which RESULT as
+            # argv[0], hence the resolved /bin/rustup path in the table.
+            ["/bin/rustup", "component", "add", "rustfmt"],
+            ["/bin/rustup", "component", "add", "clippy"],
+            ["cargo", "fetch", "--locked"],
+            ["/bin/npm", "install"],
+        ])
+        self.assertEqual([True], self.recorded_require_npm)
+
+    def test_lockfile_present_prefers_npm_ci(self):
+        (self.ext_dir / "package-lock.json").write_text("{}\n",
+                                                        encoding="utf-8")
+        return_code, _output = self._main([])
+        self.assertEqual(0, return_code)
+        self.assertEqual(["/bin/npm", "ci"], self.recorded_runs[-1])
+
+    def test_no_locked_flag_drops_locked_from_fetch(self):
+        return_code, _output = self._main(["--no-locked"])
+        self.assertEqual(0, return_code)
+        self.assertIn(["cargo", "fetch"], self.recorded_runs)
+        self.assertNotIn(["cargo", "fetch", "--locked"], self.recorded_runs)
+
+    def test_skip_npm_skips_the_require_and_the_npm_command(self):
+        return_code, _output = self._main(["--skip-npm"])
+        self.assertEqual(0, return_code)
+        self.assertEqual([False], self.recorded_require_npm)
+        npm_runs = [cmd for cmd in self.recorded_runs if "npm" in cmd[0]]
+        self.assertEqual([], npm_runs)
+
+    def test_build_flag_appends_the_release_build(self):
+        return_code, _output = self._main(["--build"])
+        self.assertEqual(0, return_code)
+        self.assertEqual(["cargo", "build", "--release"],
+                         self.recorded_runs[-1])
+
+    def test_problems_print_and_exit_one_without_running_anything(self):
+        problems = ["npm not found on PATH - install Node.js",
+                    "git not found on PATH - required for contributing"]
+        with mock.patch.object(setup_dev_env, "check_toolchain",
+                               lambda require_npm: problems):
+            return_code, output = self._main([])
+        self.assertEqual(1, return_code)
+        self.assertIn("Toolchain problems:", output)
+        for problem in problems:
+            self.assertIn(problem, output)
+        self.assertEqual([], self.recorded_runs)
 
 
 if __name__ == "__main__":
