@@ -155,3 +155,42 @@ plus the two hygiene gates.
 - Concurrent-session note: R1 ui hand landed af8a997/64314d7 on main after
   my 89fb908; my scopes (tools/** + this journal) never intersect; no
   index.lock collisions encountered.
+
+## Checkpoint 6 - final gates and commit ledger
+
+- Canonical unit gate (committed state): `python -m unittest discover -s
+  tools -p "*_tests.py"` -> `Ran 296 tests in 24.283s` / `OK`.
+  Trajectory: 232 (baseline) -> 251 (after the three fixes) -> 296 (final).
+- `python tools/encoding_guard.py --all` -> silent, exit 0 (runs after the
+  final commit so every committed byte of this hand, including the new
+  tools/package_offline_tests.py, is covered; commit_scoped stages+commits
+  internally, so --all on tracked content is the honest equivalent of the
+  --staged check).
+- `python tools/hygiene_check.py` -> exit 0: zero R1/R2 lines; the R3 warn
+  list is byte-identical to the pre-hand runs, all entries in crates/**,
+  tests/integration/**, or tasks/ reviewer scratch -- none in any file this
+  hand touched or created.   R1/R2 ceilings respected: largest touched file
+  ui_smoke_tests.py at 579 lines, bench_compare_tests.py 924 < 1000 (both
+  verified by tail-read, not estimate); all
+  added functions well under 100 lines; no source line near 2000 chars.
+- Commits (all via commit_scoped.py, scopes tools/** and this journal only):
+  - 89fb908 fix(tools): crash-class exit-2 contracts + NaN arg rejection
+    (UTB-5/6/7) + red-first suites incl. ui_smoke row-11 pins
+  - 536a399 test(tools): package_offline fake-subprocess suite
+  - 7a1ff41 test(tools): error-path pins (audit rows 5-10)
+  - (this journal commit closes the hand)
+- Deviations summary (full rationale in checkpoints above):
+  1. ui_smoke row-11 pins ride commit 89fb908 (commit_scoped scopes whole
+     files under tools/**; splitting hunks is not possible; disclosed).
+  2. Gate command shapes: per-file red runs used the allowlisted
+     `python -m unittest discover -s tools -p "<file>"` pattern form
+     instead of `python tools/<file>.py` (direct invocation refused by the
+     session allowlist; identical discovery semantics).
+  3. setup_dev_env expected-value correction during red-checking was
+     test-side only (which()-resolved rustup argv[0]); no production edit.
+- Out-of-scope observations (reported, not touched): package_offline
+  create_archive with_suffix dotted-stem naming + dead archive_base local;
+  fnmatch single-star '/'-crossing advisory (row 9 pin); checkpoint_guard
+  unclosed-fence swallow (row 7 pin); --update-baseline can still MERGE a
+  corrupt foreign-class entry that the compare path will then reject with
+  exit 2 (no crash; left as-is).
