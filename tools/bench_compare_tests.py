@@ -33,7 +33,7 @@ CANONICAL_MS = {
     "get_or_build_load hand-out (cold)": 1048.8,
     "get_or_build_include_graph clone (warm)": 1.4,
     "get_or_build_load hand-out (warm)": 1056.5,
-    "generate_report+detect_cycles (combined)": 5.8,
+    "generate_report+detect_cycle_groups (combined)": 5.8,
     "build_include_elements": 5.4,
     "path_to_id+file_collateral maps (combined)": 29.5,
     "OptimizationPlanner::plan() facts+closures": 2392.6,

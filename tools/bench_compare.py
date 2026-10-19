@@ -81,7 +81,7 @@ DOCUMENTED_PHASES = (
     "get_or_build_load hand-out (cold)",
     "get_or_build_include_graph clone (warm)",
     "get_or_build_load hand-out (warm)",
-    "generate_report+detect_cycles (combined)",
+    "generate_report+detect_cycle_groups (combined)",
     "build_include_elements",
     "path_to_id+file_collateral maps (combined)",
     "OptimizationPlanner::plan() facts+closures",
