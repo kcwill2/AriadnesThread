@@ -55,10 +55,10 @@ crop of silent-error-swallow sites.
   `let _ =`, pool keeps only the first error and queue-restore is unasserted.
   Hand H5 tests + surfaces.
 - UTA-B7 cli silent swallows: `optimize.rs:471-473` (`save_optimization_report`
-  drops serde and write errors, returns Ok), `transform.rs:230-233`
-  (`load_plan_for_action` erases the replan error), `measure.rs:11` +
-  `discover.rs:87` (`discover().ok()` turns discovery failure into an
-  *empty-file* fingerprint). Hand H7 pins/fixes.
+  drops serde and write errors, returns Ok), `commands/transform.rs:230-233`
+  (`load_plan_for_action` erases the replan error), `commands/measure.rs:11` +
+  `commands/discover.rs:87` (`discover().ok()` turns discovery failure into an
+  *empty-file* fingerprint). Hand H7a fixed all three (root-cause Errs).
 - UTA-B8 `crates/optimize prefix assumption`
   `crates/cli/src/optimize.rs:457-459` - `residual_collateral_load` assumes
   committed plans are a prefix of `safe_plans` (`take(committed)`), but the
@@ -155,6 +155,52 @@ because scope is test-additive and per-crate gate cost is one distill run).
 | UTA-B4 | graph | find_file_id nondeterministic match | FIXED by H1 994e5c3 |
 | UTA-B5 | graph | recursive DFS stack risk + SCC undercount | FIXED by H1 994e5c3 (iterative frames); fed-diamond undercount residual deferred |
 | UTA-B6 | scheduler | empty-fp checkpoint + swallowed save/first-error | FIXED (surfacing) by H5 3e48c51; counts-to-CLI-report half deferred (cli struct-literal coupling) |
-| UTA-B7 | cli | save/replan/discovery error swallows | CONFIRMED -> H7 |
-| UTA-B8 | cli | residual assumes committed-prefix | CONFIRMED -> H7 fix |
+| UTA-B7 | cli | save/replan/discovery error swallows | FIXED by H7a 60b76f3 (root-cause Errs; files live under crates/cli/src/commands/) |
+| UTA-B8 | cli | residual assumes committed-prefix | FIXED by H7a 60b76f3 (red 730 vs 640) |
 | UTA-P* | various | pin-only adjudications above | PIN |
+
+## Deferred findings (closeout ledger sync, 2026-10-19)
+
+Fixes SHIPPED: UTA-B2, B4, B5 (iterative core), B6 (surfacing), B7, B8;
+plus write-path containment (transform). FALSIFIED: UTA-B3, worker-core
+tmp-race (pre-existing). DEFERRED with evidence:
+
+- UTA-B1 include-provenance fix: needs origin field on `ExtractedSymbol`/
+  `GeneratedUnit` + cli caller changes (tasks/uta-t4-journal.md BLOCKER).
+- UTA-B5 residual: fed-diamond cycle undercount preserved (changes
+  `CallGraphManifest.recursion_cycles` on real repos).
+- UTA-B6 residual: checkpoint-count fields to CLI report (cli struct-literal
+  coupling; scheduler+cli+pipeline D-shape hand).
+- graph builder.rs:89-92: per-file index failure swallowed (`Err(_) =>
+  continue`), all-fail repo indistinguishable from empty (diagnostic policy).
+- repo discovery.rs:43-45: file-root/unreadable root walk yields empty Ok -
+  upstream class of the empty-fingerprint bug (fix here would neutralize the
+  class H7a pinned downstream).
+- cli progress overshoot unclamped (>100%, oversized bar) - pinned
+  `pin_progress_overshoot_unclamped`.
+- cli `parse_language_arg` case-strict; legacy test name overclaims
+  "case_insensitively" (rename owed).
+- cli dispatch: subrepo silently wins over positional in analyze;
+  includes/plan drop the positional via an uncomparing wildcard arm.
+- scheduler: `memory_limit_bytes` dead knob; index `IncrementalCache` dead
+  public API (deletion = API decision).
+- lang-cpp: `.H`/`.CPP` case divergence across detector/planning/shaper;
+  backend missing-source analyzes empty; `#else` of disabled `#if 0`
+  double-masked; ParserCtx self-edge; `A a();` phantom double-record (all
+  pinned with owner names).
+- lang-scala: scanner stops unterminated strings at newline while
+  directive_parser runs to EOF (docs corrected; unification owed);
+  two-deps-one-statement emits duplicate new imports; truncated `import
+  {` absorbs identifiers to EOF (tolerance policy owed).
+- cluster frontier: breaks at first frozen (nearer-collateral optimizable
+  missed); ownership arg ignored; planner.rs:477 per-candidate SCC rebuild
+  (perf); second digit-grouping impl in plan.rs (divergence pinned).
+- artifact: manifest without root-key skips root check; corrupt .bin silently
+  falls back to older .json; rename-fail leaves staged tmp; verbatim-root
+  breaks separator-cosmetic same_path equality; seq-side bounded decode
+  rejects via element-EOF, not the limit path (blob design owed).
+- build `normalize` dedup drops a whole duplicate-named context.
+- graph: `include_load == total_load` degeneracy; parallel-directive degree
+  inflation; call edges with caller-less nodes (pinned).
+- closeout rider shipped: bench_compare phase label matched to the M23.5
+  `detect_cycle_groups` producer rename (pre-existing gate drift).
