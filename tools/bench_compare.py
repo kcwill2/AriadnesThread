@@ -35,9 +35,12 @@ Exit codes:
     (5200 MiB at N=1280). The stage5 growth ratio is a TRIPWIRE (user
     decision 2026-10-06): it is computed and printed and NEVER fails a
     gate.
-  2 parse format drift, failed bench run, bad CLI usage, an
-    internal error (never substitute zeros for missing rows), or
-    stage5-memory accepting fewer than 5 invocations (not a verdict).
+  2 parse format drift, failed bench run, bad CLI usage (including a
+    non-finite --timeout value), an internal error (never substitute
+    zeros for missing rows; a baseline entry carrying a non-numeric or
+    non-finite phase value is such an internal error, reported as an
+    ERROR line, never a traceback), or stage5-memory accepting fewer
+    than 5 invocations (not a verdict).
 
 Usage:
   python tools/bench_compare.py [--bench {stage5-timing,stage5-memory}]
@@ -237,8 +240,10 @@ USAGE_TEXT = (
     "      1 regression past the mode ratio, or (stage5-memory) a\n"
     "        RATIFIED peak-bar exceedance; the growth tripwire prints\n"
     "        but never fails the exit code;\n"
-    "      2 parse drift, failed bench run, bad usage, or (stage5-memory)\n"
-    "        fewer than 5 accepted invocations."
+    "      2 parse drift, failed bench run, bad usage (non-finite\n"
+    "        --timeout), internal error (e.g. corrupt baseline phase\n"
+    "        value), or (stage5-memory) fewer than 5 accepted\n"
+    "        invocations."
 )
 
 
@@ -484,6 +489,24 @@ def load_baseline(path: Path) -> dict:
     return loaded
 
 
+# UTB-5 (round-2 audit): a baseline phase value that cannot render a finite
+# float is a corrupt baseline -- the module's exit-2 internal-error class --
+# never a float() traceback escaping main. The WHOLE phases object is
+# screened, not only the compared subset, so an untracked bogus value cannot
+# hide in the file (float() still accepts numeric strings, as before).
+def _unusable_baseline_phase_values(baseline_phases: dict) -> list:
+    unusable = []
+    for phase, value in baseline_phases.items():
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            unusable.append((phase, f"{value!r} is not a number"))
+            continue
+        if not math.isfinite(number):
+            unusable.append((phase, f"{value!r} is not finite"))
+    return unusable
+
+
 def build_baseline_entry(medians: dict, runs: int, recorded: str) -> dict:
     return {
         "phases": {phase: float(ms) for phase, ms in medians.items()},
@@ -554,12 +577,16 @@ def _positive_int(raw: str, option: str) -> int:
 
 
 def _positive_float(raw: str, option: str) -> float:
+    """Parse a CLI float that must be finite and positive. The isfinite
+    screen (UTB-7) is load-bearing: `NaN <= 0` is False and inf > 0, so the
+    old positivity test alone admitted both as unbounded deadlines."""
     try:
         value = float(raw)
     except ValueError:
         raise ValueError(f"{option} requires a number, got {raw!r}") from None
-    if value <= 0:
-        raise ValueError(f"{option} must be > 0, got {value}")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(
+            f"{option} must be a finite number > 0, got {value}")
     return value
 
 
@@ -690,6 +717,13 @@ def _handle_compare(medians: dict, runs: int, baseline_path: Path,
     if not isinstance(baseline_phases, dict):
         print(f"ERROR baseline entry for '{class_key}' has no \"phases\" "
               f"object in {baseline_path}")
+        return 2
+    unusable = _unusable_baseline_phase_values(baseline_phases)
+    if unusable:
+        print(f"ERROR baseline entry for '{class_key}' has unusable phase "
+              f"value(s) in {baseline_path}:")
+        for phase, reason in unusable:
+            print(f"  {phase}: {reason}")
         return 2
     warnings, regressed = compare_medians(
         medians, baseline_phases, ratio=ratio,

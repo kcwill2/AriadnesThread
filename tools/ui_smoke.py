@@ -9,7 +9,9 @@ answers 200 with the product's verified content types and Cache-Control.
 Usage: python tools/ui_smoke.py [--fixture PATH] [--no-build] [--cold|--warm]
                                 [--timeout SECONDS] [--exe PATH]
                                 [--target-dir DIR] [--release]
-Exit codes: 0 PASS, 1 smoke failure, 2 internal/usage error.
+Exit codes: 0 PASS, 1 smoke failure, 2 internal/usage error. --timeout must
+be a finite number > 0: nan/inf are rejected at the CLI (usage exit 2),
+never handed to the readiness poll as an unreachable deadline (UTB-7).
 
 --release is opt-in (M28 T3 rider): it builds `cargo build --release
 --bin tool` and launches target/release/tool(.exe) with the same cold/warm
@@ -30,6 +32,7 @@ Verified product contract (2026-10-01, read-only inspection):
 
 import argparse
 import json
+import math
 import shutil
 import socket
 import subprocess
@@ -99,15 +102,20 @@ def parse_arguments(argv):
     temperature.add_argument("--warm", action="store_true",
                              help="keep prebuilt artifacts in the copy (cache-hit path)")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS,
-                        help="seconds to wait for the server to reach ready state")
+                        help="seconds to wait for the server to reach ready"
+                             " state (finite, > 0)")
     parser.add_argument("--exe", default=None,
                         help="explicit path to the tool binary (overrides --target-dir)")
     parser.add_argument("--target-dir", default=None,
                         help="directory holding tool.exe (default target/debug,"
                              " or target/release with --release)")
     options = parser.parse_args(argv)
-    if options.timeout <= 0:
-        raise UsageError("--timeout must be a positive number of seconds")
+    # UTB-7 (round-2 audit): argparse's float type happily parses nan/inf and
+    # `nan <= 0` is False, so the old positivity screen admitted both -- and
+    # a NaN/inf deadline in poll_until_ready can never fire (unbounded hang).
+    if not math.isfinite(options.timeout) or options.timeout <= 0:
+        raise UsageError(
+            "--timeout must be a positive finite number of seconds")
     return options
 
 
@@ -236,6 +244,12 @@ def extract_progress_state(payload) -> Optional[str]:
 def poll_until_ready(base_url: str, timeout_seconds: float,
                      poll_interval: float = POLL_INTERVAL_SECONDS,
                      is_server_running=None) -> bool:
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        # Defense in depth for UTB-7: parse_arguments already rejects
+        # non-finite timeouts on the CLI, but a NaN/inf deadline here would
+        # spin forever (both comparisons against NaN are False), so a
+        # non-finite or non-positive budget fails closed instead of hanging.
+        return False
     deadline = time.monotonic() + timeout_seconds
     while True:
         if is_server_running is not None and not is_server_running():

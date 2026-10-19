@@ -424,5 +424,156 @@ class ReleaseProfilePlumbingTests(unittest.TestCase):
         self.assertIn(exe_path.name, ("tool", "tool.exe"))
 
 
+class NonFiniteTimeoutTests(unittest.TestCase):
+    """UTB-7 (round-2 audit): float() happily parses `nan`/`inf`, the old
+    `timeout <= 0` screen let both through (NaN <= 0 is False), and
+    poll_until_ready's NaN/inf deadline can never be reached -- an
+    unbounded hang against a server that never turns ready."""
+
+    def test_parse_arguments_rejects_nan_timeout(self):
+        with self.assertRaises(ui_smoke.UsageError):
+            ui_smoke.parse_arguments(["--timeout=nan"])
+
+    def test_parse_arguments_rejects_inf_timeout(self):
+        with self.assertRaises(ui_smoke.UsageError):
+            ui_smoke.parse_arguments(["--timeout=inf"])
+
+    def test_main_exits_two_on_nan_timeout_without_running_anything(self):
+        missing = Path(tempfile.gettempdir()) / "ui-smoke-missing.exe"
+        self.assertFalse(missing.exists())
+        code, output = run_main_captured(
+            ["--timeout=nan", "--no-build", "--exe", str(missing)])
+        self.assertEqual(2, code)
+        self.assertIn("--timeout", output)
+
+    def test_main_exits_two_on_inf_timeout_without_running_anything(self):
+        missing = Path(tempfile.gettempdir()) / "ui-smoke-missing.exe"
+        self.assertFalse(missing.exists())
+        code, output = run_main_captured(
+            ["--timeout=inf", "--no-build", "--exe", str(missing)])
+        self.assertEqual(2, code)
+        self.assertIn("--timeout", output)
+
+    def test_nonfinite_poll_deadline_fails_fast_without_sleeping(self):
+        """Defense in depth: even called directly with a non-finite timeout,
+        the poll must fail closed immediately -- it may never spin. The fake
+        sleep makes any spin loud instead of infinite."""
+        def forbidden_sleep(seconds):
+            raise AssertionError(
+                "poll loop must not spin on a non-finite timeout")
+        for bad_timeout in (float("nan"), float("inf")):
+            with self.subTest(timeout=bad_timeout):
+                with StubUiServer(ready_after_polls=10 ** 9) as stub:
+                    with mock.patch.object(ui_smoke.time, "sleep",
+                                           forbidden_sleep):
+                        ready = ui_smoke.poll_until_ready(
+                            stub.base_url, bad_timeout, poll_interval=0.02)
+                self.assertFalse(ready)
+
+
+class BuildFailureTests(unittest.TestCase):
+    """Audit row 11: the cargo-build-fail branch of run_smoke (rc=1 ->
+    EXIT_INTERNAL_ERROR + output tail), exercised with a faked subprocess --
+    cargo never runs."""
+
+    def setUp(self):
+        self._temp_dir = Path(tempfile.mkdtemp(prefix="ui-smoke-build-"))
+        self.addCleanup(shutil.rmtree, str(self._temp_dir), True)
+        self.fixture = self._temp_dir / "fixture"
+        self.fixture.mkdir()
+
+    def test_build_failure_returns_internal_error_with_output_tail(self):
+        options = ui_smoke.parse_arguments(["--fixture", str(self.fixture)])
+        options.fixture_path = self.fixture
+        options.cold = True
+        options.build = True
+
+        def fake_run(command, **_kwargs):
+            return subprocess.CompletedProcess(
+                command, returncode=1, stdout="   Compiling noise\n",
+                stderr="error: build failed for tool\n")
+
+        with mock.patch.object(ui_smoke.subprocess, "run", fake_run):
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                code = ui_smoke.run_smoke(options, self._temp_dir)
+        output = captured.getvalue()
+        self.assertEqual(ui_smoke.EXIT_INTERNAL_ERROR, code)
+        self.assertIn("cargo build --bin tool failed", output)
+        self.assertIn("error: build failed for tool", output)
+
+
+class RetryLoopTests(unittest.TestCase):
+    """Audit row 11: run_smoke's port-race retry loop with _smoke_attempt
+    stubbed -- pins MAX_PORT_ATTEMPTS exhaustion, mid-loop success, and the
+    non-retryable single-shot break."""
+
+    def setUp(self):
+        self._temp_dir = Path(tempfile.mkdtemp(prefix="ui-smoke-retry-"))
+        self.addCleanup(shutil.rmtree, str(self._temp_dir), True)
+        self.fixture = self._temp_dir / "fixture"
+        self.fixture.mkdir()
+        self.exe = self._temp_dir / "tool.exe"
+        self.exe.write_bytes(b"MZ-fake")
+        self.options = ui_smoke.parse_arguments(
+            ["--fixture", str(self.fixture), "--no-build"])
+        self.options.fixture_path = self.fixture
+        self.options.cold = True
+        self.options.build = False
+
+    def _attempt(self, number, ready, failures, retryable):
+        temp_root = self._temp_dir / ("attempt-%d" % number)
+        temp_root.mkdir()
+        return ui_smoke.AttemptResult(temp_root, ready, failures,
+                                      "stubbed detail", retryable)
+
+    def _run_with_attempts(self, attempt_factory):
+        calls = []
+
+        def fake_attempt(options, repo_root, exe_path):
+            calls.append((str(exe_path)))
+            return attempt_factory(len(calls))
+
+        with mock.patch.object(ui_smoke, "_smoke_attempt", fake_attempt):
+            with mock.patch.object(ui_smoke, "resolve_exe_path",
+                                   lambda options, repo_root: self.exe):
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured):
+                    code = ui_smoke.run_smoke(self.options, self._temp_dir)
+        return code, captured.getvalue(), len(calls)
+
+    def test_retryable_failures_retry_to_max_attempts_then_fail(self):
+        def factory(_call_number):
+            return self._attempt(_call_number, False,
+                                 ["port squatter won the race"], True)
+        code, output, call_count = self._run_with_attempts(factory)
+        self.assertEqual(ui_smoke.EXIT_SMOKE_FAILURE, code)
+        self.assertEqual(ui_smoke.MAX_PORT_ATTEMPTS, call_count)
+        self.assertIn("RETRY attempt 1", output)
+        self.assertIn("RETRY attempt 2", output)
+        self.assertNotIn("RETRY attempt 3", output)
+        self.assertIn("port squatter won the race", output)
+
+    def test_second_attempt_success_short_circuits_to_pass(self):
+        def factory(call_number):
+            if call_number == 1:
+                return self._attempt(call_number, False,
+                                     ["port squatter won the race"], True)
+            return self._attempt(call_number, True, [], False)
+        code, output, call_count = self._run_with_attempts(factory)
+        self.assertEqual(ui_smoke.EXIT_PASS, code)
+        self.assertEqual(2, call_count)
+        self.assertIn("ui_smoke: PASS", output)
+
+    def test_non_retryable_failure_breaks_after_one_attempt(self):
+        def factory(call_number):
+            return self._attempt(call_number, False,
+                                 ["cold guard tripped"], False)
+        code, output, call_count = self._run_with_attempts(factory)
+        self.assertEqual(ui_smoke.EXIT_SMOKE_FAILURE, code)
+        self.assertEqual(1, call_count)
+        self.assertNotIn("RETRY", output)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

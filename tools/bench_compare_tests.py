@@ -829,5 +829,96 @@ class BenchChoiceSurfaceTests(unittest.TestCase):
         self.assertIn("unknown --bench choice", finished.stdout)
 
 
+class CorruptBaselineExitTwoTests(unittest.TestCase):
+    """UTB-5 (round-2 audit): a baseline entry whose phase values are not
+    usable numbers is an internal error -- exit 2 + ERROR line, never a
+    float() traceback escaping main()."""
+
+    def _run_against(self, baseline):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, baseline)
+            return invoke_main(["--baseline", str(path), "--runs", "1"],
+                               run_bench_text_from())
+
+    def _entry(self, phases):
+        return {bench_compare.machine_class():
+                {"phases": phases, "recorded": "2026-09-29", "runs": 3}}
+
+    def test_non_numeric_baseline_phase_value_exits_2_not_traceback(self):
+        broken = self._entry({"file_pass (event span)": "abc"})
+        exit_code, output, _ = self._run_against(broken)
+        self.assertEqual(2, exit_code)
+        self.assertIn("ERROR", output)
+        self.assertIn("file_pass (event span)", output)
+        self.assertIn("is not a number", output)
+
+    def test_unusable_phase_value_exits_2_even_for_untracked_phase(self):
+        # The planted bogus phase is never compared against a median, yet
+        # the entry is still corrupt: the whole phases object is validated,
+        # not just the compared subset.
+        broken = self._entry({"x": "abc"})
+        exit_code, output, _ = self._run_against(broken)
+        self.assertEqual(2, exit_code)
+        self.assertIn("ERROR", output)
+
+    def test_non_finite_baseline_phase_value_exits_2(self):
+        broken = self._entry({"file_pass (event span)": float("inf")})
+        exit_code, output, _ = self._run_against(broken)
+        self.assertEqual(2, exit_code)
+        self.assertIn("ERROR", output)
+        self.assertIn("is not finite", output)
+
+    def test_baseline_entry_without_phases_dict_exits_2(self):
+        # Pin of the pre-existing sibling guard: entry without a "phases"
+        # object was already the module's exit-2 contract.
+        broken = {bench_compare.machine_class():
+                  {"recorded": "2026-09-29", "runs": 3}}
+        exit_code, output, _ = self._run_against(broken)
+        self.assertEqual(2, exit_code)
+        self.assertIn("ERROR", output)
+
+
+class NonFiniteTimeoutArgumentTests(unittest.TestCase):
+    """UTB-7 (round-2 audit) bench_compare half: --timeout nan/inf pass the
+    old `value <= 0` screen and hand an unbounded deadline to the bench
+    runner; both must be usage errors (exit 2) instead."""
+
+    def _run_with_fake(self, timeout_text):
+        fake_runner, _calls = make_fake_runner(run_bench_text_from())
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            exit_code = bench_compare.main(
+                ["--timeout", timeout_text], run_bench_impl=fake_runner)
+        return exit_code, stream.getvalue()
+
+    def test_nan_timeout_is_usage_error_exit_2(self):
+        exit_code, output = self._run_with_fake("nan")
+        self.assertEqual(2, exit_code)
+        self.assertIn("--timeout", output)
+
+    def test_inf_timeout_is_usage_error_exit_2(self):
+        exit_code, output = self._run_with_fake("inf")
+        self.assertEqual(2, exit_code)
+        self.assertIn("--timeout", output)
+
+    def test_positive_finite_timeout_still_accepted(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = write_baseline_file(scratch, {
+                bench_compare.machine_class(): baseline_from_canonical()})
+            fake_runner, _calls = make_fake_runner(run_bench_text_from())
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                exit_code = bench_compare.main(
+                    ["--timeout", "120", "--baseline", str(path)],
+                    run_bench_impl=fake_runner)
+            output = stream.getvalue()
+        self.assertEqual(0, exit_code, output)
+
+    def test_negative_timeout_still_rejected(self):
+        exit_code, output = self._run_with_fake("-5")
+        self.assertEqual(2, exit_code)
+        self.assertIn("--timeout", output)
+
+
 if __name__ == "__main__":
     unittest.main()

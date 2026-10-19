@@ -23,7 +23,9 @@ both halves (styles.css carries no literals; tokens live only in themes.css).
 Usage:
   python tools/theme_token_check.py --check-added --base <rev>
   python tools/theme_token_check.py --update-baseline
-Exit codes: 0 clean, 1 drift violation, 2 internal/usage error.
+Exit codes: 0 clean, 1 drift violation, 2 internal/usage error -- including a
+baseline file holding invalid JSON or a non-object JSON document (UTB-6),
+reported as an ERROR line, never a traceback.
 """
 
 import json
@@ -151,13 +153,23 @@ def scan_frozen_counts(root, baseline):
 
 
 def load_baseline(root):
+    """Parsed baseline; a JSON top level that is not an object (UTB-6,
+    round-2 audit) is raised as GitError so main()'s except-tuple turns it
+    into the contracted exit-2 ERROR line instead of letting the AttributeError
+    from scan_frozen_counts' .get() escape as a traceback."""
     path = Path(root) / BASELINE_PATH
     if not path.is_file():
         raise GitError(
             f"baseline file {BASELINE_PATH} missing; run --update-baseline "
             "and commit it"
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise GitError(
+            f"baseline file {BASELINE_PATH} must contain a JSON object, got "
+            f"{type(loaded).__name__}"
+        )
+    return loaded
 
 
 def update_baseline(root):

@@ -141,6 +141,35 @@ class CountFreezeTests(unittest.TestCase):
         self.assertIn("baseline", (out + err).lower())
 
 
+class CorruptBaselineTests(unittest.TestCase):
+    """UTB-6 (round-2 audit): baseline JSON that parses but is NOT an object
+    (e.g. `[]`) reached scan_frozen_counts and crashed `.get("counts")` with
+    an AttributeError outside main()'s except tuple -- a traceback where the
+    contract promises exit 2 + ERROR."""
+
+    def test_non_dict_baseline_json_exits_two_not_traceback(self):
+        root = make_repo_with_base()
+        baseline = Path(root) / BASELINE
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("[]", encoding="utf-8")
+        code, out, err = run_tool(root, "--check-added", "--base", "HEAD")
+        combined = out + err
+        self.assertEqual(2, code, combined)
+        self.assertIn("ERROR", combined)
+        self.assertNotIn("Traceback", combined)
+
+    def test_json_scalar_baseline_exits_two_not_traceback(self):
+        root = make_repo_with_base()
+        baseline = Path(root) / BASELINE
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("null", encoding="utf-8")
+        code, out, err = run_tool(root, "--check-added", "--base", "HEAD")
+        combined = out + err
+        self.assertEqual(2, code, combined)
+        self.assertIn("ERROR", combined)
+        self.assertNotIn("Traceback", combined)
+
+
 class UsageTests(unittest.TestCase):
     def test_unknown_revision_exits_two(self):
         root = make_repo_with_base()
