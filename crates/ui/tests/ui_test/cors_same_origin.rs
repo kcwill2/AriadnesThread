@@ -66,3 +66,44 @@ async fn test_cors_mirrors_same_origin_request() {
         "an Origin equal to the request Host it was sent to must be allowed"
     );
 }
+
+/// UTA2-R1 item 11: the https arm of the predicate. The predicate accepts
+/// both `http://` and `https://` forms of the exact Host; a TLS-fronted
+/// deployment must not silently deny its own origin.
+#[tokio::test]
+async fn test_cors_mirrors_https_scheme_origin() {
+    assert_eq!(
+        allow_origin_header("localhost:7742", "https://localhost:7742")
+            .await
+            .as_deref(),
+        Some("https://localhost:7742"),
+        "the https scheme of the exact host:port is the same origin (S6 arm pin)"
+    );
+}
+
+/// UTA2-R1 item 11: the missing-Host arm. Without a Host header there is no
+/// scheme+Host to compare against, so NOTHING can be mirrored back - the
+/// deny path must not fall open.
+#[tokio::test]
+async fn test_cors_denies_request_without_host_header() {
+    let app = build_router(common::ready_state(
+        std::path::PathBuf::from("."),
+        IncludeGraph::new(),
+        CallGraph::default(),
+        common::empty_export_payload(),
+    ));
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/status")
+        // deliberately no Host header: the predicate has nothing to match
+        .header("Origin", "http://localhost:7742")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("access-control-allow-origin"),
+        None,
+        "a request without Host must never receive an allow-origin grant"
+    );
+}

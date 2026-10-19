@@ -11,8 +11,13 @@ use axum::{
 use std::{collections::HashMap, sync::Arc};
 use tower::ServiceExt;
 
+/// Renamed from `test_server_traversal_routes` (UTA2-R1 item 6, journal:
+/// tasks/uta2-r1-journal.md): this test never touched `/api/graph/traversal`
+/// - it fires traverse/path/entrypoints/search against an EMPTY loaded
+/// state. Strengthened (handoff-authorized) to assert the empty-body
+/// semantics it always exercised; no assertion weakened.
 #[tokio::test]
-async fn test_server_traversal_routes() {
+async fn test_graph_query_routes_serve_empty_loaded_state() {
     let state = Arc::new(UiState::new_loaded(
         std::path::PathBuf::from("."),
         IncludeGraph::new(),
@@ -45,33 +50,47 @@ async fn test_server_traversal_routes() {
 
     let app = build_router(state);
 
-    let req = Request::builder()
-        .uri("/api/graph/traverse?graph_type=include&center=test")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (status, _headers, body) = common::request_route(
+        app.clone(),
+        "/api/graph/traverse?graph_type=include&center=test",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!([]),
+        "a non-numeric include center over an empty graph yields no elements"
+    );
 
-    let req = Request::builder()
-        .uri("/api/graph/path?graph_type=call&from=a&to=b")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (status, _headers, body) = common::request_route(
+        app.clone(),
+        "/api/graph/path?graph_type=call&from=a&to=b",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::Value::Null,
+        "no call graph nodes: no path, the JSON null answer"
+    );
 
-    let req = Request::builder()
-        .uri("/api/graph/entrypoints?graph_type=symbol")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (status, _headers, body) =
+        common::request_route(app.clone(), "/api/graph/entrypoints?graph_type=symbol").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["graph_type"], "symbol");
+    assert_eq!(body["cycles"], serde_json::json!([]));
+    for key in ["roots", "leaves", "top_hubs"] {
+        assert_eq!(
+            body[key],
+            serde_json::json!([]),
+            "empty loaded state yields no {key}"
+        );
+    }
 
-    let req = Request::builder()
-        .uri("/api/graph/search?q=test")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (status, _headers, body) =
+        common::request_route(app, "/api/graph/search?q=test").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!([]), "no elements, no matches");
 }
 
 fn given_mock_search_graphs() -> (IncludeGraph, CallGraph, ReducedSemanticModel) {

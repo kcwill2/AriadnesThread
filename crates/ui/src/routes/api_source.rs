@@ -69,14 +69,30 @@ pub(crate) async fn api_repo_info(
     State(state): State<Arc<UiState>>,
 ) -> Json<RepoInfoResponse> {
     let analysis = state.analysis();
+    // UTB-3 (UTA2-R1, journal: tasks/uta2-r1-journal.md): `file_paths` must
+    // carry the documented repo-relative PATH values - the endpoint exists
+    // so extension hosts can reconcile server paths with their own tree;
+    // numeric FileId keys meant nothing outside the server. Sorted for
+    // emission determinism (the same nondeterminism class as UTB-2). A path
+    // outside `repo_root` keeps its full server-side string. Consumer
+    // greps (extension host, ui assets, ui_test, integration, tools):
+    // nothing reads the old numeric values.
     let file_paths = analysis
         .as_ref()
         .map(|gen| {
-            gen.include_graph
+            let mut paths: Vec<String> = gen
+                .include_graph
                 .file_paths
-                .keys()
-                .map(|id| id.0.to_string())
-                .collect()
+                .values()
+                .map(|path| {
+                    path.strip_prefix(&state.repo_root)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            paths.sort();
+            paths
         })
         .unwrap_or_default();
 

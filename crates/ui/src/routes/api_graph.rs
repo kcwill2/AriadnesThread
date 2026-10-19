@@ -262,31 +262,8 @@ pub(crate) async fn api_graph_entrypoints(
         ),
     };
 
-    let mut roots = Vec::new();
-    let mut leaves = Vec::new();
-    let mut hubs = Vec::new();
-
-    let roots_set: std::collections::HashSet<String> = roots_ids.into_iter().collect();
-    let leaves_set: std::collections::HashSet<String> = leaves_ids.into_iter().collect();
-    let hubs_set: std::collections::HashSet<String> = hubs_ids.into_iter().collect();
-
-    for el in source_elements {
-        if el.data.get("source").is_none() {
-            if let Some(id) = el.data.get("id").and_then(|v| v.as_str()) {
-                if roots_set.contains(id) {
-                    roots.push(el.clone());
-                }
-                if leaves_set.contains(id) {
-                    leaves.push(el.clone());
-                }
-                if hubs_set.contains(id) {
-                    hubs.push(el.clone());
-                }
-            }
-        }
-    }
-
-    // Sort to match original limit order if necessary, but skipping for simplicity or can just return as is.
+    let (roots, leaves, hubs) =
+        partition_entrypoint_elements(source_elements, roots_ids, leaves_ids, hubs_ids);
 
     // the requirement also mentions `cycles: Vec<Vec<String>>` for EntrypointsResponse
     // For now we can leave cycles empty or try to compute them, but let's just return empty as it's not specified how to get them here
@@ -299,6 +276,60 @@ pub(crate) async fn api_graph_entrypoints(
         roots,
         leaves,
     }))
+}
+
+/// Project the `get_entrypoints` id sets onto payload elements. Roots and
+/// leaves keep payload emission order (no rank is documented for either,
+/// and every consumer compares sorted or existence-only). UTB-4 (UTA2-R1,
+/// journal: tasks/uta2-r1-journal.md): `top_hubs` must carry the
+/// degree-rank order `get_entrypoints` already returns (degree desc, id
+/// asc) - the old re-filter through emission order (the admitted "skipping
+/// for simplicity" skip) silently replaced rank semantics with emission
+/// order, and under `limit` truncated to the emission-order subset instead
+/// of the rank prefix. No consumer depends on the old order: traversal.js
+/// never calls this endpoint, api.js's sole consumer always falls into its
+/// error branch, and every test compares hub ids sorted or existence-only.
+fn partition_entrypoint_elements(
+    source_elements: &[CytoscapeElement],
+    roots_ids: Vec<String>,
+    leaves_ids: Vec<String>,
+    hubs_ids: Vec<String>,
+) -> (
+    Vec<CytoscapeElement>,
+    Vec<CytoscapeElement>,
+    Vec<CytoscapeElement>,
+) {
+    let mut roots = Vec::new();
+    let mut leaves = Vec::new();
+    let roots_set: std::collections::HashSet<String> = roots_ids.into_iter().collect();
+    let leaves_set: std::collections::HashSet<String> = leaves_ids.into_iter().collect();
+    for el in source_elements {
+        if el.data.get("source").is_none() {
+            if let Some(id) = el.data.get("id").and_then(|v| v.as_str()) {
+                if roots_set.contains(id) {
+                    roots.push(el.clone());
+                }
+                if leaves_set.contains(id) {
+                    leaves.push(el.clone());
+                }
+            }
+        }
+    }
+    let element_by_id: std::collections::HashMap<&str, &CytoscapeElement> = source_elements
+        .iter()
+        .filter(|el| el.data.get("source").is_none())
+        .filter_map(|el| {
+            el.data
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|id| (id, el))
+        })
+        .collect();
+    let hubs: Vec<CytoscapeElement> = hubs_ids
+        .iter()
+        .filter_map(|id| element_by_id.get(id.as_str()).map(|el| (*el).clone()))
+        .collect();
+    (roots, leaves, hubs)
 }
 
 /// P7: the wildcard glob for one search request, compiled ONCE per request
@@ -660,10 +691,15 @@ fn project_traversal_subtrees(
             file_count: impact.required_headers.len(),
         };
 
-        // Build actual subtree from full closure of dep (excluding dep itself)
+        // Build actual subtree from full closure of dep (excluding dep itself).
+        // UTB-1/UTB-2 (UTA2-R1): ONE node set - registered closure members,
+        // dep excluded, ascending numeric FileId - drives both nodes and
+        // edges, so edges are induced on the node set (no orphan endpoints)
+        // and emission is deterministic instead of HashSet-arbitrary.
         let dep_closure = gen.memo.strict_closure(&gen.include_graph, dep_id);
-        let actual_nodes = build_subtree_nodes_from_closure(&dep_closure, &gen, dep_id);
-        let actual_edges = build_subtree_edges_from_closure(&dep_closure, &gen);
+        let actual_node_ids = closure_node_ids(&dep_closure, &gen, dep_id);
+        let actual_nodes = build_subtree_nodes_from_closure(&actual_node_ids, &gen);
+        let actual_edges = build_subtree_edges_from_closure(&actual_node_ids, &gen);
         let actual_symbols: usize = actual_nodes.iter().map(|n| n.symbol_count).sum();
         let actual_subtree = TraversalSubtree {
             nodes: actual_nodes,
@@ -746,16 +782,41 @@ fn build_subtree_nodes(
         .collect()
 }
 
-fn build_subtree_nodes_from_closure(
+/// The actual subtree's node set (UTB-1/UTB-2, UTA2-R1): closure members
+/// registered in `file_paths` with the traversal dep excluded, ascending by
+/// numeric FileId. The `id != exclude` filter is belt-and-braces: the memo's
+/// strict closure never contains the seed (locked convention in
+/// `closures_tests.rs`), but the exclusion is part of the endpoint's stated
+/// semantics. Nodes AND edges are induced on this ordered set, so no edge
+/// can reference an id absent from the node list and every build of the
+/// same payload emits the same order.
+fn closure_node_ids(
     closure: &std::collections::HashSet<ariadne_repo::FileId>,
     gen: &crate::AnalysisGeneration,
     exclude: ariadne_repo::FileId,
-) -> Vec<TraversalSubtreeNode> {
-    closure
+) -> Vec<ariadne_repo::FileId> {
+    let mut ids: Vec<ariadne_repo::FileId> = closure
         .iter()
         .filter(|&&id| id != exclude)
-        .filter_map(|id| gen.include_graph.file_paths.get(id).map(|p| (id, p)))
-        .map(|(id, path)| {
+        .filter(|&&id| gen.include_graph.file_paths.contains_key(&id))
+        .copied()
+        .collect();
+    ids.sort_unstable_by_key(|id| id.0);
+    ids
+}
+
+fn build_subtree_nodes_from_closure(
+    node_ids: &[ariadne_repo::FileId],
+    gen: &crate::AnalysisGeneration,
+) -> Vec<TraversalSubtreeNode> {
+    node_ids
+        .iter()
+        .map(|id| {
+            let path = gen
+                .include_graph
+                .file_paths
+                .get(id)
+                .expect("closure_node_ids only yields ids registered in file_paths");
             let path_str = path.to_string_lossy().to_string();
             let fname = path
                 .file_name()
@@ -808,16 +869,21 @@ fn build_subtree_edges(
     edges
 }
 
+/// Edges of the actual subtree, induced on the node set (UTB-1): a direct
+/// include counts only when BOTH ends are nodes, so the excluded dep and
+/// unregistered closure members can never appear as source or target.
+/// `direct_includes` is sorted+dedup by construction (AR-09), so walking
+/// the ascending node list emits edges in (source, target) numeric order.
 fn build_subtree_edges_from_closure(
-    closure: &std::collections::HashSet<ariadne_repo::FileId>,
+    node_ids: &[ariadne_repo::FileId],
     gen: &crate::AnalysisGeneration,
 ) -> Vec<TraversalSubtreeEdge> {
+    let node_set: std::collections::HashSet<ariadne_repo::FileId> =
+        node_ids.iter().copied().collect();
     let mut edges = Vec::new();
-    let closure_set: std::collections::HashSet<_> = closure.iter().copied().collect();
-    for &source in closure {
-        let direct_includes = gen.include_graph.direct_includes(source);
-        for target in direct_includes {
-            if closure_set.contains(&target) {
+    for &source in node_ids {
+        for target in gen.include_graph.direct_includes(source) {
+            if node_set.contains(&target) {
                 edges.push(TraversalSubtreeEdge {
                     source: source.0.to_string(),
                     target: target.0.to_string(),

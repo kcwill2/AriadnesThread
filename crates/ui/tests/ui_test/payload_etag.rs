@@ -293,6 +293,72 @@ fn test_etag_hash_is_single_byte_mutation_sensitive() {
     );
 }
 
+/// UTA2-R1 item 10: the snapshot's validation PAIR is (epoch, refresh_key).
+/// Mutating ONLY `stage_status.last_refresh` (the `refresh_key` half, as
+/// `swap_into_state` writes it AFTER a payload refresh) must invalidate the
+/// published snapshot WITHOUT any `install_analysis` epoch bump: the next
+/// request re-serializes exactly once (counter bump proves the slow path
+/// ran, since the bytes themselves cannot reveal it), republishes, and the
+/// steady state holds again.
+#[tokio::test]
+async fn test_export_refresh_key_change_invalidates_snapshot_without_epoch_bump() {
+    let state: Arc<UiState> = common::ready_state(
+        std::path::PathBuf::from("."),
+        ariadne_graph::IncludeGraph::new(),
+        ariadne_graph::CallGraph::default(),
+        ar15_export_payload(),
+    );
+    let app = build_router(state.clone());
+
+    let (_status, headers_before, body_before) = get_export(app.clone(), None).await;
+    assert_eq!(state.export_serialization_count(), 1);
+    get_export(app.clone(), None).await;
+    assert_eq!(
+        state.export_serialization_count(),
+        1,
+        "steady state serves the snapshot before the refresh"
+    );
+    let etag_before = headers_before
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // Refresh signal only: NO payload write, NO install_analysis (epoch
+    // untouched). This is the stage-status leg of `swap_into_state`.
+    {
+        let mut stage = state.stage_status.write().unwrap();
+        stage.last_refresh = Some(1234);
+    }
+
+    let (status, headers_after, body_after) = get_export(app.clone(), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        state.export_serialization_count(),
+        2,
+        "the refresh_key change must force exactly one re-serialization despite an equal epoch"
+    );
+    assert_eq!(
+        body_after, body_before,
+        "payload untouched: the re-serialized bytes are identical"
+    );
+    let etag_after = headers_after
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(etag_after, etag_before, "identical bytes keep the validator");
+
+    get_export(app.clone(), None).await;
+    assert_eq!(
+        state.export_serialization_count(),
+        2,
+        "the refreshed snapshot is republished under the new refresh_key"
+    );
+}
+
 /// No-deep-clone lock (P5): steady requests are served from the ONE
 /// published snapshot - the serialize counter (the only remaining
 /// per-generation serialization site) moves exactly once per generation,
