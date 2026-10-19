@@ -91,3 +91,27 @@ plus the two hygiene gates.
 - Deliberately NOT done: no restructure of parse_arguments -> run_smoke
   option plumbing (fixture_path assignment stays main()'s job; pins set the
   attrs the same way main does).
+
+## Checkpoint 4 - package_offline coverage (zero tests -> 23)
+
+- New tools/package_offline_tests.py: stdlib-only fakes (unittest.mock),
+  REPO_ROOT/DIST_DIR/exe_suffix/detect_platform patched into temp trees,
+  subprocess.run recorded. Covers: run() fail-fast SystemExit on rc!=0;
+  rust binary reuse-vs-build branches (incl. set-order-tolerant cargo argv
+  and the "build did not produce binary" SystemExit); npm/vsce/npx fallback
+  chain incl. all-missing error paths and the node_modules skip; zip vs
+  tar.gz platform selection incl. stale-archive replacement; staging tree
+  (bin/vsix/installer/README, stale package-root replacement, missing
+  installer skipped); main() flag->stage wiring + --no-archive + argparse
+  exit 2.
+- No production change: package_offline.py ships exactly the contract its
+  docstring states; the suite is coverage-only (first tests this file ever
+  had), green after fixing my own harness on second run (missed mixin
+  setUp; installer copy is a silent copy2 so pinned by file content, not by
+  an output line).
+- Out-of-scope observation (reported, NOT fixed): create_archive derives the
+  archive name with Path.with_suffix on a version-dotted pkg name
+  ("ariadne-offline-0.1.0-win-x64" -> stem "ariadne-offline-0.1" ->
+  "ariadne-offline-0.1.zip"); works but the dotted suffix truncation is a
+  wart. Also `archive_base` in create_archive is computed and never used.
+  Tests pin the CURRENT naming by consuming create_archive's return value.
