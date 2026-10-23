@@ -362,7 +362,27 @@ authoritative form this hand records is `--all` (strictly stronger, the
 CW-1 disposition-4 precedent): run silent at duty-1 and re-run silent
 immediately before the landing commit (see the landing session below).
 
-<!-- final landing record appended after the commit cycle -->
+## Final landing record (journal rider, CW-1 `f73a9a1` precedent)
+
+- Duty-1 commit: `ece3513` (202/0 verdict + execution-results, the two
+  declared paths only).
+- Landing commit: `fddb200` (1/1 `extraction_apply.rs`; 135/12 `tests.rs`;
+  368/0 this journal) - the commit-vs-touch-set is exact: three declared
+  paths, nothing else. `encoding_guard --all` silent immediately before it.
+- Rider rationale (verbatim CW-1 verdict finding): the record of the
+  landing SHA cannot ride the commit it names; this rider closes the
+  placeholder the landing commit carried.
+- Post-landing tree: dirty ONLY the tolerated
+  `extensions/ariadne-extension/ariadne-extension-0.1.0.vsix`
+  (`checkpoint_guard status` ground truth).
+- Final canonical lines: baseline `178 passed / 0 failed / 8 ignored / 8
+  suites`; Green and all re-runs `179 passed / 0 failed / 8 ignored / 8
+  suites`; locks 4-5 `11 passed / 0 failed / 0 ignored / 2 suites` and
+  `205 passed / 0 failed / 0 ignored / 2 suites`. Full-census attribution
+  (anchor `1830 passed / 0 failed / 13 ignored / 119 suites @ 765df7b`) is
+  the reviewer hop's with the +1 test and the producer zero-diff proofs
+  recorded above.
+
 
 
 
