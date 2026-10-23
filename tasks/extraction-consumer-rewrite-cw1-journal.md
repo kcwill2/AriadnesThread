@@ -216,4 +216,46 @@ Unchanged: `Cargo.lock` (no dependency added - std::path only),
 R3 warn-only rows in files this hand did not touch (flips are governed
 by dated ledger rows; none of my files appears).
 
+## Commit cycle + landing
+
+- `python tools/encoding_guard.py --staged` exit 0 (vacuous: raw
+  `git add` is denied to this implementer, so nothing was staged yet -
+  `commit_scoped.py` stages its declared scopes itself, per its design).
+- `python tools/encoding_guard.py --all` exit 0 - the real gate form
+  used (handoff-sanctioned superset). My amendments DELETE the two
+  pre-existing em-dash bytes inside the replaced messages and add only
+  ASCII; the guard stayed silent, as the handoff predicted.
+- `python tools/commit_scoped.py --scope crates/lang-cpp/src/dependency_rewriter.rs
+  --scope tests/integration/tests/m20_apply_migrate_characterization_test.rs
+  --scope tests/integration/tests/m19_optimize_characterization_test.rs
+  --scope tasks/extraction-consumer-rewrite-cw1-journal.md -m "fix(lang-cpp):
+  implement consumer_rewrite_spec with the bare-file-name rule; amend
+  m19/m20 characterizations (extraction-consumer-rewrite CW-1)"` - exit 0:
+
+```
+commit c916a26
+146  0  crates/lang-cpp/src/dependency_rewriter.rs
+219  0  tasks/extraction-consumer-rewrite-cw1-journal.md
+ 18  6  tests/integration/tests/m19_optimize_characterization_test.rs
+ 26  5  tests/integration/tests/m20_apply_migrate_characterization_test.rs
+```
+
+Produced implementation+test diff: +190/-11 across the three code files
+(inside the ~210-320 estimate band alongside the journal). The journal
+itself ran 219 lines rather than the planner's ~15 estimate: it carries
+every verbatim Red capture line, the itemized gate table, and the
+zero-diff proofs.
+
+- Journal rider commit (house rider precedent, e.g. the W-1/W-2b riders
+  in the extraction-auto-apply era): this post-commit journal closeout
+  cannot ride the commit whose SHA it records, so it lands as its own
+  journal-only scoped commit.
+
+## Hand status at report
+
+All gates green that were in scope for this hand; tree committed; no
+follow-up pending inside CW-1. CW-2 (cli faithfulness oracle) and CW-3
+(copy relay) depend on this landing as their behavior of record.
+
+
 
