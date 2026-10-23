@@ -235,7 +235,9 @@
     // the real boot + swap + applier path on an isolated fixture copy.
     #[test]
     fn test_a_valid_token_applies_the_plan_end_to_end() {
-        let (_temp_dir, state, proposals, _plans) = boot_swapped_fixture("basic");
+        // CW-2 (shape C4): the generation's plans feed the expected-modified
+        // oracle, so the binding is no longer underscored.
+        let (_temp_dir, state, proposals, plans) = boot_swapped_fixture("basic");
         let plan_id = first_proposal_id(&proposals);
         let reader = installed_reader(&state);
         let applier = installed_applier(&state);
@@ -247,6 +249,8 @@
             .expect("the boot proposal id must mint an approval");
         let repo_root = state.repo_root.clone();
         let before = walked_files(&repo_root);
+        // The oracle's expected-modified set is read PRE-APPLY (shape C4).
+        let expected_modified = expected_modified_consumers(&dry_run.rewrites, &plans, &plan_id);
 
         let attempt = applier.apply(&plan_id, &token);
         assert!(attempt.is_ok(), "expected an approved apply, got {attempt:?}");
@@ -277,17 +281,17 @@
             .map(|rewrite| rewrite.consumer_file.clone())
             .collect();
         approved_consumers.sort();
-        // The handoff's literal "MODIFIED == consumer_file set" is
-        // UNSATISFIABLE here (journal D6): the shipped apply is a
-        // CHARACTERIZED identity rewrite of the consumers - it searches for
-        // the `#include "include/thing.h"` spelling while the sources hold
-        // the bare `#include "thing.h"` - locked, with that reason verbatim,
-        // by m20's apply_thing_plan_locks_transaction_outcome_and_disk_effects
-        // ("latent vacuous-rewrite bug, characterization only"). The
-        // achievable parity: WRITTEN == new_files (above), the dry-run really
-        // carries consumer rows, and MODIFIED may only ever be a SUBSET of
-        // the approved consumers - equality the day the bug is fixed; the
-        // transaction's non-emptiness rides on the written set.
+        // Faithfulness equality (extraction-consumer-rewrite): the
+        // subset-parity clause used to be the whole claim - the "UNSATISFIABLE
+        // / journal D6" workaround for the latent vacuous-rewrite bug, then
+        // characterized by m20's apply_thing_plan_locks_... test ("latent
+        // vacuous-rewrite bug, characterization only"). CW-1's plugin hook
+        // makes the consumer rewrite real, so the deferred row's
+        // expected-modified equality is the claim of record now; the subset
+        // clause survives as belt-and-braces coverage of the
+        // outside-the-approval case. The equality is falsifiable: it fails
+        // if any rewrite silently drops, any file changes outside the
+        // expected set, or any pre-existing file disappears.
         assert!(
             !approved_consumers.is_empty(),
             "the approved dry-run must actually carry consumer rewrite rows, \
@@ -297,6 +301,10 @@
             modified.iter().all(|file| approved_consumers.contains(file)),
             "the apply must not modify any file outside the approved dry-run's \
              consumer_file set: modified={modified:?}"
+        );
+        // The post-apply faithfulness audit, factored for the R1 ceiling:
+        assert_modified_faithfully_applied(
+            &before, &after, &modified, &expected_modified, &approved_consumers,
         );
 
         let mut dto_new_files = outcome.new_files.clone();
@@ -319,6 +327,96 @@
         assert_eq!(
             outcome.generation_epoch, 1,
             "the DTO carries the epoch the approval was minted on"
+        );
+    }
+
+    /// Faithfulness-oracle helper for required test 1 (invariant X1,
+    /// extraction-consumer-rewrite): the expected-modified set is exactly
+    /// the approved dry-run's consumer rows whose PRE-APPLY on-disk text
+    /// has a directive hit for at least one of the plan's plugin discovery
+    /// spellings. Spellings come from the plugin
+    /// (`plan_consumer_discovery_targets`), not from the row's
+    /// `old_includes` strings, because post-CW-1 the rewrite matches
+    /// exactly those spellings (the hook maps paths through the same
+    /// bare-file-name rule): discovery's predicate and the rewrite's
+    /// matcher agree BY CONSTRUCTION (X1) while the DTO rows stay honest
+    /// path data (X3). Host-canonical `consumer_file` strings (the parity
+    /// fact recorded above the `canonicalized_lossy` helper) return sorted.
+    fn expected_modified_consumers(
+        rewrites: &[ariadne_ui::ExtractionRewriteDto],
+        plans: &[OptimizationPlan],
+        plan_id: &str,
+    ) -> Vec<String> {
+        use ariadne_lang::DependencyRewriter;
+        let plan = plans
+            .iter()
+            .find(|candidate| candidate.id.0 == plan_id)
+            .expect("the approved plan resolves in the generation's plan set");
+        let registry = crate::registry::default_registry();
+        let spellings = crate::commands::transform::plan_consumer_discovery_targets(&registry, plan)
+            .expect("the plan's language registers a rewriting backend");
+        let rewriter = crate::registry::plan_backend(
+            &registry,
+            &plan.target_file,
+            |caps| caps.rewriting,
+            "rewriting",
+        )
+        .expect("the plan's language registers a rewriting backend")
+        .rewriter();
+        let mut expected: Vec<String> = rewrites
+            .iter()
+            .filter(|row| {
+                let consumer_text =
+                    std::fs::read_to_string(std::path::Path::new(&row.consumer_file))
+                        .expect("an approved consumer exists on disk before the apply");
+                spellings.iter().any(|spelling| {
+                    !rewriter.find_dependency_targets(&consumer_text, spelling).is_empty()
+                })
+            })
+            .map(|row| row.consumer_file.clone())
+            .collect();
+        expected.sort();
+        expected
+    }
+
+    /// Post-apply half of the faithfulness oracle for required test 1
+    /// (invariant X1, extraction-consumer-rewrite). Factored out so the
+    /// test body stays under the R1 function ceiling - every claim still
+    /// runs inside required test 1's call, nothing is weakened:
+    /// (1) modified == expected-modified - no rewrite silently dropped,
+    /// nothing changed outside the expected set; (2) on this fixture the
+    /// expected set IS the approved dry-run's consumer set (the deferred
+    /// row's restore-equality claim, machine-witnessed); (3) the A-4
+    /// observations row's whole-tree extension - no pre-existing file
+    /// outside the artifact trees is deleted by the approved apply.
+    fn assert_modified_faithfully_applied(
+        before: &BTreeMap<PathBuf, Option<Vec<u8>>>,
+        after: &BTreeMap<PathBuf, Option<Vec<u8>>>,
+        modified: &[String],
+        expected_modified: &[String],
+        approved_consumers: &[String],
+    ) {
+        assert_eq!(
+            modified, expected_modified,
+            "faithfulness oracle (extraction-consumer-rewrite, ex-D6 deferred \
+             row): the modified set equals the expected-modified set - every \
+             rewrite was faithfully attempted, none silently dropped"
+        );
+        assert_eq!(
+            expected_modified, approved_consumers,
+            "on this fixture the expected-modified set IS the approved \
+             dry-run's consumer set - the deferred row's restore-equality \
+             claim, machine-witnessed"
+        );
+        // A-4 non-numbered observations row (ledger ~327): nothing present
+        // before is absent after, artifact trees excluded (the apply's own
+        // record lives there).
+        assert!(
+            before
+                .keys()
+                .filter(|relative| !is_artifact_tree(relative))
+                .all(|relative| after.contains_key(relative)),
+            "the approved apply must not delete any pre-existing file"
         );
     }
 
@@ -777,4 +875,29 @@
             matches!(retry, ExtractionApplyRefusal::NotApproved),
             "the retry is refused at the token gate, not the transaction: {retry:?}"
         );
+    }
+
+    // CW-2 (A9 carve-out row, plan_id half): the sanitizer itself, proven
+    // directly. The e2e fixture is ASCII-only, which is exactly why the
+    // route-side required test 10 alone could not prove the plan_id
+    // mapping sanitizes at all.
+    #[test]
+    fn test_outcome_dto_sanitizes_a_non_ascii_plan_id() {
+        let applier = standalone_applier(9, Vec::new());
+        let committed_report = ApplyTransactionReport {
+            outcome: ApplyOutcome::Committed {
+                tiers_passed: vec![TierResult {
+                    tier: ValidationTier::Structural,
+                    status: ValidationStatus::Pass,
+                }],
+            },
+            new_files: Vec::new(),
+        };
+        // The non-ASCII byte rides a \u{e9} ESCAPE: the authored source
+        // stays pure ASCII (AGENTS.md); the raw char renders at panic time.
+        let dto = applier.outcome_dto("PLAN-\u{e9}N-001", &committed_report);
+        // ASCII guard first: the handoff's predicted Red panic comes from
+        // here pre-fix (outcome_dto passes plan_id through unsanitized).
+        assert_all_strings_ascii(&dto, "the non-ASCII plan_id mapping");
+        assert_eq!(dto.plan_id, "PLAN-?N-001");
     }

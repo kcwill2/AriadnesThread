@@ -160,7 +160,7 @@ impl EngineBackedExtractionApplier {
             .map(|path| self.repo_relative(path))
             .collect();
         ExtractionApplyOutcomeDto {
-            plan_id: plan_id.to_string(),
+            plan_id: ascii_only(plan_id),
             generation_epoch: self.epoch,
             committed,
             tiers,
