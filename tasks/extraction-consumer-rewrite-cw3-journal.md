@@ -1,9 +1,10 @@
 # CW-3 Journal - extraction-consumer-rewrite
 
-Status: **RESOLVED and RESUMED - GREEN, landing in progress.** The hand
-was originally BLOCKED at its own Green gate (one mandated assertion
-was unsatisfiable with the mandated comment copy; the "Blocker"
-section below stays as the preserved mechanical witness). The planner
+Status: **RESOLVED - GREEN and LANDED** (docs commit `90beaef` +
+landing `83f0b7c`; see the Landing record at the foot). The hand was
+originally BLOCKED at its own Green gate (one mandated assertion was
+unsatisfiable with the mandated comment copy; the "Blocker" section
+below stays as the preserved mechanical witness). The planner
 adjudicated in-handoff: option (b) rewrap, recorded as the DATED
 AMENDMENT at the foot of `tasks/extraction-consumer-rewrite-cw3-handoff.md`.
 The hand resumed per that erratum's docs-first procedure; see "Erratum
@@ -319,3 +320,61 @@ the byte-exact source for ledger:325 and ledger:326 unchanged:
    dirty: vsix only" predates the duty-1 posture: the two CW-2
    reviewer artifacts were on disk BY DESIGN as duty-1's inputs (CW-2
    verdict's duty-1 block); read as "no foreign dirt" and executed.
+6. Erratum choice recorded as an ACCEPTED deviation: the original
+   build-item-1 four-line block was SUPERSEDED mid-hand by the DATED
+   AMENDMENT (option b rewrap). The implementer applied the amended
+   text byte-exact and did NOT self-amend; the erratum landed as its
+   own docs commit `90beaef` first (defect is planner-attributed in
+   the erratum's own text; F14 class, planner side).
+7. Gates 4/6/7 not run in the resumed phase either - the dispatch
+   assigns workspace-wide gates to the reviewer hop outright; the
+   producer zero-diff facts it needs are recorded in the Landing
+   record.
+8. Two commit cycles for this hand (the erratum's docs commit + the
+   landing, plus the journal rider) instead of one - mandated by the
+   erratum's landing procedure; declared here per the 2026-10-06 M28
+   itemization law.
+
+## Landing record (journal rider, 2026-10-23)
+
+- Chain of record: duty-1 `701d7d7` (CW-2 verdict + execution-results,
+  this hand's dispatch duty) -> erratum docs commit **`90beaef`**
+  (+88/-0, exactly the handoff path) -> landing **`83f0b7c`**
+  (parent `90beaef`), stat:
+  - `1 1 crates/ui/assets/extraction-wizard.js` (the :386 note line only)
+  - `2 2 crates/ui/assets/hotspots.js` (the :521-522 comment block only, AMENDED rewrap)
+  - `39 0 crates/ui/tests/ui_test/extraction_wizard_render.rs` (pure append; zero existing bytes changed)
+  - `321 0 tasks/extraction-consumer-rewrite-cw3-journal.md` (journal rides the landing)
+- Whole-hand path set, `git diff --name-only "701d7d7..HEAD"` (distill
+  capture, 5 lines): exactly the three code paths above +
+  `tasks/extraction-consumer-rewrite-cw3-handoff.md` (the erratum,
+  landed as `90beaef`) + this journal. `Cargo.lock` in no diff;
+  `main.rs` in no diff; no foreign path.
+- Producer zero-diff proofs for the reviewer hop (distill-routed,
+  captures `target/distill-capture.txt`):
+  - `git diff --numstat "701d7d7..HEAD" -- crates/cli/tests` -> EMPTY
+    (0-line capture; the bench-attribution producer proof)
+  - `git diff --name-only "701d7d7..HEAD" -- crates/lang-cpp tests/integration/tests`
+    -> EMPTY (the CW-1 hook and both m19/m20 characterization files
+    are in NO diff of this hand)
+- Final Green: `371 passed / 0 failed / 0 ignored / 3 suites` exit 0
+  (the erratum's mechanical expectation exactly; baseline 369 + 2).
+- Final invocation itemization (whole hand, routed entry points only):
+  blocked phase - 3 testrun (baseline, Red, blocked Green-attempt) +
+  1 theme_token_check + 1 hygiene + 1 encoding_guard (disk state) + 1
+  distill numstat = 8 scoped, plus the duty-1 pair (encoding_guard +
+  commit_scoped) which rides CW-2's landing duty. Resume phase - 2
+  encoding_guard (pre-docs + commit cycle) + 1 testrun (Green) + 1
+  theme_token_check + 1 hygiene + 3 distill proofs + 3 commit_scoped
+  (docs erratum, landing, this rider) = 11. CW-3's own scoped gate
+  class stays inside the declared 8 + commit-cycle budget; the excess
+  is exactly the erratum's mandated extra docs commit cycle, the RGB
+  re-run mandates, and the post-landing proofs (M28 honest routed
+  count row; no gate skipped, none retried).
+- Reviewer-hop obligations (dispatch ruling): gate 4 `ui_smoke`
+  (`ui_smoke: PASS` against the served-assets byte change), gate 6
+  full census (gate 6's reconciliation arithmetic: `1837 passed /
+  0 failed / 13 ignored / 119 suites` at this landing, attribution
+  owed for any foreign residue), gate 7 `bench_compare` fresh
+  recording with WARNs recorded-not-attributed (PR-2), on top of the
+  reviewer's own fresh re-runs of every gate.
