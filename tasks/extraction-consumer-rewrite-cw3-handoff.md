@@ -5,6 +5,11 @@ CW-1 and CW-2 landed - your copy claims the behavior they shipped. Author rev
 `a38c7aaa` (planner-verified 2026-10-23); start rev = your dispatch head,
 journal it.
 
+PLANNER AMENDMENT 2026-10-23 (read first): the mandated comment block text in
+"What to build" item 1 is SUPERSEDED by the DATED AMENDMENT section at the
+foot of this file (the lock spec is UNCHANGED). Red is already captured; the
+hand resumes at Green.
+
 Binding inputs (read in this order, targeted reads only):
 1. This file (complete contract).
 2. `tasks/extraction-consumer-rewrite-kickoff.md` section 2: the stale
@@ -188,3 +193,86 @@ Sizing (planner, itemized from the mandated bodies): comment block 4 lines
 produced lines vs ~1200; 8 gates + commit cycle (shape estimated 6-7; bench
 recording + hygiene added for the milestone gate list - still inside the law);
 one module dir (`crates/ui`).
+
+---
+
+## DATED AMENDMENT - planner erratum 2026-10-23 (adjudicated in-handoff,
+clarity-track pattern; supersedes ONLY the build-item-1 block text)
+
+**Defect (planner-attributed).** Build-item 1 and the lock spec are
+mutually unsatisfiable as written: the mandated four-line comment WRAPS the
+claim of record across `hotspots.js:521/522` (bytes between "applies" and
+"with" are newline + four spaces + `// `), while the mandated pin
+`HOTSPOTS_JS.contains("<full claim>")` matches bytes CONTIGUOUSLY against the
+raw `include_str!` blob (`crates/ui/src/lib.rs:23`). The contiguous claim
+never existed in `hotspots.js` (grep-proven at the block state; the
+contiguous form lives only in `index.html:553/556`, the A-5 help copy). The
+implementer's stop was correct: journal
+`tasks/extraction-consumer-rewrite-cw3-journal.md` "Blocker" section is the
+mechanical witness (gate 3, `370 passed / 1 failed / 0 ignored / 2 suites`,
+panic at `extraction_wizard_render.rs:874:5`). My author-time verification
+covered the Red-side occurrences, not this pin's Green feasibility - the F14
+"unverified claim about the tree" class, planner side.
+
+**Adjudication: option (b) - rewrap the comment; the mandated LOCK stays
+byte-identical.** Chosen over (a) (pinning the contiguous tail) because (a)
+is strictly weaker against the no-rot intent: a future regression that flips
+only the claim's head (e.g. "the UI NEVER applies with a dry-run first, ...")
+still contains the tail as a substring, so a tail pin would pass while the
+absence locks (which pin only the literal "never runs anything") stay silent;
+the full-contiguous-claim pin rejects any negated or paraphrased variant,
+because the exact sentence must appear verbatim. And the comment's WRAPPING
+is inert copy bytes owned by this hand's touch-set (the P9/P10
+`function_body` locks read the function BODY, not the comment - proven inert
+by the journal's gate 3), whereas the pin is the lock this hand exists to
+ship: amend our copy, never weaken the lock. Option (a) would also pin a
+fragment, not the claim of record that relay row ledger:325 names verbatim.
+
+**Corrected mandated text - the four-line block (hotspots.js :519-522) now
+reads EXACTLY (lines 519-520 byte-identical to the pre-hand original; pure
+ASCII; zero code change):**
+
+    // Honest apply recipe, verbatim verbs from the CLI command surface
+    // (apply and migrate: positional repo root, --plan flag). <repo-root>
+    // stays a literal placeholder token by design (shape P9);
+    // the UI applies with a dry-run first, validation in three tiers and automatic rollback.
+
+Diff vs the pre-hand rev stays +2/-2 (:521 and :522 are the only changed
+lines). Diff vs the current blocked disk state: edit :521 to drop the
+trailing " the UI applies" and re-prefix :522 with "the UI applies "; net
+file length unchanged (691 lines).
+
+**The pin itself is UNCHANGED from the original mandate, verbatim:**
+`assert!(HOTSPOTS_JS.contains("the UI applies with a dry-run first, validation in three tiers and automatic rollback"), "the card hint carries the claim of record")`
+- scans: the `HOTSPOTS_JS` raw asset blob; the contiguous occurrence is
+  `crates/ui/assets/hotspots.js:522` (the comment line above; the claim TEXT
+  is byte-identical to the shipped A-5 help copy at `index.html:553/556`,
+  the comment's trailing period sits after the pinned string and does not
+  affect `contains`).
+- Absence locks UNCHANGED (substring-trap ruling intact):
+  `!HOTSPOTS_JS.contains("never runs anything")`,
+  `!EXTRACTION_WIZARD_JS.contains("never runs anything")`,
+  `!EXTRACTION_WIZARD_JS.contains("every consumer.</div>")`.
+
+**Red status: ALREADY CAPTURED, no re-capture.** Gate 2's
+`369 passed / 2 failed / 0 ignored / 2 suites` with the two named locks
+stands as this hand's Red: under the ORIGINAL comment the amended pin's
+contiguous claim was absent too (grep-witness above), so the positive pin
+would have failed at Red exactly as captured. The implementer RESUMES AT
+GREEN: apply the corrected block, then re-run gate 3 expecting `371 passed /
+0 failed / 0 ignored / 3 suites` (baseline 369 + the 2 locks), then gates
+4-9 as written.
+
+**Landing procedure (additions, everything else in this handoff unchanged):**
+1. BEFORE the landing commit, land this amended handoff as a small docs
+   commit: `python tools/commit_scoped.py --scope
+   tasks/extraction-consumer-rewrite-cw3-handoff.md -m "docs(cw-3): planner
+   erratum - comment rewrap so the claim-of-record pin is satisfiable
+   (extraction-consumer-rewrite CW-3)"` (journal declares the extra commit
+   cycle per the 2026-10-06 M28 itemization law).
+2. Journal edits (yours, in your touch-set): the "Copy edits applied" item 1
+   and the closeout-discharge line for ledger:325 must cite the AMENDED
+   four-line block (this section) as their byte-exact source; the
+   ledger:326 discharge line stands unchanged.
+3. Everything else in the handoff - touch-set, S4 note line, lock tests,
+   hygiene, frozen locks, gates 1-9, discipline, report-back - unchanged.
