@@ -1,4 +1,4 @@
-# extraction-consumer-rewrite - Execution Results (through CW-2 review hop)
+# extraction-consumer-rewrite - Execution Results (through CW-3 review hop)
 
 Written by the CW-1 reviewer hop, 2026-10-23, against
 `tasks/extraction-consumer-rewrite-cw1-handoff.md` acceptance and the
@@ -143,3 +143,79 @@ ledger rows 321 (CW-1), 322, 323 (`plan_id` half), 324 (zero-diff), 328
 (no-deletions observation) there; the two copy relays (325, 326) remain for
 CW-3 (shape C6). CW-3 (copy relay) pending; this file gains its section at
 that hop.
+
+## Handoff acceptance criteria (CW-3)
+
+Reviewer hop 2026-10-23 against
+`tasks/extraction-consumer-rewrite-cw3-handoff.md` INCLUDING the DATED
+AMENDMENT. HEAD at gate time: `b201aa6` on `main` (duty-1 `701d7d7` + erratum
+docs `90beaef` + landing `83f0b7c` + journal rider), start rev `d3f6dbc`.
+All commands re-run fresh in this session.
+
+| Criterion | Result | Evidence (verbatim) |
+|---|---|---|
+| Erratum chain is the sanctioned clarity-track pattern, not drift | PASS | `90beaef` is +88/-0 PURE insertion (top pointer +5, footer +83) declaring "supersedes ONLY the build-item-1 block text"; pin + all three absence strings in the footer byte-identical to the original mandates; docs-first landing followed (`90beaef` parent of `83f0b7c`); implementer stopped with mechanical witness (`370 passed / 1 failed / 0 ignored / 2 suites`, panic `:874:5`) and applied NOTHING of the candidates - the planner amended, then the hand resumed |
+| hotspots.js flip byte-exact vs the AMENDED block, +2/-2 at :521-522 only | PASS | `git show "83f0b7c" -- crates/ui/assets/hotspots.js`: one hunk, two `-`/two `+`; :519-520 unchanged hunk-context; landed lines 519-522 byte-for-byte the erratum block (direct read); claim contiguous at :522; file 691 lines; zero code change |
+| extraction-wizard.js note line +1/-1 at :386; COPY_VS_MOVE_SENTENCE in no hunk (X5) | PASS | one hunk; new line byte-equal the handoff item-2 mandate; constant at :219 absent from all diffs of the hand (`copyMoveLine` reference appears only as unchanged context) |
+| Lock tests appended byte-exact; pure append; file < 1000 | PASS | single hunk `@@ -849,3 +849,42 @@` (+39/-0); names, pin, absence strings, messages all byte-equal the mandates (handoff :75-93 + erratum :245-255); file 851 -> 890 (Read: "total 890 lines"); `main.rs` mod line untouched (module-map ruling) |
+| No-rot locks STRONG as the erratum intends | PASS | positive full-claim pin green against the raw blob and rejects head-negation/paraphrase (option (a) tail-pin weakness argument verified); absence locks pin the OLD FULL clauses - `"every consumer.</div>"` is not a substring of the new claim (trap avoided), `"never runs anything"` has zero asset occurrences at HEAD (grep); wizard positive green; claim TEXT byte-identical to the shipped A-5 help copy `index.html:553`/`:556` |
+| Frozen locks green UNEDITED | PASS | fetch-site bound `<= 2` (:349-352), ASCII locks, P9/P10 `function_body(HOTSPOTS_JS, "renderExtractionApplyHint")` locks, theme contract, static_html/standalone-export presence - all in the byte-identical pre-append region and green in the reviewer's fresh `371 passed / 0 failed` run |
+| Scoped suite = baseline 369 + the 2 locks (erratum mechanical expectation) | PASS | `python tools/testrun.py --distill -p ariadne-ui` -> `371 passed / 0 failed / 0 ignored / 3 suites`, exit 0 |
+| Touch-set containment incl. duty-1 + authorized erratum path | PASS | `git diff --name-only d3f6dbc..HEAD` -> exactly 7 paths (3 code + journal + handoff-erratum + the two CW-2 reviewer artifacts); `git diff 701d7d7 -- <both CW-2 artifacts>` empty (duty-1 blobs byte-equal the reviewer artifacts, zero drift); Cargo.lock absent |
+| Continuity zero-diffs | PASS | `git diff --name-only "d3f6dbc..HEAD" -- crates/cli/tests crates/lang-cpp tests/integration Cargo.lock crates/ui/assets/styles.css crates/ui/src crates/ui/tests/ui_test/main.rs` -> EMPTY (lang-cpp hook, m19/m20 files, CSS/server/DTO, fetch sites - no hand in this range touches any) |
+| Duty-1 stat matches CW-2 verdict prescription | PASS | `701d7d7`: 415 insertions / 3 deletions = verdict +342/-0 + execution-results +73/-3; exactly the two declared paths; message verbatim |
+| Deviations 1-8 dispositioned | PASS | verdict section 6: 1 ACCEPTED (the stop - ledger deviations-summary precedent), 2/7 ACCEPTED (workspace gates assigned to reviewer hop, all run fresh here), 3/4/5 ACCEPTED/record, 6 ACCEPTED (erratum judged on merits), 8 ACCEPTED (two commit cycles + rider mandated/precedent, fully itemized per the M28 law) |
+| Hygiene | PASS | `python tools/hygiene_check.py` -> EXIT=0; warn-only R3 rows only, zero rows in the touched files |
+| Encoding | PASS | `python tools/encoding_guard.py --all` -> silent, exit 0 (commit-cycle form `--all` superset, form journalled per gate 9) |
+| Theme hex | PASS | `python tools/theme_token_check.py --check-added --base 701d7d7` -> silent, exit 0 |
+| Report-evidence (distillation contract) | PASS | journal digest-shaped: canonical lines, exit codes, capture paths, verbatim Red/Blocker panics, routed entry points, zero raw dumps |
+
+## Workspace-wide gates (CW-3 reviewer hop, fresh)
+
+This hand is assets + tests only, but shape section 6 mandates the bench
+recording per hand, so it was RUN, not exempted. Canonical lines, verbatim:
+
+- Full census: `1837 passed / 0 failed / 13 ignored / 119 suites`
+  (`python tools/testrun.py --distill`, exit 0, capture
+  `target/testrun-capture.txt`, 3194 lines) - CW-2 anchor `1835/0/13/119` +2
+  (the two locks), nothing else moved; the handoff gate-6 arithmetic
+  (`1830 @ 765df7b` +4 +1 +2) reconciles with zero foreign residue
+- Tools suite: `Ran 296 tests in 26.568s` + `OK`
+  (`python -m unittest discover -s tools -p "*_tests.py"`) - matches the
+  ROUND-2 `Ran 296` OK anchor
+- UI smoke: `ui_smoke: PASS` / `boot+route checks clean (cold fixture,
+  attempt 1, 1.1s)` via `python tools/distill.py -- python tools/ui_smoke.py`
+  (exit 0, capture 2 lines) - gate 4 satisfied at the reviewer hop per
+  dispatch; served-asset bytes changed and boot/routes/no-store hold
+- Timing gate (RUN, not exempt): `bench compare: 3 run(s), no regressions
+  past 1.25x baseline` via
+  `python tools/distill.py -- python tools/bench_compare.py` (exit 0, capture
+  17 lines; no WARN rows beyond the recorded no-regression verdict;
+  producer attribution additionally clean on the empty
+  `crates/cli/tests` zero-diff proof above)
+
+## Explicitly NOT run (CW-3 hop)
+
+- `python tools/testrun.py --baseline` (bare, FILE form): refused by the tool
+  itself with the verbatim `usage error: missing value for --baseline`
+  (M23.5 F9, unchanged); the `--distill` census above is the census of
+  record per shape section 9 - identical count semantics, exit code + capture
+  proven; no weaker evidence used.
+- The direct `python tools/ui_smoke.py` form was probed this hop and refused
+  again with the boilerplate catch-all deny
+  (`{"permission":"bash","pattern":"*","action":"deny","source":"global"}`) -
+  the CW-1/CW-2 allowlist row still un-landed (CW-3 verdict finding 1); the
+  distill-routed form ran to PASS. Compound echo/pipe/`python -c` forms likewise
+  refused; the `; $LASTEXITCODE` form runs and supplied EXIT=0/exit 0 for the
+  static gates.
+
+## Milestone status (final)
+
+CW-3: gates green, ACCEPTED (see
+`tasks/extraction-consumer-rewrite-cw3-verdict.md`); closeout discharges
+ledger rows 325 + 326 against `83f0b7c` (journal discharge lines ready;
+ledger:325 cites the AMENDED block), PRESERVES 327 (bound green UNEDITED),
+leaves the 328 generation-swap half OPEN. All three hands landed and
+approved. State of record @ `b201aa6`: census `1837/0/13/119`, tools `Ran 296`
+OK, bench fresh no-regressions, `ui_smoke: PASS`.
+
