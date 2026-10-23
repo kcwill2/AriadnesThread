@@ -107,7 +107,7 @@ fn optimize_writes_report_artifact_equal_to_returned_report() -> Result<()> {
 }
 
 #[test]
-fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged() -> Result<()> {
+fn optimize_writes_all_extracted_headers_and_rewrites_consumer_includes() -> Result<()> {
     let (_repo_guard, repo_root) = provision_basic_repo_copy()?;
 
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
@@ -134,13 +134,25 @@ fn optimize_writes_all_extracted_headers_and_leaves_consumer_sources_unchanged()
 
     let consumer_after = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_after = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
+    // Fixed truth (extraction-consumer-rewrite CW-1): the shared discovery and
+    // shared apply path mean the same C++ consumer_rewrite_spec hook fixes the
+    // optimize verb too. The optimize payload's `generated/`-prefixed
+    // new_includes spelling is unchanged - the file-name rule maps both
+    // spellings to the same bare identifiers. Each replace-clone pins
+    // old-gone, four-in-place, order, and all-other-bytes-unchanged, byte-safe
+    // under either checkout EOL.
+    let expected_block = "#include \"ThingConfig_extracted.h\"\n#include \"Thing_Thing_extracted.h\"\n#include \"Thing_extracted.h\"\n#include \"Thing_get_id_extracted.h\"";
     assert_eq!(
-        consumer_before, consumer_after,
-        "current behavior: committed transforms never edit consumer text because the old-include \
-         replacement uses the full relative path (include/thing.h) while sources contain the bare \
-         name (thing.h) — latent vacuous-rewrite bug, characterization only"
+        consumer_after,
+        consumer_before.replace("#include \"thing.h\"", expected_block),
+        "extraction-consumer-rewrite: the committed optimize rewrites the consumer's bare \
+         include into the four extracted includes in place"
     );
-    assert_eq!(thing_impl_before, thing_impl_after);
+    assert_eq!(
+        thing_impl_after,
+        thing_impl_before.replace("#include \"thing.h\"", expected_block),
+        "extraction-consumer-rewrite: src/thing.cpp receives the same include rewrite"
+    );
     assert_eq!(report.committed_transformations, 1);
     assert_eq!(report.affected_consumer_files, 2);
     Ok(())

@@ -221,13 +221,34 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
 
     let consumer_after = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_after = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
+    // Fixed truth (extraction-consumer-rewrite CW-1): the C++ plugin now
+    // implements consumer_rewrite_spec with the bare-file-name rule, so the
+    // committed apply rewrites the bare `#include "thing.h"` into the four
+    // bare extracted includes, in the same BTreeSet order the generated-file
+    // list above asserts. Each replace-clone pins old-gone, four-in-place,
+    // order, and all-other-bytes-unchanged, and stays byte-safe under either
+    // checkout EOL (no hardcoded full-file bytes).
+    let expected_block = "#include \"ThingConfig_extracted.h\"\n#include \"Thing_Thing_extracted.h\"\n#include \"Thing_extracted.h\"\n#include \"Thing_get_id_extracted.h\"";
     assert_eq!(
-        consumer_before, consumer_after,
-        "current behavior: apply commits although the old-include replacement is a no-op \
-         (it searches for include/thing.h while sources contain the bare thing.h) — \
-         latent vacuous-rewrite bug, characterization only"
+        consumer_after,
+        consumer_before.replace("#include \"thing.h\"", expected_block),
+        "extraction-consumer-rewrite: apply rewrites tests/consumer.cpp - the bare old \
+         include is replaced in place by the four extracted includes"
     );
-    assert_eq!(thing_impl_before, thing_impl_after);
+    assert_eq!(
+        thing_impl_after,
+        thing_impl_before.replace("#include \"thing.h\"", expected_block),
+        "extraction-consumer-rewrite: apply rewrites src/thing.cpp the same way"
+    );
+    assert!(
+        !consumer_after.contains("#include \"thing.h\""),
+        "the old bare include directive is gone from the rewritten consumer"
+    );
+    assert!(
+        thing_impl_after.contains("Thing::Thing(ThingConfig config)"),
+        "X5 copy-only semantics: the flip is an include rewrite, not a move - \
+         declarations survive in the source"
+    );
     Ok(())
 }
 

@@ -92,6 +92,35 @@ impl DependencyRewriter for CppDependencyRewriter {
             })
             .collect()
     }
+
+    /// Map the path-space rewrite payload onto directive identifiers with the
+    /// SAME bare-file-name rule `consumer_discovery_targets` probes with
+    /// (the trait default, `crates/lang/src/rewriter.rs:66-75`), so
+    /// discovery's predicate and the rewrite's matcher agree by construction
+    /// (extraction-consumer-rewrite CW-1). Always `Some`: C++ always has
+    /// directive grammar. `moved_module_ids` is unused - the C++ directive
+    /// space names files, not modules.
+    fn consumer_rewrite_spec(
+        &self,
+        old_includes: &[std::path::PathBuf],
+        new_includes: &[std::path::PathBuf],
+        _moved_module_ids: &[String],
+    ) -> Option<ariadne_lang::RewriteSpec> {
+        Some(RewriteSpec {
+            old_deps: old_includes.iter().map(|path| dependency_spelling(path)).collect(),
+            new_deps: new_includes.iter().map(|path| dependency_spelling(path)).collect(),
+        })
+    }
+}
+
+/// Path -> bare directive spelling: the file name when the path has one,
+/// else its display string - the honest fallback for a path without a file
+/// name, mirroring the discovery default's refusal to invent a probe and
+/// using the same lossy-ASCII channel as today's fallback (X7).
+fn dependency_spelling(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 #[cfg(test)]
@@ -240,5 +269,122 @@ mod tests {
     fn find_dependency_targets_no_match_is_empty() {
         assert!(hits("int main() {}\n", "thing.h").is_empty());
         assert!(hits("", "thing.h").is_empty());
+    }
+
+    // CW-1 (extraction-consumer-rewrite): the consumer_rewrite_spec hook
+    // maps the path-space rewrite payload onto directive spellings with the
+    // SAME bare-file-name rule consumer_discovery_targets probes with.
+
+    fn hook_spec(old_paths: &[&str], new_paths: &[&str]) -> RewriteSpec {
+        let old_includes: Vec<std::path::PathBuf> =
+            old_paths.iter().map(std::path::PathBuf::from).collect();
+        let new_includes: Vec<std::path::PathBuf> =
+            new_paths.iter().map(std::path::PathBuf::from).collect();
+        CppDependencyRewriter
+            .consumer_rewrite_spec(&old_includes, &new_includes, &[])
+            .expect("C++ always has directive grammar")
+    }
+
+    #[test]
+    fn consumer_rewrite_spec_maps_bare_name_paths_identity() {
+        let built = hook_spec(&["old.h"], &["new.h"]);
+        assert_eq!(
+            built.old_deps,
+            vec!["old.h".to_string()],
+            "a bare path is already its directive spelling - exactly why the byte-parity \
+             test crates/validate/tests/transaction_apply_test.rs:48 (bare `old.h` payload) \
+             survives UNEDITED: the hook spec equals the path fallback there"
+        );
+        assert_eq!(built.new_deps, vec!["new.h".to_string()]);
+    }
+
+    #[test]
+    fn consumer_rewrite_spec_maps_paths_to_bare_file_names() {
+        let built = hook_spec(
+            &["include/thing.h"],
+            &["generated/include/Thing_extracted.h", "include/ThingConfig_extracted.h"],
+        );
+        assert_eq!(built.old_deps, vec!["thing.h".to_string()]);
+        assert_eq!(
+            built.new_deps,
+            vec!["Thing_extracted.h".to_string(), "ThingConfig_extracted.h".to_string()],
+            "order preserved, no sorting"
+        );
+    }
+
+    #[test]
+    fn consumer_rewrite_spec_fallback_keeps_display_string_without_file_name() {
+        let pathless_old = std::path::Path::new(".").to_path_buf();
+        let pathless_new = std::path::Path::new("..").to_path_buf();
+        let built = CppDependencyRewriter
+            .consumer_rewrite_spec(&[pathless_old], &[pathless_new], &[])
+            .expect("C++ always has directive grammar");
+        assert_eq!(
+            built.old_deps,
+            vec![".".to_string()],
+            "a path without a file name keeps its display string - never a fabricated probe"
+        );
+        assert_eq!(built.new_deps, vec!["..".to_string()]);
+    }
+
+    #[test]
+    fn discovery_hit_iff_rewrite_changes_text_over_the_spelling_classes() {
+        // X1(a) fidelity pair (kills the D6 class forever): C++ discovery
+        // hits exactly when the hook-built spec makes `rewrite` change the
+        // text, over every spelling class (non-empty new deps assumed).
+        let target_file = std::path::Path::new("include/thing.h");
+        let discovery_targets = CppDependencyRewriter.consumer_discovery_targets(target_file, &[]);
+        assert_eq!(
+            discovery_targets,
+            vec!["thing.h".to_string()],
+            "discovery probes with the bare file name (trait default)"
+        );
+        let spec = hook_spec(&["include/thing.h"], &["generated/include/Thing_extracted.h"]);
+        assert_eq!(spec.new_deps, vec!["Thing_extracted.h".to_string()]);
+        let probe = &discovery_targets[0];
+        let discovery_hits = |text: &str| !hits(text, probe).is_empty();
+
+        let bare_quoted = "#include \"thing.h\"\nint main() {}\n";
+        assert!(discovery_hits(bare_quoted));
+        assert_ne!(CppDependencyRewriter.rewrite(bare_quoted, &spec), bare_quoted);
+
+        let angled = "#include <thing.h>\nint main() {}\n";
+        assert!(discovery_hits(angled));
+        assert_ne!(CppDependencyRewriter.rewrite(angled, &spec), angled);
+
+        let crlf = "#include \"thing.h\"\r\nint y;\r\n";
+        assert!(discovery_hits(crlf));
+        assert_ne!(CppDependencyRewriter.rewrite(crlf, &spec), crlf);
+
+        // R3: comment-embedded directive, pinned on BOTH sides explicitly:
+        // C++ discovery reproduces the raw substring scan (comments included)
+        // and replace-all matches the same text - the symmetry IS the
+        // invariant, not an accident.
+        let comment_embedded = "// #include \"thing.h\"\nint main() {}\n";
+        assert!(
+            discovery_hits(comment_embedded),
+            "C++ discovery matches comment-embedded directives (substring fidelity lock)"
+        );
+        assert_ne!(
+            CppDependencyRewriter.rewrite(comment_embedded, &spec),
+            comment_embedded,
+            "the rewrite matches them too - substring symmetry (R3)"
+        );
+
+        let unrelated_path_spelling = "#include \"sub/thing.h\"\n";
+        assert!(!discovery_hits(unrelated_path_spelling));
+        assert_eq!(
+            CppDependencyRewriter.rewrite(unrelated_path_spelling, &spec),
+            unrelated_path_spelling,
+            "unrelated path spelling neither hits nor changes"
+        );
+
+        let no_match = "int main() {}\n";
+        assert!(!discovery_hits(no_match));
+        assert_eq!(
+            CppDependencyRewriter.rewrite(no_match, &spec),
+            no_match,
+            "no-match text stays byte-identical"
+        );
     }
 }
