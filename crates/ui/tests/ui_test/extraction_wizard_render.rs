@@ -849,3 +849,42 @@ fn test_apply_outcome_style_block_adds_no_hex() {
         "the A-5 block must take its colors from existing theme tokens"
     );
 }
+
+// ==== extraction-consumer-rewrite C6 (CW-3): the copy-honesty no-rot lock ====
+//
+// The two dated copy relays (ledger rows 325-326: the stale apply-hint
+// comment and the S4 truncation note) flip to the shipped truth with this
+// hand, after CW-1 shipped the consumer rewrite and CW-2 shipped the
+// expected-modified faithfulness oracle. This lock keeps both honest claims
+// pinned so neither sentence can rot back to the pre-fix copy. Dated planner
+// note (substring trap): the new truncation clause contains the old one as a
+// prefix, so the absence lock below pins the old FULL clause
+// ("...every consumer.</div>"), never the shared prefix.
+
+#[test]
+fn test_card_apply_hint_never_claims_the_ui_runs_nothing() {
+    assert!(
+        !HOTSPOTS_JS.contains("never runs anything"),
+        "the card hint must not contradict shipped apply behavior (extraction-consumer-rewrite, ex-stale-apply-hint relay row)"
+    );
+    assert!(
+        !EXTRACTION_WIZARD_JS.contains("never runs anything"),
+        "the card hint must not contradict shipped apply behavior (extraction-consumer-rewrite, ex-stale-apply-hint relay row)"
+    );
+    assert!(
+        HOTSPOTS_JS.contains("the UI applies with a dry-run first, validation in three tiers and automatic rollback"),
+        "the card hint carries the claim of record"
+    );
+}
+
+#[test]
+fn test_truncation_note_states_the_shipped_truth() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("the apply rewrites every consumer the dry run lists"),
+        "the S4 truncation note must state the shipped truth (extraction-consumer-rewrite, ex-S4 truncation-note relay row): the apply rewrites every consumer the dry run lists"
+    );
+    assert!(
+        !EXTRACTION_WIZARD_JS.contains("every consumer.</div>"),
+        "the old aspirational clause is absent as a FULL clause (substring trap: the shipped claim shares its prefix, so only the full 'every consumer.</div>' clause can pin the old copy)"
+    );
+}

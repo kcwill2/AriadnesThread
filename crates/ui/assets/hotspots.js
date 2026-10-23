@@ -518,8 +518,8 @@
 
     // Honest apply recipe, verbatim verbs from the CLI command surface
     // (apply and migrate: positional repo root, --plan flag). <repo-root>
-    // stays a literal placeholder token by design (shape P9); the UI states
-    // the command, it never runs anything.
+    // stays a literal placeholder token by design (shape P9);
+    // the UI applies with a dry-run first, validation in three tiers and automatic rollback.
     function renderExtractionApplyHint(planId) {
       const safePlanId = escapeHtml(planId || '');
       return `<div class="extraction-row extraction-apply">` +

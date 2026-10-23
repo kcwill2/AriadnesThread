@@ -383,7 +383,7 @@ function renderWizardStepDryRun(dryRun) {
       `<div class="wizard-diff-new">${newBlock}</div>${keptBlock}</div>`;
   }).join('');
   const truncationNote = dryRun.rewrites_truncated
-    ? `<div class="wizard-truncation-note">Rewrite list truncated at ${EXTRACTION_DRY_RUN_MAX_REWRITES} rows for volume; the apply rewrites every consumer.</div>`
+    ? `<div class="wizard-truncation-note">Rewrite list truncated at ${EXTRACTION_DRY_RUN_MAX_REWRITES} rows for volume; the apply rewrites every consumer the dry run lists.</div>`
     : '';
   const copyMoveLine = wizardCopyOnly(dryRun)
     ? `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>`
