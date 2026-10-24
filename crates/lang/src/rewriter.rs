@@ -92,12 +92,36 @@ pub trait DependencyRewriter: Send + Sync {
     }
 
     /// Delete the named top-level symbols from `source` (D-M23-5 move
-    /// semantics), or `None` when any name is not safely removable — the
-    /// caller then proceeds **without** removal. The default is `None`:
-    /// C++ keeps copy-only isolation (I5 — the engine never removes), only
-    /// move-capable languages (Scala, via parser spans) implement this.
+    /// semantics), or `None` when any name is not safely removable - the
+    /// caller then proceeds **without** removal. The default is still
+    /// `None`: the engine never removes for languages that do not opt in.
+    /// Since `extraction-symbol-move` the retention decision lives one
+    /// level up, in [`Self::move_out_top_level_symbols`], whose default
+    /// delegates here (deletion), so Scala keeps its deletion behavior
+    /// through this hook and C++ chooses marked comment-out.
     fn remove_top_level_symbols(&self, _source: &str, _qualified_names: &[String]) -> Option<String> {
         None
+    }
+
+    /// The post-move source-text contract: return the text that REPLACES
+    /// `source` once the named top-level symbols have moved into their
+    /// extracted units, or `None` when any name cannot be safely retired -
+    /// the caller then proceeds WITHOUT the move (copy fallback). The
+    /// RETENTION FORM is the language's choice: Scala deletes via the
+    /// inherited parser spans (through the default below); C++ comments
+    /// regions out under `ARIADNE-EXTRACT-OUT` markers bound to `plan_id`
+    /// (extraction-symbol-move, the user's reversible-move decision of
+    /// record). `plan_id` is marker provenance only - a language whose
+    /// retention needs no provenance ignores it. The default delegates to
+    /// `remove_top_level_symbols` (deletion), so every existing
+    /// implementation keeps byte-identical behavior.
+    fn move_out_top_level_symbols(
+        &self,
+        source: &str,
+        qualified_names: &[String],
+        _plan_id: &str,
+    ) -> Option<String> {
+        self.remove_top_level_symbols(source, qualified_names)
     }
 
     /// Render a unified-diff-style fragment listing dependencies removed,
@@ -216,6 +240,52 @@ mod tests {
             " - old/x\n + new/x\n ~ kept/x\n",
             "the language-neutral default is marker + dependency ONLY: no `#include` \
              or `import` spelling leaks into the neutral trait (plan §7 R2)"
+        );
+    }
+
+    /// Fake implementing the OLD hook with a visible byte transform, so the
+    /// new default's delegation is observable, not just type-checked.
+    struct DeletingRewriter;
+
+    impl DependencyRewriter for DeletingRewriter {
+        fn rewrite(&self, source: &str, _spec: &RewriteSpec) -> String {
+            source.to_string()
+        }
+
+        fn remove_top_level_symbols(
+            &self,
+            source: &str,
+            _qualified_names: &[String],
+        ) -> Option<String> {
+            Some(source.replace("class Drop\n", ""))
+        }
+    }
+
+    #[test]
+    fn default_move_out_delegates_byte_identically_to_remove_hook() {
+        let source = "class Keep {}\nclass Drop\n{\n};\n";
+        let names = ["Drop".to_string()];
+        let moved = DeletingRewriter.move_out_top_level_symbols(source, &names, "PLAN-TEST");
+        let deleted = DeletingRewriter.remove_top_level_symbols(source, &names);
+        assert!(
+            matches!((&moved, &deleted), (Some(_), Some(_))),
+            "SM-I5: the default IS the old hook - every existing implementation \
+             keeps byte-identical behavior"
+        );
+        assert_eq!(
+            moved, deleted,
+            "SM-I5: the default IS the old hook - every existing implementation \
+             keeps byte-identical behavior"
+        );
+    }
+
+    #[test]
+    fn default_move_out_refuses_exactly_where_the_remove_hook_refuses() {
+        assert_eq!(
+            InertRewriter.move_out_top_level_symbols("int x;", &["x".to_string()], "PLAN-TEST"),
+            None,
+            "SM-I5: the default refuses exactly where the old hook refuses - the \
+             caller then proceeds WITHOUT the move (copy fallback)"
         );
     }
 }
