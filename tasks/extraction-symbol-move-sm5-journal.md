@@ -94,3 +94,63 @@ Read confirmed the pinned sentence contiguous on asset :224 ONE-line const.
   Reconciles from anchor `1837/0/13/119 @ b201aa6`: SM-1 +2, SM-2 +10,
   SM-3 +0, SM-4 +3, SM-5 +1 = 1853 = the MILESTONE expectation. No foreign
   residue; suites count steady at 119 (test appended in-file, no new suite).
+
+## Gates 7-9 + landing
+
+- Gate 7 `python tools/distill.py -- python tools/bench_compare.py` ->
+  exit 1, fresh recording with ONE WARN:
+  `WARN get_or_build_include_graph clone (warm): 1.3 ms vs baseline 1.0 ms (+30%)`.
+  Recorded, NOT attributed (PR-2 persists, handoff mandate; warning counts
+  never pinned). Producer zero-diff proof:
+  `git diff --numstat e717ba0 HEAD -- crates/cli/tests` -> EMPTY (CW-3 gate-7
+  precedent). UI copy hand touches no producer code.
+- Gate 8 `python tools/hygiene_check.py` -> exit 0 (distilled run:
+  `### generic PASS (exit 0)`; R1/R2 clean; the listed R3 warns are
+  pre-existing, none in this hand's files).
+- Gate 9 commit cycle, form used (journal per handoff):
+  `python tools/encoding_guard.py --staged` (silent, exit 0) then
+  `python tools/commit_scoped.py --scope crates/ui/assets/extraction-wizard.js
+  --scope crates/ui/tests/ui_test/extraction_wizard_render.rs --scope
+  tasks/extraction-symbol-move-sm5-journal.md -m "fix(ui): move-truth copy -
+  marked retention sentences, keyed S5, marked-retention no-rot lock
+  (extraction-symbol-move SM-5)"` -> landing `82cf789`, exactly the 3
+  touch-set paths; `python tools/encoding_guard.py --all` silent exit 0
+  after landing; porcelain-after = `.vsix` only.
+- Refactor: none needed (copy + two lock sites); gate 3 not re-run beyond
+  its Green run because no refactor edits were made.
+
+## Diff audit vs duty-1 (`fd96b09..82cf789`)
+
+- Asset: five hunks = the ONE new constant block + the four named copy sites
+  (:359 1:1, :392 1:1, :430 -> keyed `moveTruthLine` block + concat line,
+  :575 one clause 1:1). `COPY_VS_MOVE_SENTENCE` constant bytes and the
+  `wizardCopyOnly` body appear in no +/- line (constant is context-only).
+  Zero new `fetch(`, no class-name change, no rename, no hex.
+- Render file: 57 insertions / 0 deletions - the appended const, the two
+  amendment clauses inside the named test, the new lock test. All six
+  surviving asserts byte-identical; all pre-existing locks untouched.
+- Journal +96 (this file, riding the landing commit).
+
+## Gate budget itemization (declared 8 + commit cycle)
+
+Gates 1-8 = 8 scoped invocations (gate 2 red + gate 3 green share the same
+gate; hygiene re-run via distill for the exit code = same gate, +1 total
+invocation: 9 + commit cycle). Inside the 2026-10-06 M28 law bound
+(~10 + commit-cycle trio). No overshoot; no D-row owed.
+
+## Deviations
+
+- None on content: every mandated string copied byte-exact (byte-pin
+  self-verified by Read on asset :224 before the lock ran).
+- Form note: duty-1's `--staged` ran pre-staging (index empty; SM-4 ledger
+  form used verbatim), the `--all` superset additionally run after each
+  commit - both silent exit 0.
+- bench_compare exit 1 = the WARN form itself (the tool signals WARN);
+  recorded per gate-7 mandate, not treated as a gate failure.
+
+## Out-of-scope observations (report-only)
+
+- Audit deferred-findings intake: no item names the wizard asset or this
+  file's copy locks; nothing carried, nothing fixed.
+- The gate-7 WARN (warm include-graph clone +30% at 1.3 ms vs 1.0 ms
+  baseline) is the PR-2 noise class; closeout owns attribution.
