@@ -330,6 +330,11 @@ fn wizard_tab_slice(html: &str, start_marker: &str, end_marker: &str) -> String 
 /// declarations stay in place). The asset carries this constant verbatim.
 const COPY_VS_MOVE_SENTENCE: &str = "The C++ backend writes the new file and leaves the source declarations in place; nothing is moved out of the source files.";
 
+/// Marked-retention move sentence (extraction-symbol-move SM-5): the honest
+/// shipped truth for moved declarations plus the restore procedure (kickoff
+/// section 1 layer 3 - never a one-click claim). The asset carries it verbatim.
+const MOVE_RETENTION_SENTENCE: &str = "the plugin comments the moved declarations out in place under ARIADNE-EXTRACT-OUT markers that name the plan; restoring means uncommenting those regions AND reverting the consumer include rewrites, or using git - never a one-click undo.";
+
 // Required test 1: S2 fetches the manifest route per step, never at boot.
 #[test]
 fn test_wizard_step_manifest_fetches_per_step() {
@@ -425,6 +430,14 @@ fn test_copy_vs_move_sentence_is_exact_and_keyed_off_the_computed_path() {
     assert!(
         !EXTRACTION_WIZARD_JS.contains(".copy_only"),
         "the renderer must never read the copy_only field directly (degraded answers set it false by force)"
+    );
+    assert!(
+        execute.contains("wizardCopyOnly("),
+        "amendment 4 (extraction-symbol-move): S5 must key its copy sentence off wizardCopyOnly like S4 - the copy sentence is false on the move branch"
+    );
+    assert!(
+        execute.contains("MOVE_RETENTION_SENTENCE"),
+        "S5's move branch must carry the marked-retention sentence"
     );
 }
 
@@ -886,5 +899,49 @@ fn test_truncation_note_states_the_shipped_truth() {
     assert!(
         !EXTRACTION_WIZARD_JS.contains("every consumer.</div>"),
         "the old aspirational clause is absent as a FULL clause (substring trap: the shipped claim shares its prefix, so only the full 'every consumer.</div>' clause can pin the old copy)"
+    );
+}
+
+// ==== extraction-symbol-move SM-5: the marked-retention no-rot lock ====
+//
+// The shipped move copy states what apply actually does: declarations are
+// commented out in place under ARIADNE-EXTRACT-OUT markers naming the plan,
+// and the restore procedure (uncomment + revert the consumer include
+// rewrites, or git) rides in the same sentence (kickoff section 1 layer 3,
+// shape R6 - never a one-click claim). The retired "strips" sentence and
+// the S6 staging-vs-move conflation can never return (SM-I8).
+
+#[test]
+fn test_move_sentence_states_marked_retention_truth() {
+    assert!(
+        EXTRACTION_WIZARD_JS.contains(MOVE_RETENTION_SENTENCE),
+        "the asset must carry the exact marked-retention sentence (the value lives contiguous on the asset's ONE-line const, same idiom as the COPY_VS_MOVE_SENTENCE pin)"
+    );
+    for renderer in [
+        "renderWizardStepImpact",
+        "renderWizardStepDryRun",
+        "renderWizardStepExecute",
+    ] {
+        let body = wizard_function_body(EXTRACTION_WIZARD_JS, renderer);
+        assert!(
+            body.contains("MOVE_RETENTION_SENTENCE"),
+            "{renderer} must carry the marked-retention sentence on its move branch"
+        );
+    }
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("ARIADNE-EXTRACT-OUT"),
+        "the shipped copy must name the marker grammar (shape C2)"
+    );
+    assert!(
+        !EXTRACTION_WIZARD_JS.contains("strips"),
+        "no shipped string may claim the apply 'strips' declarations (SM-I8 - the retired word is locked out)"
+    );
+    assert!(
+        !EXTRACTION_WIZARD_JS.contains("in place for move languages"),
+        "the S6 help line must not conflate staging with move (shape C6 item 4)"
+    );
+    assert!(
+        EXTRACTION_WIZARD_JS.contains("in place for languages that stage units in place"),
+        "the S6 help line must name the staging languages honestly (shape C6 item 4)"
     );
 }

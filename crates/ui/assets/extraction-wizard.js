@@ -218,6 +218,11 @@ const EXTRACTION_DRY_RUN_MAX_REWRITES = 200;
 // itself is never read here (W-2a verdict relay).
 const COPY_VS_MOVE_SENTENCE = 'The C++ backend writes the new file and leaves the source declarations in place; nothing is moved out of the source files.';
 
+// The marked-retention move sentence (extraction-symbol-move): what the C++
+// apply actually does with moved declarations, plus the honest restore
+// procedure (kickoff section 1 layer 3 - never a one-click claim).
+const MOVE_RETENTION_SENTENCE = 'the plugin comments the moved declarations out in place under ARIADNE-EXTRACT-OUT markers that name the plan; restoring means uncommenting those regions AND reverting the consumer include rewrites, or using git - never a one-click undo.';
+
 function extractionRouteUrl(routeSuffix) {
   return '/api/extraction/' + encodeURIComponent(wizardState.planId || '') + routeSuffix;
 }
@@ -356,7 +361,7 @@ function renderWizardStepImpact(proposal, manifest, dryRun) {
   } else if (dryRun.move_removals === 0) {
     copyMoveLine = `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>`;
   } else {
-    copyMoveLine = `<div class="wizard-impact-line">This plan moves symbols: the plugin strips ${escapeHtml(dryRun.move_removals)} moved declaration(s) from the source files.</div>`;
+    copyMoveLine = `<div class="wizard-impact-line">This plan moves ${escapeHtml(dryRun.move_removals)} declaration(s): ${escapeHtml(MOVE_RETENTION_SENTENCE)}</div>`;
   }
   return '<div class="wizard-step-title">Impact and risk</div>' +
     `<div class="wizard-row"><span class="wizard-label">Consumers</span><span class="wizard-value">${escapeHtml(proposal.consumer_tu_count || 0)} consumer TU(s) need re-validation</span></div>` +
@@ -389,7 +394,7 @@ function renderWizardStepDryRun(dryRun) {
     ? `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>`
     : (dryRun.includes_unavailable
         ? '<div class="wizard-impact-fallback">Includes unavailable: the provider could not complete this dry run; nothing is claimed about the writes.</div>'
-        : `<div class="wizard-impact-line">This plan strips ${escapeHtml(dryRun.move_removals || 0)} moved source declaration(s) as it writes.</div>`);
+        : `<div class="wizard-impact-line">As it writes, this plan retires ${escapeHtml(dryRun.move_removals || 0)} source declaration(s): ${escapeHtml(MOVE_RETENTION_SENTENCE)}</div>`);
   return '<div class="wizard-step-title">Dry run</div>' +
     '<div class="wizard-row"><span class="wizard-label">Files written</span></div>' +
     (newFileRows.length > 0 ? newFileRows : '<em>no new files listed</em>') +
@@ -423,11 +428,18 @@ function renderWizardStepExecute(planId) {
   const inflightLine = inFlight
     ? '<div class="wizard-apply-inflight">' + escapeHtml(APPLY_INFLIGHT_COPY) + '</div>'
     : '';
+  const moveTruthLine = !wizardState.dryRun
+    ? '<div class="wizard-impact-fallback">Copy-vs-move pending: the dry run has not been fetched yet (step 5).</div>'
+    : wizardCopyOnly(wizardState.dryRun)
+      ? `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>`
+      : (wizardState.dryRun.includes_unavailable
+          ? '<div class="wizard-impact-fallback">Includes unavailable: the provider could not complete this dry run; nothing is claimed about the writes.</div>'
+          : `<div class="wizard-impact-line">On apply this plan retires ${escapeHtml(wizardState.dryRun.move_removals)} moved declaration(s): ${escapeHtml(MOVE_RETENTION_SENTENCE)}</div>`);
   return '<div class="wizard-step-title">Execute</div>' +
     '<div class="wizard-row"><span class="wizard-label">Preview first</span><code class="extraction-command">tool migrate &lt;repo-root&gt; --plan ' + safePlanId + ' --preview</code></div>' +
     '<div class="wizard-row"><span class="wizard-label">Generate</span><code class="extraction-command">tool transform extract &lt;repo-root&gt; --plan ' + safePlanId + '</code></div>' +
     '<div class="wizard-row"><span class="wizard-label">Full apply</span><code class="extraction-command">tool apply &lt;repo-root&gt; --plan ' + safePlanId + '</code></div>' +
-    `<div class="wizard-impact-line">${escapeHtml(COPY_VS_MOVE_SENTENCE)}</div>` +
+    moveTruthLine +
     '<div class="wizard-apply-instruction">' + escapeHtml(instructionText) + '</div>' +
     applyButton + inflightLine;
 }
@@ -572,7 +584,7 @@ function renderWizardStepAfterApply() {
     '<div class="wizard-row"><span class="wizard-label">Tier 2</span><span class="wizard-value">Generated headers: every include a new file needs exists on disk.</span></div>' +
     '<div class="wizard-row"><span class="wizard-label">Tier 3</span><span class="wizard-value">Affected TUs: every new include of a rewritten consumer exists on disk; with no compiler toolchain this tier is skipped, and a skipped tier commits like a passed one.</span></div>' +
     '<div class="wizard-row"><span class="wizard-label">Rollback</span><span class="wizard-value">Rollback fires only on a failed tier: every snapshot file is restored and every newly created file is removed.</span></div>' +
-    '<div class="wizard-row"><span class="wizard-label">Artifacts</span><span class="wizard-value">Generated units land under artifacts/generated (or in place for move languages), the migration preview under artifacts/migration/preview.json, and the outcome record under artifacts/transaction.</span></div>';
+    '<div class="wizard-row"><span class="wizard-label">Artifacts</span><span class="wizard-value">Generated units land under artifacts/generated (or in place for languages that stage units in place), the migration preview under artifacts/migration/preview.json, and the outcome record under artifacts/transaction.</span></div>';
 }
 
 // Payload-swap reset (shape C7, third reset path): the live-refresh swap in
