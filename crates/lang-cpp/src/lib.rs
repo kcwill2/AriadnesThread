@@ -23,6 +23,7 @@ pub mod plugin;
 pub mod resolver;
 pub mod source_extractor;
 pub mod shaper;
+mod move_retention;
 mod symbol_locator;
 mod tokenizer;
 

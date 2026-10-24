@@ -111,6 +111,22 @@ impl DependencyRewriter for CppDependencyRewriter {
             new_deps: new_includes.iter().map(|path| dependency_spelling(path)).collect(),
         })
     }
+
+    /// Marked comment-out retention is C++'s chosen form of the
+    /// extraction-symbol-move decision of record: the located declaration
+    /// span stays in the file commented out under `ARIADNE-EXTRACT-OUT`
+    /// line-prefix markers bound to `plan_id` (provenance), never block
+    /// comments. Refusals answer `None` so the caller proceeds without the
+    /// move (copy fallback). Grammar and refusal contract:
+    /// `crate::move_retention`.
+    fn move_out_top_level_symbols(
+        &self,
+        source: &str,
+        qualified_names: &[String],
+        plan_id: &str,
+    ) -> Option<String> {
+        crate::move_retention::move_out_text(source, qualified_names, plan_id)
+    }
 }
 
 /// Path -> bare directive spelling: the file name when the path has one,
