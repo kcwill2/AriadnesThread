@@ -222,13 +222,20 @@ impl EngineBackedExtractionReader {
         ))
     }
 
-    /// W4 decided by the plugin exactly as `TransactionApplier` decides:
-    /// each moved-unit candidate is offered to the plan-language
-    /// rewriter's `remove_top_level_symbols` over the on-disk source
-    /// (read-only); every candidate the plugin can strip contributes its
-    /// unit's symbol count. The C++ hook is the trait default `None`
-    /// (I5), so C++ plans report 0 and the dry-run answers
-    /// `copy_only: true` - computed, not asserted.
+    /// W4 decided by the plugin exactly as `TransactionApplier` decides: the
+    /// moved-unit candidates are offered to the plan-language rewriter's
+    /// move hook `move_out_top_level_symbols` with `plan.id.0` - the same
+    /// plan id the apply's markers bind (m20's `PLAN-001` byte truth) -
+    /// over the on-disk source (read-only). The loop is a FOLD mirroring
+    /// validate's `strip_moved_symbols` exactly: BTreeSet candidate order
+    /// with a per-path running-text cache, so an offer sees the text the
+    /// earlier offer on the same path would leave behind (the merge plus
+    /// the idempotence refusals). Each fold success contributes its unit's
+    /// symbol count. Computed, not asserted (W4): the fold equals exactly
+    /// what the apply will bind, so the dry-run move claim matches the
+    /// markers apply writes (SM-I3). A refusal, a copy-only language's
+    /// default, or an unreadable file contributes nothing - the file stays
+    /// out of the move claim, byte-identical.
     fn move_removal_count(
         &self,
         plan: &OptimizationPlan,
@@ -245,20 +252,28 @@ impl EngineBackedExtractionReader {
             return 0;
         };
         let rewriter = backend.rewriter();
-        let mut stripped_symbols = 0usize;
+        let mut moved_symbols = 0usize;
+        let mut folded_text: HashMap<PathBuf, String> = HashMap::new();
         let candidates = move_removal_candidates(&self.repo_root, migration, extraction);
         for (source_path, moved_names) in candidates {
-            let Ok(source_text) = std::fs::read_to_string(self.repo_root.join(&source_path)) else {
-                continue;
+            let current_text = match folded_text.get(&source_path) {
+                Some(text) => text.clone(),
+                None => {
+                    let Ok(fresh) = std::fs::read_to_string(self.repo_root.join(&source_path))
+                    else {
+                        continue;
+                    };
+                    fresh
+                }
             };
-            if rewriter
-                .remove_top_level_symbols(&source_text, &moved_names)
-                .is_some()
+            if let Some(post_move) = rewriter
+                .move_out_top_level_symbols(&current_text, &moved_names, &plan.id.0)
             {
-                stripped_symbols += moved_names.len();
+                folded_text.insert(source_path, post_move);
+                moved_symbols += moved_names.len();
             }
         }
-        stripped_symbols
+        moved_symbols
     }
 }
 
@@ -352,8 +367,11 @@ fn rewrite_row(rewrite: &ConsumerRewrite) -> ExtractionRewriteDto {
 /// decides the same set inside the apply transaction): a rewrite's old
 /// dependency that exists on disk, is not the consumer itself, and is not
 /// one of this plan's generated targets, paired with each new-include
-/// unit's symbol names.
-fn move_removal_candidates(
+/// unit's symbol names. `pub(crate)` (extraction-symbol-move SM-4, declared
+/// mechanical visibility raise, zero behavior): the apply-side move-proof
+/// oracle reads the same derivation validate runs inside apply (SM-I6: no
+/// public surface moves).
+pub(crate) fn move_removal_candidates(
     repo_root: &Path,
     migration: &MigrationPreview,
     extraction: &ExtractionResult,
@@ -776,22 +794,31 @@ mod tests {
         );
     }
 
-    // Required test 5 (W4 copy-vs-move honesty on the C++ fixture).
+    // Required test 5 (W4 copy-vs-move honesty on the C++ fixture) -
+    // extraction-symbol-move amendment 3 (kickoff section 7 item 3): the
+    // dry run states the MOVE truth now that the C++ hook retires the
+    // locatable fixture declarations. The old name stated the superseded
+    // copy-only truth (the m19 CW-1 rename precedent).
     #[test]
-    fn test_dry_run_reports_copy_only_honesty_on_the_cpp_fixture() {
+    fn test_dry_run_reports_move_truth_on_the_cpp_fixture() {
         let (_temp_dir, state, proposals, _plans) = boot_swapped_fixture("basic");
         let plan_id = first_proposal_id(&proposals);
         let reader = installed_reader(&state);
         let dry_run = reader
             .dry_run(&plan_id)
             .expect("the boot proposal id must resolve within its generation");
-        assert_eq!(
-            dry_run.move_removals, 0,
-            "the C++ backend does not strip moved declarations today"
+        assert!(
+            dry_run.move_removals > 0,
+            "the C++ move hook retires the fixture's locatable top-level \
+             declaration(s) under ARIADNE-EXTRACT-OUT markers - the dry run \
+             must report the move, got move_removals={}",
+            dry_run.move_removals
         );
         assert!(
-            dry_run.copy_only,
-            "a C++ dry-run must report copy-only semantics"
+            !dry_run.copy_only,
+            "a dry run that reports moves must not claim copy-only \
+             semantics, got copy_only={}",
+            dry_run.copy_only
         );
     }
 

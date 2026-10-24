@@ -30,6 +30,9 @@
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
+    mod move_proof;
+
+
     /// Boot a fresh fixture copy and swap it into a `new_loading` state
     /// exactly the way `run_ui` boots (install epoch 1), returning the
     /// guard, the state, and both proposal/plan sets cloned pre-swap.
@@ -249,8 +252,9 @@
             .expect("the boot proposal id must mint an approval");
         let repo_root = state.repo_root.clone();
         let before = walked_files(&repo_root);
-        // The oracle's expected-modified set is read PRE-APPLY (shape C4).
-        let expected_modified = expected_modified_consumers(&dry_run.rewrites, &plans, &plan_id);
+        // C5/SM-I2: the expected sets and the fold are all read PRE-APPLY (C5.1).
+        let expectation = move_proof::expectation_pre_apply(&repo_root, &plans, &plan_id,
+            &dry_run.rewrites, &state.analysis().expect("boot installed the generation"));
 
         let attempt = applier.apply(&plan_id, &token);
         assert!(attempt.is_ok(), "expected an approved apply, got {attempt:?}");
@@ -298,14 +302,17 @@
              carried none"
         );
         assert!(
-            modified.iter().all(|file| approved_consumers.contains(file)),
-            "the apply must not modify any file outside the approved dry-run's \
-             consumer_file set: modified={modified:?}"
+            modified.iter().all(|file| expectation.union.contains(file)),
+            "the apply must not modify any file outside the SM-I2 expected \
+             set (consumers UNION move sources): modified={modified:?}"
         );
         // The post-apply faithfulness audit, factored for the R1 ceiling:
         assert_modified_faithfully_applied(
-            &before, &after, &modified, &expected_modified, &approved_consumers,
-        );
+            &before, &after, &modified, &expectation.union, &expectation.consumers,
+            &approved_consumers, &repo_root);
+        // C5.4/C5.5: marker proof for the marked original file, incl. SM-I3 parity.
+        move_proof::assert_marked_regions(&plans, &plan_id, Path::new("include/thing.h"),
+            &before, &after, dry_run.move_removals, &expectation.fold);
 
         let mut dto_new_files = outcome.new_files.clone();
         dto_new_files.sort();
@@ -394,20 +401,24 @@
         after: &BTreeMap<PathBuf, Option<Vec<u8>>>,
         modified: &[String],
         expected_modified: &[String],
+        expected_consumers: &[String],
         approved_consumers: &[String],
+        repo_root: &Path,
     ) {
         assert_eq!(
             modified, expected_modified,
-            "faithfulness oracle (extraction-consumer-rewrite, ex-D6 deferred \
-             row): the modified set equals the expected-modified set - every \
-             rewrite was faithfully attempted, none silently dropped"
+            "faithfulness oracle SM-I2 (extraction-symbol-move): the modified \
+             set equals the expected set (ex-D6 equality, inputs widened to \
+             consumers UNION move sources) - none silently dropped"
         );
         assert_eq!(
-            expected_modified, approved_consumers,
-            "on this fixture the expected-modified set IS the approved \
-             dry-run's consumer set - the deferred row's restore-equality \
-             claim, machine-witnessed"
+            expected_consumers, approved_consumers,
+            "the surviving CW-2 sub-claim: on this fixture the expected \
+             consumer set IS the approved dry-run's consumer set - the \
+             deferred row's restore-equality claim, machine-witnessed"
         );
+        // C5.2 fixture equality: the original file became a modified file.
+        move_proof::assert_fixture_union(modified, approved_consumers, repo_root);
         // A-4 non-numbered observations row (ledger ~327): nothing present
         // before is absent after, artifact trees excluded (the apply's own
         // record lives there).
