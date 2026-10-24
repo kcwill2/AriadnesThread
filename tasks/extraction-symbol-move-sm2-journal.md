@@ -207,4 +207,22 @@ Frozen locks proven mechanically:
 
 ## Landing
 
-(append: commit SHA, git show --stat, reflog tail)
+Commit `f6c92feed6137c4668de0191486164f8970141f7` (`f6c92fe`) via
+`python tools/commit_scoped.py --scope crates/lang-cpp/src/move_retention.rs
+--scope crates/lang-cpp/src/dependency_rewriter.rs --scope
+crates/lang-cpp/src/lib.rs --scope tasks/extraction-symbol-move-sm2-journal.md
+-m "feat(lang-cpp): implement move_out_top_level_symbols with the
+ARIADNE-EXTRACT-OUT line-prefix grammar and refusal contract
+(extraction-symbol-move SM-2)"`.
+
+- `git show --stat HEAD`: 4 files changed, 875 insertions(+) -
+  dependency_rewriter 16, lib.rs 1, move_retention 648, journal 210.
+- Commit cycle forms used: `encoding_guard.py --staged` (empty index, exit
+  0, no output) + `--all` superset (exit 0) BEFORE, `--all` again AFTER
+  (exit 0, now covering the tracked `move_retention.rs`).
+- Reflog tail (`git reflog -n 4` via distill): `f6c92fe HEAD@{0}: commit:
+  feat(lang-cpp): implement move_out_top_level_symbols...`,
+  `0db2680 HEAD@{1}`, `b993600 HEAD@{2}` - landing SHA verifiable in
+  `.git/logs/HEAD` (the reflog tool reads that file).
+- Start rev for reviewer diffs: `0db2680` (duty-1 landing; measured by
+  checkpoint_guard at boot).
