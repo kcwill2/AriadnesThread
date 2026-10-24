@@ -141,10 +141,12 @@ impl TransactionApplier {
     ///
     /// T7b move-removal (D-M23-5, I5): when a rewrite points at moved
     /// symbols generated into new files, the symbols' existing source files
-    /// are also snapshotted, and `rewriter.remove_top_level_symbols` decides
-    /// the strip inside the same transaction — `Some` writes the stripped
-    /// text back (rollback restores the original), `None` (the C++ default)
-    /// leaves the file byte-identical, preserving copy-only semantics. The
+    /// are also snapshotted, and the plugin's move hook
+    /// `rewriter.move_out_top_level_symbols` - offered the plan id as marker
+    /// provenance - decides the strip inside the same transaction: `Some`
+    /// writes the moved-out text back (rollback restores the original),
+    /// `None` (a refusal, or a copy-only language's default) leaves the file
+    /// byte-identical, so the copy fallback survives. The
     /// decision lives entirely in the hook result; validate names no
     /// language (I2).
     pub fn apply_with(
@@ -270,7 +272,7 @@ impl TransactionApplier {
             fs::write(&path, content)?;
         }
 
-        strip_moved_symbols(repo_root, move_removals, rewriter)
+        strip_moved_symbols(repo_root, move_removals, rewriter, &migration.plan_id)
     }
 
     /// AR-04 error decoration: run the same rollback the tier-failure path
@@ -332,7 +334,7 @@ impl TransactionApplier {
 }
 
 /// The existing source files whose moved symbols `apply_with` must offer to
-/// `remove_top_level_symbols`, as (repo-relative path, one unit's moved
+/// `move_out_top_level_symbols`, as (repo-relative path, one unit's moved
 /// symbol names sorted) pairs — one entry per moved UNIT per source file
 /// (T8b): the unit is the atomic move region, so an unlocatable unit (an
 /// external batch member that kept its placeholder fallback, I4) is skipped
@@ -376,18 +378,21 @@ fn is_generated_target(path: &Path, extraction: &ExtractionResult) -> bool {
     extraction.headers.iter().any(|unit| unit.path == path)
 }
 
-/// Offer each moved unit to the plugin's removal hook inside the caller's
-/// snapshot; a `Some` result is written back (I5 move), a `None` result (the
-/// C++ default, or a unit the file does not declare) leaves bytes untouched.
+/// Offer each moved unit to the plugin's move hook
+/// `move_out_top_level_symbols` inside the caller's snapshot, binding the
+/// plan id into the region markers as provenance; a `Some` result is written
+/// back (I5 move), a `None` result (a refusal, a copy-only language's
+/// default, or a unit the file does not declare) leaves bytes untouched.
 fn strip_moved_symbols(
     repo_root: &Path,
     removals: &BTreeSet<(PathBuf, Vec<String>)>,
     rewriter: &dyn DependencyRewriter,
+    plan_id: &str,
 ) -> Result<()> {
     for (relative, names) in removals {
         let path = repo_root.join(relative);
         let content = fs::read_to_string(&path)?;
-        if let Some(stripped) = rewriter.remove_top_level_symbols(&content, names) {
+        if let Some(stripped) = rewriter.move_out_top_level_symbols(&content, names, plan_id) {
             fs::write(&path, stripped)?;
         }
     }

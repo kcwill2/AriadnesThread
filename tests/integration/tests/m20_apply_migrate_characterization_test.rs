@@ -182,6 +182,7 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
 
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_before = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
+    let thing_header_before = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
     assert!(
         !repo_root.join("generated").exists(),
         "precondition: no generated dir"
@@ -244,10 +245,32 @@ fn apply_thing_plan_locks_transaction_outcome_and_disk_effects() -> Result<()> {
         !consumer_after.contains("#include \"thing.h\""),
         "the old bare include directive is gone from the rewritten consumer"
     );
+
+    let thing_header_after = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
+    fn uncomment_marked_regions(text: &str) -> String {
+        let mut restored = String::new();
+        let mut inside_region = false;
+        for line in text.split_inclusive('\n') {
+            let line_body = line.trim_end_matches(['\r', '\n']);
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ") { inside_region = true; continue; }
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT END ") { inside_region = false; continue; }
+            restored.push_str(if inside_region { line.strip_prefix("//").unwrap_or(line) } else { line });
+        }
+        restored
+    }
+    let begin_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ")).collect();
+    let end_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT END ")).collect();
+    assert_ne!(thing_header_after, thing_header_before, "the original file moved: apply must retire the moved declarations in include/thing.h, not leave it byte-identical (extraction-symbol-move)");
+    assert_eq!(begin_markers.len(), end_markers.len(), "the marked regions are balanced BEGIN/END pairs");
+    assert_eq!(begin_markers, vec!["// ARIADNE-EXTRACT-OUT BEGIN plan=PLAN-001 symbols=Thing"], "exactly ONE BEGIN line: the class record marks as one merged region (ctor/method locate inside it and refuse, ThingConfig is unlocatable - planner fixture verdict, not the shape's relayed 4-pair count); it names the plan id AND the moved symbols forwarded through move_out_top_level_symbols");
+    assert_eq!(end_markers, vec!["// ARIADNE-EXTRACT-OUT END plan=PLAN-001"], "the END line binds the same plan id provenance");
+    assert_eq!(uncomment_marked_regions(&thing_header_after), thing_header_before, "kickoff section 1 layer-2 reversibility: uncommenting the marked region reconstructs the original file byte-exactly");
+    assert!(!thing_header_after.contains("\nclass Thing {"), "no live declaration of a moved name survives: the region line carries the // prefix");
     assert!(
         thing_impl_after.contains("Thing::Thing(ThingConfig config)"),
-        "X5 copy-only semantics: the flip is an include rewrite, not a move - \
-         declarations survive in the source"
+        "extraction-symbol-move: the consumer's definition bytes survive; it is the \
+         ORIGINAL file include/thing.h where declarations are commented out in place \
+         under the marked ARIADNE-EXTRACT-OUT region"
     );
     Ok(())
 }

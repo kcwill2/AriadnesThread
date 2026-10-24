@@ -112,6 +112,7 @@ fn optimize_writes_all_extracted_headers_and_rewrites_consumer_includes() -> Res
 
     let consumer_before = fs::read_to_string(repo_root.join("tests").join("consumer.cpp"))?;
     let thing_impl_before = fs::read_to_string(repo_root.join("src").join("thing.cpp"))?;
+    let thing_header_before = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
     assert!(
         consumer_before.contains("#include \"thing.h\""),
         "fixture precondition"
@@ -155,6 +156,22 @@ fn optimize_writes_all_extracted_headers_and_rewrites_consumer_includes() -> Res
     );
     assert_eq!(report.committed_transformations, 1);
     assert_eq!(report.affected_consumer_files, 2);
+
+    let thing_header_after = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
+    assert_eq!(
+        thing_header_after,
+        thing_header_before,
+        "extraction-symbol-move DEFERRAL lock (SM-3 AMENDMENT-1, 2026-10-24; machine-true \
+         per STOP finding 1): the optimize verb marks NO original file - \
+         relocate_extraction_to_generated (crates/cli/src/optimize.rs:320) spells the \
+         migration with the generated/ prefix while apply_with receives the UN-relocated \
+         extraction (:407), so the frozen derivation (collect_move_removals, \
+         crates/validate/src/lib.rs:362, SM-I4 ZERO-DIFF) yields ZERO move candidates and \
+         the move hook is never offered. If this assert ever FAILS, the ledger-registered \
+         follow-on 'optimize-verb move parity' (path-derivation unfreeze) has landed: \
+         replace this lock with the marked-retention proofs m20 witnesses for the apply \
+         verb - never delete it silently"
+    );
     Ok(())
 }
 
