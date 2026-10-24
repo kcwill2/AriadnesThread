@@ -306,3 +306,65 @@ total ~380-430 produced lines vs the ~1200 bound; 8 scoped gates + commit
 cycle vs ~10 + trio; one crate dir. No hand split: the fold without the grown
 oracle ships honesty no one proves; the oracle without the fold pins an
 equality (SM-I3) that fails - both half-states re-open R5's window.
+
+## AMENDMENT-1 CARRIER (dated 2026-10-24, planner) - SM-3 lands under a designed HARD CHAIN; your hand discharges it. Binding; reviewer adjudicates against this section where it conflicts with the original text.
+
+SM-3 STOPped twice with machine witnesses (textbook CW-3), the planner
+adjudicated via AMENDMENT-1 in `tasks/extraction-symbol-move-sm3-handoff.md`
+(read it; read `tasks/extraction-symbol-move-sm3-journal.md` gates 4b/7),
+and SM-3 lands carrying EXACTLY one known workspace red - yours to discharge.
+
+1. BASELINE ANCHORS (supersede your header lines and gate 6 "upstream of
+   record"): the `1848` quotes are planning-phase off-by-one (already
+   journal-corrected by SM-3). Measured anchors of record: SM-2 landing =
+   `1849 passed / 0 failed / 13 ignored / 119 suites` (implementer AND
+   reviewer runs agree; duty-1 commit `790fe75` message says "census 1849
+   verified"); SM-3 delta = +0 (riders amend inside existing tests; the m19
+   rider re-authored to a deferral lock - m19 still 5 tests, m20 still 6);
+   YOUR dispatch baseline = `1849/0/13/119` but NOT green (see 2); YOUR
+   landing expectation = `1852/0/13/119` (+3); anchor `1837/0/13/119 @
+   b201aa6`.
+2. HARD-CHAIN DISCHARGE DUTY: the red test is
+   `commands::ui::extraction_apply::tests::test_a_valid_token_applies_the_plan_end_to_end`
+   (`crates/cli/src/commands/ui/extraction_apply/tests.rs:300-304`, the
+   modified-inside-consumer-set lock). Witness panic (SM-3 journal gate 7,
+   `259 passed / 1 failed / 0 ignored / 3 suites` fail-fast stop): `the
+   apply must not modify any file outside the approved dry-run's
+   consumer_file set: modified=["...include\\thing.h",
+   "...src\\thing.cpp", "...tests\\consumer.cpp"]`. Your gates adjust:
+   - Gate 1: the baseline is NOT clean - expect EXACTLY that one named test
+     red. Journal its panic line verbatim as the hard-chain witness. This
+     is NOT a STOP; anything beyond that one test IS a STOP.
+   - Gate 2 (captured Red): EXACTLY ONE named failure - required test 5
+     (pre-fold `move_removals == 0`). Required test 1 goes GREEN at
+     authoring: your C5 growth widens the :300-304 subset clause per shape
+     C5 ("the original file becomes a modified file") + SM-I6 ("the one
+     changed test file is required test 1's module tree"). That widening IS
+     the authorized discharge of SM-3's designed red; kickoff section 7
+     item 3's relay phrase "tests 1-4 UNEDITED" is SUPERSEDED for that
+     clause by shape C5 + SM-I6 (planner adjudication recorded in the SM-3
+     amendment + ledger; journal it). Your amended-assertions-first-FAIL
+     clause is satisfied for test 1 by the gate-1 witness instead of gate 2.
+   - Gate 6: your full census is the BOTH-HANDS discharge - exit 0 at
+     `1852/0/13/119` proves SM-3's threading green workspace-wide. Your
+     verdict MUST name both SM-3's landing commit and yours in its
+     gate-coverage section and cite this carrier.
+   - Adjacency MUST (reviewer): your code landing is the immediate next
+     landing after SM-3's (duty-1 doc landings allowed between; no release
+     in the window - the R5 law now also carries a red-test law).
+3. M3 TERMINATOR-ORACLE RULE (from SM-2 verdict finding M3, binding on your
+   C5.4 byte-reconstruction): `move_retention`'s accepted deviation 4 - a
+   marked region ending on a file's FINAL UNTERMINATED line gains the
+   dominant terminator. The basic fixture's files are terminated, so
+   reconstruct-equality holds as written; for any synthetic specimen without
+   a final terminator, your expected bytes must account for the ADDED
+   terminator (or author the specimen terminated). Disclosed in
+   `crates/lang-cpp/src/move_retention.rs` docs.
+4. M4 AWARENESS (informational): with refinements R-C/R-D the R-G
+   backslash-continuation refusal can never fire alone (R-D also refuses);
+   the pair test pins the OUTCOME. Do not mistake that branch for a
+   separately-covered path when mirroring the strip's refusal behavior in
+   your fold.
+5. FOLLOW-ON RELAY NOTE: "optimize-verb move parity" (path-derivation
+   unfreeze) is ledger-registered 2026-10-24; closeout re-registers per
+   kickoff section 6. NOT your scope - do not fix the derivation.

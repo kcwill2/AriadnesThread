@@ -283,3 +283,212 @@ seam separating them forces a half-built tree (threading-without-riders ships
 the milestone's core effect un-witnessed; riders-without-threading cannot go
 Green), and the merged SM-3+SM-4 option would force the rider Red to be
 re-choreographed around the reader flip, which the serial order gives free.
+
+## AMENDMENT-1 (dated 2026-10-24, planner) - supersedes RIDER 2 (item 4); authorizes a designed HARD-CHAIN landing; adjudicates both STOP findings
+
+Authority: kickoff section 7 closed-amendment policy (the planner owns
+amendment issuance; the implementer correctly STOPped per the STOP-and-report
+clause - textbook CW-3 discipline, zero improvisation). Trigger: the SM-3
+journal's two machine-witnessed STOP findings, both verified by the planner
+against the named files on 2026-10-24 before issuance. Everything above this
+section stands EXCEPT as amended here. Reviewer: adjudicate the landing
+against THIS section where it conflicts with the original text.
+
+### Erratum (milestone-truth scope)
+
+The rider-2 premise carried in item 4 - "the optimize verb moves identically
+(one hook fixes all verbs)" - is machine-FALSE for the optimize verb under
+this milestone's frozen SM-I4 derivation:
+`relocate_extraction_to_generated` (crates/cli/src/optimize.rs:320) spells
+the migration with the `generated/` prefix while `apply_with` receives the
+UN-relocated extraction (`optimize.rs:407`), so `collect_move_removals`
+(crates/validate/src/lib.rs:347-370, predicate :362 - NOT
+`crates/transform/src/lib.rs` as one relay stated; planner-verified by grep
+and read) matches ZERO candidates and the move hook is never offered for the
+optimize payload. The kickoff/shape composition paragraphs speak of the
+transform-verb transaction - the decision of record is UNCHANGED and the
+milestone's core effect is PROVEN for the apply verb: the m20 rider went
+GREEN under the threading, witnessing exactly ONE balanced
+`ARIADNE-EXTRACT-OUT BEGIN plan=PLAN-001 symbols=Thing` pair, uncomment
+reconstructing the original byte-exactly (journal gate 4a). Optimize-verb
+move parity is NOT scope of this milestone: it is a registered follow-on
+(ledger FOLLOW-ON INTAKE row, 2026-10-24; unfreezing the path-derivation is
+"out with a reason" per kickoff section 4).
+
+### RIDER 2 disposition (item 4) - RE-AUTHOR to a machine-true DEFERRAL lock (withdrawal rejected)
+
+Withdrawal (plain `git restore` of m19) is rejected: the closed clause
+(kickoff section 7 item 2) authorizes exactly "additive original-file proofs"
+inside this one named test - a deferral lock about `include/thing.h` stays
+inside that authorized hunk surface, and a withdrawal would document the
+deferral nowhere in the machine. The re-authored hunk stays pure additions
+against start rev `790fe75` (no start-rev byte deleted; the current working
+tree's proof-block bytes NEVER reached git history, so the reviewer's
+per-commit diff of the landing vs `790fe75` sees only the NEW block).
+
+Byte-exact working-tree replacement (Edit tool only; replace EXACTLY this
+block - the current file's lines 160-185, from the after-capture through the
+reconstruction assert, inside
+`optimize_writes_all_extracted_headers_and_rewrites_consumer_includes`; the
+before-capture line 115 `let thing_header_before = ...` STAYS, lines
+157-159 (report counts + blank) STAY, `Ok(())` and the closing brace STAY;
+the `uncomment_marked_regions` local fn is REMOVED from m19 - an unused
+local fn is a dead-code warning, and m20 keeps its own separate copy):
+
+OLD bytes (current working tree, verbatim):
+
+```rust
+    let thing_header_after = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
+    fn uncomment_marked_regions(text: &str) -> String {
+        let mut restored = String::new();
+        let mut inside_region = false;
+        for line in text.split_inclusive('\n') {
+            let line_body = line.trim_end_matches(['\r', '\n']);
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ") { inside_region = true; continue; }
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT END ") { inside_region = false; continue; }
+            restored.push_str(if inside_region { line.strip_prefix("//").unwrap_or(line) } else { line });
+        }
+        restored
+    }
+    assert!(
+        thing_header_after.contains("// ARIADNE-EXTRACT-OUT BEGIN plan="),
+        "extraction-symbol-move: the optimize verb moves identically (one hook fixes all \
+         verbs) - the header gained a marker (prefix-only pin; m20 owns the PLAN-001 byte)"
+    );
+    let begin_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ")).collect();
+    let end_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT END ")).collect();
+    assert_eq!(begin_markers.len(), end_markers.len(), "the marked regions are balanced BEGIN/END pairs");
+    assert_eq!(
+        uncomment_marked_regions(&thing_header_after),
+        thing_header_before,
+        "kickoff section 1 layer-2 reversibility: uncommenting the marked region \
+         reconstructs the original file byte-exactly"
+    );
+```
+
+NEW bytes (verbatim - pure ASCII, 15 lines):
+
+```rust
+    let thing_header_after = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
+    assert_eq!(
+        thing_header_after,
+        thing_header_before,
+        "extraction-symbol-move DEFERRAL lock (SM-3 AMENDMENT-1, 2026-10-24; machine-true \
+         per STOP finding 1): the optimize verb marks NO original file - \
+         relocate_extraction_to_generated (crates/cli/src/optimize.rs:320) spells the \
+         migration with the generated/ prefix while apply_with receives the UN-relocated \
+         extraction (:407), so the frozen derivation (collect_move_removals, \
+         crates/validate/src/lib.rs:362, SM-I4 ZERO-DIFF) yields ZERO move candidates and \
+         the move hook is never offered. If this assert ever FAILS, the ledger-registered \
+         follow-on 'optimize-verb move parity' (path-derivation unfreeze) has landed: \
+         replace this lock with the marked-retention proofs m20 witnesses for the apply \
+         verb - never delete it silently"
+    );
+```
+
+Test-count law holds: m19 keeps 5 tests, m20 keeps 6 - census-by-name
+reconciliation stays mechanical and the SM-3 delta stays +0.
+
+RGB adjudication (reviewer MUST read): the deferral lock is a
+machine-truth CHARACTERIZATION (Green-at-birth), not a new-truth Red: its
+Red is witnessed by gate 2a (the original unsatisfiable claim failing) plus
+gate 4b (post-thread, the header unmarked), its Green is the re-run below;
+justified-Green-at-birth precedent is SM-1's justified-Red-skip clause and
+SM-4's declared trio. The "never weaken an assertion" law is satisfied: the
+replaced claim was machine-false (witnessed by the milestone's own frozen
+locks), the replacement asserts witnessed machine truth AND is an
+unfreeze-tripwire that FAILS when the follow-on lands - a strengthening,
+never a weakening. If the re-run goes red for ANY reason other than this
+lock's own message: STOP-and-report, do not touch it.
+
+### Reduced gates for the landing under this amendment
+
+Gates 1, 2a, 2b, 3, 4a, 5, 6, 8, 9 and `encoding_guard --all` are WITNESSED
+in the journal and stand as evidence (the reviewer independently re-runs
+them fresh). Amended expectations:
+- Gate 4b' (new): `python tools/testrun.py --distill -p
+  ariadne-integration-tests --test m19_optimize_characterization_test` -
+  exit 0, `5 passed / 0 failed / 0 ignored / 1 suites` (deferral lock
+  green).
+- Gate 7 (full workspace census): EXEMPTED from this landing by this
+  amendment - hard chain, see below. The journal's gate-7 stop witness
+  (`259 passed / 1 failed / 0 ignored / 3 suites`, fail-fast at the ariadne-cli
+  lib binary) is the designed-red record of reference.
+- Resumed-session gate budget: ONE scoped testrun invocation + the commit
+  cycle trio. The journal's D-2026-10-24 overshoot row (16 measured vs 9
+  declared) stands and travels to the ledger dated sub-block at closeout;
+  the implementer's recommendation (re-state multi-test gates as per-test
+  invocations milestone-wide) is ACCEPTED for all future hands.
+
+### HARD CHAIN SM-3 -> SM-4 - AUTHORIZED (designed red, disclosed)
+
+Finding 2 is machine-true: the pre-existing UNEDITED lock
+`crates/cli/src/commands/ui/extraction_apply/tests.rs:300-304` (required
+test 1, `test_a_valid_token_applies_the_plan_end_to_end`) asserts modified
+inside the approved dry-run consumer set; the sanctioned threading marks
+`include/thing.h` on the UI apply path (same spelling as m20), so the test
+fails with verbatim panic (journal gate 7): `the apply must not modify any
+file outside the approved dry-run's consumer_file set: modified=
+["...include\\thing.h", "...src\\thing.cpp", "...tests\\consumer.cpp"]`.
+The shape assigns the grown-oracle truth to SM-4 (SM-I6: "the one changed
+test file is required test 1's module tree"; C5: "the original file becomes
+a modified file"); kickoff section 7 item 3's relay phrase "tests 1-4
+UNEDITED" is SUPERSEDED for that clause by shape C5 + SM-I6 (planner
+adjudication, recorded). `crates/cli/**` stays SM-3-forbidden.
+
+Authorization wording: the planner AUTHORIZES a designed HARD CHAIN
+SM-3 -> SM-4 (precedent: ui-extraction-card-playbook T-A/T-B designed-red
+window, O1 disclosed): SM-3 lands validate threading + m20 rider + m19
+deferral lock carrying EXACTLY that one workspace red, disclosed in this
+amendment, the journal, and the ledger; SM-4's hop discharges the workspace
+gates for BOTH hands (gate-1 names the known red; the C5 growth discharges
+it at authoring; gate 6 full census `1852/0/13/119` proves both; the SM-4
+verdict names both landing commits). Window law: no release between; SM-4's
+code landing is the immediate next landing (duty-1 doc landings allowed in
+between; reviewer adjacency check).
+
+MERGE SM-3+SM-4 REJECTED on the sizing law: the merged hand would carry 17+
+scoped gate invocations against the ~10 cap - shape section 6's own "IF the
+merged hand still fits the law" condition fails - and the rider Red would
+have to be re-choreographed around the reader flip, which the serial order
+gives for free (shape section 6, paraphrased: "the m19/m20 rider's Red must
+then run BEFORE the reader flip lands"). One-crate-per-hand scope
+discipline also argues against shipping validate inside a cli hand.
+
+### Landing commit - revised message (scopes unchanged)
+
+```
+python tools/commit_scoped.py --scope crates/validate/src/lib.rs --scope
+tests/integration/tests/m20_apply_migrate_characterization_test.rs --scope
+tests/integration/tests/m19_optimize_characterization_test.rs --scope
+tasks/extraction-symbol-move-sm3-journal.md -m "feat(validate): bind the
+plan id into the move hook at the strip call; m20 marked-retention rider +
+m19 optimize-deferral lock; hard-chained to SM-4 (extraction-symbol-move
+SM-3)"
+```
+
+### Exact landing sequence (resumed SM-3 implementer)
+
+1. `python tools/checkpoint_guard.py resume --spec
+   tasks/extraction-symbol-move-sm3-handoff.md --scope crates/validate
+   --scope tests/integration/tests --cmd python tools/testrun.py --distill
+   -p ariadne-integration-tests --test m19_optimize_characterization_test`
+   - bootstrap; journal the boot lines + confirm the disk-state inventory
+   matches the journal (HEAD `790fe75`; dirty exactly validate/m19/m20 +
+   this journal + tolerated .vsix).
+2. Edit ONLY `tests/integration/tests/m19_optimize_characterization_test.rs`:
+   replace the OLD block quoted above with the NEW block, byte-exactly
+   (Edit tool; never Set-Content/Out-File/`>`).
+3. Gate 4b' (the one scoped invocation above): expect exit 0,
+   `5 passed / 0 failed / 0 ignored / 1 suites`.
+4. Journal: append the AMENDMENT-1 execution record (amendment reference,
+   gate 4b' canonical line + capture path, R5 statement carried forward,
+   and the HARD-CHAIN statement: main stays red on the single named test
+   until SM-4's landing discharges it).
+5. `python tools/encoding_guard.py --staged` (or the `--all` superset if the
+   staging seam refuses - journal the form used), then the revised
+   commit_scoped command above. Never `git add .`; the journal rides in the
+   landing commit.
+6. Report back per the handoff's "Report back" section with two deltas:
+   gate 7 omitted by amendment (hard chain), and Red evidence = gates 2a/2b
+   + gate 4b stop witness + gate 4b' Green.
