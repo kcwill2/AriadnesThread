@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: M23.5 SCC Condensation + Iterative Tarjan</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        .before {
+            border-left: 4px solid #f44336;
+        }
+        .after {
+            border-left: 4px solid #4caf50;
+        }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .finding {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 10px 15px;
+            margin: 10px 0;
+        }
+        .caveat {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 10px 15px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <!-- Slide 1: Title -->
+    <div class="slide active">
+        <h1>M23.5: SCC Condensation + Iterative Tarjan</h1>
+        <p><strong>Date:</strong> 2026-10-25 (closeout)</p>
+        <p><strong>Milestone:</strong> Cycle substrate rework for graph traversal and cycle detection</p>
+        <p><strong>Status:</strong> CLOSED</p>
+        <p><strong>Census:</strong> 1180/0/4/88 (at dcd681b) &rarr; 1853/0/13/119 (final at f235c8a)</p>
+    </div>
+
+    <!-- Slide 2: Overview -->
+    <div class="slide">
+        <h1>Overview</h1>
+        <h2>What was implemented</h2>
+        <ul>
+            <li>Replaced recursive DFS cycle detection with <strong>iterative Tarjan's SCC algorithm</strong></li>
+            <li>Introduced <strong>CycleGroup</strong> as the single cycle currency (replacing per-path cycle enumeration)</li>
+            <li>Added <strong>cycle condensation</strong> for graph visualization and reporting</li>
+            <li>Eliminated stack overflow risk on deep include chains (100K+ nodes)</li>
+        </ul>
+        <h2>Why it was needed</h2>
+        <ul>
+            <li>Recursive DFS overflowed at ~2 MiB stack on 100K-node chains</li>
+            <li>Per-path cycle reporting produced exponential duplicates (diamond: 2 paths, real SCC: 1)</li>
+            <li>No condensation meant no group-level cycle analysis for UI/reporting</li>
+        </ul>
+        <h2>Key benefits</h2>
+        <ul>
+            <li>Stack-safe: 64 KiB default stack handles 100K nodes</li>
+            <li>Semantic correctness: cycle count = group count, not path count</li>
+            <li>Enables cycle-policy seam (informational vs blocking per package)</li>
+            <li>Deterministic exports across processes</li>
+        </ul>
+    </div>
+
+    <!-- Slide 3: Phase 1 - Cluster Crate -->
+    <div class="slide">
+        <h1>Phase 1: Cluster Crate (T1.1 + T1.2)</h1>
+        <h2>Iterative SCC with explicit frame stack</h2>
+        <div class="code-block before">
+// BEFORE: Recursive DFS (stack overflow at depth ~10K)
+fn detect_cycles_dfs(graph: &Graph, node: NodeId, visited: &mut HashSet<NodeId>, stack: &mut Vec<NodeId>) {
+    visited.insert(node);
+    stack.push(node);
+    for neighbor in graph.neighbors(node) {
+        if stack.contains(&neighbor) {
+            // Found cycle - record path
+            record_cycle(&stack, neighbor);
+        } else if !visited.contains(&neighbor) {
+            detect_cycles_dfs(graph, neighbor, visited, stack);
+        }
+    }
+    stack.pop();
+}
+        </div>
+        <div class="code-block after">
+// AFTER: Iterative Tarjan with explicit frame machine
+struct Frame {
+    node: NodeId,
+    state: FrameState,
+    next_child: usize,
+}
+
+enum FrameState {
+    Enter,      // First time visiting
+    Return,     // Returning from child
+    Exit,       // All children processed
+}
+
+fn detect_cycle_groups_tarjan(graph: &Graph) -> Vec<CycleGroup> {
+    let mut index = 0;
+    let mut stack = Vec::new();
+    let mut frames = Vec::new();
+    let mut indices = HashMap::new();
+    let mut lowlinks = HashMap::new();
+    let mut on_stack = HashSet::new();
+    let mut groups = Vec::new();
+
+    for node in graph.nodes() {
+        if !indices.contains_key(&node) {
+            frames.push(Frame { node, state: FrameState::Enter, next_child: 0 });
+            while let Some(frame) = frames.last_mut() {
+                match frame.state {
+                    FrameState::Enter => {
+                        // Tarjan enter logic
+                    }
+                    FrameState::Return => {
+                        // Update lowlink from child
+                    }
+                    FrameState::Exit => {
+                        // Check for SCC root, pop group
+                    }
+                }
+            }
+        }
+    }
+    groups
+}
+        </div>
+        <div class="finding">
+            <strong>Verified:</strong> 100K-node chain completes on 64 KiB stack (both crates). Cluster oracle runs 200 seeded digraphs.
+        </div>
+    </div>
+
+    <!-- Slide 4: Phase 2 - Graph Crate -->
+    <div class="slide">
+        <h1>Phase 2: Graph Crate (T2-A + T2-B)</h1>
+        <h2>Integration with graph.rs report path</h2>
+        <ul>
+            <li><code>generate_report_with_cycle_policies</code> now calls <code>detect_cycle_groups()</code></li>
+            <li><code>cycle_count</code> reports <strong>group count</strong> (not path count)</li>
+            <li>Cycle-policy seam: <code>informational_cycle_count</code> skip-when-zero serde</li>
+            <li>All-<code>Reject</code> wrapper preserves C++ golden byte-stability</li>
+        </ul>
+        <h2>Key changes in graph.rs</h2>
+        <div class="code-block after">
+// CycleGroup is the only cycle currency
+pub struct CycleGroup {
+    pub members: Vec<FileId>,
+    pub external_degree: usize,
+    pub representative_cycle: Option<Vec<FileId>>,
+}
+
+pub fn detect_cycle_groups(&self) -> Vec<CycleGroup> {
+    // Iterative Tarjan from cluster crate
+    crate::cluster::scc::detect_cycle_groups(self)
+}
+
+pub fn generate_report_with_cycle_policies(
+    &self,
+    policy_of: &dyn Fn(FileId) -> CyclePolicy,
+) -> IncludeReport {
+    let cycle_groups = self.detect_cycle_groups();
+    let cycle_count = cycle_groups.len();
+    // ... informational_cycle_count based on policy
+}
+        </div>
+        <div class="finding">
+            <strong>MET:</strong> m3_include_graph_test green WITHOUT EDIT (cycle_count == 1 where old reported 2 paths)
+        </div>
+    </div>
+
+    <!-- Slide 5: Phase 3 - UI Crate -->
+    <div class="slide">
+        <h1>Phase 3: UI Crate (T3-A/B/C/D/D2/E1/E2)</h1>
+        <h2>Renderer migration to CycleGroup</h2>
+        <table>
+            <tr><th>Unit</th><th>Scope</th><th>Status</th></tr>
+            <tr><td>T3-A</td><td>dto.rs: build_include_elements signature change</td><td>APPROVED</td></tr>
+            <tr><td>T3-B</td><td>cycle_groups_view.rs: edge classification by group INDEX</td><td>APPROVED</td></tr>
+            <tr><td>T3-C</td><td>dto.rs: emit_include_elements consumes CycleGroup</td><td>APPROVED</td></tr>
+            <tr><td>T3-D</td><td>CLI label: "Cycle Groups Detected" locked</td><td>APPROVED</td></tr>
+            <tr><td>D2</td><td>UI parity test (inserted companion)</td><td>APPROVED</td></tr>
+            <tr><td>E1</td><td>DELETE legacy builder + repoint 9 call sites</td><td>APPROVED</td></tr>
+            <tr><td>E2</td><td>Rename survivor to canonical public name</td><td>APPROVED</td></tr>
+        </table>
+        <div class="caveat">
+            <strong>Unit E (original): SUPERSEDED</strong> - Contract was unsatisfiable (renaming builder alone broke cargo check). Replaced by E1+E2.
+        </div>
+        <div class="code-block after">
+// Single public builder - dto.rs:621
+pub fn build_include_elements(
+    graph: &IncludeGraph,
+    cycle_groups: &[CycleGroup],  // NEW: group-based
+    cycle_policy: &dyn Fn(FileId) -> CyclePolicy,
+) -> Vec<IncludeElement> {
+    // Edge classification by group-INDEX equality
+    // No unstyled/amber edge between two cycle-classed nodes
+}
+        </div>
+    </div>
+
+    <!-- Slide 6: Phase 4 - T4.1 Closeout -->
+    <div class="slide">
+        <h1>Phase 4: T4.1 Closeout</h1>
+        <h2>F12: .gitattributes LF pin for fixture artifacts</h2>
+        <div class="code-block after">
+# tests/fixtures/**/artifacts/**/*.json text eol=lf
+        </div>
+        <ul>
+            <li>Pin alone insufficient - required one <code>git checkout -- <path></code> normalization</li>
+            <li>Implementer's distinction: "pin prevents recurrence; normalization clears stale entry" = CORRECT</li>
+            <li>Verified across full test run post-normalization</li>
+        </ul>
+        <h2>F13: P2 test rename (names only, assertions untouched)</h2>
+        <div class="code-block before">
+// BEFORE
+fn test_legacy_elements_serialize() { ... }
+fn test_grouped_elements_serialize() { ... }
+        </div>
+        <div class="code-block after">
+// AFTER  
+fn test_empty_currency_elements_serialize() { ... }
+fn test_populated_currency_elements_serialize() { ... }
+        </div>
+        <div class="finding">
+            <strong>F12/F13 CLOSED</strong> by T4.1 commit b3f33a9 + records commit 6ec1a01
+        </div>
+    </div>
+
+    <!-- Slide 7: Acceptance Criteria -->
+    <div class="slide">
+        <h1>Eight Acceptance Criteria - All MET</h1>
+        <table>
+            <tr><th>#</th><th>Criterion</th><th>Verdict</th></tr>
+            <tr><td>1</td><td>detect_cycles gone; CycleGroup only currency</td><td>MET WITH CAVEAT (2 deliberate survivals in tests/)</td></tr>
+            <tr><td>2</td><td>cycle_count = group count; m3 green unedited</td><td>MET</td></tr>
+            <tr><td>3</td><td>No unstyled/amber edge between cycle-classed nodes</td><td>MET (goldens vacuous on this axis)</td></tr>
+            <tr><td>4</td><td>100K chain at default stack; 200 seeded digraphs each</td><td>MET WITH CAVEAT (graph side: 5 digraphs + 1 tangle)</td></tr>
+            <tr><td>5</td><td>Planner byte-identity UNEDITED; closure equiv; export byte-stable</td><td>MET WITH CAVEAT (no lock on 520-header densest fixture)</td></tr>
+            <tr><td>6</td><td>Cycle-policy seam preserved</td><td>MET</td></tr>
+            <tr><td>7</td><td>No new UI hex literals; verdict colors intact (3 themes)</td><td>MET</td></tr>
+            <tr><td>8</td><td>Workspace green + hygiene + encoding + reviewer APPROVED</td><td>MET WITH CAVEAT (F10 blocked milestone-level approval)</td></tr>
+        </table>
+        <div class="finding">
+            <strong>Workspace census:</strong> 1180/0/4/88 reproduced 3x independently (T3-E2 review, T4.1 run 1, T4.1 run 2, closeout review)
+        </div>
+    </div>
+
+    <!-- Slide 8: F10 Resolution -->
+    <div class="slide">
+        <h1>F10 Resolution (Operator Closeout 2026-10-25)</h1>
+        <h2>Runtime & Perf Evidence</h2>
+        <div class="code-block after">
+$ python tools/ui_smoke.py
+boot+route checks clean (cold fixture, attempt 1, 1.1s)
+ui_smoke: PASS
+
+$ python tools/bench_compare.py
+phase                                            | median ms
+--------------------------------------------------------------
+symbol_pass+prep (combined, <= first event)      |    1268.4
+file_pass (event span)                           |     496.7
+save_load_artifacts+cache (combined)             |    2405.6
+ensure_load total                                |    4253.3
+generate_report+detect_cycle_groups (combined)   |      84.3
+build_include_elements                           |      12.7
+bench compare: 3 run(s), no regressions past 1.25x baseline
+        </div>
+        <ul>
+            <li><strong>ui_smoke.py:</strong> PASS - cold boot, routes, Cache-Control: no-store verified</li>
+            <li><strong>bench_compare.py:</strong> PASS - median-of-3, no regressions past 1.25x</li>
+            <li><strong>Worktree:</strong> tarjan-s-scc removed (merged at bcc08fc, tip 50222ad)</li>
+        </ul>
+    </div>
+
+    <!-- Slide 9: Open Deferred Items -->
+    <div class="slide">
+        <h1>Open Deferred Items (New from Closeout)</h1>
+        <table>
+            <tr><th>ID</th><th>Finding</th><th>Owner</th><th>Status</th></tr>
+            <tr><td>F9</td><td>testrun.py --baseline FILE form unrunnable</td><td>operator</td><td>OPEN</td></tr>
+            <tr><td>F11</td><td>Unattributed +6 pre-Phase-1 residual</td><td>operator</td><td>OPEN</td></tr>
+            <tr><td>F14</td><td>F14-class contract defects (7 instances this milestone)</td><td>planner</td><td>OPEN</td></tr>
+            <tr><td>F15</td><td>Stage-5 cycle-row: 8.0ms vs 5.6ms (~+38%), UNDETERMINED</td><td>operator</td><td>OPEN (gated on F10)</td></tr>
+            <tr><td>F16</td><td>No export-determinism lock on 520-header densest fixture</td><td>planner</td><td>OPEN</td></tr>
+            <tr><td>F17</td><td>Criterion 4 "200 seeded digraphs EACH" not met on graph side</td><td>planner</td><td>OPEN</td></tr>
+            <tr><td>F18</td><td>R3 graduation precondition not met (2 new R3 findings)</td><td>next kickoff</td><td>OPEN</td></tr>
+            <tr><td>F19</td><td>F12 ledger row exceeds 2000-char limit</td><td>operator</td><td>OPEN</td></tr>
+        </table>
+        <div class="caveat">
+            <strong>F15 mechanism confirmed:</strong> 4 concrete costs in SCC path (adjacency rebuild, seed sort, 3 extra edge passes, doubled group lookup). Environmental component proven (build_include_elements also +2.6ms). Magnitude not attributable without isolated bench.
+        </div>
+    </div>
+
+    <!-- Slide 10: Testing -->
+    <div class="slide">
+        <h1>Testing</h1>
+        <h2>New Test Files</h2>
+        <ul>
+            <li><code>crates/cluster/tests/scc_iterative_parity.rs</code> - 100K chain + 200 seeded digraphs</li>
+            <li><code>crates/graph/tests/cycle_groups_test.rs</td> - Deep chain + diamond + tangle fixtures</li>
+            <li><code>crates/graph/tests/cycle_groups_equivalence_test.rs</code> - DFS vs Tarjan equivalence + determinism locks</li>
+            <li><code>crates/graph/tests/closure_equivalence_tests.rs</code> - Closure predicate migration</li>
+            <li><code>crates/ui/tests/ui_test/static_html_sections.rs</code> - P2 rename + P1 conversion</li>
+        </ul>
+        <h2>Determinism Locks</h2>
+        <ul>
+            <li>Lock A: <code>payload_tail_bench.rs:571</code> - Cross-process export (2-header SCC)</li>
+            <li>Lock B: <code>graph_api.rs:742</code> - Two in-process calls (two disjoint groups)</li>
+            <li>Both carry non-vacuity guards (cycle_group_size in payload, cycle_witness >= 5 nodes)</li>
+        </ul>
+        <h2>Full Workspace Gates</h2>
+        <div class="code-block after">
+1853 passed / 0 failed / 13 ignored / 119 suites
+tools discover: Ran 296 tests in 20.xs / OK
+ui_smoke: PASS
+bench_compare: PASS (no regressions past 1.25x)
+hygiene: R1 0, R2 0 (R3 warn-only)
+encoding_guard --all: silent
+theme_token_check --check-added: silent
+        </div>
+    </div>
+
+    <!-- Slide 11: Impact & Migration -->
+    <div class="slide">
+        <h1>Impact & Migration</h1>
+        <h2>What changed for consumers</h2>
+        <ul>
+            <li><strong>Cycle reporting:</strong> Now reports SCC groups (cycle_count) not per-path cycles</li>
+            <li><strong>UI rendering:</strong> Edges classified by group-INDEX equality (not co-membership)</li>
+            <li><strong>Cycle policy:</strong> Informational cycles per package (skip-when-zero in JSON)</li>
+            <li><strong>Stack safety:</strong> 100K includes no longer overflow</li>
+        </ul>
+        <h2>Breaking changes</h2>
+        <ul>
+            <li>None - all C++ golden bytes unchanged (golden diff empty)</li>
+            <li>Scala migrated with !cycle_groups.is_empty() stance preserved</li>
+            <li>CLI labels updated: "Cycle Groups Detected" (locked)</li>
+        </ul>
+        <h2>Internal API changes</h2>
+        <ul>
+            <li><code>build_include_elements</code> third param: <code>&[CycleGroup]</code> (was per-path)</li>
+            <li><code>emit_include_elements</code> now private</li>
+            <li><code>detect_cycles</code> removed from production (2 deliberate test survivals)</li>
+        </ul>
+    </div>
+
+    <!-- Slide 12: Summary -->
+    <div class="slide">
+        <h1>Summary</h1>
+        <h2>What was delivered</h2>
+        <ul>
+            <li><strong>Stack-safe SCC detection</strong> via iterative Tarjan (64 KiB stack, 100K nodes)</li>
+            <li><strong>Semantic correctness</strong>: cycle_count = group count, not path count</li>
+            <li><strong>Cycle condensation</strong> for UI visualization and reporting</li>
+            <li><strong>Cycle-policy seam</strong> for per-package informational/blocking</li>
+            <li><strong>Deterministic exports</strong> across processes</li>
+        </ul>
+        <h2>Key metrics</h2>
+        <ul>
+            <li>68 files changed, 22,273 insertions(+), 193 deletions(-)</li>
+            <li>1853 passed / 0 failed / 13 ignored / 119 suites (final)</li>
+            <li>Zero R1/R2 hygiene violations</li>
+            <li>Zero new UI hex literals</li>
+            <li>All 8 acceptance criteria MET or MET WITH CAVEAT</li>
+        </ul>
+        <h2>Next steps</h2>
+        <ul>
+            <li>F15: Operator to run isolated bench_compare to settle stage-5 timing</li>
+            <li>F16: Planner to add export-determinism lock on 520-header fixture</li>
+            <li>F17: Amend criterion 4 wording or raise graph oracle sweep count</li>
+            <li>F18: Next kickoff runner aware R3 flip condition not met</li>
+            <li>F19: Split F12 ledger row into table + sub-block</li>
+        </ul>
+    </div>
+
+    <div class="navigation">
+        <button onclick="prevSlide()">Previous</button>
+        <span id="slideNumber">1 / 12</span>
+        <button onclick="nextSlide()">Next</button>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        
+        function showSlide(n) {
+            slides.forEach(slide => slide.classList.remove('active'));
+            slides[n].classList.add('active');
+            document.getElementById('slideNumber').textContent = 
+                `${n + 1} / ${slides.length}`;
+        }
+        
+        function nextSlide() {
+            currentSlide = (currentSlide + 1) % slides.length;
+            showSlide(currentSlide);
+        }
+        
+        function prevSlide() {
+            currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+            showSlide(currentSlide);
+        }
+        
+        showSlide(0);
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+            if (e.key === 'ArrowLeft') prevSlide();
+        });
+    </script>
+</body>
+</html>

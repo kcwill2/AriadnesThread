@@ -11,6 +11,7 @@ gates.
 | Worktree | State at 2026-10-01 | Disposition |
 |---|---|---|
 | `.kilo/worktrees/load-tail-phase-performance` | merged via `7a58e1f` | abandon with row |
+| `.kilo/worktrees/tarjan-s-scc` | M23.5 branch, complete | removed 2026-10-25 (merged at `bcc08fc`, branch tip `50222ad`) |
 
 Row moved verbatim 2026-10-04 (Phase 4 closeout): its disposition -- merged --
 was carried out, so the row is discharged. The three rows still live in
