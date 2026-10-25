@@ -229,6 +229,17 @@ pub enum Commands {
         /// After measurement path
         after: PathBuf,
     },
+    /// Purge marked extraction regions from source files
+    Purge {
+        /// Path to repository root
+        repo: PathBuf,
+        /// Plan ID whose marked regions to purge (optional; purges all if omitted)
+        #[arg(long)]
+        plan: Option<String>,
+        /// Dry-run: show what would be purged without making changes
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Optimize repository dependencies end-to-end
     Optimize {
         /// Path to repository root
@@ -317,6 +328,9 @@ pub fn run_cli() -> Result<()> {
         }
         Some(Commands::Compare { before, after }) => {
             compare_build_measurements(&before, &after)?;
+        }
+        Some(Commands::Purge { repo, plan, dry_run }) => {
+            purge_marked_regions(&repo, plan.as_deref(), dry_run)?;
         }
         Some(Commands::Optimize { repo }) => {
             run_end_to_end_optimize(&repo)?;

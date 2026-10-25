@@ -43,6 +43,7 @@ ariadne-ui = { path = "../ui" }
 ariadne-lang = { path = "../lang" }
 open = "5.1.2"
 axum = { version = "0.7", features = ["tokio"] }
+walkdir = "2.5"
 
 [dev-dependencies]
 tempfile.workspace = true

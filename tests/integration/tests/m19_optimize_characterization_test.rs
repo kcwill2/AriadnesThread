@@ -158,20 +158,25 @@ fn optimize_writes_all_extracted_headers_and_rewrites_consumer_includes() -> Res
     assert_eq!(report.affected_consumer_files, 2);
 
     let thing_header_after = fs::read_to_string(repo_root.join("include").join("thing.h"))?;
-    assert_eq!(
-        thing_header_after,
-        thing_header_before,
-        "extraction-symbol-move DEFERRAL lock (SM-3 AMENDMENT-1, 2026-10-24; machine-true \
-         per STOP finding 1): the optimize verb marks NO original file - \
-         relocate_extraction_to_generated (crates/cli/src/optimize.rs:320) spells the \
-         migration with the generated/ prefix while apply_with receives the UN-relocated \
-         extraction (:407), so the frozen derivation (collect_move_removals, \
-         crates/validate/src/lib.rs:362, SM-I4 ZERO-DIFF) yields ZERO move candidates and \
-         the move hook is never offered. If this assert ever FAILS, the ledger-registered \
-         follow-on 'optimize-verb move parity' (path-derivation unfreeze) has landed: \
-         replace this lock with the marked-retention proofs m20 witnesses for the apply \
-         verb - never delete it silently"
-    );
+    fn uncomment_marked_regions(text: &str) -> String {
+        let mut restored = String::new();
+        let mut inside_region = false;
+        for line in text.split_inclusive('\n') {
+            let line_body = line.trim_end_matches(['\r', '\n']);
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ") { inside_region = true; continue; }
+            if line_body.starts_with("// ARIADNE-EXTRACT-OUT END ") { inside_region = false; continue; }
+            restored.push_str(if inside_region { line.strip_prefix("//").unwrap_or(line) } else { line });
+        }
+        restored
+    }
+    let begin_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ")).collect();
+    let end_markers: Vec<&str> = thing_header_after.lines().filter(|line| line.starts_with("// ARIADNE-EXTRACT-OUT END ")).collect();
+    assert_ne!(thing_header_after, thing_header_before, "the original file moved: optimize must retire the moved declarations in include/thing.h, not leave it byte-identical (optimize-verb move parity)");
+    assert_eq!(begin_markers.len(), end_markers.len(), "the marked regions are balanced BEGIN/END pairs");
+    assert_eq!(begin_markers, vec!["// ARIADNE-EXTRACT-OUT BEGIN plan=PLAN-001 symbols=Thing"], "exactly ONE BEGIN line: the class record marks as one merged region (ctor/method locate inside it and refuse, ThingConfig is unlocatable); it names the plan id AND the moved symbols forwarded through move_out_top_level_symbols");
+    assert_eq!(end_markers, vec!["// ARIADNE-EXTRACT-OUT END plan=PLAN-001"], "the END line binds the same plan id provenance");
+    assert_eq!(uncomment_marked_regions(&thing_header_after), thing_header_before, "reversibility: uncommenting the marked region reconstructs the original file byte-exactly");
+    assert!(!thing_header_after.contains("\nclass Thing {"), "no live declaration of a moved name survives: the region line carries the // prefix");
     Ok(())
 }
 

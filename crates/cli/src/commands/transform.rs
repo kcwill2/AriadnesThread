@@ -579,3 +579,88 @@ mod tests {
         }
     }
 }
+
+/// Purge marked extraction regions from source files.
+/// Deletes `ARIADNE-EXTRACT-OUT` regions matching the given plan ID (or all if None).
+pub fn purge_marked_regions(repo_path: &PathBuf, plan_id: Option<&str>, dry_run: bool) -> Result<()> {
+    use std::fs;
+
+    let repository = Repository::locate(repo_path)?;
+    let mut total_regions = 0;
+    let mut total_files = 0;
+
+    // Walk all files in the repository
+    for entry in walkdir::WalkDir::new(&repository.root) {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        // Only process source files (by extension)
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if !matches!(ext, "h" | "hpp" | "hh" | "hxx" | "c" | "cpp" | "cc" | "cxx" | "rs" | "scala") {
+            continue;
+        }
+
+        let content = fs::read_to_string(path)?;
+        let lines: Vec<&str> = content.lines().collect();
+        let mut new_lines = Vec::new();
+        let mut inside_region = false;
+        let mut region_plan_id = String::new();
+        let mut region_start_line = 0;
+        let mut file_regions = 0;
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("// ARIADNE-EXTRACT-OUT BEGIN ") {
+                inside_region = true;
+                // Extract plan ID from the marker
+                if let Some(plan_start) = trimmed.strip_prefix("// ARIADNE-EXTRACT-OUT BEGIN plan=") {
+                    region_plan_id = plan_start.split_whitespace().next().unwrap_or("").to_string();
+                }
+                region_start_line = i;
+                continue;
+            }
+            if trimmed.starts_with("// ARIADNE-EXTRACT-OUT END ") && inside_region {
+                inside_region = false;
+                // Check if this region matches the plan filter
+                let matches = plan_id.map_or(true, |p| p == region_plan_id);
+                if matches {
+                    // Skip the entire region (BEGIN to END inclusive)
+                    file_regions += 1;
+                    total_regions += 1;
+                    continue;
+                } else {
+                    // Keep the region - write it back
+                    for j in region_start_line..=i {
+                        new_lines.push(lines[j].to_string());
+                    }
+                }
+                continue;
+            }
+            if inside_region {
+                continue; // Skip lines inside a matching region
+            }
+            new_lines.push(line.to_string());
+        }
+
+        if file_regions > 0 {
+            total_files += 1;
+            if !dry_run {
+                fs::write(path, new_lines.join("\n"))?;
+                println!("Purged {} region(s) from {}", file_regions, path.strip_prefix(&repository.root).unwrap_or(path).display());
+            } else {
+                println!("Would purge {} region(s) from {}", file_regions, path.strip_prefix(&repository.root).unwrap_or(path).display());
+            }
+        }
+    }
+
+    if dry_run {
+        println!("Dry-run complete: {} region(s) in {} file(s) would be purged", total_regions, total_files);
+    } else {
+        println!("Purge complete: {} region(s) in {} file(s) purged", total_regions, total_files);
+    }
+
+    Ok(())
+}

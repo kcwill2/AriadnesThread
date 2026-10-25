@@ -350,6 +350,11 @@ fn collect_move_removals(
     extraction: &ExtractionResult,
 ) -> BTreeSet<(PathBuf, Vec<String>)> {
     let mut removals: BTreeSet<(PathBuf, Vec<String>)> = BTreeSet::new();
+    let generated_unit_paths: BTreeSet<PathBuf> = extraction
+        .headers
+        .iter()
+        .map(|u| Path::new("generated").join(&u.path))
+        .collect();
     for rewrite in &migration.rewrites {
         for old_dep in &rewrite.old_includes {
             if old_dep == &rewrite.consumer_file || is_generated_target(old_dep, extraction) {
@@ -359,7 +364,9 @@ fn collect_move_removals(
                 continue;
             }
             for unit in &extraction.headers {
-                if !rewrite.new_includes.contains(&unit.path) || unit.symbols.is_empty() {
+                let matches = rewrite.new_includes.contains(&unit.path)
+                    || rewrite.new_includes.iter().any(|p| generated_unit_paths.contains(p));
+                if !matches || unit.symbols.is_empty() {
                     continue;
                 }
                 let names: Vec<String> =
