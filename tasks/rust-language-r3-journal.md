@@ -122,13 +122,17 @@ dependency_rewriter, validator) + root Cargo.toml + A8 appends
 
 ## Split-trigger status
 
-- Produced volume at the green gate, measured `git diff --numstat 3a7ec48`:
-  crate files 1083 (+ root Cargo.toml 6, + m17 append 2/-2, + this journal
-  125) = ~1218 insertions. `Cargo.lock` (13 lines) excluded as machine bytes
-  per LOCKER-LOCK; foreign `tasks/rust-language-execution-results.md`
-  (45/1, reviewer artifact) not part of this hand's output. UNDER the
-  pre-declared ~1350 ceiling: the shaper-to-R-4 split proposal is NOT
-  triggered; nothing moved out.
+- Pre-landing measurement (`git diff --numstat 3a7ec48`, intent-to-add for
+  the new files) plus the landing commit's own numstat: produced volume at
+  `fe34e23` = crate files 1083 + root Cargo.toml 6 + m17 append +2/-2 + this
+  journal 138 = 1229 insertions / 2 deletions (~1231 changed lines).
+  `Cargo.lock` (13 lines) excluded as machine bytes per LOCKER-LOCK; foreign
+  `tasks/rust-language-execution-results.md` (45/1, reviewer artifact) not
+  part of this hand's output. UNDER the pre-declared ~1350 ceiling: the
+  shaper-to-R-4 split proposal is NOT triggered; nothing moved out. (This
+  section's counts are stated for the landing commit; the pre-append reading
+  of it, ~1218, is superseded by this row - the rider landing this file's
+  correction is the in-scope tail.)
 - Landing SHA not self-journalled (a commit cannot contain its own SHA);
   relayed in the report with R-4 duty 1 citing it, per the handoff's Landing
   SHA relay clause and the R-2 deviation-(c) disposition.
