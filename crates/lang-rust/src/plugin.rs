@@ -138,17 +138,16 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    /// The R-4 registration-flip literal (INV-5, discovery ONLY): the
-    /// detector, the shaper, and the frozen-fixture discovery evidence all
-    /// exist at this hop, so `discovery` is the ONLY bit true; every later
-    /// stage's component lands with its own hand and its own bit.
-    /// `requires_toolchain` is false at every hop (A3/D-2): the pipeline
-    /// never invokes a Rust compile.
+    /// The R-5 semantic-index flip literal (INV-5, monotone): `discovery`
+    /// (R-4) stays and `semantic_index` turns on with this hop's real `syn`
+    /// analyzer; every later stage's component lands with its own hand and
+    /// its own bit. `requires_toolchain` is false at every hop (A3/D-2): the
+    /// pipeline never invokes a Rust compile.
     fn capabilities(&self) -> LanguageCapabilities {
         LanguageCapabilities {
             discovery: true,
             dependency_graph: false,
-            semantic_index: false,
+            semantic_index: true,
             load_metric: false,
             planning: false,
             extraction: false,
@@ -158,10 +157,15 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    // NO analysis_fingerprint override at this hop: the trait default "v1"
-    // stays. The "rust-1" fingerprint lands at R-5 in the same commit as the
-    // real `syn` analyzer it fingerprints (INV-8).
-    //
+    /// INV-8: `"rust-1"` rides the first analyzer-shipping commit (this one)
+    /// and is the per-plugin cache-digest input; bumps ride future parser
+    /// changes. The C++/Scala fingerprint literals are separate digest inputs,
+    /// unedited; the cache epoch `CURRENT_ANALYSIS_VERSION` is never the
+    /// vehicle (frozen by M27 - zero bytes under `crates/index`).
+    fn analysis_fingerprint(&self) -> String {
+        "rust-1".to_string()
+    }
+
     // NO aggregation_filter / target_path_for overrides: the trait defaults
     // (None = planning unsupported) stand until planning enrollment lands at
     // R-9 (INV-5).
@@ -231,17 +235,19 @@ mod tests {
     }
 
     /// Byte-exact capability literal lock (pattern of Scala's
-    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-4
-    /// registration flip turns on `discovery` ONLY - an INDEPENDENT full-
-    /// struct literal, the D-M23-6 style Scala proved catches bit slips.
+    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-5
+    /// semantic-index flip turns on `discovery` + `semantic_index` and ONLY
+    /// those - an INDEPENDENT full-struct literal, the D-M23-6 style Scala
+    /// proved catches bit slips. Renamed from the R-4 registration-pin of
+    /// the same discipline (amendment-style byte-pin, flipped WITH the flip).
     #[test]
-    fn capabilities_match_the_registration_flip_literal() {
+    fn capabilities_match_the_semantic_index_flip_literal() {
         assert_eq!(
             RustPlugin::new().capabilities(),
             LanguageCapabilities {
                 discovery: true,
                 dependency_graph: false,
-                semantic_index: false,
+                semantic_index: true,
                 load_metric: false,
                 planning: false,
                 extraction: false,
@@ -272,17 +278,28 @@ mod tests {
         );
     }
 
-    /// INV-5 default-seam pin: no fingerprint bump and no planning-hook
-    /// enrollment before their components exist.
+    /// R-5 in-src pin (INV-8): the fingerprint literal `"rust-1"` lands in
+    /// the FIRST commit shipping an analyzer. Bumps ride future parser
+    /// changes; the C++/Scala fingerprint literals are separate digest inputs,
+    /// unedited (cache digests for their fixtures must not move).
+    #[test]
+    fn analysis_fingerprint_is_rust_1() {
+        assert_eq!(
+            RustPlugin::new().analysis_fingerprint(),
+            "rust-1",
+            "INV-8: the fingerprint rides the real syn analyzer at R-5"
+        );
+    }
+
+    /// INV-5 default-seam pin: no planning-hook enrollment before R-9. The
+    /// fingerprint left the default seam at R-5 with the analyzer it
+    /// fingerprints - pinned separately by
+    /// `analysis_fingerprint_is_rust_1` (the R-3/R-4 era's `"v1"` assertion
+    /// lived here and retired with the override, journal D4).
     #[test]
     fn plugin_default_seams_stay_at_trait_defaults() {
         use std::path::Path;
         let plugin = RustPlugin::new();
-        assert_eq!(
-            plugin.analysis_fingerprint(),
-            "v1",
-            "R-3 keeps the trait default; \"rust-1\" rides the real analyzer at R-5 (INV-8)"
-        );
         assert_eq!(
             plugin.aggregation_filter(Path::new("."), Path::new("src/lib.rs")),
             None,

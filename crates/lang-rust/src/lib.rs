@@ -25,6 +25,8 @@ pub mod constraints;
 pub mod detector;
 mod dependency_rewriter;
 pub mod extractor;
+mod parser_items;
+mod parser_uses;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
