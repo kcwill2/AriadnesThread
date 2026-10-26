@@ -173,15 +173,15 @@ fn capabilities_lock_the_semantic_index_flip_literal() {
             discovery: true,
             dependency_graph: true,
             semantic_index: true,
-            load_metric: false,
+            load_metric: true,
             planning: false,
             extraction: false,
             rewriting: false,
             validation: false,
             requires_toolchain: false,
         },
-        "R-6's resolver hop turns dependency_graph on alongside the two R-5 \
-         bits, and ONLY those three (INV-5 monotonicity); requires_toolchain \
+        "R-7's load-metric hop turns load_metric on alongside the three R-6 \
+         bits, and ONLY those four (INV-5 monotonicity); requires_toolchain \
          stays false at every hop (A3/D-2)"
     );
 }

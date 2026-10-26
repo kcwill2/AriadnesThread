@@ -289,9 +289,10 @@ fn rs_claimed_case_exact_and_plan_backend_resolves() {
 }
 
 /// INV-5 capability lock, integration side, m19 idiom: an INDEPENDENT
-/// literal - R-4 flipped `discovery`, R-5 added `semantic_index`, R-6's
-/// resolver hop adds `dependency_graph` (m23 Scala precedent: superseded
-/// flip-locks are amended with the flip, never weakened).
+/// literal - R-4 flipped `discovery`, R-5 added `semantic_index`, R-6 added
+/// `dependency_graph`, R-7's load-metric hop adds `load_metric` (m23 Scala
+/// precedent: superseded flip-locks are amended with the flip, never
+/// weakened).
 #[test]
 fn capabilities_lock_the_registration_flip_literal() {
     let registry = ariadne_cli::registry::default_registry();
@@ -304,16 +305,16 @@ fn capabilities_lock_the_registration_flip_literal() {
             discovery: true,
             dependency_graph: true,
             semantic_index: true,
-            load_metric: false,
+            load_metric: true,
             planning: false,
             extraction: false,
             rewriting: false,
             validation: false,
             requires_toolchain: false,
         },
-        "R-4 turned discovery on, R-5 added semantic_index, R-6 adds \
-         dependency_graph and ONLY that (INV-5 monotonicity); \
-         requires_toolchain stays false (A3/D-2)"
+        "R-4 turned discovery on, R-5 added semantic_index, R-6 added \
+         dependency_graph, R-7 adds load_metric and ONLY that \
+         (INV-5 monotonicity); requires_toolchain stays false (A3/D-2)"
     );
 }
 
