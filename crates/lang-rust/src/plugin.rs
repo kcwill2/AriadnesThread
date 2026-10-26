@@ -138,10 +138,13 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    /// The R-6 dependency-graph flip literal (INV-5, monotone): `discovery`
-    /// (R-4) and `semantic_index` (R-5) stay and `dependency_graph` turns on
-    /// with this hop's real mod-tree/`use`-path resolver; every later
-    /// stage's component lands with its own hand and its own bit.
+    /// The R-7 load-metric flip literal (INV-5, monotone): `discovery` (R-4),
+    /// `semantic_index` (R-5) and `dependency_graph` (R-6) stay and
+    /// `load_metric` turns on with this hop - the load stage's backing
+    /// component (the collateral computation over the include graph and the
+    /// reduced model) already consumes the real analyzer/resolver outputs,
+    /// and the R-7 suite locks the manifest/vocabulary/label data answers;
+    /// every later stage's component lands with its own hand and its own bit.
     /// `requires_toolchain` is false at every hop (A3/D-2): the pipeline never
     /// invokes a Rust compile.
     fn capabilities(&self) -> LanguageCapabilities {
@@ -149,7 +152,7 @@ impl LanguagePlugin for RustPlugin {
             discovery: true,
             dependency_graph: true,
             semantic_index: true,
-            load_metric: false,
+            load_metric: true,
             planning: false,
             extraction: false,
             rewriting: false,
@@ -236,21 +239,21 @@ mod tests {
     }
 
     /// Byte-exact capability literal lock (pattern of Scala's
-    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-6
-    /// dependency-graph flip turns on `discovery` + `semantic_index` +
-    /// `dependency_graph` and ONLY those three - an INDEPENDENT full-struct
-    /// literal, the D-M23-6 style Scala proved catches bit slips. Renamed
-    /// from the R-5 semantic-index pin of the same discipline (amendment-style
-    /// byte-pin, flipped WITH the flip).
+    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-7
+    /// load-metric flip turns on `discovery` + `semantic_index` +
+    /// `dependency_graph` + `load_metric` and ONLY those four - an
+    /// INDEPENDENT full-struct literal, the D-M23-6 style Scala proved
+    /// catches bit slips. Renamed from the R-6 dependency-graph pin of the
+    /// same discipline (amendment-style byte-pin, flipped WITH the flip).
     #[test]
-    fn capabilities_match_the_dependency_graph_flip_literal() {
+    fn capabilities_match_the_load_metric_flip_literal() {
         assert_eq!(
             RustPlugin::new().capabilities(),
             LanguageCapabilities {
                 discovery: true,
                 dependency_graph: true,
                 semantic_index: true,
-                load_metric: false,
+                load_metric: true,
                 planning: false,
                 extraction: false,
                 rewriting: false,
