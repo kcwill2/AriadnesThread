@@ -1,16 +1,17 @@
 //! [`RustPlugin`] - the registry entry point for Rust (rust-language R-3,
 //! registered at R-4).
 //!
-//! Wires the real kickoff components ([`crate::detector::RustDetector`] and
-//! [`crate::shaper::RustUnitShaper`]) and the honest never-dispatched stubs
-//! (`RustAnalyzer`, `RustImportResolver`, `RustClusteringConstraints`,
-//! `RustSourceExtractor`, `RustDependencyRewriter`, `RustToolchainValidator`)
-//! into `ariadne_lang::LanguagePlugin`. Registered at R-4 (appended LAST in
-//! the composition root); the R-4 capability flip turns on `discovery` ONLY
-//! (detector + shaper + fixture evidence exist): INV-5 (capability
-//! monotonicity) - no pipeline stage can be dispatched to this plugin until
-//! the component behind its bit lands and the per-hand flip turns the bit
-//! on.
+//! Wires the real components into `ariadne_lang::LanguagePlugin`: the
+//! detector, shaper, boundary markers and modeling literals landed at R-3;
+//! the `syn` analyzer at R-5; the import resolver at R-6; the source
+//! extractor and the dependency rewriter (use-path rewrite plus the
+//! RISK-MODTREE parent-`mod` consumer mechanism,
+//! [`crate::dependency_rewriter`]) at R-8. The toolchain validator is the
+//! remaining honest never-dispatched stub (R-9). Registration appended the
+//! plugin LAST in the composition root at R-4; the capability literal
+//! tracks component landing per hand under INV-5 (capability
+//! monotonicity) - no pipeline stage is dispatched to a component whose
+//! bit is off, and no bit turns on before its component exists.
 
 use crate::analyzer::RustAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
