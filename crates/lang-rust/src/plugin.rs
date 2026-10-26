@@ -138,15 +138,16 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    /// The R-5 semantic-index flip literal (INV-5, monotone): `discovery`
-    /// (R-4) stays and `semantic_index` turns on with this hop's real `syn`
-    /// analyzer; every later stage's component lands with its own hand and
-    /// its own bit. `requires_toolchain` is false at every hop (A3/D-2): the
-    /// pipeline never invokes a Rust compile.
+    /// The R-6 dependency-graph flip literal (INV-5, monotone): `discovery`
+    /// (R-4) and `semantic_index` (R-5) stay and `dependency_graph` turns on
+    /// with this hop's real mod-tree/`use`-path resolver; every later
+    /// stage's component lands with its own hand and its own bit.
+    /// `requires_toolchain` is false at every hop (A3/D-2): the pipeline never
+    /// invokes a Rust compile.
     fn capabilities(&self) -> LanguageCapabilities {
         LanguageCapabilities {
             discovery: true,
-            dependency_graph: false,
+            dependency_graph: true,
             semantic_index: true,
             load_metric: false,
             planning: false,
@@ -235,18 +236,19 @@ mod tests {
     }
 
     /// Byte-exact capability literal lock (pattern of Scala's
-    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-5
-    /// semantic-index flip turns on `discovery` + `semantic_index` and ONLY
-    /// those - an INDEPENDENT full-struct literal, the D-M23-6 style Scala
-    /// proved catches bit slips. Renamed from the R-4 registration-pin of
-    /// the same discipline (amendment-style byte-pin, flipped WITH the flip).
+    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-6
+    /// dependency-graph flip turns on `discovery` + `semantic_index` +
+    /// `dependency_graph` and ONLY those three - an INDEPENDENT full-struct
+    /// literal, the D-M23-6 style Scala proved catches bit slips. Renamed
+    /// from the R-5 semantic-index pin of the same discipline (amendment-style
+    /// byte-pin, flipped WITH the flip).
     #[test]
-    fn capabilities_match_the_semantic_index_flip_literal() {
+    fn capabilities_match_the_dependency_graph_flip_literal() {
         assert_eq!(
             RustPlugin::new().capabilities(),
             LanguageCapabilities {
                 discovery: true,
-                dependency_graph: false,
+                dependency_graph: true,
                 semantic_index: true,
                 load_metric: false,
                 planning: false,
