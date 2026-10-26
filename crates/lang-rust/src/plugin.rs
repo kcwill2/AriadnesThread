@@ -6,8 +6,11 @@
 //! the `syn` analyzer at R-5; the import resolver at R-6; the source
 //! extractor and the dependency rewriter (use-path rewrite plus the
 //! RISK-MODTREE parent-`mod` consumer mechanism,
-//! [`crate::dependency_rewriter`]) at R-8. The toolchain validator is the
-//! remaining honest never-dispatched stub (R-9). Registration appended the
+//! [`crate::dependency_rewriter`]) at R-8. The planning hook pair
+//! ([`crate::planning`], ADR-0002 Decision 3 - registry dispatch enrolls the
+//! overrides below with ZERO CLI edit) and the probe-only toolchain validator
+//! ([`crate::validator`]) land at R-9b, completing the enrollment: every
+//! capability bit now sits behind a shipped component. Registration appended the
 //! plugin LAST in the composition root at R-4; the capability literal
 //! tracks component landing per hand under INV-5 (capability
 //! monotonicity) - no pipeline stage is dispatched to a component whose
@@ -63,7 +66,7 @@ impl RustPlugin {
             constraints: RustClusteringConstraints,
             extractor: RustSourceExtractor,
             rewriter: RustDependencyRewriter,
-            validator: RustToolchainValidator,
+            validator: RustToolchainValidator::new(),
         }
     }
 }
@@ -139,13 +142,14 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    /// The R-7 load-metric flip literal (INV-5, monotone): `discovery` (R-4),
-    /// `semantic_index` (R-5) and `dependency_graph` (R-6) stay and
-    /// `load_metric` turns on with this hop - the load stage's backing
-    /// component (the collateral computation over the include graph and the
-    /// reduced model) already consumes the real analyzer/resolver outputs,
-    /// and the R-7 suite locks the manifest/vocabulary/label data answers;
-    /// every later stage's component lands with its own hand and its own bit.
+    /// The FINAL all-true parity literal (INV-5, monotone: every bit landed
+    /// WITH its component - `discovery` R-4, `semantic_index` R-5,
+    /// `dependency_graph` R-6, `load_metric` R-7 (R-7 owns it; it does not
+    /// re-appear here), the extraction/rewriting mechanism R-8 + R-9a,
+    /// `planning` this hop's hook pair (the overrides below, retiring the
+    /// trait defaults), `validation` this hop's probe-only validator - no
+    /// bit precedes its component, and the hop that ships a component flips
+    /// exactly its bits).
     /// `requires_toolchain` is false at every hop (A3/D-2): the pipeline never
     /// invokes a Rust compile.
     fn capabilities(&self) -> LanguageCapabilities {
@@ -154,10 +158,10 @@ impl LanguagePlugin for RustPlugin {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         }
     }
@@ -171,9 +175,32 @@ impl LanguagePlugin for RustPlugin {
         "rust-1".to_string()
     }
 
-    // NO aggregation_filter / target_path_for overrides: the trait defaults
-    // (None = planning unsupported) stand until planning enrollment lands at
-    // R-9 (INV-5).
+    /// R-9b enrollment (ADR-0002 Decision 3 pair): a file is an aggregation
+    /// unit when it parses and declares >= 1 out-of-line `mod x;` item
+    /// (shape sec. 3.5); delegating to [`crate::planning::aggregation_filter`].
+    /// Registry dispatch (`crates/cli/src/registry.rs` `planning_hooks`)
+    /// enrolls these overrides with ZERO CLI edit - the trait default `None`
+    /// ("planning unsupported") is retired WITH the planning bit.
+    fn aggregation_filter(
+        &self,
+        repo_root: &std::path::Path,
+        path: &std::path::Path,
+    ) -> Option<bool> {
+        crate::planning::aggregation_filter(repo_root, path)
+    }
+
+    /// R-9b enrollment: the extraction target is the sanitized
+    /// `{symbol}.rs` beside the aggregation file, delegating to
+    /// [`crate::planning::target_path_for`]. One grammar with the
+    /// move-retention hook's `mod <stem>;` insertions -
+    /// `sanitize_module_stem` is the single source of truth (R-9a rode it).
+    fn target_path_for(
+        &self,
+        aggregation_path: &std::path::Path,
+        symbol_name: &str,
+    ) -> Option<std::path::PathBuf> {
+        crate::planning::target_path_for(aggregation_path, symbol_name)
+    }
 
     /// The Rust shaper owns the cargo-layout unit-shaping literals
     /// (shape sec. 3.5).
@@ -240,14 +267,18 @@ mod tests {
     }
 
     /// Byte-exact capability literal lock (pattern of Scala's
-    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-7
-    /// load-metric flip turns on `discovery` + `semantic_index` +
-    /// `dependency_graph` + `load_metric` and ONLY those four - an
-    /// INDEPENDENT full-struct literal, the D-M23-6 style Scala proved
-    /// catches bit slips. Renamed from the R-6 dependency-graph pin of the
-    /// same discipline (amendment-style byte-pin, flipped WITH the flip).
+    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-9b
+    /// parity flip turns ALL EIGHT stage bits true - every one behind a
+    /// shipped component (`discovery` R-4, `semantic_index` R-5,
+    /// `dependency_graph` R-6, `load_metric` R-7, the extraction/rewriting
+    /// mechanism R-8 + R-9a, `planning` this hop's hook pair, `validation`
+    /// this hop's probe-only validator), an INDEPENDENT full-struct literal,
+    /// the D-M23-6 style Scala proved catches bit slips. Renamed from the
+    /// R-7 load-metric pin of the same discipline (implementer-band rename,
+    /// amendment sec. 9 - flipped WITH the flip). `requires_toolchain` is
+    /// false at every hop including this one (A3/D-2).
     #[test]
-    fn capabilities_match_the_load_metric_flip_literal() {
+    fn capabilities_match_the_parity_flip_literal() {
         assert_eq!(
             RustPlugin::new().capabilities(),
             LanguageCapabilities {
@@ -255,10 +286,10 @@ mod tests {
                 dependency_graph: true,
                 semantic_index: true,
                 load_metric: true,
-                planning: false,
-                extraction: false,
-                rewriting: false,
-                validation: false,
+                planning: true,
+                extraction: true,
+                rewriting: true,
+                validation: true,
                 requires_toolchain: false,
             }
         );
@@ -297,24 +328,48 @@ mod tests {
         );
     }
 
-    /// INV-5 default-seam pin: no planning-hook enrollment before R-9. The
-    /// fingerprint left the default seam at R-5 with the analyzer it
-    /// fingerprints - pinned separately by
-    /// `analysis_fingerprint_is_rust_1` (the R-3/R-4 era's `"v1"` assertion
-    /// lived here and retired with the override, journal D4).
+    /// R-9b evolution (amendment sec. 9): the two hook legs turned from
+    /// trait-default `None` pins into Some-dispatch pins the moment planning
+    /// enrolled; the pins name the exact hook bytes - an out-of-line `mod x;`
+    /// IS an aggregation unit, an inline `mod x { .. }` block is NOT,
+    /// unreadable input answers the honest `Some(false)`, and target naming
+    /// is the sanitized `{symbol}.rs` beside the aggregation file. The
+    /// fingerprint seam was never part of this test; it is pinned separately
+    /// by `analysis_fingerprint_is_rust_1` (the R-3/R-4 era's `"v1"`
+    /// assertion lived here and retired with the override, R-5 journal D4).
     #[test]
     fn plugin_default_seams_stay_at_trait_defaults() {
-        use std::path::Path;
+        use std::path::{Path, PathBuf};
+        let dir = tempfile::tempdir().expect("temp hook-specimen dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("specimen src dir");
+        std::fs::write(root.join("src").join("lib.rs"), "mod greeting;\nmod models;\n")
+            .expect("out-of-line mod specimen");
+        std::fs::write(
+            root.join("src").join("inline.rs"),
+            "mod inlined {\n    pub fn buried() {}\n}\n",
+        )
+        .expect("inline mod specimen");
         let plugin = RustPlugin::new();
         assert_eq!(
-            plugin.aggregation_filter(Path::new("."), Path::new("src/lib.rs")),
-            None,
-            "planning enrollment is R-9's hop (INV-5)"
+            plugin.aggregation_filter(root, Path::new("src/lib.rs")),
+            Some(true),
+            "planning enrolled at R-9b: an out-of-line `mod x;` declaration makes the file an aggregation unit (INV-5 - the bit ships with its hooks)"
         );
         assert_eq!(
-            plugin.target_path_for(Path::new("src/lib.rs"), "Widget"),
-            None,
-            "no extraction target naming before planning enrolls (INV-5)"
+            plugin.aggregation_filter(root, Path::new("src/inline.rs")),
+            Some(false),
+            "an inline `mod x {{ .. }}` block declares no aggregation child (handoff item 1)"
+        );
+        assert_eq!(
+            plugin.aggregation_filter(root, Path::new("src/absent.rs")),
+            Some(false),
+            "unreadable input is honestly not an aggregation unit - the filter invents nothing (Scala parity)"
+        );
+        assert_eq!(
+            plugin.target_path_for(Path::new("src/lib.rs"), "fixture_marker"),
+            Some(PathBuf::from("src/fixture_marker.rs")),
+            "planning enrolled at R-9b: target naming is the sanitized `{{symbol}}.rs` beside the aggregation file"
         );
     }
 }

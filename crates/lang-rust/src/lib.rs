@@ -29,6 +29,7 @@ mod mod_tree;
 mod move_retention;
 mod parser_items;
 mod parser_uses;
+mod planning;
 pub mod plugin;
 pub mod resolver;
 pub mod shaper;
