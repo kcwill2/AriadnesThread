@@ -289,7 +289,9 @@ fn rs_claimed_case_exact_and_plan_backend_resolves() {
 }
 
 /// INV-5 capability lock, integration side, m19 idiom: an INDEPENDENT
-/// literal - this hop flips `discovery` ONLY.
+/// literal - R-4 flipped `discovery` only; R-5's analyzer landing adds
+/// `semantic_index` (m23 Scala precedent: superseded flip-locks are amended
+/// with the flip, never weakened).
 #[test]
 fn capabilities_lock_the_registration_flip_literal() {
     let registry = ariadne_cli::registry::default_registry();
@@ -301,7 +303,7 @@ fn capabilities_lock_the_registration_flip_literal() {
         LanguageCapabilities {
             discovery: true,
             dependency_graph: false,
-            semantic_index: false,
+            semantic_index: true,
             load_metric: false,
             planning: false,
             extraction: false,
@@ -309,7 +311,7 @@ fn capabilities_lock_the_registration_flip_literal() {
             validation: false,
             requires_toolchain: false,
         },
-        "the registration flip turns discovery on and ONLY discovery \
+        "R-4 turned discovery on; R-5 adds semantic_index and ONLY that \
          (INV-5 monotonicity); requires_toolchain stays false (A3/D-2)"
     );
 }
