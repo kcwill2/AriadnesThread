@@ -228,8 +228,66 @@ canonical lines quoted verbatim.
 - `python tools/golden_guard.py --base <rev>`: tool not landed; substituted
   by the handoff's prose byte-check (criteria 11/15 proofs).
 - Catch-all-deny refusals (verbatim `{"permission":"bash","pattern":"*",
-  "action":"deny","source":"global"}`): one chained `git show --stat a;
-  echo ...` (substituted by three individual `git show --stat` runs), two
-  `python -c` probes, one `findstr`, one `Get-Content .Count`, one chained
-  `$LASTEXITCODE` probe (substituted by Read-tool line totals and distiller
-  `PASS (exit 0)` lines). No expected gate was skipped.
+   "action":"deny","source":"global"}`): one chained `git show --stat a;
+   echo ...` (substituted by three individual `git show --stat` runs), two
+   `python -c` probes, one `findstr`, one `Get-Content .Count`, one chained
+   `$LASTEXITCODE` probe (substituted by Read-tool line totals and distiller
+   `PASS (exit 0)` lines). No expected gate was skipped.
+
+## R-6 - resolver (mod tree + use paths), dependency_graph flip, graph-shape truth
+
+Chain from start rev `f18f57f`: duty 1 `bd44e41` + landing `baf24f8`
+(implementer, 4 files +1293/-34) + orchestrator rider `470ae22`
+(three-witness amendment, 2 files +21/-13 - adjudicated rider-of-record,
+ACCEPTED: two one-literal flip-lock evolutions + the warm-reindex sentinel
+relocation, both the shapes the implementer's board ASK option (a) proposed,
+m23 precedent). Verdict: APPROVED - see `tasks/rust-language-r6-verdict.md`.
+All lines below are the reviewer's own fresh runs (2026-10-26, HEAD
+`470ae22`, tree clean), canonical lines quoted verbatim.
+
+| # | Acceptance criterion | Result | Evidence line (verbatim) |
+|---|----------------------|--------|--------------------------|
+| 1 | lang-rust green, baseline 43 - 1 superseded stub pin + 14 named resolver tests (handoff gate 4) | PASS | `56 passed / 0 failed / 0 ignored / 2 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-lang-rust`); 43 - 1 + 14 = 56 counted by name at source; in-src pin `capabilities_match_the_dependency_graph_flip_literal` (renamed byte-exact) green |
+| 2 | New suite green incl. the RISK-CYCLE report-data assertion (gate 3) | PASS | `9 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test rust_language_dependency_graph_test`); mod-tree both layouts at written spans, use-facts verbatim, vendor boundary marker-only, cycle informational via the existing `cycle_policy_by_file`-shaped lookup with zero core edits |
+| 3 | m20 model suite green UNEDITED (gate 5) | PASS | `5 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test m20_scala_dependency_graph_test`); m20 file in no hunk of `f18f57f..470ae22` |
+| 4 | Rider-touched suites green (relay verified personally) | PASS | semantic_index: `11 passed / 0 failed / 0 ignored / 1 suites`; discovery: `7 passed / 0 failed / 0 ignored / 1 suites` (both exit 0, `--distill` scoped) |
+| 5 | m18.7 SCC-sharing oracle green UNEDITED (shape sec. 6) | PASS | `6 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-cluster --test planner_injection`); `crates/cluster` zero-diff in the range |
+| 6 | Full census reconcile vs duty-1 anchor `1916/0/13/123 @ 8622b2c`, failed 0, suites +1 (gate 6) | PASS | `1938 passed / 0 failed / 13 ignored / 124 suites` (exit 0, bare fail-fast `python tools/testrun.py --distill`, capture 3356 lines); 1916 + 13 (lang-rust net) + 9 (new suite) = 1938; pre-rider the three superseded witnesses sat failed (journal `1935 passed / 3 failed / 13 ignored / 124 suites`) and the rider turned all three green without changing the test count; +1 suite = `rust_language_dependency_graph_test`; ignored flat 13; cross-check 1886 @ a9b6864 + 30 (R-5) + 22 (R-6) = 1938 |
+| 7 | Caps literal byte-exact: EXACTLY three true bits, five independent literals agreeing | PASS | plugin.rs impl + in-src pin + new integration lock + the two rider-amended older locks ALL carry `discovery: true, dependency_graph: true, semantic_index: true`, the five other bits false, `requires_toolchain: false`; all five witnesses green in reviewer runs (criteria 1/2/4) |
+| 8 | Commit-vs-touch-set (three commits, oldest first) | PASS | `bd44e41` = verdict + 1-line ledger flip; `baf24f8` = the four touch-set paths only; `470ae22` = the two named rider files (orchestrator's sanctioned band); `git diff --name-only f18f57f..470ae22` = 8 paths, nothing else |
+| 9 | Frozen locks incl. fixture bytes UNTOUCHED + `crates/pipeline/src/lib.rs` no hunk | PASS | `git diff --name-only f18f57f..470ae22 -- tests/fixtures tests/golden Cargo.toml Cargo.lock crates/repo crates/pipeline crates/cli crates/lang-cpp crates/lang-scala crates/index crates/graph crates/report crates/validate crates/artifact crates/cluster crates/transform crates/scheduler crates/ui crates/worker-core tools` -> EMPTY; the sentinel is runtime envelope mutation in `tempfile::TempDir` copies only (suite source: all writes under the temp root) |
+| 10 | Merged-closure root cause + sentinel relocation = correct-behavior accommodation, cache-serve witness intact | ACCEPTED (rider) | `crates/worker-core` zero-diff proves zero core edits (tu_store consumed the stub all along and now walks real resolver edges); `src/macro_specimen.rs` declared nowhere in the fixture (grep: no `mod`/`use` references it - the fixture carries zero top-level `use` statements) and holds one written symbol; sentinel id exists only in the stored envelope JSON (a re-parse loses it) and the `surface_written` precondition still fails on an empty surface |
+| 11 | D6 stash breach verification | MINOR/RECORD (verdict finding 1) | no stash remains: `git rev-parse --verify refs/stash` -> `fatal: Needed a single revision` (no `refs/stash` at all); plugin.rs landing hunk bounded to the caps/pin/doc lines (28 lines, no EOL churn); suites re-ran green on the restored bytes in reviewer runs; RULING: minor/record-class process breach, not a blocker (single in-touch-set file, popped immediately, self-reported, zero residue); recurrence = blocker |
+| 12 | Resolver honesty vs the Scala IV-5/D10 precedent (syn per shape decision 2, no hand-rolled scanning; rel_path owns cross-file truth per the R-5 D5 relay) | PASS | `syn::parse_file` + `parser_uses` facts verbatim; marker-first External, zero-match External (never Unresolved - out-of-repo resolves to NOTHING), sorted Wildcard, matched-under-marker External, `directive_edge_kind() -> Some(Import)` - each mirrored 1-for-1 and test-pinned in-src; Red list structurally true (start-rev stub empty vec + trait default `ResolveOutcome::Unresolved` at crates/lang/src/resolver.rs:159) |
+| 13 | Hygiene exit 0 (gate 7) | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 173 lines); all rows warn-only R3, none naming resolver.rs (542 lines) / plugin.rs / the new suite (489 lines) / the journal |
+| 14 | L12 encoding | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)` (capture 0 lines) |
+| 15 | Tool unit suites (CI form) | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 29.323s` / `OK` |
+| 16 | Reviewer acceptance bench, RUN fresh (kickoff fully-run; lang-rust/src touched - this hand changes analysis payloads flowing into indexing) | PASS | `python tools/distill.py --timeout 3000 -- python tools/bench_compare.py` -> `### generic PASS (exit 0)`; `bench compare: 3 run(s), no regressions past 1.25x baseline`; zero WARN lines so the PR-2 record-not-attribute stance was moot; no baseline/corpus change (D-3) |
+| 17 | Duty-1 completeness (`bd44e41`) | PASS | stat = verdict +219 + 1-line ledger flip; clause verbatim: `R-5 LANDED 673b22b (+rider 8622b2c) APPROVED 2026-10-26, census anchor 1916 passed / 0 failed / 13 ignored / 123 suites @ 8622b2c, R-6 dispatched (resolver hop).`; memory mirror `ledger.milestone.rust-language` verified holding the same state |
+| 18 | ASK 2 disposition (shape sec. 8 docs riders) | RECORDED | shape sec. 8 "five docs riders land at R-6" conflicts with the handoff touch-set (which omits the path) - touch-set law governs; riders CONFIRMED at R-10 (planner hand already carries "5 dated guide riders"); no action R-7..R-9; verdict finding 4 asks the planner to retire/date-annotate the stale line |
+
+### R-6 not run / refused (explicit statement)
+
+- `python tools/testrun.py --baseline` (bare): refused - `usage error:
+  missing value for --baseline`; F9-errata FILE form, superseded track-wide
+  (no baseline file exists for this track; probing the FILE form confirmed
+  the pre-existing cp1252 `_echo` crash noted in the R-4 addendum - carried
+  as verdict finding 3, not attributable to this hand). Criterion 6 is the
+  governing fresh `--distill` census (handoff gate 6's prescribed form), and
+  it matches the anchor exactly.
+- `python tools/testrun.py --distill` Red run at the stub: structurally
+  unreproducible for a reviewer at landing HEAD; honesty verified at source
+  instead (criterion 12) - the start-rev stub's empty vec and the trait's
+  `Unresolved` default make every journalled `left:` value true.
+- `python tools/ui_smoke.py`: not required by this hand (no UI/runtime-
+  surface bytes; `crates/ui` zero-diff); NOT run.
+- `python tools/golden_guard.py --base <rev>`: tool not landed; substituted
+  by the handoff's prose byte-check (criteria 3/8/9 name-only proofs).
+- Catch-all-deny refusals (verbatim `{"permission":"bash","pattern":"*",
+  "action":"deny","source":"global"}`): one chained
+  `git show --stat x3; git stash list` (substituted by three individual
+  `git show --stat` runs + `git rev-parse --verify refs/stash` - criterion
+  11), one `git grep` (grep tool), one `Set-Content` chain (Write tool), one
+  scratchpad write outside the reviewer edit grant (dropped as unnecessary),
+  one `> $null` chained exit-code probe (substituted by distiller
+  `PASS (exit 0)` lines - criteria 13/14/16). No expected gate was skipped.
