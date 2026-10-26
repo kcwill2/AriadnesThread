@@ -161,6 +161,40 @@ eeddfed).
 
 See "Lock proofs" section appended after the landing.
 
+## Landing + lock proofs (measured post-commit, start rev = duty-1 `cb5e0f4`)
+
+- Landing: `ec552bd` (ONE registration commit; 16 files, +729/-31 per the
+  commit_scoped numstat above). The gate-10 scope list rode: the handoff's
+  seven scopes + the two declared-extension scopes (`crates/pipeline/
+  Cargo.toml`, `Cargo.lock`). `encoding_guard.py --all` ran silent exit 0
+  before commit; a `python -c` byte-scanner substitute for the staged-run
+  was refused by the catch-all deny (boilerplate refusal; journaled - all
+  authored bytes are ASCII by construction through the Write/Edit tools).
+- Gate 10 tally: guard runs 2 (--staged silent-OK at duty-1, --all silent-OK
+  pre-landing) + commit_scoped 1 + refused ASCII scan 1.
+- L5: `git diff cb5e0f4..HEAD -- tests/integration/tests/
+  m19_scala_discovery_test.rs` = EXACTLY the one-hunk 1-line vec change at
+  :217 (digest above); m20/m21/m22/m23 paths ABSENT from the name-only diff.
+- L6: m17/m18 ABSENT from all diffs (byte-identical; m17 rode A8 at R-3).
+- L2/L3: name-only diff names NO path under `tests/golden`; the fixture
+  diff is ONLY the eight `tests/fixtures/rust-basic/` additions -
+  `tests/fixtures/basic`/`expensive` zero new files.
+- L7/L8/L9: `crates/lang-cpp`, `crates/lang-scala`, `tools` ABSENT.
+- L1: `crates/repo` entirely ABSENT (identity.rs untouched).
+- L4: m00 UNEDITED (absent from diff; green in the gate-8 census).
+- Reviewer MUSTs held: the three `CyclePolicy::Reject` planner literals
+  untouched (cli diff = src/registry.rs only); `m24_language_identity_test
+  .rs` untouched (cited in the suite header); `tests/integration/Cargo.toml`
+  NOT in any hunk (no lang-rust import - the preferred delegation form
+  held; no bincode import - deviation 2's placement decision).
+- Refusal log (all boilerplate catch-all, none an expected gate): raw
+  `git status` chain (start of session), kickoff `git grep` with `\b`
+  patterns, `commit_scoped --help` piped through PowerShell, `python -c`
+  ledger-tail probe, hygiene-exit-code probe with redirection, ASCII-scan
+  `python -c` via distiller. All substituted by tooling or skipped with the
+  substitution journaled.
+
+
 
 ## Red protocol (a)/(b)/(c) accounting
 
