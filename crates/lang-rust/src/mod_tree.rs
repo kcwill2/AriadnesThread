@@ -136,19 +136,40 @@ pub(crate) fn sanitize_module_stem(stem: &str) -> String {
     }
 }
 
-/// `crate::<dirs>::<stem>` for an src-rooted file path; `None` when the path
-/// carries no `src` directory before the file name (Scala's conservative
-/// outside-the-source-root stance). The written stem rides verbatim here -
-/// it names analyzer ids; only mod-space spellings get sanitized.
+/// The honest Rust module path of an src-rooted file (amendment sec. 1a(1)):
+/// - `src/lib.rs` / `src/main.rs` ARE the crate-root module: `Some("crate")`.
+/// - a file named `mod.rs` IS its directory's module: `crate::<dirs>`.
+/// - every other src-rooted path: `crate::<dirs>::<stem>` (byte-identical
+///   to the R-8 rule).
+/// `None` when the path carries no `src` directory before the file name
+/// (Scala's conservative outside-the-source-root stance, unchanged). The
+/// written stem rides verbatim here - it names analyzer ids; only
+/// mod-space spellings get sanitized.
 pub(crate) fn module_path_of_src_file(path: &Path) -> Option<String> {
     let parts: Vec<String> =
         path.components().map(|component| component.as_os_str().to_string_lossy().into_owned()).collect();
     let stem = path.file_stem()?.to_string_lossy().into_owned();
     let root = parts.iter().position(|part| part == "src")?;
-    (root + 1 < parts.len()).then(|| {
-        let directories = &parts[root + 1..parts.len() - 1];
-        format!("crate::{}{stem}", directories.join("::") + if directories.is_empty() { "" } else { "::" })
-    })
+    (root + 1 < parts.len()).then(|| module_spelling(&parts[root + 1..parts.len() - 1], &stem))
+}
+
+/// The spelling for one (directories, file-stem) pair inside a `src` root,
+/// per the module-semantics rules on [`module_path_of_src_file`].
+fn module_spelling(directories: &[String], stem: &str) -> String {
+    if stem == "mod" {
+        // mod.rs IS the directory's module; an empty directory chain is the
+        // crate root, spelled `crate`.
+        return if directories.is_empty() {
+            "crate".to_string()
+        } else {
+            format!("crate::{}", directories.join("::"))
+        };
+    }
+    let is_crate_root_file = directories.is_empty() && (stem == "lib" || stem == "main");
+    if is_crate_root_file {
+        return "crate".to_string();
+    }
+    format!("crate::{}{stem}", directories.join("::") + if directories.is_empty() { "" } else { "::" })
 }
 
 /// Whitespace prefix of the line holding byte `byte`.
@@ -192,4 +213,49 @@ fn widen_to_full_line(content: &str, from: usize, to: usize) -> (usize, usize) {
     let alone = head[line_start..].chars().all(char::is_whitespace)
         && tail[..line_end_relative].chars().all(char::is_whitespace);
     alone.then(|| (line_start, to + line_end_relative)).unwrap_or((from, to))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::module_path_of_src_file;
+    use std::path::Path;
+
+    /// R-9a F1 (amendment sec. 1b red 1): honest Rust module semantics for
+    /// the two special forms; every other src-rooted path keeps the R-8
+    /// spelling byte-identically (the green-at-birth legs below).
+    #[test]
+    fn module_path_pins_the_rust_module_semantics() {
+        assert_eq!(
+            module_path_of_src_file(Path::new("src/lib.rs")),
+            Some("crate".to_string()),
+            "src/lib.rs IS the crate-root module (the R-8 stem rule said `crate::lib`)"
+        );
+        assert_eq!(
+            module_path_of_src_file(Path::new("src/main.rs")),
+            Some("crate".to_string()),
+            "src/main.rs is a crate-root file exactly like src/lib.rs"
+        );
+        assert_eq!(
+            module_path_of_src_file(Path::new("src/models/mod.rs")),
+            Some("crate::models".to_string()),
+            "mod.rs IS its directory's module (the R-8 stem rule said `crate::models::mod`)"
+        );
+        // Unchanged forms (green-at-birth legs of this pin): the amendment's
+        // byte-identity clause for every other shape.
+        assert_eq!(
+            module_path_of_src_file(Path::new("src/models/user.rs")),
+            Some("crate::models::user".to_string()),
+            "every other src-rooted path is byte-identical to the R-8 rule"
+        );
+        assert_eq!(
+            module_path_of_src_file(Path::new("src/widgets.rs")),
+            Some("crate::widgets".to_string()),
+            "a src-rooted sibling keeps its own stem segment"
+        );
+        assert_eq!(
+            module_path_of_src_file(Path::new("include/thing.h")),
+            None,
+            "outside a src dir the conservative None stance is unchanged"
+        );
+    }
 }

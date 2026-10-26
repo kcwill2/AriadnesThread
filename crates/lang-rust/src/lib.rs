@@ -26,6 +26,7 @@ pub mod detector;
 mod dependency_rewriter;
 pub mod extractor;
 mod mod_tree;
+mod move_retention;
 mod parser_items;
 mod parser_uses;
 pub mod plugin;
