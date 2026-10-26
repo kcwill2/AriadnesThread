@@ -1,0 +1,30 @@
+[package]
+name = "ariadne-lang-rust"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# Plugin crate (rust-language R-3, shape sec. 3.2): depends inward only.
+# Deliberately NOT depended on: ariadne-build / ariadne-scheduler /
+# ariadne-graph / ariadne-cluster / ariadne-transform / ariadne-validate.
+# The m17 guards `plugin_crates_do_not_depend_on_core_pipeline` and its
+# transitive-tree form start asserting on this manifest the moment the crate
+# exists (A8 / INV-11: both PLUGIN_CRATES appends land in this same commit).
+#
+# D-2 deliberate deviation (the R-10 docs rider records it): the three
+# third-party parser deps extend the guide's "three deps and no more"
+# snippet. The m17 guards forbid only ariadne-graph/cluster/transform/
+# validate (manifest) and scheduler/report/cluster/graph/transform/validate
+# (transitive); third-party parser deps cannot reach them (shape sec. 6
+# RISK-GUIDE-DEPS). `span-locations` on proc-macro2 is load-bearing for
+# INV-7: no version bump may drop it.
+[dependencies]
+ariadne-repo = { path = "../repo" }
+ariadne-lang-api = { path = "../lang-api" }
+ariadne-lang = { path = "../lang" }
+syn.workspace = true
+proc-macro2.workspace = true
+unicode-ident.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -248,6 +248,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne-lang-rust"
+version = "0.1.0"
+dependencies = [
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-repo",
+ "proc-macro2",
+ "syn 2.0.119",
+ "tempfile",
+ "unicode-ident",
+]
+
+[[package]]
 name = "ariadne-lang-scala"
 version = "0.1.0"
 dependencies = [

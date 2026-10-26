@@ -268,7 +268,7 @@ fn seam_mock_plugin_drives_registry_lookups() {
 /// plugin crates depend inward, never on the pipeline).
 #[test]
 fn plugin_crates_do_not_depend_on_core_pipeline() {
-    const PLUGIN_CRATES: [&str; 2] = ["crates/lang-cpp", "crates/lang-scala"];
+    const PLUGIN_CRATES: [&str; 3] = ["crates/lang-cpp", "crates/lang-scala", "crates/lang-rust"];
     const FORBIDDEN_DEPS: [&str; 4] = [
         "ariadne-graph",
         "ariadne-cluster",
@@ -483,7 +483,7 @@ const TRANSITIVE_FORBIDDEN_DEPS: [&str; 7] = [
 /// `transitive_guard_detects_planted_scheduler_edge` below.
 #[test]
 fn plugin_crates_transitive_tree_excludes_core_pipeline() {
-    const PLUGIN_CRATES: [&str; 2] = ["crates/lang-cpp", "crates/lang-scala"];
+    const PLUGIN_CRATES: [&str; 3] = ["crates/lang-cpp", "crates/lang-scala", "crates/lang-rust"];
     let mut offenders: Vec<String> = Vec::new();
     for plugin_crate in PLUGIN_CRATES {
         let manifest = repo_root().join(plugin_crate).join("Cargo.toml");
