@@ -171,7 +171,7 @@ fn capabilities_lock_the_semantic_index_flip_literal() {
         rust.capabilities(),
         ariadne_lang::LanguageCapabilities {
             discovery: true,
-            dependency_graph: false,
+            dependency_graph: true,
             semantic_index: true,
             load_metric: false,
             planning: false,
@@ -180,9 +180,9 @@ fn capabilities_lock_the_semantic_index_flip_literal() {
             validation: false,
             requires_toolchain: false,
         },
-        "the analyzer hop turns semantic_index on alongside discovery and \
-         ONLY those two bits (INV-5 monotonicity); requires_toolchain stays \
-         false at every hop (A3/D-2)"
+        "R-6's resolver hop turns dependency_graph on alongside the two R-5 \
+         bits, and ONLY those three (INV-5 monotonicity); requires_toolchain \
+         stays false at every hop (A3/D-2)"
     );
 }
 
@@ -374,15 +374,22 @@ fn warm_reindex_of_unchanged_bytes_is_cache_served() -> Result<()> {
 
     // Plant the sentinel INSIDE the cached envelope (fingerprint untouched):
     // only a run that serves the envelope instead of re-parsing the source
-    // can ever surface it.
-    let path = envelope_path(&repo.root, USER_REL);
+    // can ever surface it. The host is `macro_specimen.rs`, NOT `user.rs`:
+    // since R-6 the resolver's mod-tree edges merge declared children into
+    // parent envelopes, so a planted id in a reachable file would ADD a
+    // unique symbol (the original id survives in the child envelope) and
+    // break the count-equality witness below. `macro_specimen.rs` is
+    // declared nowhere in the fixture, is never merged, and holds exactly
+    // one written symbol - the sentinel replaces it in place (R-6 rider,
+    // merged-closure truth; the pre-R-6 count held on any unit).
+    let path = envelope_path(&repo.root, MACRO_REL);
     let mut envelope: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
     let surface_written = envelope["analysis"]["symbols"]
         .as_array()
         .is_some_and(|symbols| !symbols.is_empty());
     assert!(
         surface_written,
-        "the cold envelope for {USER_REL} carries the written symbols the \
+        "the cold envelope for {MACRO_REL} carries the written symbols the \
          sentinel can ride (fails on the stub's empty surface - Red reason)"
     );
     envelope["analysis"]["symbols"][0]["id"] =

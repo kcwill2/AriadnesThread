@@ -289,9 +289,9 @@ fn rs_claimed_case_exact_and_plan_backend_resolves() {
 }
 
 /// INV-5 capability lock, integration side, m19 idiom: an INDEPENDENT
-/// literal - R-4 flipped `discovery` only; R-5's analyzer landing adds
-/// `semantic_index` (m23 Scala precedent: superseded flip-locks are amended
-/// with the flip, never weakened).
+/// literal - R-4 flipped `discovery`, R-5 added `semantic_index`, R-6's
+/// resolver hop adds `dependency_graph` (m23 Scala precedent: superseded
+/// flip-locks are amended with the flip, never weakened).
 #[test]
 fn capabilities_lock_the_registration_flip_literal() {
     let registry = ariadne_cli::registry::default_registry();
@@ -302,7 +302,7 @@ fn capabilities_lock_the_registration_flip_literal() {
         rust.capabilities(),
         LanguageCapabilities {
             discovery: true,
-            dependency_graph: false,
+            dependency_graph: true,
             semantic_index: true,
             load_metric: false,
             planning: false,
@@ -311,8 +311,9 @@ fn capabilities_lock_the_registration_flip_literal() {
             validation: false,
             requires_toolchain: false,
         },
-        "R-4 turned discovery on; R-5 adds semantic_index and ONLY that \
-         (INV-5 monotonicity); requires_toolchain stays false (A3/D-2)"
+        "R-4 turned discovery on, R-5 added semantic_index, R-6 adds \
+         dependency_graph and ONLY that (INV-5 monotonicity); \
+         requires_toolchain stays false (A3/D-2)"
     );
 }
 
