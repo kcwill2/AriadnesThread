@@ -89,9 +89,3 @@ Implementer: R-1 hand of the rust-language milestone. Contract:
   is the only new path (touch-set).
 - L12: `python tools/encoding_guard.py` - gate-7 form `--staged` first per
   the handoff; `--all` superset as the L12 proof.
-
-(to be appended per Green gate)
-
-## Gate inventory (itemized per-hand counts, M28 law)
-
-- Gate 1 baseline: 1 invocation.
