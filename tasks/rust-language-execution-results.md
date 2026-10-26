@@ -185,3 +185,51 @@ HEAD `a9b6864`, tree clean), canonical lines quoted verbatim.
   counter, and one `Select-Object`-piped unittest run (re-ran un-piped -
   succeeded). All substituted by dedicated tooling or un-piped equivalents.
   No expected gate was skipped.
+
+## R-5 - syn analyzer, fingerprint "rust-1", semantic_index flip, span truth
+
+Chain from start rev `c54035d`: duty 1 `80a2e28` + landing `673b22b`
+(implementer, 7 files +1395/-40) + orchestrator rider `8622b2c` (one-literal
+amendment of the superseded R-4 flip-lock, m23 precedent - adjudicated
+rider-of-record, ACCEPTED: `5+/3-`, one literal `false->true` + doc-comment +
+assert message, full-struct byte-exact discipline intact). Verdict: APPROVED
+- see `tasks/rust-language-r5-verdict.md`. All lines below are the
+reviewer's own fresh runs (2026-10-26, HEAD `8622b2c`, tree clean),
+canonical lines quoted verbatim.
+
+| # | Acceptance criterion | Result | Evidence line (verbatim) |
+|---|----------------------|--------|--------------------------|
+| 1 | lang-rust green at landing, baseline 24 - 1 superseded stub pin + 19 attributed (handoff gate 3) | PASS | `43 passed / 0 failed / 0 ignored / 2 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-lang-rust`); +4 analyzer / +1 plugin fingerprint pin / +8 parser_items / +7 parser_uses, all counted by name at source |
+| 2 | New suite green incl. literal-exact span pins (gate 4) | PASS | `11 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test rust_language_semantic_index_test`); all 9 fixture span literals re-read by the reviewer against the frozen bytes - every pin exact, incl. the attribute-immune `User (4,12)` and the handoff's named `mod models; (7,5)` oracle |
+| 3 | Discovery suite green post-rider (flip-lock amendment) | PASS | `7 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test rust_language_discovery_test`) |
+| 4 | m21 Scala witness green UNEDITED (gate 5; cache-digest non-perturbation) | PASS | `5 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test m21_scala_semantic_index_test`); m21 file in NO hunk of the range |
+| 5 | Full census reconcile vs duty-1 anchor `1886/0/13/122 @ a9b6864`, failed 0, suites +1 (gate 6) | PASS | `1916 passed / 0 failed / 13 ignored / 123 suites` (exit 0, `python tools/testrun.py --distill`, bare fail-fast form, single run, capture 3310 lines); 1886 + 19 (lang-rust net) + 11 (new suite) + 0 (rider restores the flip-touched lock) = 1916, attribution verified independently; the implementer's `1915/1/13/123` reconciles by name - their lone failure was the stale lock now rider-fixed |
+| 6 | Transient fixture-copy flake re-check (cli extraction_apply end-to-end) | TRANSIENT-NOTED | fresh full census passed it green in one bare 123-suite run; not reproduced; pre-existing Windows copy race class copying the untouched `basic` fixture, outside this hand's bytes; recorded for closeout pattern census |
+| 7 | Hygiene exit 0 (gate 7) | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 173 lines); all rows warn-only R3, zero name a file of this hand; analyzer 143 / parser_items 338 / parser_uses 219 / suite 425 lines - pre-split ceilings held |
+| 8 | L12 encoding `encoding_guard.py --all` exit 0 (gate 8/L12) | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)` (capture 0 lines) |
+| 9 | Tool unit suites (CI form) | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 32.080s` / `OK` |
+| 10 | Reviewer acceptance bench, RUN fresh (kickoff sec. 4 fully-run; lang-rust/src touched) | PASS | `python tools/distill.py -- python tools/bench_compare.py` -> `### generic PASS (exit 0)`; `bench compare: 3 run(s), no regressions past 1.25x baseline`; zero WARN lines in capture (PR-2 moot); no baseline/corpus change (D-3) |
+| 11 | Commit-vs-touch-set | PASS | `git diff --name-only c54035d..HEAD` = 10 paths: 9 inside the declared touch-set; the tenth (`rust_language_discovery_test.rs`) is the rider file, the ONLY `tests/**` hunk outside fixtures - rider-of-record ACCEPTED, implementer never touched it; landing stat = the six contract paths + journal (gate 8 "Journal inside") |
+| 12 | Caps literal byte-exact: discovery + semantic_index true ONLY, requires_toolchain false, locked by independent literals | PASS | implementation `plugin.rs:147-157`; THREE agreeing byte-literals: in-src `capabilities_match_the_semantic_index_flip_literal`, integration-side `capabilities_lock_the_semantic_index_flip_literal` (suite :165-187, registry seam), amended rider lock (discovery test :294-315) |
+| 13 | Fingerprint `"rust-1"` in the FIRST analyzer-shipping commit, pinned twice; CURRENT_ANALYSIS_VERSION read-proof | PASS | `"rust-1".to_string()` override + in-src `analysis_fingerprint_is_rust_1` + integration `registered_plugin_fingerprint_is_rust_1`, all in `673b22b`; read-check: `crates/index/src/cache.rs:30` = `"2.2.0"` (handoff's 2.1.0 quote STALE - registered M28 T4 DP-2 exception; m21 pins 2.2.0); zero bytes under `crates/index` |
+| 14 | syn mechanism + span truth (shape decision 2 / INV-7 / RISK-SYN-SPAN) | PASS | `syn::parse_file` + `Spanned`/`Span::start()` discipline end to end; hand-rolled-scanning grep (`.lines()`/`char_indices`/`find`/`split`/`matches`) over `parser_*.rs` = zero hits; macro-fabrication audit: every pinned symbol has written source, `generated_by_macro` pinned absent |
+| 15 | Frozen locks incl. fixture read-only + Cargo.lock untouched | PASS | `git diff c54035d..HEAD -- Cargo.toml Cargo.lock crates/index crates/repo crates/cli crates/pipeline crates/lang crates/lang-cpp crates/lang-scala tests/fixtures tests/golden tools` EMPTY; m00/m18-m23/ar27 green UNEDITED inside the census; suite copies `rust-basic` to tempdirs (m19/m21 idiom), writes nothing to the fixture |
+| 16 | Deviations D1-D5 | ACCEPTED | D1 plan erratum (2.2.0 verified, zero bytes); D2 protocol-implied red-suite run; D3 report-not-fix correct, rider resolved it; D4 retirement-of-superseded (superseded) - positively pinned twice since; D5 verified design judgment (seam receives no file-position input), parked to R-6 resolver / R-9 isolation |
+| 17 | Duty-1 completeness (`80a2e28`) | PASS | stat = verdict +237 + 1-line ledger flip; BOTH clauses verbatim (`R-4 LANDED ec552bd APPROVED 2026-10-26, census anchor 1886 passed / 0 failed / 13 ignored / 122 suites @ a9b6864, R-5 dispatched (analyzer hop).` + `fixture rust-basic APPROVED 2026-10-26 at ec552bd via R-4 verdict - L3 approval path discharged.`); memory mirror `ledger.milestone.rust-language` verified present |
+
+### R-5 not run / refused (explicit statement)
+
+- `python tools/testrun.py --baseline` (bare): refused - `usage error:
+  missing value for --baseline`; F9-errata FILE form, superseded track-wide
+  (no baseline file exists for this track). Criterion 5 is the governing
+  fresh `--distill` census (handoff gate 6's prescribed form).
+- `python tools/ui_smoke.py`: not required by this hand (no UI/runtime-
+  surface bytes); NOT run.
+- `python tools/golden_guard.py --base <rev>`: tool not landed; substituted
+  by the handoff's prose byte-check (criteria 11/15 proofs).
+- Catch-all-deny refusals (verbatim `{"permission":"bash","pattern":"*",
+  "action":"deny","source":"global"}`): one chained `git show --stat a;
+  echo ...` (substituted by three individual `git show --stat` runs), two
+  `python -c` probes, one `findstr`, one `Get-Content .Count`, one chained
+  `$LASTEXITCODE` probe (substituted by Read-tool line totals and distiller
+  `PASS (exit 0)` lines). No expected gate was skipped.
