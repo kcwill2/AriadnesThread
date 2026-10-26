@@ -280,6 +280,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
+ "ariadne-lang-rust",
  "ariadne-lang-scala",
  "ariadne-repo",
  "ariadne-report",

@@ -1,0 +1,8 @@
+# rust-language R-4 fixture (frozen set; approval via the R-4 verdict -
+# kickoff L3 path). Package manifest at the fixture root: this is exactly
+# what RustUnitShaper::build_markers() recognizes as the cargo build marker.
+# The fixture is never built by any suite: no toolchain is required.
+[package]
+name = "rust_basic"
+version = "0.1.0"
+edition = "2021"

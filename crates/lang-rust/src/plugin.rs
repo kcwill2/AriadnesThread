@@ -1,14 +1,16 @@
-//! [`RustPlugin`] - the registry entry point for Rust (rust-language R-3).
+//! [`RustPlugin`] - the registry entry point for Rust (rust-language R-3,
+//! registered at R-4).
 //!
 //! Wires the real kickoff components ([`crate::detector::RustDetector`] and
 //! [`crate::shaper::RustUnitShaper`]) and the honest never-dispatched stubs
 //! (`RustAnalyzer`, `RustImportResolver`, `RustClusteringConstraints`,
 //! `RustSourceExtractor`, `RustDependencyRewriter`, `RustToolchainValidator`)
-//! into `ariadne_lang::LanguagePlugin`. The crate is UNREGISTERED at this hop
-//! (registration lands at R-4) and every capability bit is false: INV-5
-//! (capability monotonicity) in its strongest form - no pipeline stage can be
-//! dispatched to this plugin until the component behind its bit lands and the
-//! per-hand flip turns the bit on.
+//! into `ariadne_lang::LanguagePlugin`. Registered at R-4 (appended LAST in
+//! the composition root); the R-4 capability flip turns on `discovery` ONLY
+//! (detector + shaper + fixture evidence exist): INV-5 (capability
+//! monotonicity) - no pipeline stage can be dispatched to this plugin until
+//! the component behind its bit lands and the per-hand flip turns the bit
+//! on.
 
 use crate::analyzer::RustAnalyzer;
 use crate::boundary::EXTERNAL_PATH_MARKERS;
@@ -136,13 +138,15 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    /// ALL-FALSE skeleton literal (INV-5, strongest form): the crate is
-    /// unregistered and no component behind any bit exists in this hop.
+    /// The R-4 registration-flip literal (INV-5, discovery ONLY): the
+    /// detector, the shaper, and the frozen-fixture discovery evidence all
+    /// exist at this hop, so `discovery` is the ONLY bit true; every later
+    /// stage's component lands with its own hand and its own bit.
     /// `requires_toolchain` is false at every hop (A3/D-2): the pipeline
     /// never invokes a Rust compile.
     fn capabilities(&self) -> LanguageCapabilities {
         LanguageCapabilities {
-            discovery: false,
+            discovery: true,
             dependency_graph: false,
             semantic_index: false,
             load_metric: false,
@@ -227,14 +231,15 @@ mod tests {
     }
 
     /// Byte-exact capability literal lock (pattern of Scala's
-    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-3
-    /// skeleton is ALL-FALSE - unregistered crate, no component landed yet.
+    /// `capabilities_match_the_m23_flip_literal`, plugin.rs:431): the R-4
+    /// registration flip turns on `discovery` ONLY - an INDEPENDENT full-
+    /// struct literal, the D-M23-6 style Scala proved catches bit slips.
     #[test]
-    fn capabilities_match_the_skeleton_literal() {
+    fn capabilities_match_the_registration_flip_literal() {
         assert_eq!(
             RustPlugin::new().capabilities(),
             LanguageCapabilities {
-                discovery: false,
+                discovery: true,
                 dependency_graph: false,
                 semantic_index: false,
                 load_metric: false,
@@ -244,6 +249,26 @@ mod tests {
                 validation: false,
                 requires_toolchain: false,
             }
+        );
+    }
+
+    /// R-4 in-src pin: with the plugin registry-dispatchable, `RustPlugin`
+    /// answers `detect_language` for `.rs` (the detector behavior itself is
+    /// already pinned from R-3 in `detector.rs`; this locks the wiring the
+    /// registration routes through).
+    #[test]
+    fn rust_plugin_answers_detect_language_for_rs_paths() {
+        use ariadne_lang::SourceFileKind;
+        use std::path::Path;
+        let plugin = RustPlugin::new();
+        assert_eq!(
+            plugin.detector().detect(Path::new("widget.rs")),
+            SourceFileKind::Source,
+            "post-registration the registry asks THIS detector for .rs"
+        );
+        assert_eq!(
+            plugin.detector().detect(Path::new("src/lib.rs")),
+            SourceFileKind::Source
         );
     }
 

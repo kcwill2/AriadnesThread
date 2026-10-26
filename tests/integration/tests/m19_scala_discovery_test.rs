@@ -214,7 +214,7 @@ fn plugin_contract_in_default_registry() {
     let registry = ariadne_cli::registry::default_registry();
     assert_eq!(
         registry.languages(),
-        vec![LanguageId::Cpp, LanguageId::Scala]
+        vec![LanguageId::Cpp, LanguageId::Scala, LanguageId::Rust]
     );
 
     let scala = registry
