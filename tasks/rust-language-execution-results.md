@@ -397,3 +397,73 @@ row; D2-D5 accepted). All lines below are the reviewer's own fresh runs
   "source":"agent"}`) and replaced by Read-tool line totals + grep regex
   length probes (`^.{152,}$`/`^.{180,}$`/`^.{182,}$`), which is how verdict
   findings 1-2 were measured. No expected gate was skipped.
+
+## R-9a - mechanism hop: payload-derived consumer retarget + move-retention hook (under AMENDMENT-1; caps still false, no flip)
+
+Chain from start rev `f2387f1` (AMENDMENT-1 + relay; R-9 STOP at `239df72`,
+duty 1 discharged at `c52817c`): single landing `fcb078c` (implementer;
+`dependency_rewriter.rs` +283/-8, `mod_tree.rs` +74/-8, `move_retention.rs`
+NEW 321, `lib.rs` +1, journal NEW 244). Verdict: APPROVED - see
+`tasks/rust-language-r9a-verdict.md` (2 minor/informational findings; D1
+CORRECT-BY-AMENDMENT; D2-D7 accepted). All lines below are the reviewer's
+own fresh runs (2026-10-26, HEAD `fcb078c`, tree clean bar one untracked
+resume artifact), canonical lines quoted verbatim.
+
+| # | Acceptance criterion (amendment gates + sec. 1c re-gate + reviewer MUSTs) | Result | Evidence line (verbatim) |
+|---|--------|--------|--------------------------|
+| 1 | Baseline gate 1 `83 / 0 / 0 / 2` and Green gate 3 `83 + 11 / 0 / 0 / 2` | PASS | green: `94 passed / 0 failed / 0 ignored / 2 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-lang-rust`, capture 107 lines); baseline `83` confirmed indirectly (in-src `#[test]` inventory at HEAD = 94 = 83 + 11; journal gate-1 digest matches the amendment's declared baseline verbatim) |
+| 2 | Red-first honestly witnessed (amendment sec. 1b) | PASS | journal sec. 3 verbatim `left:` lines match the amendment's predicted vectors (`left: Some("crate::lib")`, `left: ["lib"]`, `left: ["mod"]`, collision no-rewrite text, four hook default-`None` panics); red state itself unreproducible at landing (intermediate state uncommitted) - adjudicated by prediction-match + the pure-append landing shape + D4's harness-fix disclosure (compile-level only, no red expectation altered) |
+| 3 | 11 new tests attributed by name | PASS | 1 mod_tree + 6 dependency_rewriter + 4 move_retention, all names in verdict; green arithmetic 83+11=94 and census arithmetic 1970+11=1981 both close exactly |
+| 4 | RE-GATE sec. 1c: deleted-line census of the mechanism diff production-side ONLY | PASS | `git diff 5f87944..fcb078c -- crates/lang-rust/src/dependency_rewriter.rs`: exactly 8 deleted lines - 4 docblock (stale hook note honestly reworded), 2 prefix-leg rewrap (`retarget_id` still FIRST), 2 `line_terminator` doc/signature (`pub(crate)` widening); final hunk `@@ -614,4 +684,209 @@` is pure test-module APPEND (zero `-` lines past `#[cfg(test)]`) |
+| 5 | 17 rewriter witnesses pure-append, all 29 R-8 witnesses UNEDITED green | PASS | `23 passed / 0 failed / 0 ignored / 1 suites` (rewriter module: 17 R-8 + 6 new) and `12 passed / 0 failed / 0 ignored / 1 suites` (`extractor::tests`, file zero-diff) - both via `python tools/testrun.py --distill -p ariadne-lang-rust -- <module>::tests` |
+| 6 | Neutral seam + delegation + m23 mirror UNEDITED (gates 4/5) | PASS | `2 passed / 0 failed / 0 ignored / 1 suites` (`-p ariadne-validate --test move_removal_transaction_test`); `7 passed / 0 failed / 0 ignored / 1 suites` (`--test m23_symbol_isolation_test`); `crates/lang` zero-diff (range name-diff empty across lang, lang-cpp, lang-scala, index, pipeline, cli, repo, cluster, validate, graph, tests, tools) |
+| 7 | FRESH census +11 by name, suites/ignored flat | PASS | `1981 passed / 0 failed / 13 ignored / 125 suites` (exit 0, `python tools/testrun.py --distill`, capture 3401 lines) @ `fcb078c` = NEW ANCHOR; anchor `1970 / 0 / 13 / 125 @ 5f87944` + 11; 0 failed => four caps locks GREEN (no flip this hop) |
+| 8 | Caps posture INV-5: plugin.rs zero-diff proof | PASS | plugin.rs absent from `git diff --numstat 5f87944..fcb078c -- crates/lang-rust` output (only `dependency_rewriter.rs` 283/8 and `lib.rs` 1/0): R-7 four-true literal byte-identical, `CURRENT_ANALYSIS_VERSION` untouched |
+| 9 | Mechanism plan-literal (amendment sec. 1a + 3) | PASS | code-level: honest module semantics (lib/main -> `crate`, mod.rs -> directory module, other legs byte-identical, None stance unchanged); derivation leg flat-ids-only (single-segment gate), unequal lengths add nothing, `M_old == "crate"` spells `crate::X`, segment-repeat spelling pinned not special-cased; full-spelling keying with unchanged `leaf_affected_by` (collision pin); hook = ONE delegating method + `move_retention.rs` (helper-band rule), retention = deletion + insert-once (Scala parity), four refusals land exactly, empty batch refused by vacuous all-quantifiers; `sanitize_module_stem` single source; last-out-of-line-mod anchor with vis/indent copy, file-private fallback, CRLF-aware via shared `line_terminator`; no retained dual stem rule |
+| 10 | F1 FINAL WORD: m23-mirror apply assertion satisfiable VERBATIM | PASS | the two named reds pin exactly the amendment sec. 7 apply bytes (`crate::fixture_marker -> crate::fixture_marker::fixture_marker`; `crate::models::models_marker -> crate::models::models_marker::models_marker`), green at HEAD; collision pin proves rewrite reaches the consumer `use` line and leaves the colliding module byte-identical; R-9b consumes, never re-words |
+| 11 | Commit-vs-touch-set | PASS | `git diff --name-only f2387f1..HEAD` = 5 paths, all inside the amendment sec. 3 touch-set; single commit, message verbatim the amendment's prescribed one |
+| 12 | Frozen locks + no stash + no manifest/lock change | PASS | `Cargo.toml`/`Cargo.lock` zero-diff; `refs/stash` absent (`git rev-parse --verify refs/stash` -> `fatal: Needed a single revision`; `git stash list` refused - catch-all deny, substituted by the strictly-stronger rev-parse check); fixtures/goldens/m18-m23/tools in no hunk (criterion 6 name-diffs) |
+| 13 | Hygiene exit 0 (gate 7) | PASS | `python tools/hygiene_check.py` -> exit 0; every output line R3 warn-only, all preexisting in other crates (zero lang-rust entries, zero R1/R2) |
+| 14 | L12 encoding | PASS | `python tools/encoding_guard.py --all` -> exit 0 (silent); `move_retention.rs` now tracked, so its ASCII purity is gate-proven at HEAD (supersedes journal D6's byte-scan substitute) |
+| 15 | Tool unit suites (CI form) | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 31.215s` / `OK` |
+| 16 | Reviewer acceptance bench, RUN fresh (kickoff sec. 4, via distiller; mechanism touches src bytes) | PASS | `python tools/distill.py -- python tools/bench_compare.py` -> `### generic PASS (exit 0)`; `bench compare: 3 run(s), no regressions past 1.25x baseline`; no baseline/corpus change (D-3) |
+| 17 | Report-evidence discipline (gate 8 of review-gate) | PASS | journal sec. 3-6 are digest-shaped: distilling entry points only, canonical lines + capture paths (`target/testrun-capture.txt`, `target/distill-capture.txt`), zero raw dumps; red `left:` lines journalled verbatim per sec. 1b law |
+| 18 | D1 amendment-vs-dispatch split compliance | PASS - D1 CORRECT-BY-AMENDMENT | amendment sec. 0 (R-9b = "the F2 freeze, the symbol-isolation suite"), sec. 2 ("ADDED to R-9b's touch-set"), sec. 5 (named test "in R-9b's suite"); neither file in R-9a's hard touch-set (sec. 3); implementer followed the governing contract over the dispatch brief's scope line |
+
+### R-9a out-of-scope observation (recorded)
+
+- `cargo clippy -p ariadne-lang-rust --all-targets -- -D warnings` fails at
+  BASELINE, not by this hop: 7 errors sit in the untouched
+  `crates/lang-rust/src/resolver.rs` (lines 6-12, 286) and two more
+  (`dependency_rewriter.rs:308/393`) sit in unedited R-8-era code - all
+  present pre-hop. Style-level lints do point at new R-9a bytes (doc-list
+  indentation in new docblocks, a `.then_some(..).unwrap_or_default()`
+  chain copied verbatim from the landed R-8 idiom at `:393`, new-test
+  style); zero substantive findings; warn-only posture per ledger
+  graduation rows. Informational; nothing chased; not a blocker.
+
+### R-9a not run / refused (explicit statement)
+
+- `python tools/testrun.py --baseline` (bare): refused - `usage error:
+  missing value for --baseline` (flag takes a FILE; no baseline file for
+  this track). Governing fresh census ran the amendment gate-6 form
+  `--distill` (criterion 7), line matches expected verbatim.
+- Catch-all-deny refusals (verbatim `{"permission":"bash","pattern":"*",
+  "action":"deny","source":"global"}`): `git stash list` (substituted by
+  the `refs/stash` rev-parse - criterion 12), `git grep -c` on blobs
+  (substituted by working-tree `#[test]` inventory + pure-append diff proof
+  - criterion 5), inline `python -c` probes, and a `Get-Content`
+  line-count probe (substituted by Read-tool line totals; verdict finding 1
+  measured this way: rewriter 892 not 899, mod_tree 261 not 271,
+  move_retention 321 exact, lib.rs 46 exact). A scratch script Write to the
+  temp dir was refused by the agent edit grant
+  (`{"permission":"edit","pattern":"*","action":"deny","source":"agent"}`);
+  substituted by direct `git diff` reading (criterion 4). Multi-filter
+  `testrun -- mod_a::tests mod_b::tests` returned parse DRIFT (exit 2 -
+  tool-shape note for the distiller, not this hop); single-filter form ran
+  both witness proofs.
+- `python tools/ui_smoke.py`: not required by this hop (no UI/runtime
+  bytes); NOT run. `tools/golden_guard.py`: not landed; prose byte-check
+  substitutes per the handoff (criteria 5/6/8/12). Red re-run at the
+  pre-mechanism tree: structurally unreproducible at landing HEAD;
+  verified by prediction-match (criterion 2). No expected gate skipped.
