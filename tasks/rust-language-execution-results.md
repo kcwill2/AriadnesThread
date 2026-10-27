@@ -467,3 +467,57 @@ resume artifact), canonical lines quoted verbatim.
   substitutes per the handoff (criteria 5/6/8/12). Red re-run at the
   pre-mechanism tree: structurally unreproducible at landing HEAD;
   verified by prediction-match (criterion 2). No expected gate skipped.
+
+## R-9b1 - in-src enrollment: planning hooks + probe-only validator + F2 freeze + final all-true caps flip (under AMENDMENT-2; + orchestrator rider band incl. the ASKed expansion)
+
+Chain from duty 1 `cef3b0a` (R-9a verdict + ledger relay; adopt-and-verify
+dirty state on top): landing `eb1e0c9` (implementer; `planning.rs` NEW 186,
+`validator.rs` 402 changed, `plugin.rs` 135, `constraints.rs` 115, `lib.rs` +1,
+journal NEW 243, shape 7 changed; 1001 insertions / 88 deletions) + orchestrator
+rider `588bb86` (four caps locks + the two board-ASKed flip-superseded witness
+retargets, `.f90` per the registry.rs precedent). Verdict: APPROVED - see
+`tasks/rust-language-r9b1-verdict.md` (4 findings, all minor/informational; D1
+`planner_injection`-in-`ariadne-cluster` package correction ACCEPTED; D2-D4
+accepted; D6 noted; rider expansion independently adjudicated ACCEPTED). All
+lines below are the reviewer's own fresh runs (2026-10-27, HEAD `588bb86`, tree
+clean), canonical lines quoted verbatim.
+
+| # | Acceptance criterion (amendment-2 sec. 3 gates + reviewer MUSTs) | Result | Evidence line (verbatim) |
+|---|--------|--------|--------------------------|
+| 1 | Green crate gate (gates 2/3): `94 + M / 0 / 0 / 2`, M=8 BY NAME | PASS | `102 passed / 0 failed / 0 ignored / 2 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-lang-rust`, capture 115 lines); M=8 attributed by name (net probe set +3, F2 pins +2, planning witnesses +3, all named in verdict sec. 1); 94 baseline = the R-9a anchor; red re-observation (`92 passed / 4 failed / 0 ignored / 1 suites`) is journal leg-2 machine truth at the dirty tree, unreproducible post-landing without reverting the landed flip - falsifiability instead PROVEN from the commit diff's `-` side (four false bits, `None` hooks, empty `HashSet`) |
+| 2 | Caps hunk bit-count audit + final literal byte-exact (INV-5) | PASS | `git diff cef3b0a eb1e0c9 -- crates/lang-rust/src/plugin.rs`: exactly four bits `false -> true` (planning/extraction/rewriting/validation), `load_metric`/`discovery`/`dependency_graph`/`semantic_index`/`requires_toolchain: false` context-only; impl == pin == all four post-rider locks == handoff INV-5 text byte-for-byte; Scala parity verified (`crates/lang-scala/src/plugin.rs:143-153` answers the same literal) |
+| 3 | Probe-only validator plan-literal (probe order, seam, INV-10 a/b/c) | PASS | `TOOLCHAIN_PROBE_ORDER == ["cargo", "rustc"]` byte-locked; seam mirrors `crates/lang-scala/src/validator.rs` 1-for-1 pub surface (deliberate contract delta: `rustc` specifically, not the probe hit); five probe tests by exact name; every spawn `--version`-shaped; repo-wide grep: `.validate_compile(` call sites ONLY in lang-crate test modules - no pipeline compile invocation anywhere; two stub pins gone from all test code, positive replacements named in their doc-comments |
+| 4 | m23 / planner_injection / cli / m24 UNEDITED green | PASS | `7 passed / 0 failed / 0 ignored / 1 suites` (`--test m23_symbol_isolation_test`); `6 passed / 0 failed / 0 ignored / 1 suites` (`-p ariadne-cluster --test planner_injection` - target exists ONLY in cluster, gate-line package typo ruled D1-accepted); `182 passed / 0 failed / 8 ignored / 8 suites` (`-p ariadne-cli`); `8 passed / 0 failed / 0 ignored / 1 suites` (`--test m24_language_identity_test`); all four files in NO chain hunk |
+| 5 | Rider-touched suites green post-rider | PASS | discovery `7 passed / 0 failed / 0 ignored / 1 suites`, semantic_index `11 / 0 / 0 / 1`, dependency_graph `9 / 0 / 0 / 1`, load_analysis `5 / 0 / 0 / 1` (each `python tools/testrun.py --distill -p ariadne-integration-tests --test <suite>`) |
+| 6 | FRESH bare census vs anchor `1981 / 0 / 13 / 125 @ fcb078c` + M | PASS | `1989 passed / 0 failed / 13 ignored / 125 suites` (exit 0, `python tools/testrun.py --distill -- --no-fail-fast`, capture 3410 lines) @ `588bb86` = NEW ANCHOR; 1981 + 8 = 1989 exact; pre-rider journal line `1983 passed / 6 failed / 13 ignored / 125 suites` closes exactly (1983+6=1989); rider moved zero test counts |
+| 7 | Commit-vs-touch-set (both commits independently) | PASS | landing = exactly the seven sec. 3 paths, frozen zones zero-hunk, manifests zero-hunk; duty 1 = ledger + verdict only; rider = the four band files + one cli file under the user dispatch's precedent-granted zone (rider is the orchestrator's own, board-ASKed 2026-10-26, adjudicated in verdict sec. 5d) |
+| 8 | Rider band audit: four locks + the two extras, never weakening | PASS | lock names unchanged, full-struct asserts intact, four bits only, true-count `4 -> 8` present; discovery-test extraction-false arm replaced by post-parity truth with dated supersession note; cli doomed fixture `solver.rs -> solver.f90` with token-burn/Failed/ASCII/NotApproved lines outside the hunk; coverage verified: capability-off class pinned at `crates/cli/src/registry.rs:443-458` (toolchain-tier on `a.cpp`, the always-false off-bit), unclaimed-target class at `registry.rs:429-442` (`.f90`) + `m24_language_identity_test.rs:348-356` (`.mock`) |
+| 9 | Ledger duty-1 clause blob fidelity + count-of-1 | PASS | the `cef3b0a` diff `-/+` row pair: appended clause `R-9a LANDED fcb078c APPROVED 2026-10-26, census anchor 1981 passed / 0 failed / 13 ignored / 125 suites @ fcb078c, R-9b dispatched (hooks + validator + all-true flip).` inside the state cell, rest of the row byte-identical; full-line regex re-match at HEAD blob: once, row 62 |
+| 10 | Adoption integrity + frozen witness set | PASS | landing diff test-side changes confined to the amendment-inventoried adopted hunks + declared evolutions; R-8's 29 + R-9a's 11 witnesses' files in NO hunk, green inside criterion 1; `Cargo.toml`/`Cargo.lock` zero-hunk (dev-dep grant rides R-9b2); F5 name `flat_id_shared_mod_and_fn_record_is_planning_frozen` unspent (grep: contract docs only); journal F14-clean (no self SHA) |
+| 11 | Frozen locks + no stash + no version bumps | PASS | `refs/stash` absent (`git rev-parse refs/stash` -> `fatal: ambiguous argument 'refs/stash': unknown revision or path not in the working tree.`); `git diff fcb078c HEAD --name-only -- crates/index` -> empty (`CURRENT_ANALYSIS_VERSION` held); fingerprint `"rust-1"` and the three `CyclePolicy::Reject` literals zero-hunk; fixtures/goldens/m18-m22/m00/ar27/lang-cpp/lang-scala/cluster/validate/tools in no hunk |
+| 12 | Hygiene exit 0 (gate 8) | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 173 lines); every line R3 warn-only, zero naming any touched file; new files planning 186 / validator 396 / plugin 375 / constraints 161 - all under ceilings, functions under 100 |
+| 13 | L12 encoding | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)` (silent) |
+| 14 | Tool unit suites (CI form) | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 26.142s` / `OK` |
+| 15 | UI runtime smoke (workspace acceptance pass) | PASS | `python tools/distill.py -- python tools/ui_smoke.py` -> `### generic PASS (exit 0)`; `boot+route checks clean (cold fixture, attempt 1, 1.1s)`; `ui_smoke: PASS` |
+| 16 | Reviewer acceptance bench, RUN fresh (`crates/lang-rust/src` touched; the implementer never runs the bench) | PASS | `python tools/distill.py -- python tools/bench_compare.py` -> `### generic PASS (exit 0)`; `bench compare: 3 run(s), no regressions past 1.25x baseline`; zero WARNs; no baseline/corpus change (D-3) |
+| 17 | Report-evidence discipline (review-gate step 8) | PASS | journal secs. 1-9 digest-shaped: distilling entry points only, canonical lines + `target/testrun-capture.txt` capture paths, zero raw dumps; red `left:` lines journalled verbatim; board ASK recorded with the six-red line |
+
+### R-9b1 out-of-scope observations (recorded)
+
+- Rider/journal mislabel: the registry.rs `.rs -> .f90` witness precedent is
+  R-4-era (`ec552bd`; dated A3 comment `crates/cli/src/registry.rs:425-428`),
+  not "R-1" as the rider message / journal sec. 7 say; the m24 unclaimed
+  witness is `.mock`, not `.f90`. Verdict findings 1-2; fold the correction
+  into the R-9b2 relay note (verdict sec. 9).
+- `validator.rs` 396 lines vs the "mirror ~200" watch-note (verdict finding 3);
+  informational.
+
+### R-9b1 not run / refused (explicit statement)
+
+- `python tools/testrun.py --baseline` (bare acceptance-pass form): FILE-form
+  refusal is the standing track stance (F9 - `--distill` census substitute
+  governs, R-1..R-9a precedent); the governing fresh census ran criterion 6
+  and matched the expected line verbatim.
+- `python tools/golden_guard.py --base <rev>`: not landed; the handoff's prose
+  byte-checks substitute (criteria 4/8/10/11 name-diffs + greps).
+- Catch-all-deny refusals (verbatim `{"permission":"bash","pattern":"*","action":"deny","source":"global"}`): chained `git show --stat` trio (substituted - all three commits reviewed with bare `git show`), inline `python -c` ledger probe (substituted by working-tree full-line regex match + the `cef3b0a` diff row pair - criterion 9), `git grep -o -F` (substituted same), `git stash list` (substituted by the strictly-stronger rev-parse fatal - criterion 11, R-9a criterion-12 precedent), and bare `python tools/ui_smoke.py` (run instead via the documented distilling wrapper - criterion 15). No expected gate skipped.
