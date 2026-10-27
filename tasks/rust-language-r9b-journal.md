@@ -241,3 +241,155 @@ F5 exact-named test NOT authored here - reserved, lands in R-9b2's suite
 extras), reviewer fresh bare census (expect >= 1981+8 / 0 failed / 13
 ignored / 125 @ landing+rider), then R-9b2 (suite + manifest dev-dep).
 
+## Section 10 - R-9b2 duty-1 landing + gate 1 boot baseline (dated 2026-10-27)
+
+Duty 1 landed as its own commit: `tasks/rust-language-r9b1-verdict.md`
+landed as authored (425 lines, untracked -> tracked unchanged);
+`tasks/milestone_ledger.md` row 62 gained the verdict sec. 9 relay clause
+VERBATIM, inserted after the `... R-9b1 dispatched with dirty-tree
+adoption.` tail. Placement note: the row grew a CLOSEOUT DEBT meta-note
+after that tail (the split relay), so the clause landed between the tail
+and the debt note - the clause chain stays chronological, the debt note
+stays the cell's closing meta line. Count-of-1 proven two ways:
+working-tree full-line regex count (`rg -c` = 1) plus the commit's own
+blob diff showing the row-62 change as the clause insert ONLY, everything
+else byte-identical. Substitution law (verdict finding 4 precedent):
+inline `python -c` blob probes are catch-all-deny here; the substitute is
+`python tools/distill.py -- rg -c ...` + the git-tool blob diff - the
+identical pair the R-9b1 reviewer adjudicated equal-or-stronger (sec. 2a).
+Date note (duty-1 law): the landed clause carries the corrected date
+2026-10-27 per the verdict sec. 9; amendment-2 sec. 6's draft carried the
+placeholder 2026-10-26 - the verdict's clause is the one of record.
+Encoding pair: `python tools/encoding_guard.py --staged` silent PASS and
+`--all` silent PASS (0-line captures, via the distilling wrapper).
+Memory mirror `ledger.milestone.rust-language` updated the same hop;
+anchor of record now `1989 / 0 / 13 / 125 @ 588bb86`. Reviewer findings
+1-2 relayed here as docs corrections (byte-fix lands in the R-10 docs
+pass; no code change): the registry.rs `.rs -> .f90` witness precedent is
+R-4 era (`ec552bd`, A3 comment), not "R-1" as the rider message, the
+discovery-test supersession note, and this journal's sec. 7 label it;
+m24's unclaimed-target witness uses `src/nowhere.mock`, not `.f90` (the
+registry comment's "m24's mock vocabulary" wording fused the two).
+NOT re-landed: `c52817c` / `f2387f1` / `fcb078c` / `cef3b0a` / R-9b1's
+landing / the rider.
+
+Gate 1 (boot baseline, post-rider, pre-suite):
+`python tools/testrun.py --distill` -> `1989 passed / 0 failed / 13
+ignored / 125 suites`, exit 0 (capture `target/testrun-capture.txt`, 3410
+lines) - EXACTLY the R-9b1 reviewer's certified anchor; rider landed, tree
+clean. Next: the granted dev-dep row + `Cargo.lock` machine regen, then
+the suite author (gate 2 adjudicates red-where-real vs
+justified-green-at-birth stage by stage).
+
+## Section 11 - R-9b2 gate 2: suite authored, harness triaged to 9/2, ONE mechanism red (STOP-and-report) (dated 2026-10-27)
+
+Manifest grant landed on disk (uncommitted, inside the landing scope):
+`tests/integration/Cargo.toml` gained the `ariadne-lang-rust` dev-dep row
+granted by amendment-2 sec. 5; `Cargo.lock` machine-regenerated via
+`python tools/distill.py -- cargo check -p ariadne-integration-tests
+--tests` (three `ariadne-lang-rust` entries; package compiles). Suite
+authored: `tests/integration/tests/rust_language_symbol_isolation_test.rs`
+(auto-discovered target; 11 tests named per the amendment-2 sec. 4 stage
+map).
+
+Gate 2 run ladder (all `python tools/testrun.py --distill -p
+ariadne-integration-tests --test rust_language_symbol_isolation_test`,
+capture `target/testrun-capture.txt`):
+- author run: `4 passed / 7 failed / 0 ignored / 1 suites` (plus one
+  compile fix first: an escaped `{symbol}` brace in an assert message);
+- after triage round 1: `8 passed / 3 failed / 0 ignored / 1 suites`;
+- after triage round 2: `9 passed / 2 failed / 0 ignored / 1 suites`
+  - the 2 are ONE mechanism root cause, attributed below.
+
+Green-at-birth / green-after-triage (9): caps byte-lock; hook dispatch
+(EXACTLY the two aggregation files); wired plan proposes EXACTLY the two
+fn extractions; tier-3 Skipped via `with_runner` scripted all-None +
+cargo-available counter-leg + INV-10 call-log; preview discovery targets
++ consumer rewrite + grown-oracle dry-runs on both parents; apply plan-1
+full cluster (F1 flat retarget, NOT-OLD leg, parent strip + `mod`
+insertion, frozen children byte-exact); rollback dir-hash identity +
+re-plan convergence; rollback-then-re-apply byte convergence; F5
+flat-id frozen leg (EXACTLY one `crate::greeting` record, twin fold with
+two DeclIds proposed-for-nothing, never pinning folded kind/defining_file).
+
+Suite-side defects found and fixed during triage (harness honesty, zero
+mechanism weakening - each an author error against SHIPPED pinned
+behavior, each source-read verified first):
+1. preview consumer match used `== CONSUMER_REL`; the m23 idiom is
+   `ends_with` (paths ride the platform separator form) - fixed.
+2. grown-oracle helper hardcoded BOTH parents' survivor needles on every
+   call; parameterized per parent (`mod greeting;`/`mod models;` for
+   lib.rs, `pub mod user;` for models/mod.rs).
+3. the F5 twin authored both `fn twin` on line 1; the shipped fold
+   dedupes by DeclId identity (`<id>#L<line>`), so identical written
+   lines fold to ONE DeclId. twin_b's fn now rides a distinct line (the
+   two-declarations proof the F5 spec demands).
+4. moved-unit asserts authored raw-source-VERBATIM; the shipped extractor
+   is syn-print by contract (GENERATION_HEADER states "syn-printed
+   content"; `locate_symbol_bodies` returns `to_token_stream().to_string()
+   `, R-8 pinned). Asserts retargeted to the engine's honest grammar:
+   generation-header marker + moved fn + literal, token-spacing-free.
+   The consumer-import VERBATIM pair is untouched (NOT-OLD leg intact).
+5. rollback/reapply digests covered the whole temp tree; `artifacts/`
+   stage manifests carry build stamps no byte-convergence claim can
+   honestly re-verify, and no transaction path writes there. Digests now
+   ride `src/` - the transaction's write surface - documented in-place.
+
+THE mechanism red (2 tests, ONE root cause; STOP-and-report per RGB law,
+zero `crates/**` hunk): plan 2 (nested-module parent
+`src/models/mod.rs`) wired apply discovers ZERO consumers and COMMITS
+anyway. Captured evidence: the plan-2 preview prints
+`Migration preview: 0 effective rewrites` while the temp consumer's
+honest import `use crate::models::models_marker;` sits right there; tiers
+answer `[Pass, Pass, Pass]`; the commit leaves the fn in the parent AND
+in the extracted file (a COPY, orphaned - no `pub mod models_marker;`
+line appears because parent strips derive from the rewrite payload via
+`collect_move_removals`). Chain, source-read verified:
+`consumer_discovery_targets` (dependency_rewriter.rs:114-123) probes the
+moved FLAT ids plus the target stem - `["crate::models_marker", "mod"]`,
+pinned green by this suite's own preview test; `leaf_affected_by`
+(:315-323) matches non-star use leaves by FULL STRING EQUALITY; the
+honest Rust spelling of an item in `src/models/mod.rs` is
+`crate::models::models_marker` - equal to neither probe, so no discovery,
+no payload, no strip, no retarget. The F1 FINAL WORD pair (old
+`crate::models::models_marker` -> new segment-repeat
+`crate::models::models_marker::models_marker`) is therefore
+unsatisfiable through the wired route for nested-module parents. Plan-1
+(crate-root parent, honest flat spelling equals the flat probe) is fully
+green through the same route, which isolates the gap to the nested
+spelling derivation, not discovery generally. Amendment candidates
+(out of this hand's touch-set; planner/reviewer call): (a)
+`consumer_discovery_targets` derives the honest module-path spellings
+for moved ids (parent-dir qualified), or (b) the discovery walk accepts
+probe-leaf tail matches under the existing conservative sibling rule.
+The failing pair stays RED on disk: `apply_moves_models_marker_and_
+rewrites_the_consumer_import` (F1 leg) and
+`apply_isolates_both_functions_and_rewrites_the_consumer_verbatim`
+(models retarget leg).
+
+STOP posture: landing gates (3-8 + landing commit) require 0 failed, so
+the suite, the Cargo.toml row, and Cargo.lock stay UNCOMMITTED in the
+worktree for the successor hop after the amendment; this journal lands
+alone at the clean boundary (R-9 precedent `239df72`). Tree hygiene: the
+only uncommitted paths are the three touch-set paths above. Board ASK
+posted to main with this evidence.
+
+Hygiene hop (before the STOP, recorded honestly): the first full-file
+`hygiene_check` run flagged the authored suite at R2 1136 lines > 1000
+and R1 `flat_id_shared_...` fn 107 lines > 100 - blocking gates 3+8 and
+the landing. The touch-set names ONE suite file, so no split: the file
+was compressed to 990 lines by comment rewraps, one-line assert folds,
+packed byte-lock literals (the caps struct fields, the stage-bit array,
+the hook expected array), and the F5 leg-3 twin census extracted as
+`assert_twin_fold_is_planning_frozen` (R1 clean; semantics, asserts, and
+messages unchanged). Two rewrite regressions caught and fixed by the
+gate reruns (a doc-comment/`fn` fusion; a `&Path` vs `&PathBuf` mismatch
+in the extracted `wired_apply_plan` helper - the CLI wired route takes
+`&PathBuf`). Post-compression gate 2: `9 passed / 2 failed / 0 ignored /
+1 suites` - byte-for-byte the same two mechanism reds, zero collateral.
+Landing shape stays the single named file; expected landing census
+`2000 passed / 0 failed / 13 ignored / 126 suites` (K = 11 tests, one
+new auto-discovered suite).
+
+
+
