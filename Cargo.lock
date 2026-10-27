@@ -194,6 +194,7 @@ dependencies = [
  "ariadne-lang",
  "ariadne-lang-api",
  "ariadne-lang-cpp",
+ "ariadne-lang-rust",
  "ariadne-lang-scala",
  "ariadne-pipeline",
  "ariadne-repo",

@@ -24,6 +24,8 @@ pub mod boundary;
 pub mod constraints;
 pub mod detector;
 mod dependency_rewriter;
+#[cfg(test)]
+mod discovery_fidelity_tests;
 pub mod extractor;
 mod mod_tree;
 mod move_retention;

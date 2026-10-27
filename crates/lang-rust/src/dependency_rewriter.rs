@@ -29,10 +29,14 @@
 //!   a scan that cannot guarantee "never inside comments or strings" must
 //!   not report hits at all.
 //! - [`DependencyRewriter::consumer_discovery_targets`] probes the moved
-//!   ids (use-space) PLUS the plan target file's sanitized stem
-//!   (mod-space): the parent declaring `mod <source-stem>;` becomes a
-//!   consumer-side target of the extraction transaction - the grown-oracle
-//!   discipline (SM-4) then sees it in the dry-run MODIFIED set.
+//!   ids (use-space), PLUS - for each FLAT id on a nested parent - its
+//!   honest parent-qualified written spelling derived from the target
+//!   file's module path (R-9b3, AMENDMENT-1 sec. 1a(2) grammar: discovery's
+//!   predicate and the rewrite's matcher agree by construction, CW-1),
+//!   PLUS the plan target file's sanitized stem (mod-space): the parent
+//!   declaring `mod <source-stem>;` becomes a consumer-side target of the
+//!   extraction transaction - the grown-oracle discipline (SM-4) then sees
+//!   it in the dry-run MODIFIED set.
 //! - [`DependencyRewriter::consumer_rewrite_spec`] derives that
 //!   dual-space spec: moved ids under a source module are retargeted onto
 //!   its new sibling module (ids under no source module are DROPPED -
@@ -110,13 +114,27 @@ impl DependencyRewriter for RustDependencyRewriter {
     /// Use-space probes (the moved ids) plus the mod-space probe (the
     /// sanitized stem of the plan's target file): the parent that declares
     /// `mod <stem>;` is discovered as a consumer so its declaration insert
-    /// rides the same transaction.
+    /// rides the same transaction. For a FLAT id `crate::X` the honest
+    /// written spelling `M::X` (M = the target file's module path) rides
+    /// too - exactly the spec leg's derived old spelling (CW-1
+    /// agree-by-construction); a crate root spells `crate::X` already, so
+    /// the dedupe keeps those probe lists byte-identical.
     fn consumer_discovery_targets(
         &self,
         target_file: &Path,
         moved_module_ids: &[String],
     ) -> Vec<String> {
-        let mut probes: Vec<String> = moved_module_ids.to_vec();
+        let mut probes: Vec<String> = Vec::new();
+        let parent_module = module_path_of_src_file(target_file);
+        for id in moved_module_ids {
+            probes.push(id.clone());
+            if let (Some(flat_leaf), Some(module)) = (flat_id_leaf(id), parent_module.as_deref()) {
+                let honest = format!("{module}::{flat_leaf}");
+                if !probes.contains(&honest) {
+                    probes.push(honest);
+                }
+            }
+        }
         if let Some(stem) = target_file.file_stem() {
             probes.push(sanitize_module_stem(&stem.to_string_lossy()));
         }
@@ -887,6 +905,51 @@ mod tests {
             rw("pub mod models;\npub fn keeper() {}\n", &["mod"], &["models_marker"]),
             "pub mod models;\npub fn keeper() {}\n",
             "no file declares `mod mod;`: the mod.rs stem anchors nothing"
+        );
+    }
+
+    /// R-9b3 W1 (AMENDMENT-3 sec. 1d): the nested-parent probe list carries
+    /// the honest parent-qualified written spelling of the FLAT id - the
+    /// exact old spelling the spec leg derives (:729-737), so discovery's
+    /// predicate and the rewrite's matcher agree by construction (CW-1).
+    #[test]
+    fn discovery_probes_the_honest_module_spelling_for_a_nested_parent() {
+        assert_eq!(
+            RustDependencyRewriter.consumer_discovery_targets(
+                Path::new("src/models/mod.rs"),
+                &["crate::models_marker".to_string()],
+            ),
+            vec![
+                "crate::models_marker".to_string(),
+                "crate::models::models_marker".to_string(),
+                "mod".to_string(),
+            ],
+            "the flat id, then its honest M::X spelling, then the inert mod.rs stem anchor"
+        );
+    }
+
+    /// R-9b3 W3 (AMENDMENT-3 sec. 1d, INV-R9B3-2): GREEN-at-birth
+    /// characterization, justified per SM-3's clause (AMENDMENT-2 sec. 2
+    /// usage): the crate-root parent dedupes by equality - the flat id
+    /// already IS the honest spelling - so crate-root probe lists stay
+    /// byte-identical before and after the derivation.
+    #[test]
+    fn crate_root_discovery_probes_stay_byte_identical() {
+        assert_eq!(
+            RustDependencyRewriter.consumer_discovery_targets(
+                Path::new("src/lib.rs"),
+                &["crate::fixture_marker".to_string()],
+            ),
+            vec!["crate::fixture_marker".to_string(), "lib".to_string()],
+            "plan-1 pin (suite :527-531): id leg then the inert `lib` anchor, nothing derived"
+        );
+        assert_eq!(
+            RustDependencyRewriter.consumer_discovery_targets(
+                Path::new("src/main.rs"),
+                &["crate::fixture_marker".to_string()],
+            ),
+            vec!["crate::fixture_marker".to_string(), "main".to_string()],
+            "main.rs is a crate-root file too: same dedupe, the stem leg unchanged"
         );
     }
 }

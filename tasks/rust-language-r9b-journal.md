@@ -391,5 +391,136 @@ Landing shape stays the single named file; expected landing census
 `2000 passed / 0 failed / 13 ignored / 126 suites` (K = 11 tests, one
 new auto-discovered suite).
 
+## Section 12 - R-9b3: option (a) landed - discovery derives the honest module-path spellings (dated 2026-10-27)
+
+Bootstrap: fresh session ran the AMENDMENT-3 sec. 4a resume line.
+Disk ground truth matched the hand: HEAD `aa67ff2`; dirty = `Cargo.lock`,
+`tests/integration/Cargo.toml`, untracked suite (the R-9b2 STOP
+artifacts). Harness note: the resume invocation itself returned a
+`ChildProcess.kill` transport glitch AFTER completing - its report file
+`tasks/rust-language-r9b3-amendment-resume.md` exists UNTRACKED on disk;
+it is a tool artifact outside the touch-set, deliberately NOT committed.
+
+Reads (governing law, all complete): `tasks/rust-language-r9b3-amendment.md`
+(AMENDMENT-3, all sections), this journal secs. 10-11, AMENDMENT-2 secs.
+4-5, AMENDMENT-1 secs. 1a/7, the named witnesses in
+`crates/lang-rust/src/dependency_rewriter.rs` (:626-639, :669-686,
+:721-746, :752-767, :880-891), the CW-1 pair in `crates/lang-cpp/src/
+dependency_rewriter.rs` (:96-113, :347-372), `module_path_of_src_file`
+(`mod_tree.rs:139-173`), and the suite's named regions.
+
+Gate ladder (all via the distilling entry point, captures
+`target/testrun-capture.txt`):
+1. Baseline `python tools/testrun.py --distill -p ariadne-lang-rust`:
+   `102 passed / 0 failed / 0 ignored / 2 suites` - verbatim match.
+2. RED (W1-W3 authored FIRST against unmodified production bytes):
+   `103 passed / 2 failed / 0 ignored / 1 suites` - exactly the two named
+   reds, verbatim failure lines:
+   - `discovery_probes_the_honest_module_spelling_for_a_nested_parent`
+     (W1): `assertion left == right failed: the flat id, then its honest
+     M::X spelling, then the inert mod.rs stem anchor` /
+     `left: ["crate::models_marker", "mod"]` /
+     `right: ["crate::models_marker", "crate::models::models_marker", "mod"]`.
+   - `discovery_and_rewrite_hit_iff_over_the_honest_spellings` (W2):
+     `assertion left == right failed: fidelity pair broken for class
+     honest M::X leaf` / `left: false` / `right: true` - the honest leaf
+     rewritten but NOT discovered: the D6 disagreement, red for the
+     predicted semantic reason.
+   - W3 `crate_root_discovery_probes_stay_byte_identical`:
+     GREEN-AT-BIRTH, attributed - a justified characterization pin of the
+     crate-root dedupe (INV-R9B3-2) per SM-3's clause, the usage
+     AMENDMENT-2 sec. 2 already sanctioned; the dedupe is today's
+     behavior the pin must survive, not a claim of unshipped mechanism.
+3. GREEN (production edit): `105 passed / 0 failed / 0 ignored / 2
+   suites`; refactor re-run same line. The 29 R-8 witnesses, 11 R-9a
+   pins, and R-9b1's pins stayed green UNEDITED inside the 105.
+   Post-split re-run (below): same `105 passed / 0 failed / 0 ignored /
+   2 suites` line - W2 relocated, count unchanged.
+4. `--test rust_language_symbol_isolation_test`:
+   `11 passed / 0 failed / 0 ignored / 1 suites` - the two named
+   regression reds (`apply_moves_models_marker_and_rewrites_the_consumer_import`,
+   `apply_isolates_both_functions_and_rewrites_the_consumer_verbatim`)
+   turned green with their bytes UNTOUCHED; the preview test green only
+   via the sanctioned re-pin (INV-R9B3-4).
+5. `--test m23_symbol_isolation_test` UNEDITED:
+   `7 passed / 0 failed / 0 ignored / 1 suites`.
+6. `-p ariadne-cli` UNEDITED: `182 passed / 0 failed / 8 ignored /
+   8 suites` (dispatch consumed; the X1 faithfulness oracle derives its
+   spellings from the plugin itself, so it stays consistent by
+   construction).
+7. `-p ariadne-cluster --test planner_injection` UNEDITED:
+   `6 passed / 0 failed / 0 ignored / 1 suites`.
+8. Full census (bare tree): `2003 passed / 0 failed / 13 ignored /
+   126 suites` - EXACT. Deltas BY NAME over the `1989/0/13/125 @ 588bb86`
+   anchor: +11 suite tests (named in sec. 11), +3 discovery witnesses W1
+   `discovery_probes_the_honest_module_spelling_for_a_nested_parent`, W2
+   `discovery_and_rewrite_hit_iff_over_the_honest_spellings`, W3
+   `crate_root_discovery_probes_stay_byte_identical`; suites +1 =
+   exactly the one new integration binary; ignored flat 13. Floor of
+   record: AMENDMENT-3 ruling 3 (measured), NOT the superseded 2023.
+
+The production edit (confined, per AMENDMENT-3 sec. 1b): in
+`consumer_discovery_targets` each moved id rides verbatim (unchanged
+leg); for each FLAT id `crate::X` (via the spec leg's own eligibility
+grammar `flat_id_leaf`) the honest spelling `M::X` with M =
+`module_path_of_src_file(target_file)` is pushed after its id, deduped
+by equality (a crate root already spells `crate::X`, so plan-1 lists
+are byte-identical; multi-segment/foreign/non-src contribute nothing);
+the sanitized stem stays last (unchanged leg). The doc comment and the
+module-header bullet were retargeted to this wording truth. `leaf_affected_by`,
+`find_dependency_targets`, `consumer_rewrite_spec`,
+`derive_flat_id_pairs`, `retarget_id`, `insert_declared_mods` and every
+existing test fn: zero modified/deleted lines. INV-R9B3-1 locked by
+W1+W2; INV-R9B3-2 by W3 + the UNEDITED :626-639 witness + the UNEDITED
+plan-1 suite pin; INV-R9B3-3 by the zero-diff on the frozen list;
+INV-R9B3-4 by gate 4.
+
+CONDITIONAL hygiene escape TAKEN (sec. 4b): the inline W1-W3 growth put
+the file at 1002 lines - past the 995 budget (and the R2 1000 ceiling).
+Per the ruling, W2 moved verbatim to
+`crates/lang-rust/src/discovery_fidelity_tests.rs` (the only new-file
+allowance) and the file re-ran the gate-3 line unchanged. DECLARATION
+PLACEMENT (self-reported judgment): the amendment names the one
+`#[cfg(test)] mod discovery_fidelity_tests;` line but not its host; the
+amendment's named file path resolves only as a crate-root module, so
+the line landed in `crates/lang-rust/src/lib.rs` (the module-list file)
+- the alternative hosts (subdirectory relocation, a `#[path]`
+attribute) would each break the amendment's own named path or add an
+unrequested attribute. `lib.rs` carries exactly that one added line.
+
+Suite re-pin (the ONLY sanctioned suite hunk, ruling 4b): the plan-2
+probe list in
+`preview_lists_discovery_targets_and_the_parent_oracle_names_the_mod_line`
+re-pinned to `["crate::models_marker",
+"crate::models::models_marker", "mod"]` with a dated comment citing
+AMENDMENT-3 (the old list pinned the defect itself; the re-pin is
+strictly strengthening - same full-list equality, superset). Net +2
+lines (990 -> 992, ceiling 1000). The two regression reds and the
+plan-1 pin (:527-531) byte-untouched.
+
+Manifest rows landed UNCHANGED from the STOP disk state:
+`tests/integration/Cargo.toml` (granted dev-dep row + dated comment)
+and the machine-regenerated `Cargo.lock`.
+
+What was NOT done (deliberate): no DEFER-ZERO-CONSUMER work (ruling 2 -
+dated engine deferral, R-10 rider material, engine stays frozen); no
+caps/frozen-lock bytes touched (trivially - one function's zone); no
+witness edits; no `git stash`; bench not run here (fresh bench is the
+reviewer's acceptance-pass duty per sec. 4a).
+
+Deviations (self-reported): (1) the bootstrap resume transport glitch +
+untracked resume artifact (above, not committed); (2) W2 split TAKEN at
+1002 lines with the declaration line in `lib.rs` (above); (3) gate-2
+RED was captured with W2 inline - the split relocated its (green)
+bytes AFTER the red evidence, relocation re-gated at gate 3; (4) the
+first bootstrap/HEAD-probe invocations hit the catch-all deny boilerplate
+and succeeded on retry through `tools/distill.py` - no gate skipped.
+Disk state at landing: exactly the four touch-set paths staged for the
+scoped commit; the resume artifact stays untracked. Next: reviewer
+acceptance via skill `review-gate` (gate-C diff audit vs `8c1ac46` not
+applicable - base is `aa67ff2`; suite disk-identity; zero-diff proofs;
+fresh bare census), then R-10 (docs hop + parity suite + dated riders
+incl. DEFER-ZERO-CONSUMER).
+
 
 
