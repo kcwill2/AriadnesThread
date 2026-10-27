@@ -6,13 +6,14 @@
 //! stays the CLI's only registry-facing seam - no other CLI code may
 //! reference a concrete plugin type; indexing, unit shaping, and worker
 //! backends all route through what the builder enumerates (C++ first, then
-//! Scala; registration order is a contract).
+//! Scala, then Rust - rust-language R-4; registration order is a contract).
 
 use ariadne_lang::{LanguageId, LanguageRegistry};
 use ariadne_repo::SourceLanguage;
 
 /// The default language registry - delegation to the shared D9 builder
-/// (C++ per plan sec 3.4 lifecycle table, Scala per M19.3).
+/// (C++ per plan sec 3.4 lifecycle table, Scala per M19.3, Rust per
+/// rust-language R-4).
 pub fn default_registry() -> LanguageRegistry {
     ariadne_pipeline::build_default_registry()
 }
