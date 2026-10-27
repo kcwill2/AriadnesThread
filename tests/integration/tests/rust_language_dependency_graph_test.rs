@@ -134,15 +134,15 @@ fn capabilities_lock_the_dependency_graph_flip_literal() {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         },
-        "R-7's load-metric hop turns load_metric on alongside the three R-6 \
-         bits, and ONLY those four (INV-5 monotonicity); requires_toolchain \
-         stays false at every hop (A3/D-2)"
+        "full parity: all eight stage bits true, every one behind a shipped \
+         component (INV-5 monotonicity); requires_toolchain stays false at \
+         every hop (A3/D-2)"
     );
 }
 

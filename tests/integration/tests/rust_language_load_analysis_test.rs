@@ -221,15 +221,15 @@ fn capabilities_lock_the_load_metric_flip_literal() {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         },
-        "the load-metric hop turns load_metric on alongside the three landed \
-         bits and ONLY those four (INV-5 monotonicity); requires_toolchain \
-         stays false at every hop (A3/D-2)"
+        "full parity: all eight stage bits true, every one behind a shipped \
+         component (INV-5 monotonicity); requires_toolchain stays false at \
+         every hop (A3/D-2)"
     );
     let caps = rust.capabilities();
     let enabled = [
@@ -244,8 +244,8 @@ fn capabilities_lock_the_load_metric_flip_literal() {
     ];
     assert_eq!(
         enabled.iter().filter(|bit| **bit).count(),
-        4,
-        "exactly four stage bits are true after this flip"
+        8,
+        "all eight stage bits are true at full parity"
     );
 }
 

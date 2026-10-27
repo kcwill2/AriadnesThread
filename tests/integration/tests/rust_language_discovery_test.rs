@@ -268,31 +268,31 @@ fn rs_claimed_case_exact_and_plan_backend_resolves() {
         .is_ok(),
         "post-registration a .rs plan target RESOLVES through the Rust plugin"
     );
-    // ...and where the probed capability is still OFF (R-5 lands the
-    // analyzer), the honest error is the CAPABILITY error, never the
-    // unclaimed-target error.
-    let capability_off = ariadne_cli::registry::plan_backend(
-        &registry,
-        Path::new("src/unclaimed.rs"),
-        |caps| caps.extraction,
-        "extraction",
-    )
-    .err()
-    .expect("Rust keeps extraction false at this hop (INV-5)");
-    let capability_text = capability_off.to_string();
+    // R-9b1 rider (dated supersession): the extraction-false arm here
+    // expired with the parity flip - no stage capability stays off for
+    // Rust, so the extraction probe resolves like every other. The
+    // capability-off error class stays pinned elsewhere (the toolchain-tier
+    // probe on a.cpp in crates/cli/src/registry.rs) and the unclaimed-target
+    // error class rides the `.f90` witnesses there and in
+    // m24_language_identity_test.rs - zero coverage was lost here.
     assert!(
-        !capability_text.contains("no language plugin claims")
-            && capability_text.contains("does not enable"),
-        "the .rs target must get the capability-off error, never the \
-         unclaimed-target error: {capability_text}"
+        ariadne_cli::registry::plan_backend(
+            &registry,
+            Path::new("src/unclaimed.rs"),
+            |caps| caps.extraction,
+            "extraction",
+        )
+        .is_ok(),
+        "post-parity a .rs plan target resolves for every stage capability"
     );
 }
 
 /// INV-5 capability lock, integration side, m19 idiom: an INDEPENDENT
-/// literal - R-4 flipped `discovery`, R-5 added `semantic_index`, R-6 added
-/// `dependency_graph`, R-7's load-metric hop adds `load_metric` (m23 Scala
-/// precedent: superseded flip-locks are amended with the flip, never
-/// weakened).
+/// literal - each hop turned exactly its own bit on (`discovery` R-4,
+/// `semantic_index` R-5, `dependency_graph` R-6, `load_metric` R-7); the
+/// R-9b1 rider amends this lock to the FINAL all-true parity literal with
+/// the flip (m23 Scala precedent: superseded flip-locks are amended with
+/// the flip, never weakened).
 #[test]
 fn capabilities_lock_the_registration_flip_literal() {
     let registry = ariadne_cli::registry::default_registry();
@@ -306,15 +306,15 @@ fn capabilities_lock_the_registration_flip_literal() {
             dependency_graph: true,
             semantic_index: true,
             load_metric: true,
-            planning: false,
-            extraction: false,
-            rewriting: false,
-            validation: false,
+            planning: true,
+            extraction: true,
+            rewriting: true,
+            validation: true,
             requires_toolchain: false,
         },
-        "R-4 turned discovery on, R-5 added semantic_index, R-6 added \
-         dependency_graph, R-7 adds load_metric and ONLY that \
-         (INV-5 monotonicity); requires_toolchain stays false (A3/D-2)"
+        "full parity: all eight stage bits true, every one behind a shipped \
+         component (INV-5 monotonicity); requires_toolchain stays false at \
+         every hop (A3/D-2)"
     );
 }
 
