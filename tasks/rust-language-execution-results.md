@@ -574,3 +574,74 @@ artifact), canonical lines quoted verbatim.
   status` ran), and `git stash list` (substituted by the strictly-stronger
   `git rev-parse --verify refs/stash` -> `fatal: Needed a single revision`
   = no stash exists, R-9a/R-9b1 precedent). No expected gate was skipped.
+
+## R-10 - full-parity acceptance suite + dated guide riders (final hand, DEADSESSION-3 adoption)
+
+Chain from base `c93bada` (R-9b3 landing): duty-1 `28894bc` (landed by the
+DEAD predecessor hand - content verified by the reviewer anyway), landing
+`6369572` (successor; touch-set trio +1281/-5), orchestrator rider `a3fd07e`
+(comment-only registry.rs doc rider, dispatch-declared out-of-touch-set).
+Verdict: APPROVED - see `tasks/rust-language-r10-verdict.md` (3 findings, all
+minor/informational; finding 1 = the journal sec. 6 quote-swap deferral
+record corrected at closeout; DEV-1..DEV-6 all ACCEPTED/informational). All
+lines below are the reviewer's own fresh runs (2026-10-27, HEAD `a3fd07e`,
+tree clean bar the untracked r10 resume artifact routed to closeout DELETE),
+canonical lines quoted verbatim.
+
+| # | Acceptance criterion (handoff gates + reviewer acceptance pass) | Result | Evidence line (verbatim) |
+|---|--------|--------|--------------------------|
+| 1 | Parity suite green on arrival (gate 1; declared red-skip) | PASS | `12 passed / 0 failed / 0 ignored / 1 suites` (exit 0, `python tools/testrun.py --distill -p ariadne-integration-tests --test rust_language_parity_test`, capture 38 lines) - EXACT; the 12 passed count matches the 12 journalled test names 1:1 (reviewer grep of every `fn`/`#[test]` in the file) |
+| 2 | DEATH-ADOPT integrity: inventory TRUE at source, nothing missing or weakened (dispatch special 1) | PASS | reviewer read the full 882-line suite: test 1 INV-1/INV-4 enumeration+m24 cited-edits-nothing (:199); test 2 INV-5 byte-exact all-true + `requires_toolchain: false` + true-count 8 + m19-style in-suite pin (:220-267); tests 3-10 per-capability re-drives each naming its owner hand (all eight capabilities bound: discovery 3, semantic index 4, graph 5, load 6, planning 7/8, extraction 9, rewriting 9, validation 10); test 11 = M21-error CURRENT-behavior pin (asserts the error STAYS + NOT "unhandled language"; NOT a feature claim - shape sec. 6); test 12 RISK-SELFSCAN standing witness (exact six-suite roster, fixture input asserted, own-tree idioms forbidden); test 10 INV-10 (a)/(b)/(c) probe contract through the dev-dep seam with the call log pinned to the probe-order `--version` walks only |
+| 3 | Red-skip justification per the handoff's cited trio (SM-1/W-1/CW-2) | ACCEPTED | every bound claim was RED-at-its-owning-hand and journal-recorded there (R-5/R-6/R-7 caps-flip reds, R-9b1 `92 passed / 4 failed`, R-9b2 `9 passed / 2 failed` -> R-9b3 fix, m23-mirror apply red); falsifiability statement journalled (verdict finding 2b: one inserted article vs the handoff sentence, substance identical); successor re-observed GREEN at gate 1 per the R-9b1 AMENDMENT-2 sec. 2 adoption precedent, independently re-run by the reviewer (criterion 1) |
+| 4 | Docs riders - five riders vs shape sec. 8, each DATED (reviewer acceptance MUST) | PASS | all five present and adjudicated rider-by-rider (verdict sec. 3): manifest-deps extension (D-2, guards restated unrelaxed, trio-for-three = lang-scala baseline), dispatch-sites refresh (203/305/419 + AR-19 hook enrollment + informational CyclePolicy), honest-limits third-plugin dated update (parked bullet KEPT true), guard bullet two->three with INV-11 append discipline, Step-5 `rust_language_*` worked example; each opens `**Dated 2026-10-27 (rust-language R-10 rider: ...)**`; DEV-2 (landing-date vs handoff's 2026-10-26) ACCEPTED by ruling |
+| 5 | Byte-integrity of `docs/adding-a-language.md` (dispatch special 2) | PASS | `git show "6369572" -- docs/adding-a-language.md`: exactly 5 deleted pre-existing lines - ALL the rider-4 guard bullet (the instruction's own rewrite target); 63 added lines; all other hunks pure `+`; whole-file regex `[^\x00-\x7F]` -> zero matches (file pure ASCII before AND after - no pre-existing glyph line could have been rewritten outside the untouched lines); no line > 2000 chars (grep `^.{2001,}$`: zero); `encoding_guard --all` fresh exit 0 |
+| 6 | FRESH full bare census at HEAD | PASS | `2015 passed / 0 failed / 13 ignored / 127 suites` (exit 0, `python tools/testrun.py --distill -- --no-fail-fast`, capture 3449 lines) @ `a3fd07e` - EXACT; deltas BY NAME over `2003/0/13/126 @ c93bada`: +12 = the twelve parity tests, suites +1 = the one new integration binary, ignored flat 13; NEW ANCHOR declared at `a3fd07e` (verdict sec. 10; identical line certified at the landing `6369572`) |
+| 7 | cli green post-rider | PASS | `182 passed / 0 failed / 8 ignored / 8 suites` (exit 0, `-p ariadne-cli`, capture 274 lines) - EXACT at `a3fd07e`, the reviewer's own fresh run corroborating the orchestrator's post-rider claim |
+| 8 | Commit-vs-touch-set (per-commit, oldest-first) | PASS | `git diff --name-only c93bada..HEAD` = 7 paths: the duty-1 trio (ledger + verdict + execution-results; verdict blob byte-as-authored, no later hunk; ledger Draft B clause count-of-1 at row 62; r9b3 resume artifact disk-absent = DELETE discharged) + the landing trio (suite NEW + guide + journal NEW; 1281 insertions / 5 deletions) + the rider's `crates/cli/src/registry.rs` (dispatch-declared, R-1/R-5/R-6/R-7 precedent); zero `crates/**` in the implementer commits; no stash (`git rev-parse --verify refs/stash` -> `fatal: Needed a single revision`) |
+| 9 | Zero-diff locks by name | PASS | `git diff --name-only c93bada..HEAD -- crates/lang-rust` EMPTY (the rider is cli); EMPTY for `crates/lang-cpp crates/lang-scala crates/cluster crates/validate crates/transform crates/index crates/graph crates/repo crates/ui crates/report crates/artifact crates/build crates/scheduler crates/lang crates/lang-api crates/pipeline tools tests/fixtures tests/golden docs/adr Cargo.lock`; `tests/integration/tests` + integration `Cargo.toml` -> EXACTLY the one new suite (all existing suites + the four caps locks + symbol_isolation zero-hunk); INV-3 full-milestone `522a770..HEAD -- crates/lang-cpp crates/lang-scala` EMPTY; `CURRENT_ANALYSIS_VERSION` still `"2.2.0"` at `crates/index/src/cache.rs:30` |
+| 10 | Orchestrator rider `a3fd07e` re-adjudication + bench-exemption ruling (dispatch MUST) | RULED (finding 3) | every added/changed line of `git diff 6369572..a3fd07e` is a `//!`/`///` doc-comment line (+3/-2, zero code bytes); truthful (enumeration `[Cpp, Scala, Rust]` LAST-appended pinned green by test 1 in the fresh census; A3 comment at `registry.rs:426-429` already R-4-attributed); exemption MAINTAINED: the successor's proof `git diff --name-only c93bada..HEAD -- crates` = EMPTY verified TRUE at `6369572` (re-run by the reviewer); bench NOT RUN per the handoff BENCH clause; fresh census + cli green at `a3fd07e` |
+| 11 | Journal factual error (dispatch special 3) | FINDING 1, ROUTED | `crates/lang-rust/src/extractor.rs:36` still `use syn::__private::ToTokens;` (verified at source) and `git show --stat "4bd22c8"` = docs-only `tasks/rust-language-execution-results.md` +57 (the dated DEFERRAL ROW landed, the swap did not); journal sec. 6's bullet misleads on its heading reading; disposition: dated correction append by the orchestrator at closeout + closeout ledger record states the swap DEFERRED post-milestone (verdict sec. 9 items 2-3) |
+| 12 | Hygiene exit 0 (gate 5) | PASS | `python tools/distill.py -- python tools/hygiene_check.py` -> `### generic PASS (exit 0)` (capture 173 lines); every row R3 warn-only in pre-existing zones; capture grep for `rust_language_parity|adding-a-language|registry.rs` -> zero rows name a touched file; suite 882 < 1000 (R2, margin 118), longest fn ~57 (< 100) |
+| 13 | L15 encoding exit 0 (gate 6 form) | PASS | `python tools/distill.py -- python tools/encoding_guard.py --all` -> `### generic PASS (exit 0)` (silent) - authored bytes pure ASCII, guide glyphs unchanged |
+| 14 | Tool unit suites (CI form, gate 3) | PASS | `python -m unittest discover -s tools -p "*_tests.py"` -> `Ran 296 tests in 27.112s` / `OK` (DEV-5 note accepted: the bare dispatch form discovers 33 under unittest's default pattern; the CI form is canonical per AGENTS.md) |
+| 15 | ui_smoke (gate 4) | PASS | `python tools/distill.py -- python tools/ui_smoke.py` -> `### generic PASS (exit 0)`; `boot+route checks clean (cold fixture, attempt 1, 1.1s)`; `ui_smoke: PASS` |
+| 16 | Report-evidence discipline (review-gate step 8) | PASS | journal secs. 1-8 digest-shaped: distilling entry points only, canonical lines + capture paths + exit codes, zero raw dumps, F14-clean; relay table (sec. 6) independently true: 23 SHA tokens resolve, the three recorded discrepancy classes (i)/(ii)/(iii) are ledger-abbreviation facts, not contradictions; the R-8 rider `4bd22c8` verified as a real commit with matching subject |
+
+### R-10 orchestrator rider row - `a3fd07e` (post-landing, orchestrator's own)
+
+| # | Acceptance criterion | Result | Evidence line (verbatim) |
+|---|--------|--------|--------------------------|
+| 1 | Comment-only: every added/changed line a doc-comment | PASS | `git show "a3fd07e"`: +3/-2 single file `crates/cli/src/registry.rs` - module-header `//!` bullet (adds `Scala, then Rust - rust-language R-4`) + fn-doc two `///` lines (adds `Rust per rust-language R-4`); zero code bytes; stat `1 file changed, 3 insertions(+), 2 deletions(-)` |
+| 2 | Content truthful + dated status | PASS | enumeration order claim pinned green by the fresh census (test 1); `.f90`/`.mock` attribution at `:426-429` already correct; commit message carries the dating ("dated orchestrator rider", git date 2026-10-27) - in-text date is the provenance tag, informational (verdict sec. 6) |
+| 3 | Bench-exemption interaction | MAINTAINED (no bench) | proof EMPTY at `6369572` re-verified; rider comment-only -> no benchmarked-semantics change; fresh census `2015 passed / 0 failed / 13 ignored / 127 suites` and cli `182 passed / 0 failed / 8 ignored / 8 suites` both exit 0 AT `a3fd07e`; handoff BENCH clause assigns no bench run to this hand or its reviewer pass |
+
+### R-10 out-of-scope observations (recorded)
+
+- Journal sec. 6 quote-swap wording (verdict finding 1) - closeout correction
+  append + ledger statement (DEFERRED post-milestone).
+- Suite size 882 vs ~400 estimate (DEV-3): planning-law overrun ~7% of the
+  whole-hand line budget, attributed, under all ceilings - for the sizing
+  ledger.
+- `tasks/rust-language-r10-handoff-resume.md` UNTRACKED on disk - DELETE at
+  the closeout hop (verdict sec. 9 item 6); reviewer grant bars deletion.
+
+### R-10 not run / refused (explicit statement)
+
+- `python tools/bench_compare.py`: NOT RUN by ruling - the handoff BENCH
+  clause ("no bench run belongs to this hand or its reviewer pass"); the
+  zero-`crates` exemption proof held verbatim at the landing `6369572`
+  (reviewer re-ran: empty) and the orchestrator rider was adjudicated
+  comment-only with fresh green census/cli at `a3fd07e` (rider row 3; verdict
+  finding 3 records the literal-vs-merits status).
+- `python tools/testrun.py --baseline` (bare): probed, refused verbatim
+  `usage error: missing value for --baseline` - the F9-errata FILE form,
+  superseded track-wide (R-1..R-9b3 precedent); the governing fresh census
+  ran the `--distill -- --no-fail-fast` form and matched EXACTLY.
+- `python tools/golden_guard.py --base <rev>`: not landed; the handoff's
+  prose byte-checks substitute (criteria 5/9 name-diffs).
+- Catch-all-deny refusals this review (verbatim
+  `{"permission":"bash","pattern":"*","action":"deny","source":"global"}`):
+  a chained `git diff; echo; ...` probe (split into single invocations, all
+  ran) and `git ls-files tasks` (substituted by a Glob-tool disk census plus
+  the `checkpoint_guard` untracked list for the resume-artifact checks). No
+  expected gate was skipped.

@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Walkthrough: rust-language - Rust as the Third Language Plugin</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .slide {
+            background: white;
+            padding: 40px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .slide.active {
+            display: block;
+        }
+        .slide h1 {
+            color: #333;
+            border-bottom: 2px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .slide h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+            white-space: pre;
+        }
+        .before {
+            border-left: 4px solid #f44336;
+        }
+        .after {
+            border-left: 4px solid #4caf50;
+        }
+        .key { color: #569cd6; }
+        .str { color: #ce9178; }
+        .cm { color: #6a9955; }
+        .label { font-weight: 600; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: -6px; }
+        .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+        .pill.green { background: #e8f5e9; color: #2e7d32; }
+        .pill.red { background: #ffebee; color: #c62828; }
+        .pill.blue { background: #e3f2fd; color: #1565c0; }
+        .pill.amber { background: #fff8e1; color: #b45309; }
+        .cols { display: flex; gap: 20px; }
+        .cols > div { flex: 1; min-width: 0; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+        th { background: #f0f0f0; }
+        .navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .navigation button {
+            margin: 0 5px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active">
+    <h1>rust-language: Rust as the Third Language Plugin</h1>
+    <p style="font-size: 18px; color: #555;">
+        The full-capability-parity arc: ten serial hands, three dated amendments,
+        three dead sessions recovered by adopt-and-verify, and zero bytes moved
+        under C++ or Scala.
+    </p>
+    <p>
+        <span class="pill green">final anchor 2015 passed / 0 failed / 13 ignored / 127 suites @ a3fd07e</span>
+        <span class="pill blue">10 hands R-1..R-10, all APPROVED</span>
+        <span class="pill amber">3 amendments + 1 more (R-9 split x2)</span>
+    </p>
+    <p style="color: #888;">
+        2026-10-25 through 2026-10-27 | branch <code>add-rust-language-support</code> (worktree balsam-basil) |
+        unregistered post-M28 track, key <code>rust-language</code>, ledger row 62 | IDD/RGB-TDD
+    </p>
+    <p style="color: #888;">
+        Sources: <code>tasks/rust-language-kickoff.md</code>, <code>-shape.md</code> (INV-1..15), <code>-plan.md</code>,
+        <code>-r{1..10}-handoff.md</code> and journals, verdicts, <code>-execution-results.md</code> (all quotes
+        verbatim), shipped code under <code>crates/lang-rust/src/</code>, fixture <code>tests/fixtures/rust-basic/</code>,
+        and the five dated riders in <code>docs/adding-a-language.md</code>.
+    </p>
+</div>
+
+<!-- Slide 2: Executive summary -->
+<div class="slide">
+    <h1>Executive summary</h1>
+    <h2>Intent</h2>
+    <p>
+        Add Rust as the third language plugin (after C++ and Scala) at full capability parity with Scala today:
+        discovery, dependency_graph, semantic_index, load_metric, planning, extraction, rewriting, validation.
+        The kickoff names the why: the project's core intent is multi-language support through a plugin mechanism,
+        and rule R1 ("a foreign language can be added without friction") has never yet been exercised by a third language.
+    </p>
+    <h2>Scope</h2>
+    <p>
+        One new plugin crate <code>crates/lang-rust</code>; a handful of guard-legal core-spine edits
+        (<code>FileKind</code> table, <code>from_file_kind</code> arm, one appended <code>AggregationKind</code> variant);
+        one registration line; the CLI <code>--lang</code> closed-set growth; named enumeration amendments A1-A8;
+        one fixture; six new milestone-named suites.
+        Zero edits to index/graph/cluster/transform/validate/report/artifact/scheduler/ui production code.
+    </p>
+    <h2>User decisions of record (2026-10-25, do not revisit)</h2>
+    <ul>
+        <li><b>D-1 FULL PARITY ARC</b> - all 8 capabilities, one milestone, serial handoff arc
+            (the kickoff estimated ~5-7 hands; the planner sized it to 10).</li>
+        <li><b>D-2 SYN-CRATE PARSER</b> - the user rejected heuristic-only correctness: parse with
+            <code>syn</code> + <code>proc-macro2</code> (feature <code>span-locations</code> mandatory) +
+            <code>unicode-ident</code>, in-process and offline.
+            Assumption A3 holds: the pipeline never invokes a Rust compile; the validator probes
+            <code>--version</code> only.</li>
+        <li><b>D-3 .RS COLLISION ACCEPTED, fixtures-only</b> - once the spine maps <code>.rs</code>,
+            scanning this repo indexes its own Rust tree; accepted by the user.
+            No test in this milestone scans the repo's own sources; benches keep running existing corpora.</li>
+    </ul>
+    <h2>Risk</h2>
+    <p>
+        The shipped risk posture is "additive and pinned": enum appends only (INV-12), byte-freeze of
+        goldens/ar27/m00 (INV-4), C++/Scala plugin zero-diff (INV-3), capability monotonicity (INV-5).
+        The two live costs carried honestly: the <code>syn::__private::ToTokens</code> import (no semver promise)
+        and the flat-id sharing class - both deferred with dated rows, not hidden.
+    </p>
+</div>
+
+<!-- Slide 3: The arc -->
+<div class="slide">
+    <h1>The arc: 10 serial hands, one relay</h1>
+    <p>
+        Strictly serial, one scoped landing per hand, never parallel-safe (the hands share
+        <code>plugin.rs</code>, the ledger, and the suite substrate).
+        Every hand opened with <b>duty 1</b>: land the previous hand's verdict plus the ledger relay
+        clause <i>verbatim</i> (the relay carries the census anchor forward word-for-word, so an anchor
+        can never drift by paraphrase).
+    </p>
+    <table>
+        <tr><th>Hand</th><th>Shipped</th><th>Caps after</th><th>Census anchor (verbatim line, verbatim)</th></tr>
+        <tr><td>start</td><td>inherited from extraction-symbol-move closeout</td><td>-</td><td>1853/0/13/119 @ 522a770</td></tr>
+        <tr><td>R-1</td><td>spine: FileKind::RustSource + LanguageId::Rust</td><td>all false</td><td>1854/0/13/119 @ e862acf</td></tr>
+        <tr><td>R-2</td><td>lang-api: AggregationKind::ModDeclaration append + A6 row</td><td>all false</td><td>1855/0/13/119 @ 1dd042d</td></tr>
+        <tr><td>R-3</td><td>crate skeleton, unregistered, caps all-false, A8 rides</td><td>all false</td><td>1878/0/13/121 @ eeddfed</td></tr>
+        <tr><td>R-4</td><td>registration + discovery + fixture rust-basic + A1-A4, A7</td><td>discovery</td><td>1886/0/13/122 @ a9b6864</td></tr>
+        <tr><td>R-5</td><td>syn analyzer, fingerprint "rust-1", span truth</td><td>+semantic_index</td><td>1916/0/13/123 @ 8622b2c</td></tr>
+        <tr><td>R-6</td><td>mod/use resolver, mod tree, graph-shape truth</td><td>+dependency_graph</td><td>1938/0/13/124 @ 470ae22</td></tr>
+        <tr><td>R-7</td><td>load_metric flip + language-is-data proofs (SUCCESSOR hand)</td><td>+load_metric</td><td>1943/0/13/125 @ a659465</td></tr>
+        <tr><td>R-8</td><td>real extractor + real dependency rewriter</td><td>4 true, unchanged</td><td>1970/0/13/125 @ 5f87944</td></tr>
+        <tr><td>R-9 -> 9a</td><td>STOP, AMENDMENT-1, payload-derived retarget mechanism</td><td>4 true, unchanged</td><td>1981/0/13/125 @ fcb078c</td></tr>
+        <tr><td>R-9b1</td><td>planning hooks + probe validator + F2 freeze + all-true flip</td><td>ALL 8 true</td><td>1989/0/13/125 @ 588bb86</td></tr>
+        <tr><td>R-9b3</td><td>AMENDMENT-3 honest-spelling fix + symbol-isolation suite</td><td>ALL 8 true</td><td>2003/0/13/126 @ c93bada</td></tr>
+        <tr><td>R-10</td><td>full-parity acceptance suite + 5 dated guide riders (SUCCESSOR hand)</td><td>ALL 8 true</td><td>2015/0/13/127 @ a3fd07e (NEW ANCHOR)</td></tr>
+    </table>
+    <p>
+        Landing/rider commits oldest-first: e862acf, 3d4dfae (+1cf6786, docs 1dd042d), fe34e23, ec552bd,
+        673b22b (+rider 8622b2c), baf24f8 (+rider 470ae22), 4fd40ca (+rider a659465), 5f87944,
+        STOP c52817c/239df72, AMENDMENT-1 f2387f1, fcb078c, duty cef3b0a, AMENDMENT-2, eb1e0c9 (+rider 588bb86),
+        STOP 8c1ac46, AMENDMENT-3 aa67ff2, c93bada, duty 28894bc, 6369572 (+rider a3fd07e = HEAD).
+    </p>
+</div>
+
+<!-- Slide 4: Caps discipline -->
+<div class="slide">
+    <h1>Capability discipline: flip-per-hop, never a bit ahead of its component</h1>
+    <p>
+        INV-5 (shape) is the spine of the whole arc: "At every commit on the arc, no capability bit is
+        <code>true</code> before the component behind it exists in the crate."
+        The caps literal was therefore flipped one hop at a time, and each flip superseded the
+        integration-suite caps locks of earlier hops via an orchestrator rider commit with a dated note -
+        never by the implementer editing out-of-touch-set locks (report-don't-fix, R-5/R-6/R-7 rider precedent).
+    </p>
+    <div class="cols">
+        <div>
+            <div class="label">Before (R-3 skeleton, caps all-false)</div>
+            <div class="code-block before">// caps literal + pin, hop R-3 (all-false)
+LanguageCapabilities {
+    discovery: false, dependency_graph: false,
+    semantic_index: false, load_metric: false,
+    planning: false, extraction: false,
+    rewriting: false, validation: false,
+    requires_toolchain: false,
+}</div>
+            <p>Stubs returned neutral values - no <code>todo!</code>, no
+            <code>unimplemented!</code> (reviewer-checked at R-3).</p>
+        </div>
+        <div>
+            <div class="label">After (final, crates/lang-rust/src/plugin.rs:155-167)</div>
+            <div class="code-block after">fn capabilities(&amp;self) -&gt; LanguageCapabilities {
+    LanguageCapabilities {
+        discovery: true,
+        dependency_graph: true,
+        semantic_index: true,
+        load_metric: true,
+        planning: true,
+        extraction: true,
+        rewriting: true,
+        validation: true,
+        requires_toolchain: false,
+    }
+}</div>
+            <p>Locked by the in-src byte-exact literal
+            <code>capabilities_match_the_parity_flip_literal</code> plus four integration-suite
+            locks (byte-witnesses counted: impl + in-src pin + four locks).</p>
+        </div>
+    </div>
+    <h2>Flip order, one hop behind nothing</h2>
+    <p>
+        R-4 discovery, R-5 semantic_index, R-6 dependency_graph, R-7 load_metric,
+        R-8/R-9a shipped the extraction/rewriting mechanism while both bits stayed false,
+        R-9b1 flipped planning/extraction/rewriting/validation with their components in the same commit.
+        R-8's whole plugin.rs diff was doc-comment lines only (blocker-class reviewer check: every changed
+        line starts <code>//!</code>).
+    </p>
+    <h2>requires_toolchain: false is a statement, not a default</h2>
+    <p>
+        A3/D-2: this product never compiles Rust.
+        The probe-only validator spawns <code>--version</code> shaped processes only; INV-10(c) is pinned
+        by scripted-runner tests. The plugin.rs doc says it: "requires_toolchain is false at every hop
+        (A3/D-2): the pipeline never invokes a Rust compile."
+    </p>
+</div>
+
+<!-- Slide 5: Plugin anatomy -->
+<div class="slide">
+    <h1>Anatomy of crates/lang-rust</h1>
+    <table>
+        <tr><th>Module</th><th>Landed</th><th>Job</th></tr>
+        <tr><td><code>detector.rs</code></td><td>R-3/R-4</td><td>claims <code>.rs</code> + <code>rust</code> identity, case-folded basename-before-extension idiom</td></tr>
+        <tr><td><code>shaper.rs</code> / <code>boundary.rs</code></td><td>R-3</td><td>Cargo.toml build marker, <code>rustc</code> compiler name; boundary markers target/vendor/.cargo</td></tr>
+        <tr><td><code>parser_items.rs</code> / <code>parser_uses.rs</code></td><td>R-5</td><td>syn parse: items and use-facts, Span::start() line/col truth; zero hand-rolled scanning</td></tr>
+        <tr><td><code>analyzer.rs</code></td><td>R-5</td><td>semantic index payloads, fingerprint "rust-1"</td></tr>
+        <tr><td><code>resolver.rs</code> / <code>mod_tree.rs</code></td><td>R-6 / R-8</td><td>mod-tree + use-path resolution both layouts (mod.rs and file.rs); mod-tree path grammar reused by rewriting</td></tr>
+        <tr><td><code>extractor.rs</code></td><td>R-8</td><td>syn-printed generated files, in-place module-tree placement, comment-loss header</td></tr>
+        <tr><td><code>dependency_rewriter.rs</code> / <code>move_retention.rs</code></td><td>R-8/R-9a/R-9b3</td><td>consumer discovery, rewrite spec derivation, parent mod-decl insertion, move-retention hook</td></tr>
+        <tr><td><code>planning.rs</code> / <code>constraints.rs</code></td><td>R-9b1</td><td>planning hooks (target_path_for, out-of-line mod answer); F2 frozen_symbols rule</td></tr>
+        <tr><td><code>validator.rs</code></td><td>R-9b1</td><td>probe-only toolchain status + compile deferral, CommandRunner seam</td></tr>
+        <tr><td><code>plugin.rs</code></td><td>every flip</td><td>identity, modeling vocabulary, caps literal, hook enrollment, fingerprint</td></tr>
+        <tr><td><code>discovery_fidelity_tests.rs</code></td><td>R-9b3</td><td>the fidelity witness that discovery and rewrite agree, relocated to a src host</td></tr>
+    </table>
+    <h2>Language is data - nothing downstream changed</h2>
+    <p>
+        INV-14: zero bytes under <code>crates/ui/**</code>, <code>crates/report/**</code>,
+        <code>crates/artifact/**</code> for the whole arc (three-crate zero-diff proof re-run at R-7 and again
+        at closeout scope). R-7's suite proves it as data: manifest <code>["Rust"]</code> through the existing
+        <code>collect_stage_languages</code> path, D26 vocabulary ("Use"/"used"/"mod aggregation") rendering
+        through existing formatters, and the UI label via bare-name Debug - "data asserts only".
+    </p>
+</div>
+
+<!-- Slide 6: Core spine before/after -->
+<div class="slide">
+    <h1>Core spine: two appends, one registration, seven amendments</h1>
+    <div class="cols">
+        <div>
+            <div class="label">Before (crates/repo/src/types.rs matrix)</div>
+            <div class="code-block before">("a.rs", FileKind::Other),
+// ...
+("a.h.rs", FileKind::Other),   // row :114</div>
+        </div>
+        <div>
+            <div class="label">After (flipped rows, shipped)</div>
+            <div class="code-block after">("a.rs", FileKind::RustSource),
+// ...
+("a.h.rs", FileKind::RustSource),</div>
+        </div>
+    </div>
+    <p>
+        The planner caught a shape gap before the arc started: A5 named only <code>types.rs:103</code>, but
+        the row <code>("a.h.rs", Other)</code> flips too, because the extension of <code>a.h.rs</code> is
+        <code>rs</code>. R-1 carries both rows, with a reviewer blocker written on the table if :114 were missed.
+        <code>FileKind::RustSource</code> was APPENDED after <code>Other</code>, never inserted (INV-12):
+        warm serde/bincode bytes for C++/Scala keep their indices, and the ar27 + goldens + m00 trio prove it
+        UNEDITED at every hop (INV-4 byte-freeze).
+    </p>
+    <h2>Registration and amendments</h2>
+    <ul>
+        <li>Registry order is a contract: appended LAST - C++, Scala, Rust (A1 amended enum test verifies).</li>
+        <li>A2: <code>"rust"</code>/<code>"Rust"</code> move into the accepted <code>--lang</code> closed set.</li>
+        <li>A3/A4: two cli witnesses used <code>src/unclaimed.rs</code> as their "no plugin claims this"
+            path - that fact dies the moment Rust registers, so the witnesses moved to
+            <code>.f90</code> in the same R-4 commit. INV-9's oracle is a grep: the string
+            <code>unclaimed.rs</code> occurs NOWHERE under <code>crates/</code> - reviewer re-ran,
+            "No files found".</li>
+        <li>A6/A7: the exhaustive FileKind-to-LanguageId row and the m19 enumeration vec gain Rust
+            (a registration fact, not a Scala behavior change).</li>
+        <li>A8: both <code>PLUGIN_CRATES</code> guards in m17 (<code>[&amp;str; 2]</code> to
+            <code>[&amp;str; 3]</code>) land in the SAME commit as the new manifest, because both guards
+            self-skip a missing manifest - append-early would silently pass.</li>
+        <li>R-2 appended <code>AggregationKind::ModDeclaration</code> after <code>None</code>, pure-append,
+            zero deletions, reviewer-proven by hunk range (L11/INV-12).</li>
+    </ul>
+    <p>
+        Honest limit surfaced at R-10 and pinned as current behavior, not fixed: a mixed-language repo still
+        answers the M21 error. Parity test 11 asserts the error STAYS - a pin, never a feature claim (shape sec. 6).
+    </p>
+</div>
+
+<!-- Slide 7: syn analyzer -->
+<div class="slide">
+    <h1>R-5: syn parsing, span truth, fingerprint</h1>
+    <p>
+        D-2 made a promise and INV-7 made it falsifiable: for named fixture items, analyzer records carry the
+        EXACT expected line and column, e.g. the attribute-immune <code>User (4,12)</code> and the
+        handoff's named oracle <code>mod models; (7,5)</code> - all span literals re-read by the reviewer
+        against the frozen fixture bytes.
+    </p>
+    <div class="cols">
+        <div>
+            <div class="label">The mechanism (parser_items.rs / parser_uses.rs)</div>
+            <div class="code-block after">syn::parse_file(...) with Spanned values
+Span::start() -&gt; (line, column)
+// proc-macro2 feature "span-locations" -
+// without it the accessors do not exist
+// at all (compile-forced oracle)</div>
+            <p>Reviewer grep over the parsers for hand-rolled scanning
+            (<code>.lines()</code>, <code>char_indices</code>, <code>find</code>, <code>split</code>,
+            <code>matches</code>): zero hits.</p>
+        </div>
+        <div>
+            <div class="label">What it refuses to invent</div>
+            <div class="code-block">// macro-fabrication audit:
+// every pinned symbol has WRITTEN source
+generated_by_macro -&gt; pinned absent
+analysis_caveat names "macro" (pinned)</div>
+            <p>D-2's honest limit as data: macro-generated module structure
+            (<code>include!</code>, <code>macro_rules!</code>-generated <code>mod</code>) is not expanded;
+            the caveat is stated where reports read it.</p>
+        </div>
+    </div>
+    <h2>Cache-safety decisions</h2>
+    <p>
+        INV-8: <code>analysis_fingerprint() == "rust-1"</code> shipped in the FIRST analyzer-shipping commit,
+        pinned twice (in-src + integration). <code>CURRENT_ANALYSIS_VERSION</code> stayed at
+        <code>"2.2.0"</code> with zero bytes under <code>crates/index</code> - the handoff's stale 2.1.0 quote
+        was caught as a plan erratum (D1), and m21 (Scala cache digest) stayed green UNEDITED as the
+        non-perturbation witness.
+    </p>
+    <h2>Id shape decision, defended twice afterwards</h2>
+    <p>
+        The analyzer gives every written item a FLAT id (<code>crate::User</code>), not a module-qualified one -
+        the analyzer seam receives only a hashed FileId, so a file-position prefix would be fabricated input
+        (accepted judgment R-5 D5). That decision returned as AMENDMENT-1's core question and again as
+        AMENDMENT-3's; both times it held, and both amendments routed around it honestly instead of
+        reopening the id space.
+    </p>
+</div>
+
+<!-- Slide 8: Resolver and graph -->
+<div class="slide">
+    <h1>R-6/R-7: mod tree, graph shape, load metric</h1>
+    <h2>R-6 resolver - mirror of the Scala honesty stance</h2>
+    <ul>
+        <li>Mod-tree resolution works for BOTH layouts (<code>src/models/mod.rs</code> and
+            <code>src/models.rs</code>), at written spans, both in-src and integration-pinned.</li>
+        <li>Zero-match resolves to External/NOTHING - never Unresolved; out-of-repo resolves to nothing,
+            mirroring the C++ boundary stance (marker-first External, vendor is boundary-marker-only).</li>
+        <li>Cycles stay informational through the existing <code>cycle_policy_by_file</code> lookup -
+            zero core edits, m20 green UNEDITED.</li>
+        <li>The warm-reindex witness broke for a good reason: real mod-tree closures now merge child
+            symbols into parent envelopes (tu_store was walking stub edges all along; now it walks real
+            ones), so the cache-serve witness moved its sentinel to a file no declaration reaches
+            (<code>src/macro_specimen.rs</code>) - correct-behavior accommodation, rider-adjudicated,
+            with <code>crates/worker-core</code> zero-diff proving zero core edits.</li>
+    </ul>
+    <h2>R-7 load metric - and a first dead session</h2>
+    <p>
+        The load hop is where the first context-wall death landed: the predecessor shipped duty 1
+        (<code>5492372</code>) and its board ASK, then died before its landing commit.
+        The successor bootstrapped from disk only, verified the predecessor's Green state against
+        the landing stat, and the Red basis was adjudicated on the relay plus falsifiability review plus
+        census corroboration - precedent held that a successor hand is not required to re-author Red.
+        Gates: lang-rust <code>56 passed / 0 failed / 0 ignored / 2 suites</code>, new suite
+        <code>5 passed / 0 failed / 0 ignored / 1 suites</code>, ui_smoke PASS, three-crate zero-diff EMPTY.
+    </p>
+</div>
+
+<!-- Slide 9: Data and control flow -->
+<div class="slide">
+    <h1>Flow of the changed path</h1>
+    <h2>Analysis flow (read path)</h2>
+    <div class="code-block">detect_language(.rs)            detector.rs
+  -&gt; shaper: Cargo.toml nearest-ancestor units    shaper.rs
+  -&gt; syn parse items + uses                       parser_items.rs / parser_uses.rs
+  -&gt; analyzer payloads (spans, ids "crate::X")    analyzer.rs
+  -&gt; resolver: mod tree + use facts (Rust edges)  resolver.rs
+  -&gt; index/graph/manifest: language is data       (zero core edits, INV-14)</div>
+    <h2>Transform flow (plan to apply), post-AMENDMENT-1/3</h2>
+    <div class="code-block">plan        plugin planning hook answers target paths (planning.rs)
+            constraints.frozen_symbols filters (constraints.rs)
+            -&gt; engine proposes batches; frozen batch skipped whole
+preview     consumer_discovery_targets derives probes   dependency_rewriter.rs
+            (moved flat ids + honest M::X spelling + mod stem)
+            find_dependency_targets matches by FULL leaf equality
+apply       rewrite spec derives old/new use-space pairs
+            parent mod-decl insert + move retention ride
+            the move_out_top_level_symbols hook (move_retention.rs)
+            through the EXISTING engine transaction - snapshot/rollback</div>
+    <p>
+        The key agreement: discovery's probe grammar and the rewrite's derivation are produced by the SAME
+        code path, so they "agree by construction" - the C++ CW-1 law, which AMENDMENT-3 enforced for Rust
+        after R-9a had fixed only the spec side. Every engine seam crossed is a trait default that already
+        existed; <code>crates/lang</code>, transform, validate, cluster stayed in NO hunk across the whole arc.
+    </p>
+</div>
+
+<!-- Slide 10: Extraction and rewriting mechanism -->
+<div class="slide">
+    <h1>R-8 + R-9a: the extraction/rewriting mechanism</h1>
+    <div class="cols">
+        <div>
+            <div class="label">Printing seam (extractor.rs:30-36, verbatim)</div>
+            <div class="code-block">// quote is not a direct dependency of
+// this crate and Cargo.toml is outside
+// the R-8 touch-set, while the handoff
+// names the mechanism - proc_macro2::
+// TokenStream to-string via syn printing.
+use syn::__private::ToTokens;</div>
+            <p>
+                Vendored syn 2.0.119 documents <code>__private</code> as "Not public API", but syn's own
+                exported macros emit <code>$crate::__private::ToTokens</code> downstream - de-facto stable
+                in 2.x, with NO semver promise. Ruled ACCEPT-as-recorded with a dated deferral row:
+                direct <code>quote</code> dep + import switch at the first manifest-capable hop.
+            </p>
+        </div>
+        <div>
+            <div class="label">Honest spelling the rewriter must produce (AMENDMENT-1 FINAL WORD)</div>
+            <div class="code-block">use crate::fixture_marker;
+  -&gt; use crate::fixture_marker::fixture_marker;
+
+use crate::models::models_marker;
+  -&gt; use crate::models::models_marker
+       ::models_marker;</div>
+            <p>
+                When the new file's stem equals the moved name, honest Rust repeats the segment;
+                the suite pins exactly that byte, no special-casing.
+            </p>
+        </div>
+    </div>
+    <h2>What R-8 shipped, pinned byte-exact</h2>
+    <ul>
+        <li>Discovery targets = moved paths plus the source module stem; syn-only hits, comments/strings/sibling
+            spellings are never hits (conservative collision).</li>
+        <li>Glob narrowing on the aggregate old-dep only (the Scala D-M23-5 analog).</li>
+        <li>Parent mod insertion is an idempotent no-op on the second application; insertion copies the anchor's
+            visibility and indent, stays ASCII.</li>
+        <li>A use-only consumer without the mod anchor NEVER receives an insertion - five dedicated pins,
+            no assertion stretching (reviewer criterion 6).</li>
+        <li>Generated files go in place, not <code>generated/</code>: a staging dir is outside the module tree
+            and would strand the extracted file invisible (RISK-MODTREE).</li>
+    </ul>
+    <p>
+        Caps stayed false across R-8 and R-9a: the mechanism shipped first, its bits flipped only when
+        its witnesses and its hooks were all landed (INV-5 again).
+    </p>
+</div>
+
+<!-- Slide 11: Planning freeze + validator -->
+<div class="slide">
+    <h1>R-9b1: planning freeze and the probe-only validator</h1>
+    <h2>F2 freeze - a language answer, so it lives in the plugin</h2>
+    <p>
+        R-9's suite would otherwise plan the unplannable: a <code>mod x;</code> declaration is structure, and its
+        "body" IS the child file - extracting it means clobbering a frozen child
+        (<code>src/lib.rs</code> to <code>src/greeting.rs</code>) or a self-referential stub.
+        "Deciding it that way is language GRAMMAR, so the filter sits in the plugin, not the neutral engine"
+        (AMENDMENT-1 sec. 2). <code>crates/cluster</code> and <code>crates/cli</code> stayed in NO hunk;
+        the existing engine rule "a batch holding a frozen symbol is skipped whole" does the rest, UNEDITED.
+    </p>
+    <p>
+        <code>frozen_symbols</code> answers the union of Module-kind records AND records with two or more
+        declarations - the flat-id sharing class. A record folded from two written items cannot honestly be
+        extracted at all, and <code>declarations.len() &gt;= 2</code> is fold-order-independent proof of that.
+        F5 ruling: flat-id sharing is "the known, ACCEPTED cost of the flat-id analyzer... neutralized at the
+        planning seam by the F2 freeze, not by re-qualification" - pinned by
+        <code>flat_id_shared_mod_and_fn_record_is_planning_frozen</code>.
+    </p>
+    <h2>Probe-only validator - INV-10 as three testable clauses</h2>
+    <div class="code-block after">// crates/lang-rust/src/validator.rs (verbatim)
+pub const TOOLCHAIN_PROBE_ORDER: [&amp;str; 2]
+    = ["cargo", "rustc"];
+pub(crate) const VERSION_PROBE_ARGS: &amp;[&amp;str]
+    = &amp;["--version"];
+pub trait CommandRunner: Send + Sync { ... }
+pub fn with_runner(runner: Box&lt;dyn CommandRunner&gt;)
+    -&gt; Self</div>
+    <ul>
+        <li>(a) no usable probe yields <code>Missing</code>; (b) every scripted spawn is
+            (probe entry, ["--version"]); (c) <code>validate_compile</code> errors naming the deferral
+            without spawning beyond the probe walk.</li>
+        <li>Deliberate contract delta from the Scala mirror: the compile binary is <code>rustc</code>
+            specifically - the probe order answers PRESENCE, not which binary compiles.</li>
+        <li>Repo-wide grep proof the reviewer ran: <code>.validate_compile(</code> call sites exist only in
+            lang-crate test modules - no pipeline compile invocation anywhere. Tier 3
+            <code>Skipped</code> is <code>crates/validate</code>'s existing neutral behavior, no edit.</li>
+        <li>The seam consumed from outside needed a manifest row; the handoff's literal was unsatisfiable
+            under the no-new-deps law, so the implementer raised F6, the user granted the dev-dep rider
+            (AMENDMENT-2), precedent: the lang-scala M19.3 row in the same file.</li>
+    </ul>
+</div>
+
+<!-- Slide 12: AMENDMENT-1 -->
+<div class="slide">
+    <h1>AMENDMENT-1 (2026-10-26): the R-9 STOP and the retarget ruling</h1>
+    <p>
+        R-9's implementer found the handoff's apply assertion unsatisfiable as written, and stopped
+        at a clean boundary instead of improvising: zero src touched, duty 1 landed (<code>c52817c</code>),
+        STOP journal landed (<code>239df72</code>), five findings F1-F5 on the record.
+        "Textbook CW-3 discipline" is the architect's own word for it.
+    </p>
+    <h2>The core blocker (F1), in one paragraph</h2>
+    <p>
+        The analyzer ships flat ids (<code>crate::User</code>) because the seam cannot honestly see file position.
+        The R-8 rewriter retargets ids by matching the moved id's MODULE PREFIX, derived from the consumer's
+        file path. A flat id has no module prefix, so no wired plan could ever rewrite a Rust consumer's
+        use line - while Scala's mirror test asserts a REAL rewritten import.
+        Silent weakening was forbidden, so this was an amendment, not a test edit.
+    </p>
+    <h2>Options adjudicated (the deck shows the rejected ones on purpose)</h2>
+    <ul>
+        <li>(a) analyzer id re-qualification - REJECTED: fabricated input at the seam (contradicting the
+            accepted R-5 D5) and it would reopen every approved id witness across the whole landed arc.</li>
+        <li>(c) re-word the apply assertion - NOT CHOSEN; it would be a scope cut on the user's FULL PARITY
+            decision and "may not be chosen silently by this role".</li>
+        <li>(b) payload-derived retarget in the Rust rewriter - CHOSEN: derive old/new use-space pairs from
+            the plan payload the hook already receives (old_includes/new_includes + moved ids), same data
+            discipline that makes Scala's <code>old_deps = [package]</code> honest. The m23-mirror assertion
+            stays VERBATIM.</li>
+    </ul>
+    <p>
+        Also ruled here: F2 freeze (slide 11), F3 - the move-retention hook rides the mechanism hop with an
+        expanded touch-set rather than stranding R-9b on a copy-fallback tree; F4 - the exact four-lock rider
+        band, the orchestrator's commit, never the implementer's; F5 - flat-id sharing named in scope as one
+        pinned test. The honest fix exceeded one hand on both sizing axes, so R-9 split into
+        R-9a (mechanism, caps unchanged) then R-9b (enrollment + flip). R-9a's re-gate of the R-8 mechanism
+        was machine-proven pure-append: deleted-line census production-side only, all 29 R-8 witnesses
+        green UNEDITED.
+    </p>
+</div>
+
+<!-- Slide 13: AMENDMENT-2 -->
+<div class="slide">
+    <h1>AMENDMENT-2 (2026-10-26): two deadsessions, adopt-and-verify, the split</h1>
+    <p>
+        Two R-9b implementer sessions died at the context wall with empty summaries
+        (R9B-DEADSESSION-1/2), clean-boundary class: no half-written file beyond an inventoried dirty tree,
+        no stash, no branch change. Standing law: a dead session is never resumed;
+        the successor bootstraps from disk via <code>resume-checkpoint</code> /
+        <code>checkpoint_guard.py resume</code>.
+    </p>
+    <h2>The harvest: every byte attributed before a line was trusted</h2>
+    <p>
+        The amendment's sec. 1 lists the dead hand's partials as ADOPTED or NOT DONE, each line
+        "diff-checked, not journal-taken". The adopted partials were test-side only (two positive
+        constraints pins, the caps-pin rename to the all-true literal, seam-leg pin evolutions, and the
+        executed Red <code>92 passed / 4 failed / 0 ignored / 1 suites</code> with verbatim
+        <code>left:</code> lines); production <code>frozen_symbols</code> still answered an empty set and the
+        caps literal was still false on disk - exactly the boundary the successor continued from.
+        When the journal's preamble and the disk disagreed on which death wrote what, the amendment said
+        plainly: "the disk cannot adjudicate the head-count... it CAN attribute every byte of partial state
+        to the journal-bearing hand" - and harvested from diffs only.
+    </p>
+    <h2>Rulings</h2>
+    <ul>
+        <li>SPLIT R-9b into R-9b1 (in-src enrollment + flip) then R-9b2 (suite + manifest consumption);
+            the seam chosen so R-9b1 ships green-endable alone.</li>
+        <li>GRANT the manifest rider: the <code>ariadne-lang-rust</code> dev-dep row in
+            <code>tests/integration/Cargo.toml</code>, per the lang-scala M19.3 precedent (user decision,
+            relaying the implementer's F6 ASK).</li>
+        <li>Adopt-and-verify became the milestone standard from here: the successor re-observes the gate
+            itself before adopting (R-9b1 re-observed the Red by name; R-10 re-ran gate 1 green on the dead
+            hand's partial suite before adopting it as-is).</li>
+    </ul>
+</div>
+
+<!-- Slide 14: AMENDMENT-3 -->
+<div class="slide">
+    <h1>AMENDMENT-3 (2026-10-27): the nested-module honest-spelling fix</h1>
+    <p>
+        R-9b2 reached its suite with <code>9 passed / 2 failed / 0 ignored / 1 suites</code> and STOPped.
+        The root cause chain, re-verified by read: plan 2's parent is the nested module
+        <code>src/models/mod.rs</code>; wired consumer discovery probed only <code>["crate::models_marker", "mod"]</code>;
+        the honest written spelling is <code>use crate::models::models_marker;</code>; the matcher requires
+        FULL leaf equality - so zero discovery, zero rewrite payload, and a commit that would leave the
+        function in BOTH files while tiers answered <code>[Pass, Pass, Pass]</code> and the preview printed
+        "0 effective rewrites". The suite's own preview pin had encoded the defect green - the pin
+        agreed with the broken list, not with the language.
+    </p>
+    <div class="cols">
+        <div>
+            <div class="label">Before (R-9a wiring - discovery and rewrite disagree)</div>
+            <div class="code-block before">probes = [ moved flat id ]
+         + [ sanitized stem "mod" ]
+// "crate::models_marker" never equals
+// the written leaf
+//   "crate::models::models_marker"
+// -&gt; consumer never discovered</div>
+        </div>
+        <div>
+            <div class="label">After (shipped, dependency_rewriter.rs:122-136)</div>
+            <div class="code-block after">for id in moved_module_ids {
+    probes.push(id.clone());
+    if let (Some(flat_leaf), Some(module)) =
+        (flat_id_leaf(id), parent_module
+            .as_deref()) {
+        let honest =
+            format!("{module}::{flat_leaf}");
+        if !probes.contains(&amp;honest) {
+            probes.push(honest);
+        }
+    }
+}</div>
+        </div>
+    </div>
+    <p>
+        The rule is CW-1's own law: discovery derives the SAME spelling the spec leg already derives,
+        "agree by construction", by code identity (reuse of <code>flat_id_leaf</code> and
+        <code>module_path_of_src_file</code>), not by a parallel grammar. Option (b) - tail-matching the
+        matcher - was REJECTED with a construction: it is either inert or it fires on
+        <code>crate::models::users::User</code> for a <code>crate::models::user::User</code> probe,
+        breaking the pinned conservative-collision witness; plus it manufactures discovered-but-unrewritten
+        consumers, the inverse D6 violation. The fix touched ONE function plus its docs; every matcher,
+        spec leg, and existing witness stayed byte-identical (Gate-C diff audit, 6 minus lines total).
+    </p>
+    <p>
+        Two further rulings ride here: the census floor was amended from the planned
+        <code>2023</code> to MEASURED truth - the fresh line at <code>c93bada</code> is
+        <code>2003 passed / 0 failed / 13 ignored / 126 suites</code>, +14 by name (11 suite tests +
+        3 witness tests), no padding to hit a planning guess (INV-13 governs);
+        and the zero-consumer-commit hazard (a commit where nothing was discovered still commits an orphan
+        copy with Pass tiers) is an ENGINE row, DEFERRED with a dated line - the plugin stays honest about
+        what it does and does not see, the frozen engine stays frozen.
+    </p>
+</div>
+
+<!-- Slide 15: Incident ledger -->
+<div class="slide">
+    <h1>The incident ledger, as maintained</h1>
+    <table>
+        <tr><th>Incident</th><th>Class</th><th>Recovery</th></tr>
+        <tr><td>R-7 deadsession (mid-hop, post-duty-1)</td><td>context wall, empty summary</td><td>successor from disk; duty-1 SHA intact; Red basis = relay + falsifiability + census corroboration (accepted precedent)</td></tr>
+        <tr><td>R9B-DEADSESSION-1/2 (two stops)</td><td>context wall, clean-boundary class, partial dirty tree</td><td>AMENDMENT-2 harvest: diff-checked adoption inventory, Red RE-OBSERVED by the successor, split into R-9b1/R-9b2</td></tr>
+        <tr><td>R-10 deadsession (the third, per its journal; post-duty-1)</td><td>context wall, partial suite on disk untracked</td><td>adopt-and-verify: gate 1 re-run green, full 882-line suite read and inventoried by name against the binding list - "NO required binding missing, NONE weakened"</td></tr>
+    </table>
+    <p>
+        Discipline worth naming: no hop was ever lost to a death. Duty-1 relays survived intact
+        (ledger clause count-of-1 blob-verified), and every Red that could be re-observed was
+        re-observed (R-9b1: <code>92 passed / 4 failed</code> with the four journalled
+        <code>left:</code> lines); where re-observation was structurally impossible (intermediate trees
+        uncommitted), the reviewer adjudicated on prediction-match against the amendment's own vectors -
+        named, per-hop, never waived.
+    </p>
+    <h2>Rider bands supersede flip-era witnesses, with dated notes</h2>
+    <p>
+        Each caps flip broke earlier caps locks - by design, that is what a flip is.
+        R-5: one lock; R-6: two locks plus the warm-reindex sentinel relocation; R-7: three locks;
+        R-9b1: four caps locks, the load-count pin 4 to 8, the discovery-test extraction-false arm retired
+        into honest parity truth, and a cli doomed-plan fixture retargeted <code>solver.rs</code> to
+        <code>solver.f90</code> (that witness tested "a .rs target must fail core routing" - the routing
+        became honest when extraction became honest).
+        Every one: orchestrator rider commit, dated supersession note, coverage verified before retiring any
+        arm (the capability-off and unclaimed-target error classes stay pinned at registry.rs and m24).
+        The implementers reported; the orchestrator ruled; the reviewer re-adjudicated each rider hunk
+        independently.
+    </p>
+    <p>
+        Also honest on the ledger: one self-reported stash-breach in the R-6 journal (single file,
+        popped immediately, ruled MINOR/RECORD with "recurrence = blocker"; recurrence never happened -
+        <code>refs/stash</code> absent at every hop after).
+    </p>
+</div>
+
+<!-- Slide 16: Evidence chain -->
+<div class="slide">
+    <h1>The evidence chain</h1>
+    <h2>Census progression (every delta attributed by name; ignored flat at 13 the whole arc)</h2>
+    <table>
+        <tr><th>Anchor progression</th><td colspan="2"><code>1853 @ 522a770, 1854, 1855, 1878, 1886, 1916, 1938, 1943, 1970, 1981, 1989, 2003, 2015 passed / 0 failed / 13 ignored / 127 suites @ a3fd07e</code> (NEW ANCHOR)</td></tr>
+    </table>
+    <p>
+        Final canonical line, verbatim from the R-10 verdict run:
+        <code>2015 passed / 0 failed / 13 ignored / 127 suites</code> at <code>a3fd07e</code>
+        (exit 0, <code>python tools/testrun.py --distill -- --no-fail-fast</code>).
+        Arithmetic closes at every hop by name: e.g. R-9b1's pre-rider line
+        <code>1983 passed / 6 failed / 13 ignored / 125 suites</code> closes exactly
+        (1983 + 6 = 1989 = anchor + 8 new), and the rider moved zero test counts.
+        The census floor itself got amended to measured truth once (AMENDMENT-3: 2003, not the planned 2023) -
+        INV-13 forbids padding to a planning guess.
+    </p>
+    <h2>Gates, all via the distilling entry points</h2>
+    <ul>
+        <li>Census: <code>python tools/testrun.py --distill</code> (the FILE-form
+            <code>--baseline</code> refused verbatim at every hop - standing F9 errata, recorded every time).</li>
+        <li>Tools suites: <code>Ran 296 tests ... OK</code> at every hop (CI form).</li>
+        <li>Hygiene exit 0 (warn-only R3, none naming a touched file) and
+            <code>encoding_guard --all</code> exit 0 (authored bytes pure ASCII) at every hop.</li>
+        <li>ui_smoke: PASS where the workspace surface was in scope - zero-edit boot still serves routes and no-store.</li>
+        <li>Bench: RUN fresh by the reviewer at every src-touching hop -
+            <code>bench compare: 3 run(s), no regressions past 1.25x baseline</code>; one recorded WARN pair
+            at R-3 (sub-millisecond get_or_build_include_graph deltas, record-not-attribute, the crate was
+            unregistered there); R-10 exempted WITH the zero-crates-diff proof, and the reviewer re-ran the
+            proof before accepting the exemption.</li>
+        <li>m23/m24 and all Scala/C++ witnesses green UNEDITED every hop;
+            INV-3 whole-milestone diff <code>522a770..HEAD</code> under lang-cpp and lang-scala: EMPTY.</li>
+    </ul>
+    <p>
+        Ledger note of record: row 62 keeps state; the milestone's CLOSEOUT RECORD sub-block lands with the
+        orchestrator's closeout commit itself (this deck was authored while it was still in flight - the
+        per-hand anchors above come from the verdicts and execution-results, which carry every canonical line).
+    </p>
+</div>
+
+<!-- Slide 17: Testing and invariant locks -->
+<div class="slide">
+    <h1>Testing: what locks what</h1>
+    <table>
+        <tr><th>Suite (tests)</th><th>Landed</th><th>Primary invariant locks</th></tr>
+        <tr><td><code>rust_language_discovery_test.rs</code> (7)</td><td>R-4</td><td>INV-1 enumeration, INV-6 fixture truth, INV-9 .rs claimed (plus the real-plugin identity bytes through the real registry, INV-4)</td></tr>
+        <tr><td><code>rust_language_semantic_index_test.rs</code> (11)</td><td>R-5</td><td>INV-7 exact spans, INV-8 fingerprint "rust-1", cache non-perturbation vs m21</td></tr>
+        <tr><td><code>rust_language_dependency_graph_test.rs</code> (9)</td><td>R-6</td><td>mod-tree both layouts at written spans, use-facts verbatim, cycle informational, zero core edits</td></tr>
+        <tr><td><code>rust_language_load_analysis_test.rs</code> (5)</td><td>R-7</td><td>INV-14 language-is-data (manifest/vocabulary/Debug label), caps lock at its hop</td></tr>
+        <tr><td><code>rust_language_symbol_isolation_test.rs</code> (11)</td><td>R-9b3</td><td>plan/preview/apply/rollback arc, F2 freeze + F5 sharing pins, INV-10 through the granted dev-dep seam</td></tr>
+        <tr><td><code>rust_language_parity_test.rs</code> (12)</td><td>R-10</td><td>the full-parity acceptance witness: all eight capabilities re-driven per capability, each naming its owner hand; INV-1/4/5/6/7/8/10; M21-error current-behavior pin; RISK-SELFSCAN fixture-only witness</td></tr>
+        <tr><td>fixture <code>tests/fixtures/rust-basic/</code> (8 files)</td><td>R-4 (reviewer-approved, L3 path)</td><td>build marker, both module forms, tests/ exclusion, vendor side, macro specimen - read-only: every suite copies it to a tempdir and writes nothing back</td></tr>
+    </table>
+    <p>
+        The remaining invariants lock by construction outside these files: INV-2/INV-4 by the UNEDITED
+        m19/m18/m00/ar27/goldens trio, INV-3/INV-14 by zero-diff name proofs, INV-5 by the byte-exact caps
+        literal plus four integration locks, INV-11 by the m17 guards green from R-3 on, INV-12 by
+        pure-append hunk proofs, INV-15 by the two exit-0 guards.
+        In-crate the witnesses are the durable layer: 105 lang-rust tests at closeout, including
+        <code>discovery_fidelity_tests.rs</code> - the pair that kills the discovery/rewrite disagreement class forever.
+    </p>
+    <h2>How to run any of it</h2>
+    <div class="code-block">python tools/testrun.py --distill                    # whole-workspace census
+python tools/testrun.py --distill -p ariadne-lang-rust
+python tools/testrun.py --distill -p ariadne-integration-tests \
+    --test rust_language_parity_test</div>
+</div>
+
+<!-- Slide 18: Honest limits and trade-offs -->
+<div class="slide">
+    <h1>Honest limits carried forward (what was rejected, deferred, or pinned-as-is)</h1>
+    <table>
+        <tr><th>Limit</th><th>Status</th><th>Why, in one breath</th></tr>
+        <tr><td><code>syn::__private::ToTokens</code> import</td><td>DEFERRED post-milestone (dated row at R-8, restated at R-10 closeout)</td><td>Direct <code>quote</code> dep + one-line import switch at the first manifest-capable hop; de-facto stable in syn 2.x but no semver promise (syn 3 already in the lock)</td></tr>
+        <tr><td>DEFER-ZERO-CONSUMER engine row</td><td>DEFERRED, engine-side</td><td>A plan whose consumers are all undiscovered commits an orphaned copy while tiers pass; the honest fix is engine-side and the engine stays frozen on this track (AMENDMENT-3 ruling)</td></tr>
+        <tr><td>Flat-id sharing (one id, two written items)</td><td>ACCEPTED cost, neutralized at the planning seam</td><td>F2 freeze keeps shared-fold records unextractable; safe support would need path-aware ids - a dated deferral row, not a secret</td></tr>
+        <tr><td>Macro-generated structure (<code>include!</code>, <code>macro_rules!</code>-built mods)</td><td>analysis_caveat as shipped data</td><td>D-2's honest limit; expanding macros is out of the plugin model</td></tr>
+        <tr><td>Any real compile (all languages)</td><td>Deferred (D-M23-12 class)</td><td>Probe-only validation; tier 3 answers Skipped offline - never fakes a Pass</td></tr>
+        <tr><td>Mixed-language repo indexing</td><td>Pinned AS-IS (parity test 11)</td><td>The M21 multi-language error stays; asserting it STAYS is honesty, pretending parity is not</td></tr>
+        <tr><td>Dynamic/out-of-process plugin loading</td><td>Parked by ADR-0001, untouched</td><td>Needs its own ADR; a language plugin is not the vehicle</td></tr>
+        <tr><td>Own-tree .rs indexing</td><td>Accepted consequence of D-3</td><td>Fixtures-only test surface, benches unchanged; a load-perf gate that scans the own tree must be a deliberate decision later</td></tr>
+    </table>
+    <p>
+        The rejected alternatives are on the record where they mattered: id re-qualification (AMENDMENT-1 (a)),
+        assertion re-wording (AMENDMENT-1 (c), "may not be chosen silently"), tail-match discovery
+        (AMENDMENT-3 (b), "either inert or witness-breaking"), and merging R-9's fix into one hand
+        (sizing law). A walkthrough that only showed the happy path would teach the wrong lesson here.
+    </p>
+</div>
+
+<!-- Slide 19: Impact and summary -->
+<div class="slide">
+    <h1>Impact and summary</h1>
+    <h2>What changes for a maintainer</h2>
+    <ul>
+        <li><code>default_registry().languages() == [Cpp, Scala, Rust]</code>, order appended-last as contract.</li>
+        <li><code>.rs</code> is claimed: scanning this repo now indexes its own Rust tree (accepted, D-3).</li>
+        <li><code>--lang rust</code> is accepted; unclaimed-target witnesses everywhere moved off
+            <code>.rs</code> onto <code>.f90</code>/<code>.mock</code>.</li>
+        <li>A fourth language plugin now has a WORKED EXAMPLE: the five dated riders in
+            <code>docs/adding-a-language.md</code> (2026-10-27) refreshed the manifest-deps guidance
+            (trio-for-three, guards unrelaxed), the dispatch-site line refs with AR-19 hook enrollment,
+            the honest-limits third-plugin update (parked bullets kept true), the guard-count bullet two-to-three
+            with the INV-11 append discipline, and the <code>rust_language_*</code> Step-5 worked example.</li>
+        <li>No breaking changes: serde enums pure appends, goldens byte-clean, warm C++/Scala bytes unmoved,
+            UI/report/artifact zero-diff, toolchain never required (<code>requires_toolchain: false</code>).</li>
+    </ul>
+    <h2>Summary</h2>
+    <ul>
+        <li>Ten serial hands, every one gated APPROVED with a reviewer-run census line; anchors chained
+            <code>1853</code> to <code>2015</code> with zero failures and every delta named.</li>
+        <li>The adaptability story is three dated amendments, each born from a witnessed STOP or a death:
+            payload-derived retarget (flat-id retarget without reopening the id space), the deadsession split
+            with diff-checked adoption, and the nested-module honest-spelling fix restoring
+            agree-by-construction between discovery and rewrite.</li>
+        <li>Three deadsessions, zero lost hops: duty-1 relays blob-verified, reds re-observed or
+            prediction-matched, adoption as-is only after inventory.</li>
+        <li>The proof the guide promised: a third language arrives through the seam - core spine edits are two
+            appends plus one arm, C++/Scala bytes never move, and the parity suite re-drives all eight
+            capabilities naming the hand that owns each.</li>
+    </ul>
+    <p style="font-size: 18px; color: #555;">Full parity, zero drift, honest limits on the table.</p>
+    <p style="color: #888;">Docs: <code>tasks/rust-language-*.md</code> (kickoff, shape, plan, handoffs,
+    journals, amendments, verdicts, execution-results) | ledger row 62 | this deck belongs in
+    <code>walkthroughs/</code> landed with the closeout commit.</p>
+</div>
+
+<div class="navigation">
+    <button onclick="prevSlide()">Previous</button>
+    <span id="slideNumber">1 / 19</span>
+    <button onclick="nextSlide()">Next</button>
+</div>
+
+<script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+
+    function showSlide(n) {
+        slides.forEach(slide => slide.classList.remove('active'));
+        slides[n].classList.add('active');
+        document.getElementById('slideNumber').textContent =
+            `${n + 1} / ${slides.length}`;
+    }
+
+    function nextSlide() {
+        currentSlide = (currentSlide + 1) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+        currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+        showSlide(currentSlide);
+    }
+
+    showSlide(0);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+        if (e.key === 'ArrowLeft') prevSlide();
+    });
+</script>
+</body>
+</html>
