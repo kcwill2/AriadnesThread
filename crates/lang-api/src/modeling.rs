@@ -17,6 +17,13 @@ pub enum AggregationKind {
     Header,
     PackageObject,
     None,
+    /// Rust's aggregation mechanism: a parent module's `mod x;` declaration
+    /// paired with its sibling file (`x.rs` or `x/mod.rs`).
+    /// `PackageObject` would lie for Rust and `None` would understate a
+    /// real mechanism (rust-language shape sec. 3.3).
+    /// FROZEN indices: pre-existing variants keep positional (bincode)
+    /// indices 0/1/2 unmoved; this variant takes index 3 at the END (INV-12).
+    ModDeclaration,
 }
 
 /// Duplicate-definition guard mechanism (was: hardcoded `#pragma once`).
@@ -200,5 +207,26 @@ mod tests {
             scala_modeling().symbol_placement,
             SymbolPlacement::SingleFile
         );
+    }
+
+    #[test]
+    fn aggregation_kind_append_is_serde_index_stable() {
+        // INV-12/L11: ModDeclaration is appended LAST, so every pre-existing
+        // variant keeps its historical serde name (JSON) and its positional
+        // (bincode) index order; the new name appears only at index 3.
+        let cases = [
+            (AggregationKind::Header, "\"Header\""),
+            (AggregationKind::PackageObject, "\"PackageObject\""),
+            (AggregationKind::None, "\"None\""),
+            (AggregationKind::ModDeclaration, "\"ModDeclaration\""),
+        ];
+        for (kind, expected_json) in cases {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(
+                json, expected_json,
+                "INV-12/L11: {kind:?} must serialize under its historical name \
+                 and ModDeclaration may only ever occupy the last index"
+            );
+        }
     }
 }

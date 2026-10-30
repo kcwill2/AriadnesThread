@@ -25,6 +25,18 @@ at 247 (collateral opportunities) and 272-281 (safe extractions), and
 `crates/cli/src/commands/ui.rs` at 359-368. ADR-0001's known-exception subsection
 records all three files; expect to edit every site.
 
+**Dated 2026-10-27 (rust-language R-10 rider: dispatch sites refreshed).** The line
+numbers in the paragraph above are stale (pre-AR-19): the three unconditional sites now
+live at `crates/cli/src/commands/plan.rs:203`, `crates/cli/src/optimize.rs:305`, and
+`crates/cli/src/commands/ui.rs:419`. Since AR-19 all three constructors consume the
+registry-dispatched `planning_hooks`, so a language enrolls by overriding the trait
+hooks (`aggregation_filter` and `target_path_for`) -- not by editing these sites. The
+`CyclePolicy::Reject` literals stayed, and they are informational to the planner: the
+planner treats the cycle stance as informational, and per-language policy reaches the
+report side through `cycle_policy_by_file`. The Rust plugin enrolled in planning with
+zero edits to any of these dispatch sites, so read "expect to edit every site" as a
+pre-AR-19 statement.
+
 Your plugin crate depends inward only: `ariadne-repo`, `ariadne-lang-api`, and
 `ariadne-lang` and nothing else. It must NOT list `ariadne-graph`,
 `ariadne-cluster`, `ariadne-transform`, or `ariadne-validate`.
@@ -57,6 +69,22 @@ tempfile.workspace = true
 ADR-0001 explains why those three and no more: the repository spine, the neutral
 vocabulary, and the plugin traits. Add `"crates/lang-<x>"` to `members` in the
 root `Cargo.toml` -- the only core-adjacent file you touch here.
+
+**Dated 2026-10-27 (rust-language R-10 rider: deliberate parser-deps extension).** The
+Rust plugin extends this manifest with three third-party parser libraries -- `syn`
+(features `full`), `proc-macro2` (feature `span-locations`), and `unicode-ident` -- all
+workspace-pinned in the root `Cargo.toml`. This is the one recorded deviation from "three
+deps and no more", and it is deliberate (kickoff decision D-2): parsing real Rust
+syntax with the `syn` crate is the correctness guarantee, and `span-locations` is
+load-bearing because the analyzer's records carry exact 1-based line and column, with a
+span-literal test that fails the moment the feature vanishes. What the m17 guards
+forbid is unchanged and not relaxed by this rider: the manifest guard still rejects
+`ariadne-graph`, `ariadne-cluster`, `ariadne-transform`, and `ariadne-validate`, and
+the transitive-tree guard still rejects scheduler, report, cluster, graph, transform,
+and validate anywhere in the dependency tree -- third-party parser libraries cannot
+reach the forbidden set. "Trio-for-three" stays the lang-scala baseline, not a
+universal cap: what binds every plugin is the guards' forbidden-crate lists, not the
+size of any one plugin's dependency list.
 
 ### Step 2 -- Implement the trait surface
 
@@ -154,13 +182,28 @@ and `m21_run_ui_smoke_test.rs` likewise have nothing to do with the Scala
 milestone. The five above plus `m18_cpp_plugin_parity_test.rs` are the
 milestone-evidence names; name yours for the milestone it lands in.
 
+**Dated 2026-10-27 (rust-language R-10 rider: the trap with a worked example).** The
+`rust-language` milestone landed six suites named `rust_language_discovery_test.rs`,
+`rust_language_dependency_graph_test.rs`, `rust_language_semantic_index_test.rs`,
+`rust_language_load_analysis_test.rs`, `rust_language_symbol_isolation_test.rs`, and
+`rust_language_parity_test.rs`. None carries an `mNN` prefix: the track is an
+unregistered post-M28 milestone with no M-number, so the guide rule applies directly --
+name your suites for the milestone they land in, and this track's `rust_language_*`
+prefix is the worked example of doing exactly that.
+
 ## The guard will check you
 
-- `plugin_crates_do_not_depend_on_core_pipeline` reads `crates/lang-cpp/Cargo.toml`
-  and `crates/lang-scala/Cargo.toml` as text and asserts neither declares
-  `ariadne-graph`, `ariadne-cluster`, `ariadne-transform`, or `ariadne-validate`.
-  `PLUGIN_CRATES` is a two-element list: your crate is NOT in it until you add it,
-  or the guard skips you.
+- `plugin_crates_do_not_depend_on_core_pipeline` reads the plugin manifests as text
+  (`crates/lang-cpp/Cargo.toml`, `crates/lang-scala/Cargo.toml`, and -- dated 2026-10-27
+  rust-language R-10 rider -- also `crates/lang-rust/Cargo.toml`) and asserts none
+  declares `ariadne-graph`, `ariadne-cluster`, `ariadne-transform`, or
+  `ariadne-validate`. `PLUGIN_CRATES` was a two-element list when this page was
+  written; it is now three. The pattern for joining is the append discipline: the
+  list element and the crate's manifest land in the SAME commit -- both guards
+  self-skip a manifest that does not exist yet, so appending the element early would
+  pass silently, and appending it late is caught by test-diff review (the
+  rust-language track's INV-11 law). Your crate is still NOT in the list until you
+  add it, or the guard skips you.
 - `core_crates_do_not_name_languages` walks every `.rs` file under `src/` in
   `crates/index`, `crates/graph`, `crates/cluster`, `crates/transform`,
   `crates/validate`, `crates/report`, and `crates/pipeline`, and asserts that no
@@ -218,6 +261,21 @@ evidence is thinner than the promise itself.
   or rejected. ADR-0001 parks it and says why: a loaded plugin's dependency
   surface is decided by the host at load time rather than by a manifest beside
   the source, so it would change how rule R1 is enforced and needs its own ADR.
+
+**Dated 2026-10-27 (rust-language R-10 rider: the two-plugin limits move).** A third
+plugin now exists: `crates/lang-rust` landed 2026-10-27 at full capability parity with
+Scala, so the guard sees three plugins, not two. The third plugin was still added by
+this team in this repository, so the "never tested against an adversary" limit above
+stands, unchanged in kind -- only the plugin count moved. What genuinely moved: rule
+R1 was exercised for the first time on a language foreign to the spine's own modeling
+vocabulary -- Rust's aggregation mechanism matched no existing `AggregationKind`, the
+spine grew an appended variant instead of a reinterpretation, and the seam held with
+the spine edit confined to the `FileKind` table plus append-only vocabulary. The
+first bullet's "only genuinely foreign plugin so far" wording describes the world
+before this landing: `crates/lang-rust` is the second genuinely foreign plugin
+authored against the seam. Dynamic and out-of-process plugin loading stays exactly as
+parked above -- nothing in the rust-language milestone loads a plugin, and that
+bullet is kept because it remains true.
 
 ## Where to read more
 

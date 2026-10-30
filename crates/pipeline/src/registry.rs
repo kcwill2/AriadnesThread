@@ -12,10 +12,12 @@
 use ariadne_lang::LanguageRegistry;
 use std::sync::Arc;
 
-/// The single plugin enumeration site (D9 consolidation): C++ first, then Scala.
-/// Registration ORDER is a contract - it drives `unit_shaper_for()`/
-/// `unit_shaper_for_repo()` fallback and `plugin_for()` precedence so existing
-/// C++ discovery stays byte-identical. Marker-based shaper auto-selection
+/// The single plugin enumeration site (D9 consolidation): C++ first, then
+/// Scala, then Rust appended last. Registration ORDER is a contract - it
+/// drives `unit_shaper_for()`/`unit_shaper_for_repo()` fallback and
+/// `plugin_for()` precedence so existing C++ discovery stays byte-identical
+/// (rust-language R-4: C++ first stays first; Rust appends last,
+/// INV-1/INV-2). Marker-based shaper auto-selection
 /// (the deferred M18.5 gap) landed with plan M22 D22: unfiltered discovery
 /// picks the first registered plugin whose build markers sit at the repo root.
 /// The CLI delegates here (`ariadne-cli::registry::default_registry`); cli
@@ -24,6 +26,7 @@ pub fn build_default_registry() -> LanguageRegistry {
     LanguageRegistry::new()
         .register(Box::new(ariadne_lang_cpp::CppPlugin::new()))
         .register(Box::new(ariadne_lang_scala::ScalaPlugin::new()))
+        .register(Box::new(ariadne_lang_rust::RustPlugin::new()))
 }
 
 /// Shared registry for library-level [`Pipeline::new`] entry points and

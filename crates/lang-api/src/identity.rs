@@ -40,6 +40,7 @@ mod tests {
             (FileKind::ScalaScript, LanguageId::Scala),
             (FileKind::BuildDefinition, LanguageId::Scala),
             (FileKind::Other, LanguageId::Other),
+            (FileKind::RustSource, LanguageId::Rust),
         ];
         for (kind, expected) in cases {
             assert_eq!(

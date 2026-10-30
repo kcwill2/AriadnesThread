@@ -59,6 +59,9 @@ pub const SCALA: &str = "Scala";
 /// The legacy "no language claimed this" label. Never a plugin identity and
 /// never returned by `detect_language` (M24 Part A, D-A3).
 pub const OTHER: &str = "Other";
+/// The canonical name of the Rust language, the identity the third-language
+/// plugin names itself with (rust-language spine, R-1).
+pub const RUST: &str = "Rust";
 
 /// Open-ended language identity (M24 Part A, D-A1; homed here by AR-27a).
 ///
@@ -85,6 +88,8 @@ impl LanguageId {
     pub const SCALA: &'static str = SCALA;
     /// The legacy "no language claimed this" label.
     pub const OTHER: &'static str = OTHER;
+    /// The canonical name of the Rust language.
+    pub const RUST: &'static str = RUST;
 
     /// The C++ language identity. PascalCase to match the stored variant names,
     /// so `LanguageId::Cpp` reads and spells exactly as the enum variant did.
@@ -96,6 +101,9 @@ impl LanguageId {
     /// The legacy "no language claimed this" label, as an identity.
     #[allow(non_upper_case_globals)]
     pub const Other: Self = Self(Cow::Borrowed(OTHER));
+    /// The Rust language identity.
+    #[allow(non_upper_case_globals)]
+    pub const Rust: Self = Self(Cow::Borrowed(RUST));
 
     /// Names any language, including one no other crate has heard of.
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
@@ -121,6 +129,11 @@ impl LanguageId {
         Self::Scala
     }
 
+    /// The Rust language identity, spelled so a core crate can name it.
+    pub fn rust() -> Self {
+        Self::Rust
+    }
+
     /// The legacy "no language claimed this" label, spelled so a core crate can
     /// name it.
     pub fn other() -> Self {
@@ -136,6 +149,7 @@ impl LanguageId {
             FileKind::ScalaSource | FileKind::ScalaScript | FileKind::BuildDefinition => {
                 Self::Scala
             }
+            FileKind::RustSource => Self::Rust,
             FileKind::Other => Self::Other,
         }
     }
@@ -397,5 +411,27 @@ mod tests {
         assert_eq!(LanguageId::CPP, "Cpp");
         assert_eq!(LanguageId::SCALA, "Scala");
         assert_eq!(LanguageId::OTHER, "Other");
+    }
+
+    #[test]
+    fn rust_source_kind_carries_the_rust_identity() {
+        use std::path::Path;
+        // INV-12: `RustSource` is the appended-last FileKind variant; INV-9:
+        // the identity it maps to is the Rust plugin's own name. The spine
+        // rows below pin the discovery-to-identity chain end to end.
+        assert_eq!(
+            FileKind::from_path(Path::new("a.rs")),
+            FileKind::RustSource,
+            "INV-12: .rs discovers as the appended RustSource variant"
+        );
+        assert!(
+            FileKind::RustSource.is_analyzable(),
+            "INV-9: RustSource is a semantically analyzable kind"
+        );
+        assert_eq!(
+            LanguageId::from_file_kind(FileKind::RustSource),
+            LanguageId::Rust,
+            "INV-12/INV-9: the exhaustive from_file_kind match carries RustSource to the Rust identity"
+        );
     }
 }

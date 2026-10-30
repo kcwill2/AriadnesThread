@@ -36,3 +36,5 @@ ariadne-lang = { path = "../../crates/lang" }
 ariadne-lang-cpp = { path = "../../crates/lang-cpp", features = ["test-resolver"] }
 # M19.3: the m19 discovery suite asserts the Scala plugin contract end to end.
 ariadne-lang-scala = { path = "../../crates/lang-scala" }
+# rust-language R-9b: the symbol-isolation suite consumes RustToolchainValidator::with_runner (F6 tier-3 Skipped chain).
+ariadne-lang-rust = { path = "../../crates/lang-rust" }

@@ -195,6 +195,7 @@ dependencies = [
  "ariadne-lang",
  "ariadne-lang-api",
  "ariadne-lang-cpp",
+ "ariadne-lang-rust",
  "ariadne-lang-scala",
  "ariadne-pipeline",
  "ariadne-repo",
@@ -249,6 +250,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ariadne-lang-rust"
+version = "0.1.0"
+dependencies = [
+ "ariadne-lang",
+ "ariadne-lang-api",
+ "ariadne-repo",
+ "proc-macro2",
+ "syn 2.0.119",
+ "tempfile",
+ "unicode-ident",
+]
+
+[[package]]
 name = "ariadne-lang-scala"
 version = "0.1.0"
 dependencies = [
@@ -268,6 +282,7 @@ dependencies = [
  "ariadne-index",
  "ariadne-lang",
  "ariadne-lang-cpp",
+ "ariadne-lang-rust",
  "ariadne-lang-scala",
  "ariadne-repo",
  "ariadne-report",

@@ -6,13 +6,14 @@
 //! stays the CLI's only registry-facing seam - no other CLI code may
 //! reference a concrete plugin type; indexing, unit shaping, and worker
 //! backends all route through what the builder enumerates (C++ first, then
-//! Scala; registration order is a contract).
+//! Scala, then Rust - rust-language R-4; registration order is a contract).
 
 use ariadne_lang::{LanguageId, LanguageRegistry};
 use ariadne_repo::SourceLanguage;
 
 /// The default language registry - delegation to the shared D9 builder
-/// (C++ per plan sec 3.4 lifecycle table, Scala per M19.3).
+/// (C++ per plan sec 3.4 lifecycle table, Scala per M19.3, Rust per
+/// rust-language R-4).
 pub fn default_registry() -> LanguageRegistry {
     ariadne_pipeline::build_default_registry()
 }
@@ -32,7 +33,7 @@ pub fn ensure_language_registered(
 }
 
 /// Parse a `--lang` value against the stored PascalCase serde names
-/// (`SourceLanguage::CPP`/`SCALA`/`OTHER`), also accepting the exact
+/// (`SourceLanguage::CPP`/`SCALA`/`RUST`/`OTHER`), also accepting the exact
 /// lowercase short form (`--lang cpp` ≡ `--lang Cpp`) for ergonomics.
 pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
     let mut chars = raw.chars();
@@ -46,22 +47,26 @@ pub fn parse_language_arg(raw: &str) -> Result<SourceLanguage, String> {
         }
     }
     Err(format!(
-        "unknown language '{raw}'; expected cpp, scala, or other \
-         (serde names: Cpp, Scala, Other)"
+        "unknown language '{raw}'; expected cpp, scala, rust, or other \
+         (serde names: Cpp, Scala, Rust, Other)"
     ))
 }
 
 /// AR-27a closed-set lookup over the stored serde names. The JSON arm of
 /// `SourceLanguage` (now the open `LanguageId` newtype) parses ANY name, so
-/// the `--lang` selection must not run through it: `--lang rust` stays the
-/// clear error §3.3 fact 3 demands, and an open id enters a run only through
-/// a registered plugin, never through this argument.
+/// the `--lang` selection must not run through it: only the stored names of
+/// registered plugins parse (rust-language R-4 added `Rust`), any other
+/// open id stays the clear error §3.3 fact 3 demands, and an open id enters
+/// a run only through a registered plugin, never through this argument.
 fn closed_set_language_by_serde_name(name: &str) -> Option<SourceLanguage> {
     if name == SourceLanguage::CPP {
         return Some(SourceLanguage::Cpp);
     }
     if name == SourceLanguage::SCALA {
         return Some(SourceLanguage::Scala);
+    }
+    if name == SourceLanguage::RUST {
+        return Some(SourceLanguage::Rust);
     }
     if name == SourceLanguage::OTHER {
         return Some(SourceLanguage::Other);
@@ -304,16 +309,22 @@ mod tests {
         let registry = default_registry();
         assert_eq!(
             registry.languages(),
-            vec![LanguageId::Cpp, LanguageId::Scala],
+            vec![LanguageId::Cpp, LanguageId::Scala, LanguageId::Rust],
             "registration ORDER is a contract: C++ first keeps unit_shaper_for()/\
-             detect_language C++ precedence byte-identical (M19.3)"
+             detect_language C++ precedence byte-identical (M19.3); Rust is \
+             appended LAST (rust-language R-4, INV-1/INV-2)"
         );
         assert!(registry.plugin_for_id(LanguageId::Cpp).is_some());
         assert!(registry.plugin_for_id(LanguageId::Scala).is_some());
+        assert!(registry.plugin_for_id(LanguageId::Rust).is_some());
         assert!(registry.detect_language(std::path::Path::new("src/a.cpp")).is_some());
         assert_eq!(
             registry.detect_language(std::path::Path::new("src/Main.scala")),
             Some(LanguageId::Scala)
+        );
+        assert_eq!(
+            registry.detect_language(std::path::Path::new("src/a.rs")),
+            Some(LanguageId::Rust)
         );
     }
 
@@ -366,7 +377,7 @@ mod tests {
 
     #[test]
     fn parse_language_arg_rejects_unknown_values() {
-        for bad in ["", "rust", "py", "Cpp20"] {
+        for bad in ["", "py", "Cpp20"] {
             assert!(parse_language_arg(bad).is_err(), "'{bad}' must be rejected");
         }
     }
@@ -388,6 +399,8 @@ mod tests {
         assert_eq!(parse_language_arg("Scala").unwrap(), SourceLanguage::Scala);
         assert_eq!(parse_language_arg("other").unwrap(), SourceLanguage::Other);
         assert_eq!(parse_language_arg("Other").unwrap(), SourceLanguage::Other);
+        assert_eq!(parse_language_arg("rust").unwrap(), SourceLanguage::Rust);
+        assert_eq!(parse_language_arg("Rust").unwrap(), SourceLanguage::Rust);
         // Rejected: the uppercase and mixed-case shapes the handoff names.
         assert!(
             parse_language_arg("CPP").is_err(),
@@ -396,6 +409,10 @@ mod tests {
         assert!(
             parse_language_arg("sCaLa").is_err(),
             "sCaLa is rejected: capitalizing yields SCaLa, matching no serde name"
+        );
+        assert!(
+            parse_language_arg("RUST").is_err(),
+            "RUST keeps its case and matches no serde name - same class as CPP/SCALA"
         );
         assert!(parse_language_arg("SCALA").is_err());
         assert!(parse_language_arg("OTHER").is_err());
@@ -406,17 +423,21 @@ mod tests {
     fn pin_plan_backend_honest_errors_unclaimed_target_and_capability_off() {
         let registry = default_registry();
         // (1) a target no plugin claims names the target AND the stage.
+        // (rust-language R-4, A3: the witness moved to `src/solver.f90` -
+        // m24's mock vocabulary, still unclaimed once the Rust plugin
+        // registers; a `.rs` witness would start resolving and this
+        // honest-error pin would go red.)
         let unclaimed = plan_backend(
             &registry,
-            std::path::Path::new("src/unclaimed.rs"),
+            std::path::Path::new("src/solver.f90"),
             |caps| caps.extraction,
             "extraction",
         )
         .err()
-        .expect("no registered detector claims `.rs`");
+        .expect("no registered detector claims `.f90`");
         let unclaimed_text = unclaimed.to_string();
         assert!(
-            unclaimed_text.contains("no language plugin claims the plan target src/unclaimed.rs")
+            unclaimed_text.contains("no language plugin claims the plan target src/solver.f90")
                 && unclaimed_text.contains("cannot route the extraction backend"),
             "the unclaimed-target error must name target and stage, got: {unclaimed_text}"
         );
@@ -740,7 +761,10 @@ mod tests {
         // there is no arm to misroute into any more.
         let registry = default_registry();
         let hooks = planning_hooks(&registry, std::path::Path::new("."));
-        for unclaimed in ["src/solver.f90", "src/unclaimed.rs"] {
+        // rust-language R-4, A4: the `.rs` witness row is gone - a plugin
+        // claims `.rs` now, so the f90 witness alone answers "no plugin
+        // claims" (same remedy as A3).
+        for unclaimed in ["src/solver.f90"] {
             let path = std::path::Path::new(unclaimed);
             assert!(
                 !(hooks.aggregation)(path),

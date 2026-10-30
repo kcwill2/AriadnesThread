@@ -5,6 +5,7 @@ members = [
     "crates/lang-api",
     "crates/lang-cpp",
     "crates/lang-scala",
+    "crates/lang-rust",
     "crates/repo",
     "crates/build",
     "crates/worker-core",
@@ -44,6 +45,11 @@ axum = { version = "0.7", features = ["json", "query"] }
 tower-http = { version = "0.5", features = ["cors"] }
 rayon = "1"
 thiserror = "2.0"
+# D-2 parser deps for lang-rust (shape sec. 3.2): `span-locations` on
+# proc-macro2 is load-bearing for INV-7 - no version bump may drop it.
+syn = { version = "2", features = ["full"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+unicode-ident = "1"
 
 [profile.release]
 # AriadnesThread: keep integer underflow LOUD in release. Two incidents

@@ -39,6 +39,8 @@ pub enum FileKind {
     BuildDefinition,
     // Catch-all
     Other,
+    // Rust - APPENDED LAST (INV-12: no pre-existing variant's serde index moves)
+    RustSource,
 }
 
 impl FileKind {
@@ -54,6 +56,7 @@ impl FileKind {
             Some("scala") => FileKind::ScalaSource,
             Some("sc") => FileKind::ScalaScript,
             Some("sbt" | "mill") => FileKind::BuildDefinition,
+            Some("rs") => FileKind::RustSource,
             _ => FileKind::Other,
         }
     }
@@ -66,7 +69,7 @@ impl FileKind {
     pub fn is_analyzable(&self) -> bool {
         matches!(
             self,
-            FileKind::Header | FileKind::Source | FileKind::ScalaSource
+            FileKind::Header | FileKind::Source | FileKind::ScalaSource | FileKind::RustSource
         )
     }
 }
@@ -100,7 +103,7 @@ mod file_kind_matrix_tests {
             ("a.sbt", FileKind::BuildDefinition),
             ("a.mill", FileKind::BuildDefinition),
             ("a.txt", FileKind::Other),
-            ("a.rs", FileKind::Other),
+            ("a.rs", FileKind::RustSource),
             ("Makefile", FileKind::Other),
             ("a", FileKind::Other),
             // A leading-dot name carries no extension for Path: dotfiles
@@ -111,7 +114,7 @@ mod file_kind_matrix_tests {
             (".h", FileKind::Other),
             (".gitignore", FileKind::Other),
             ("a.b.cpp", FileKind::Source),
-            ("a.h.rs", FileKind::Other),
+            ("a.h.rs", FileKind::RustSource),
         ];
         for (name, expected) in cases {
             assert_eq!(kind_of(name), expected, "FileKind::from_path({name:?})");
@@ -141,6 +144,7 @@ mod file_kind_matrix_tests {
             ("a.Sc", FileKind::ScalaScript),
             ("a.Mill", FileKind::BuildDefinition),
             ("a.Cc", FileKind::Source),
+            ("a.RS", FileKind::RustSource),
         ];
         for (name, expected) in cases {
             assert_eq!(kind_of(name), expected, "FileKind::from_path({name:?})");

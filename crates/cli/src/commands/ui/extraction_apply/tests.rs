@@ -824,16 +824,20 @@
     fn pin_failed_transaction_burns_the_token_and_reports_failed_text() {
         // The apply gate is a strict pipeline: (1) resolve, (2) try-lock,
         // (3) CONSUME, (4-5) the shared core. A plan whose transaction
-        // fails inside the core's own routing (a `.rs` target no plugin
+        // fails inside the core's own routing (a `.f90` target no plugin
         // claims) surfaces as Failed(Debug-shaped text, ASCII-sanitized)
         // - and the approval is ALREADY consumed at step (3): a retry with
         // the same token answers NotApproved at the token gate, never a
-        // second transaction attempt.
+        // second transaction attempt. R-9b1 rider: the doomed target moved
+        // from `.rs` to `.f90` because the Rust plugin now claims `.rs`
+        // with extraction on, so a `.rs` plan COMMITTED instead of failing
+        // the routing - same retarget the R-1 rider made for the
+        // registry.rs witnesses for exactly the `.rs`-claim reason.
         let (_temp_dir, state, _proposals, plans) = boot_swapped_fixture("basic");
         let shipped = plans.first().expect("fixture ships a plan").clone();
         let plan_id = shipped.id.0.clone();
         let doomed = OptimizationPlan {
-            target_file: PathBuf::from("solver.rs"),
+            target_file: PathBuf::from("solver.f90"),
             ..shipped
         };
         let applier = EngineBackedExtractionApplier::new(
@@ -852,7 +856,7 @@
 
         let refusal = match applier.apply(&plan_id, &token) {
             Ok(outcome) => panic!(
-                "a .rs target must fail the core routing, got Ok(committed={})",
+                "a .f90 target must fail the core routing, got Ok(committed={})",
                 outcome.committed
             ),
             Err(refusal) => refusal,
