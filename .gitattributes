@@ -15,3 +15,9 @@ tests/fixtures/**/artifacts/**/*.json text eol=lf
 # its terminator (caught at the shining-enthusiasm -> main merge 2026-10-12:
 # green in the authoring worktree, red on the smudged copy).
 crates/lang-cpp/tests/tokenizer_oracles/** text eol=lf
+
+# Same rationale for the rust-language frozen fixture tree (AR-31/F12 class,
+# caught at the rust-language merge to main 2026-10-30: green in the authoring
+# worktree, red on the CRLF-smudged copy - the rust suites match fixture
+# bytes with LF literals): the fixtures are frozen byte-exact trees.
+tests/fixtures/rust-basic/** text eol=lf
