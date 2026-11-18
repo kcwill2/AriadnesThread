@@ -74,6 +74,9 @@ pub struct TuStoreContext {
     pub contexts: Vec<CompilationContext>,
     hash_by_id: Arc<HashMap<FileId, String>>,
     path_by_id: Arc<HashMap<FileId, PathBuf>>,
+    /// Directive-resolution catalog over `discovery`, built once per run:
+    /// rebuilding it per TU cost ~125 ms at 28k files (~12 min per 5.7k TUs).
+    catalog: Arc<FileCatalog>,
 }
 
 pub type SharedTuStoreContext = Arc<TuStoreContext>;
@@ -94,7 +97,13 @@ impl TuStoreContext {
             contexts,
             hash_by_id: Arc::new(hash_by_id),
             path_by_id: Arc::new(path_by_id),
+            catalog: Arc::new(FileCatalog::from_records(&discovery.files)),
         })
+    }
+
+    /// The shared directive-resolution catalog over this run's discovery.
+    pub fn catalog(&self) -> &FileCatalog {
+        &self.catalog
     }
 }
 
@@ -371,7 +380,7 @@ pub fn compute_tu_closure_plugin(
         repo_root,
         search_paths,
     };
-    let catalog = FileCatalog::from_records(&ctx.discovery.files);
+    let catalog = ctx.catalog();
 
     let source_abs = repo_root.join(&tu.source_path);
     // Unreadable TU source is a normal miss: same sentinel as the legacy path.
@@ -392,7 +401,7 @@ pub fn compute_tu_closure_plugin(
         resolver.resolve_edges(tu.file_id, &tu.source_path, &files[0].2, &resolution);
     while let Some(edge) = stack.pop() {
         let destinations =
-            edge_destinations(&edge, resolver, &catalog, &resolution, ctx, repo_root);
+            edge_destinations(&edge, resolver, catalog, &resolution, ctx, repo_root);
         for (dest_id, dest_path) in destinations {
             if !visited.insert(dest_id) {
                 continue;
@@ -489,6 +498,21 @@ mod tests {
             },
             language: Default::default(),
         }
+    }
+
+    /// The closure walk resolves directives against one catalog built with
+    /// the context, not a fresh 30k-record catalog per TU; clones of the
+    /// context share it instead of copying it.
+    #[test]
+    fn context_builds_one_shared_catalog_over_discovery() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.cpp"), "#include \"b.h\"\n").unwrap();
+        fs::write(dir.path().join("b.h"), "int b();\n").unwrap();
+        let ctx = make_ctx(dir.path());
+        assert_eq!(ctx.catalog().len(), ctx.discovery.files.len());
+        assert!(ctx.catalog().by_rel_path("b.h").is_some());
+        let cloned = (*ctx).clone();
+        assert!(std::ptr::eq(ctx.catalog(), cloned.catalog()));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! repository [`FileId`] without touching the filesystem.
 
 use ariadne_repo::{FileId, FileRecord};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +34,16 @@ pub struct FileCatalog {
     by_basename: HashMap<String, FileId>,
     by_module_path: HashMap<String, FileId>,
     records: HashMap<FileId, FileRecord>,
+    /// Dotted module key (extension stripped) per record, computed once at
+    /// construction so suffix queries never re-normalize paths.
+    module_keys: HashMap<FileId, String>,
+    /// Last dotted segment of each record's module key and of its parent
+    /// (package-dir) key -> record ids. A suffix query can only match a
+    /// record filed under the query's own last segment, so
+    /// [`Self::by_module_path_suffix`] tests one bucket instead of scanning
+    /// every record (the per-import linear scan made Scala closure walks
+    /// cost ~10 ms per directive at 30k files).
+    suffix_buckets: HashMap<String, Vec<FileId>>,
 }
 
 impl FileCatalog {
@@ -53,15 +64,29 @@ impl FileCatalog {
                 .entry(basename.to_string())
                 .or_insert(record.id);
         }
-        self.by_module_path
-            .entry(module_key(&rel))
-            .or_insert(record.id);
+        let key = module_key(&rel);
+        self.by_module_path.entry(key.clone()).or_insert(record.id);
         self.by_canonical_path
             .entry(canonical_key(&record.canonical_path))
             .or_insert(record.id);
-        self.records
-            .entry(record.id)
-            .or_insert_with(|| record.clone());
+        if let Entry::Vacant(slot) = self.records.entry(record.id) {
+            slot.insert(record.clone());
+            self.index_module_suffixes(record.id, key);
+        }
+    }
+
+    /// Files `file_id` under the last segment of its module key and of its
+    /// parent key (once when both are equal), then remembers the key.
+    fn index_module_suffixes(&mut self, file_id: FileId, key: String) {
+        let mut tails = vec![last_segment(&key).to_string()];
+        if let Some(parent) = strip_last_segment(&key) {
+            tails.push(last_segment(parent).to_string());
+        }
+        tails.dedup();
+        for tail in tails {
+            self.suffix_buckets.entry(tail).or_default().push(file_id);
+        }
+        self.module_keys.insert(file_id, key);
     }
 
     /// Resolve a candidate path against the catalog the way a resolver
@@ -128,13 +153,14 @@ impl FileCatalog {
         if suffix.is_empty() {
             return Vec::new();
         }
-        let mut hits: Vec<(String, FileId)> = self
-            .records
-            .values()
-            .filter_map(|record| {
-                let rel = normalize_path(&record.path.to_string_lossy());
-                let key = module_key(&rel);
-                ends_with_module_suffix(&key, &suffix).then_some((key, record.id))
+        let Some(candidates) = self.suffix_buckets.get(last_segment(&suffix)) else {
+            return Vec::new();
+        };
+        let mut hits: Vec<(&str, FileId)> = candidates
+            .iter()
+            .filter_map(|file_id| {
+                let key = self.module_keys.get(file_id)?;
+                ends_with_module_suffix(key, &suffix).then_some((key.as_str(), *file_id))
             })
             .collect();
         hits.sort();
@@ -241,7 +267,15 @@ fn module_key(rel_path: &str) -> String {
 /// `key` ends with `suffix` on a component boundary: exactly the suffix, or
 /// the suffix extended leftward by dotted segments (`prefix.suffix`).
 fn ends_on_module_boundary(key: &str, suffix: &str) -> bool {
-    key == suffix || key.ends_with(&format!(".{suffix}"))
+    key == suffix
+        || key
+            .strip_suffix(suffix)
+            .is_some_and(|head| head.ends_with('.'))
+}
+
+/// Final dotted segment of a unified key (the whole key when it has no dot).
+fn last_segment(unified: &str) -> &str {
+    unified.rsplit('.').next().unwrap_or(unified)
 }
 
 /// Suffix test for [`FileCatalog::by_module_path_suffix`]: the full module
@@ -646,5 +680,79 @@ mod tests {
             "a pure ParentDir chain is kept verbatim: with no root to anchor to, \
              the dots cannot collapse and must stay visible"
         );
+    }
+
+    /// The pre-index linear scan, kept verbatim as the parity oracle for the
+    /// indexed [`FileCatalog::by_module_path_suffix`].
+    fn brute_force_suffix_lookup(records: &[FileRecord], module_path: &str) -> Vec<FileId> {
+        let suffix = unify_segments(module_path);
+        if suffix.is_empty() {
+            return Vec::new();
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut hits: Vec<(String, FileId)> = records
+            .iter()
+            .filter(|record| seen.insert(record.id))
+            .filter_map(|record| {
+                let key = module_key(&normalize_path(&record.path.to_string_lossy()));
+                ends_with_module_suffix(&key, &suffix).then_some((key, record.id))
+            })
+            .collect();
+        hits.sort();
+        hits.into_iter().map(|(_key, id)| id).collect()
+    }
+
+    fn awkward_suffix_records() -> Vec<FileRecord> {
+        let mut records = scala_tree_records();
+        for rel in [
+            "src/main/scala/com/example/models/models.scala",
+            "lib/models/Order.scala",
+            "a/b.c/d.test.scala",
+            "README",
+            "Makefile.am",
+            "src\\win\\models\\User.scala",
+            "src/main/scala/com/example/xmodels/Order.scala",
+            "src/main/scala/com/example/models/User.scala",
+        ] {
+            records.push(record(rel));
+        }
+        records
+    }
+
+    fn all_dotted_suffixes(key: &str) -> Vec<String> {
+        let segments: Vec<&str> = key.split('.').collect();
+        (0..segments.len())
+            .map(|start| segments[start..].join("."))
+            .collect()
+    }
+
+    #[test]
+    fn indexed_suffix_lookup_matches_the_linear_scan_oracle() {
+        let records = awkward_suffix_records();
+        let catalog = FileCatalog::from_records(&records);
+        let mut queries: Vec<String> = ["", ".", "nope", "models", "x.models", "scala.com"]
+            .iter()
+            .map(|query| query.to_string())
+            .collect();
+        for record in &records {
+            let key = module_key(&normalize_path(&record.path.to_string_lossy()));
+            queries.extend(all_dotted_suffixes(&key));
+            if let Some(parent) = strip_last_segment(&key) {
+                queries.extend(all_dotted_suffixes(parent));
+            }
+        }
+        for query in &queries {
+            assert_eq!(
+                catalog.by_module_path_suffix(query),
+                brute_force_suffix_lookup(&records, query),
+                "query {query:?}"
+            );
+            let slashed = query.replace('.', "/");
+            assert_eq!(
+                catalog.by_module_path_suffix(&slashed),
+                brute_force_suffix_lookup(&records, &slashed),
+                "query {slashed:?}"
+            );
+        }
     }
 }
