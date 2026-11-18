@@ -232,6 +232,14 @@ impl LoadMemo {
     /// included (an unknown/edgeless seed yields the singleton `{itself}`).
     /// The single-seed case copies the memoized set once; multi-seed calls
     /// union the Arc contents into the owned result.
+    ///
+    /// Once the cache is FULL (capped boot memo at corpus scale), per-seed
+    /// walks can no longer be admitted, so walking each seed separately
+    /// would re-traverse every shared successor once per seed. The full-cache
+    /// branch instead unions the cached hits and runs ONE shared walk over
+    /// the remaining seeds - the same set, by seed-locality, in O(reachable)
+    /// instead of O(seeds x reachable). Uncapped memos are never full, so
+    /// their per-seed memoization is unchanged.
     pub fn get_semantic_closure_of_symbols(
         &self,
         model: &ReducedSemanticModel,
@@ -240,9 +248,56 @@ impl LoadMemo {
         if let [only_seed] = start_symbols {
             return (*self.cached_single_seed_closure(model, only_seed)).clone();
         }
+        if self.semantic_closure_cache_is_full() {
+            return self.shared_walk_closure(model, start_symbols);
+        }
         let mut visited = HashSet::new();
         for seed in start_symbols {
             visited.extend(self.cached_single_seed_closure(model, seed).iter().cloned());
+        }
+        visited
+    }
+
+    /// True when the first-N admission policy will reject every new entry.
+    /// Monotone: entries are never evicted, so once full, always full.
+    fn semantic_closure_cache_is_full(&self) -> bool {
+        self.semantic_closure_cache.lock().unwrap().len() >= self.semantic_closure_cap
+    }
+
+    /// Multi-seed closure on a full cache: cached seeds contribute their
+    /// memoized (reachability-closed) sets, then the uncached seeds share
+    /// one walk that prunes at every already-visited symbol. Pruning is
+    /// sound because each memoized set is closed under successors. The
+    /// cache guard covers only the `Arc` lookups, never a set copy or walk.
+    fn shared_walk_closure(
+        &self,
+        model: &ReducedSemanticModel,
+        seeds: &[SymbolId],
+    ) -> HashSet<SymbolId> {
+        let (cached_closures, uncached_seeds) = {
+            let cache = self.semantic_closure_cache.lock().unwrap();
+            let mut cached_closures = Vec::new();
+            let mut uncached_seeds = Vec::new();
+            for seed in seeds {
+                match cache.get(seed) {
+                    Some(closure) => cached_closures.push(Arc::clone(closure)),
+                    None => uncached_seeds.push(seed),
+                }
+            }
+            (cached_closures, uncached_seeds)
+        };
+        let mut visited = HashSet::new();
+        for closure in &cached_closures {
+            visited.extend(closure.iter().cloned());
+        }
+        let mut stack = Vec::new();
+        for seed in uncached_seeds {
+            if visited.insert(seed.clone()) {
+                stack.push(seed.clone());
+            }
+        }
+        if !stack.is_empty() {
+            self.walk_semantic_successors(model, &mut visited, stack);
         }
         visited
     }
@@ -288,6 +343,21 @@ impl LoadMemo {
         model: &ReducedSemanticModel,
         seed: &SymbolId,
     ) -> HashSet<SymbolId> {
+        let mut visited = HashSet::new();
+        visited.insert(seed.clone());
+        self.walk_semantic_successors(model, &mut visited, vec![seed.clone()]);
+        visited
+    }
+
+    /// One traversal (counted once on the test-only tally) from `stack`
+    /// over the lazily built `symbol_adjacency`, inserting every reachable
+    /// symbol into `visited`. Callers pre-insert the stack's seeds.
+    fn walk_semantic_successors(
+        &self,
+        model: &ReducedSemanticModel,
+        visited: &mut HashSet<SymbolId>,
+        mut stack: Vec<SymbolId>,
+    ) {
         #[cfg(any(test, feature = "test-instrument"))]
         self.record_semantic_bfs_traversal();
 
@@ -301,10 +371,6 @@ impl LoadMemo {
             adj
         });
 
-        let mut visited = HashSet::new();
-        visited.insert(seed.clone());
-        let mut stack = vec![seed.clone()];
-
         while let Some(current) = stack.pop() {
             if let Some(nexts) = adjacency.get(&current) {
                 for next in nexts {
@@ -314,7 +380,6 @@ impl LoadMemo {
                 }
             }
         }
-        visited
     }
 
     /// Test-only: counts each semantic-closure BFS traversal actually run by

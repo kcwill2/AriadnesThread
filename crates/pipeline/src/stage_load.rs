@@ -19,7 +19,7 @@
 //! moved item); its signature is unchanged (shape sec. 3.3 preferred
 //! outcome - the pin test is green UNEDITED).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -35,7 +35,8 @@ use ariadne_report::LoadReport;
 
 use crate::{LoadMilestone, Pipeline, ProgressCb, ProgressEvent, StageReuse, STAGE_LOAD};
 
-/// Chunk width of the two stage-5 passes (M28 T2 (c)): each rayon
+/// Chunk width of the stage-5 FILE pass (M28 T2 (c); the symbol pass is
+/// grouped by defining file since the 2026-11-18 boost fix): each rayon
 /// `collect()` now owns at most a chunk's worth of intermediate elements,
 /// so the pass intermediates scale with this width instead of the corpus.
 /// 512 is a power of two, >= 16x a typical logical-core count (the pool
@@ -340,54 +341,83 @@ fn symbol_query_resolution(model: &ReducedSemanticModel) -> HashMap<&str, &Symbo
     resolution
 }
 
-/// Chunked, parallel, order-preserving symbol metric pass for `ensure_load`
-/// (M28 T2 (c)) over the AR-07 by-id seam (AR-08). The BTreeMap `.values()`
-/// view is walked in chunks of `LOAD_PASS_CHUNK` (b-tree value iterators are
-/// not rayon parallel iterators): each chunk is collected through
-/// `par_iter().filter_map().collect()` - the same vector, and the same order,
-/// the old full-size collect produced - and appended, so the chunk-owned
-/// intermediates stay chunk-sized while the result keeps the exact element
-/// order (sequential-reference oracles, green UNEDITED).
+/// Parallel, order-preserving symbol metric pass for `ensure_load` over the
+/// AR-07 by-id seam (AR-08), grouped by DEFINING FILE (2026-11-18 boost
+/// collateral-pass fix 2). The walk is the BTreeMap `.values()` order resolved
+/// through the AR-08 table, exactly as before; each defining file's group then
+/// shares ONE physical expansion across all of its symbols. The pre-grouping
+/// pass walked symbols in key order, which scatters them across files, so
+/// once the first-N physical memo filled (128 entries, reached almost at once
+/// at boost scale) every symbol re-expanded its file's whole include closure.
+/// Results land in walk-position slots, so the output keeps the exact element
+/// order (sequential-reference oracles, green UNEDITED). Ids without a record
+/// or defining file are skipped, matching the old `filter_map` over the
+/// erroring by-id entry.
 ///
 /// Both the walk and the resolution read `analyzer.model` - the same map the
 /// by-id entry resolves against - so the pass cannot index one model while
 /// resolving against another.
-fn collect_symbol_metrics(analyzer: &LoadAnalyzer<'_>) -> Vec<LoadMetric> {
+pub(crate) fn collect_symbol_metrics(analyzer: &LoadAnalyzer<'_>) -> Vec<LoadMetric> {
     let symbols_by_query = symbol_query_resolution(analyzer.model);
-    let mut metrics: Vec<LoadMetric> = Vec::new();
-    let mut id_chunk: Vec<&SymbolId> = Vec::with_capacity(LOAD_PASS_CHUNK);
-    for symbol_record in analyzer.model.symbols.values() {
-        // The query is a record name, and every record name is a key of the
-        // table, so this cannot miss; the `continue` keeps the shape the old
-        // `filter_map` had for an unresolvable name (drop the element) in the
-        // event the table and the walk were ever built from different maps.
-        let Some(symbol_id) = symbols_by_query.get(symbol_record.name.as_str()) else {
-            continue;
-        };
-        id_chunk.push(symbol_id);
-        if id_chunk.len() == LOAD_PASS_CHUNK {
-            metrics.extend(analyze_symbol_chunk(analyzer, &id_chunk));
-            id_chunk.clear();
-        }
+    // Every record name is a key of the table, so the lookup cannot miss;
+    // `filter_map` keeps the drop-on-miss shape in case the table and the
+    // walk were ever built from different maps.
+    let walk: Vec<&SymbolId> = analyzer
+        .model
+        .symbols
+        .values()
+        .filter_map(|record| symbols_by_query.get(record.name.as_str()).copied())
+        .collect();
+    let groups = group_walk_by_def_file(analyzer, &walk);
+    let analyzed: Vec<Vec<(usize, LoadMetric)>> = groups
+        .par_iter()
+        .map(|(def_file, positions)| analyze_def_file_group(analyzer, *def_file, &walk, positions))
+        .collect();
+    let mut slots: Vec<Option<LoadMetric>> = (0..walk.len()).map(|_| None).collect();
+    for (position, metric) in analyzed.into_iter().flatten() {
+        slots[position] = Some(metric);
     }
-    if !id_chunk.is_empty() {
-        metrics.extend(analyze_symbol_chunk(analyzer, &id_chunk));
-    }
-    metrics
+    slots.into_iter().flatten().collect()
 }
 
-/// One symbol chunk: analyze every resolved id in parallel through the by-id
-/// entry - no name round-trip, no per-symbol scan - skipping the ids whose
-/// analysis errors exactly as the pre-split `filter_map` did (the records
-/// without a defining file, which error with the message the name entry has
-/// always produced).
-fn analyze_symbol_chunk(
+/// Walk positions grouped by the symbol's defining file (BTreeMap keeps the
+/// grouping deterministic). Positions whose id has no record or no defining
+/// file are left out - the by-id entry would error on them.
+fn group_walk_by_def_file(
     analyzer: &LoadAnalyzer<'_>,
-    symbol_ids: &[&SymbolId],
-) -> Vec<LoadMetric> {
-    symbol_ids
+    walk: &[&SymbolId],
+) -> Vec<(FileId, Vec<usize>)> {
+    let mut groups: BTreeMap<FileId, Vec<usize>> = BTreeMap::new();
+    for (position, symbol_id) in walk.iter().enumerate() {
+        let def_file = analyzer
+            .model
+            .symbols
+            .get(*symbol_id)
+            .and_then(|record| record.defining_file);
+        if let Some(def_file) = def_file {
+            groups.entry(def_file).or_default().push(position);
+        }
+    }
+    groups.into_iter().collect()
+}
+
+/// One defining file's group: expand the file once, then analyze its symbols
+/// in parallel over that shared expansion, tagged with their walk positions.
+fn analyze_def_file_group(
+    analyzer: &LoadAnalyzer<'_>,
+    def_file: FileId,
+    walk: &[&SymbolId],
+    positions: &[usize],
+) -> Vec<(usize, LoadMetric)> {
+    let expansion = analyzer.physical_expansion(def_file);
+    positions
         .par_iter()
-        .filter_map(|&symbol_id| analyzer.analyze_symbol_load_by_id(symbol_id).ok())
+        .filter_map(|&position| {
+            analyzer
+                .analyze_symbol_load_with_expansion(walk[position], &expansion)
+                .ok()
+                .map(|metric| (position, metric))
+        })
         .collect()
 }
 

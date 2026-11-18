@@ -361,3 +361,74 @@ mod caps_env_ablation {
         );
     }
 }
+
+/// Boost-scale symbol-pass lock (fix 2 of the 2026-11-18 collateral-pass
+/// investigation): the symbol pass groups symbols by defining file and
+/// expands each file ONCE, so even a memo-off (cap 0,0) analyzer runs one
+/// physical expansion per distinct defining file - not one per symbol, the
+/// rate the first-N memo degraded to once full at corpus scale. Output must
+/// stay element-for-element equal to the uncapped by-id reference.
+#[cfg(feature = "test-instrument")]
+mod grouped_symbol_pass {
+    use super::setup_repo;
+    use crate::stage_load::collect_symbol_metrics;
+    use crate::Pipeline;
+    use ariadne_graph::{LoadAnalyzer, LoadMemo, LoadMetric};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    #[test]
+    fn symbol_pass_expands_each_defining_file_once_and_keeps_order() {
+        let dir = setup_repo();
+        // Two symbols in one header, so grouping is observable.
+        std::fs::write(
+            dir.path().join("include/common.h"),
+            "struct Common { int id; };
+struct Spare { int unused; };",
+        )
+        .unwrap();
+        let mut pipeline = Pipeline::new(dir.path(), None).unwrap();
+        pipeline.ensure_include_graph().unwrap();
+        pipeline.ensure_reduced().unwrap();
+        let (graph, closures, reduced) = pipeline
+            .take_graph_and_reduced_for_load()
+            .expect("the seam hands out the populated trio after both stages");
+
+        let memo_off = LoadMemo::with_closures_and_capacity(closures.clone(), 0, 0);
+        let analyzer = LoadAnalyzer::with_memo(&graph, &reduced, Arc::new(memo_off));
+        let grouped = collect_symbol_metrics(&analyzer);
+
+        let reference_analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
+        let reference: Vec<LoadMetric> = reduced
+            .symbols
+            .values()
+            .filter_map(|record| {
+                let symbol_id = reference_analyzer.symbol_id_by_name(&record.name)?;
+                reference_analyzer.analyze_symbol_load_by_id(&symbol_id).ok()
+            })
+            .collect();
+        assert_eq!(grouped, reference, "grouped pass must keep the walk order");
+
+        let defining_files: HashSet<_> = reduced
+            .symbols
+            .values()
+            .filter_map(|record| record.defining_file)
+            .collect();
+        let defined_symbols = reduced
+            .symbols
+            .values()
+            .filter(|record| record.defining_file.is_some())
+            .count();
+        assert!(
+            defined_symbols > defining_files.len(),
+            "fixture must hold a file defining several symbols ({} symbols, {} files)",
+            defined_symbols,
+            defining_files.len()
+        );
+        assert_eq!(
+            analyzer.memo().physical_expansion_count(),
+            defining_files.len(),
+            "memo off: one physical expansion per defining file, not per symbol"
+        );
+    }
+}

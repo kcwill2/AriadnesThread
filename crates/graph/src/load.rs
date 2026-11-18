@@ -144,6 +144,23 @@ pub struct ExtractionImpact {
     pub symbols_no_longer_parsed: usize,
 }
 
+/// Physical expansion of ONE defining file (the union of `file_symbols` over
+/// the file's transitive includes, the file included), tagged with that file.
+/// Built by `LoadAnalyzer::physical_expansion`; the tag lets
+/// `analyze_symbol_load_with_expansion` reject a symbol from another file.
+#[derive(Debug, Clone)]
+pub struct DefFileExpansion {
+    def_file: FileId,
+    symbols: Arc<HashSet<SymbolId>>,
+}
+
+impl DefFileExpansion {
+    /// The defining file this expansion was built for.
+    pub fn def_file(&self) -> FileId {
+        self.def_file
+    }
+}
+
 /// Single-pass split of the physical expansion into `(semantic, collateral)`
 /// vectors (plan LoadPerf A3): one walk of `physical_symbols` instead of the
 /// old two filter passes, then one ascending sort each. Sorting after the
@@ -534,6 +551,18 @@ impl<'a> LoadAnalyzer<'a> {
             }
         };
 
+        Ok(self.build_metric(target_name, target_file, physical_symbols, semantic_closure))
+    }
+
+    /// Metric body shared by every entry: split the physical expansion
+    /// against the semantic closure and group both sides by source file.
+    fn build_metric(
+        &self,
+        target_name: String,
+        target_file: Option<PathBuf>,
+        physical_symbols: &HashSet<SymbolId>,
+        semantic_closure: &HashSet<SymbolId>,
+    ) -> LoadMetric {
         let (semantic_sym_vec, collateral_symbols) =
             partition_symbols(physical_symbols, semantic_closure);
 
@@ -541,7 +570,7 @@ impl<'a> LoadAnalyzer<'a> {
         let largest_collateral_source = collateral_sources.first().cloned();
         let semantic_sources = self.contributing_sources(&semantic_sym_vec);
 
-        Ok(LoadMetric {
+        LoadMetric {
             target_name,
             target_file,
             semantic_load: semantic_sym_vec.len(),
@@ -553,7 +582,68 @@ impl<'a> LoadAnalyzer<'a> {
             collateral_sources,
             largest_collateral_source,
             semantic_sources,
-        })
+        }
+    }
+
+    /// Registered record and defining file of `symbol_id`, with the exact
+    /// miss errors the by-id entry has always produced.
+    fn symbol_record_and_def_file(
+        &self,
+        symbol_id: &SymbolId,
+    ) -> Result<(&'a crate::ReducedSymbolRecord, FileId)> {
+        let record = self
+            .model
+            .symbols
+            .get(symbol_id)
+            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_id.0))?;
+        let def_file = record
+            .defining_file
+            .ok_or_else(|| anyhow!("No defining file for symbol"))?;
+        Ok((record, def_file))
+    }
+
+    /// Physical expansion of one defining file, tagged with that file so
+    /// `analyze_symbol_load_with_expansion` can refuse a mismatched symbol.
+    /// Served through the memo (an admitted entry is a refcount bump), so a
+    /// caller that groups symbols by defining file expands each file once
+    /// even after the capped boot memo is full.
+    pub fn physical_expansion(&self, def_file: FileId) -> DefFileExpansion {
+        DefFileExpansion {
+            def_file,
+            symbols: self
+                .memo
+                .cached_physical_expansion(self.include_graph, self.model, def_file),
+        }
+    }
+
+    /// Symbol load over a caller-held expansion of the symbol's defining
+    /// file: identical metric to `analyze_symbol_load_by_id`, without
+    /// re-expanding the file per symbol. Errors on the by-id miss paths,
+    /// and when `expansion` belongs to a different defining file.
+    pub fn analyze_symbol_load_with_expansion(
+        &self,
+        symbol_id: &SymbolId,
+        expansion: &DefFileExpansion,
+    ) -> Result<LoadMetric> {
+        let (record, def_file) = self.symbol_record_and_def_file(symbol_id)?;
+        if def_file != expansion.def_file {
+            return Err(anyhow!(
+                "Expansion is for a different defining file than symbol: {}",
+                symbol_id.0
+            ));
+        }
+        let target_file_path = self.include_graph.file_paths.get(&def_file).cloned();
+        // Borrow the memoized `Arc` closure directly: the per-symbol pass
+        // calls this once per symbol, so cloning the set is the cost to avoid.
+        let semantic_closure = self
+            .memo
+            .cached_single_seed_closure(self.model, symbol_id);
+        Ok(self.build_metric(
+            record.name.clone(),
+            target_file_path,
+            &expansion.symbols,
+            &semantic_closure,
+        ))
     }
 
     /// Name entry: resolve via `symbol_id_by_name`, then delegate. Zero
@@ -575,33 +665,8 @@ impl<'a> LoadAnalyzer<'a> {
     /// errors with the same `"No defining file for symbol"` message the
     /// name entry has always produced.
     pub fn analyze_symbol_load_by_id(&self, symbol_id: &SymbolId) -> Result<LoadMetric> {
-        let record = self
-            .model
-            .symbols
-            .get(symbol_id)
-            .ok_or_else(|| anyhow!("Symbol record not found for: {}", symbol_id.0))?;
-        let def_file = record
-            .defining_file
-            .ok_or_else(|| anyhow!("No defining file for symbol"))?;
-        let target_file_path = self.include_graph.file_paths.get(&def_file).cloned();
-
-        // Hot path: borrow the memoized `Arc` closure directly — the
-        // pipeline's per-symbol pass calls this once per symbol, and
-        // cloning the whole closure set per call was the dominant
-        // cache-hit cost the Arc memo exists to remove.
-        let semantic_closure = self
-            .memo
-            .cached_single_seed_closure(self.model, symbol_id);
-
-        let mut def_files = HashSet::new();
-        def_files.insert(def_file);
-
-        self.compute_load(
-            record.name.clone(),
-            target_file_path,
-            def_files,
-            &semantic_closure,
-        )
+        let (_, def_file) = self.symbol_record_and_def_file(symbol_id)?;
+        self.analyze_symbol_load_with_expansion(symbol_id, &self.physical_expansion(def_file))
     }
 
     /// Path entry: resolve the id, then delegate. Zero behavior change —
@@ -704,6 +769,12 @@ mod vocabulary;
 #[cfg(test)]
 #[path = "load_degeneracy_tests.rs"]
 mod degeneracy;
+
+/// Boost-scale speedup suite: shared multi-seed walk on a full semantic
+/// memo, and the once-per-def-file shared physical expansion entry.
+#[cfg(test)]
+#[path = "load_shared_walk_tests.rs"]
+mod shared_walk;
 
 /// AR-07 by-id suite: locks the `analyze_symbol_load_by_id` /
 /// `symbol_id_by_name` seam (audit P1 part 1) — parity with the name entry,
