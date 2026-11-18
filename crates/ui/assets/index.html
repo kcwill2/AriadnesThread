@@ -240,7 +240,10 @@
       <div class="hotspot-hint" id="hotspotHint"></div>
       <div class="hotspot-list" id="hotspotList"></div>
       <div id="proposedExtractionsSection" style="display:none;">
-        <div class="link-list-title" style="color:var(--amber);">&#128161; Proposed extractions</div>
+        <div class="link-list-title" style="color:var(--amber);">
+          <span>&#128161; Proposed extractions</span>
+          <span id="proposedExtractionsCount" style="font-family:monospace;">0</span>
+        </div>
         <div class="extraction-list" id="proposedExtractionsList"></div>
       </div>
     </div>
@@ -362,6 +365,7 @@
             <span id="inspUpstreamTitle">Incoming (Includers / Callers)</span>
             <span id="inspUpstreamCount" style="font-family:monospace;">0</span>
           </summary>
+          <input type="search" class="path-input link-filter-input" id="inspUpstreamFilter" placeholder="Filter incoming by name or path..." autocomplete="off">
           <div class="link-list" id="inspUpstreamList"></div>
         </details>
 
@@ -370,6 +374,7 @@
             <span id="inspDownstreamTitle">Outgoing (Dependencies / Callees)</span>
             <span id="inspDownstreamCount" style="font-family:monospace;">0</span>
           </summary>
+          <input type="search" class="path-input link-filter-input" id="inspDownstreamFilter" placeholder="Filter outgoing by name or path..." autocomplete="off">
           <div class="link-list" id="inspDownstreamList"></div>
         </details>
 

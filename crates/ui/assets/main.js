@@ -344,6 +344,40 @@
       closeModals();
     });
 
+    // Inspector link-list filter: hides rows whose name/path (data-filter-text,
+    // emitted by graph.js) does not contain the query, case-insensitively, and
+    // shows "visible / total" in the section count while a query is active.
+    function applyLinkListFilter(inputId, listId, countId) {
+      const input = document.getElementById(inputId);
+      const list = document.getElementById(listId);
+      if (!input || !list) return;
+      const query = input.value.trim().toLowerCase();
+      const rows = list.querySelectorAll('.link-item[data-filter-text]');
+      let visible = 0;
+      rows.forEach(row => {
+        const match = !query || row.dataset.filterText.toLowerCase().includes(query);
+        row.style.display = match ? '' : 'none';
+        if (match) visible++;
+      });
+      const count = document.getElementById(countId);
+      if (count) count.textContent = query ? visible + ' / ' + rows.length : String(rows.length);
+    }
+
+    function resetLinkListFilter(inputId, countId, total) {
+      const input = document.getElementById(inputId);
+      if (input) input.value = '';
+      const count = document.getElementById(countId);
+      if (count) count.textContent = String(total);
+    }
+
+    function bindLinkListFilter(inputId, listId, countId) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      input.addEventListener('input', () => applyLinkListFilter(inputId, listId, countId));
+    }
+    bindLinkListFilter('inspUpstreamFilter', 'inspUpstreamList', 'inspUpstreamCount');
+    bindLinkListFilter('inspDownstreamFilter', 'inspDownstreamList', 'inspDownstreamCount');
+
     function findIncludePath(fromId, toId) {
       if (fromId === toId) return [fromId];
       const queue = [[fromId]];

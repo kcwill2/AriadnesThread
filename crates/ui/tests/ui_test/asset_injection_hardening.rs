@@ -184,11 +184,11 @@ fn test_no_nested_escaper_calls() {
 #[test]
 fn test_graphjs_inspector_sites_delegated_and_escaped() {
     assert!(
-        GRAPH_JS.contains(r##"<div class="link-item" data-select-id="${escapeAttribute(e.source)}">"##),
+        GRAPH_JS.contains(r##"<div class="link-item" data-select-id="${escapeAttribute(e.source)}" data-filter-text="${escapeAttribute(filterText)}" title="${escapeAttribute(srcNode && srcNode.path ? srcNode.path : name)}">"##),
         "upstream row must carry the source id as an inert escaped data attribute"
     );
     assert!(
-        GRAPH_JS.contains(r##"<div class="link-item" data-select-id="${escapeAttribute(e.target)}">"##),
+        GRAPH_JS.contains(r##"<div class="link-item" data-select-id="${escapeAttribute(e.target)}" data-filter-text="${escapeAttribute(filterText)}" title="${escapeAttribute(dstNode && dstNode.path ? dstNode.path : name)}">"##),
         "downstream row must carry the target id as an inert escaped data attribute"
     );
     assert!(

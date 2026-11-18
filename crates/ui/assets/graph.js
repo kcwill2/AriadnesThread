@@ -591,8 +591,9 @@
       upList.innerHTML = upstream.map(e => {
         const srcNode = tabAllNodes.find(n => n.id === e.source);
         const name = srcNode ? srcNode.label : e.source;
+        const filterText = name + ' ' + (srcNode && srcNode.path ? srcNode.path : '');
         return `
-          <div class="link-item" data-select-id="${escapeAttribute(e.source)}">
+          <div class="link-item" data-select-id="${escapeAttribute(e.source)}" data-filter-text="${escapeAttribute(filterText)}" title="${escapeAttribute(srcNode && srcNode.path ? srcNode.path : name)}">
             <span>${escapeHtml(name)}</span>
             <span style="color:var(--text-sub);">${e.kind || 'Direct'}</span>
           </div>
@@ -605,13 +606,17 @@
       downList.innerHTML = downstream.map(e => {
         const dstNode = tabAllNodes.find(n => n.id === e.target);
         const name = dstNode ? dstNode.label : e.target;
+        const filterText = name + ' ' + (dstNode && dstNode.path ? dstNode.path : '');
         return `
-          <div class="link-item" data-select-id="${escapeAttribute(e.target)}">
+          <div class="link-item" data-select-id="${escapeAttribute(e.target)}" data-filter-text="${escapeAttribute(filterText)}" title="${escapeAttribute(dstNode && dstNode.path ? dstNode.path : name)}">
             <span style="color:var(--cyan);">${escapeHtml(name)}</span>
             <span style="color:${e.is_cycle ? 'var(--red)' : 'var(--text-sub)'};">${e.is_cycle ? 'Cycle' : (e.kind || 'Direct')}</span>
           </div>
         `;
       }).join('') || '<div style="color:var(--text-sub);font-style:italic;padding:4px;">None (Leaf)</div>';
+      // A new selection starts unfiltered (the old query rarely fits the new node).
+      resetLinkListFilter('inspUpstreamFilter', 'inspUpstreamCount', upstream.length);
+      resetLinkListFilter('inspDownstreamFilter', 'inspDownstreamCount', downstream.length);
 
       // Populate Collateral Breakdown
       const collateralSection = document.getElementById('inspCollateralSection');

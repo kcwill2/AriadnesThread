@@ -281,11 +281,14 @@
         list.innerHTML = '<div style="color:var(--text-sub);font-style:italic;padding:4px;">No hotspots for this metric.</div>';
         return;
       }
+      const proposalTargets = new Set(
+        (graphData.extraction_proposals || []).map(p => String(p.target_file_id)));
       list.innerHTML = entries.map((e, i) => {
         const pct = top > 0 ? Math.max(4, Math.round((e.value / top) * 100)) : 0;
-        let tip = String(e.value);
-        if (metric === 'burden') tip = e.affected + ' file(s) pay ' + e.value + ' symbols';
-        else if (metric === 'cycle') tip = e.node.in_degree + ' in / ' + e.node.out_degree + ' out';
+        const tip = hotspotRowTooltip(e, metric);
+        const proposalBadge = proposalTargets.has(String(e.node.id))
+          ? '<span class="hotspot-proposal-badge" title="Has a proposed extraction (see below)">\u{1F4A1}</span>'
+          : '';
         const active = e.node.id === selectedNodeId ? ' active' : '';
         const hasOutgoing = (e.node.out_degree || 0) > 0;
         const traversalBtn = hasOutgoing
@@ -294,7 +297,7 @@
         return `
           <div class="hotspot-row${active}" data-select-id="${escapeAttribute(e.node.id)}" title="${escapeHtml(tip)}">
             <span class="hotspot-rank">${i + 1}</span>
-            <span class="hotspot-name">${escapeHtml(e.node.label)}</span>
+            <span class="hotspot-name">${escapeHtml(e.node.label)}${proposalBadge}</span>
             <span class="hotspot-val">${e.value}</span>
             <span class="hotspot-path">${escapeHtml(e.node.path || '')}</span>
             <span class="hotspot-bar"><span class="hotspot-bar-fill" style="width:${pct}%;"></span></span>
@@ -302,6 +305,19 @@
           </div>
         `;
       }).join('');
+    }
+
+    // Hover text for a hotspot row: file name, full path (the row may wrap
+    // it), then the metric detail that used to be the whole tooltip.
+    function hotspotRowTooltip(entry, metric) {
+      let detail = String(entry.value);
+      if (metric === 'burden') detail = entry.affected + ' file(s) pay ' + entry.value + ' symbols';
+      else if (metric === 'cycle') detail = entry.node.in_degree + ' in / ' + entry.node.out_degree + ' out';
+      const lines = [entry.node.label];
+      if (entry.node.path && entry.node.path !== entry.node.label) lines.push(entry.node.path);
+      lines.push(detail);
+      lines.push((entry.node.in_degree || 0) + ' incoming / ' + (entry.node.out_degree || 0) + ' outgoing');
+      return lines.join('\n');
     }
 
     // Row / extraction-card entry point (I2): auto-set the toolbar Direction to
@@ -607,6 +623,7 @@
         return;
       }
       if (extractionProposalsSource === proposals && extractionProposalsRoot === selectedNodeId) return;
+      document.getElementById('proposedExtractionsCount').textContent = String(proposals.length);
       document.getElementById('proposedExtractionsList').innerHTML =
         proposals.map(renderExtractionProposalCard).join('');
       if (window.bindPreviewControls) window.bindPreviewControls(document.getElementById('proposedExtractionsList'));
