@@ -156,11 +156,35 @@ fn normalize_path(path: &str) -> String {
 }
 
 /// Catalog key for any path: `.`/`..` components resolved (without touching
-/// the filesystem), separators unified to `/`.
+/// the filesystem), separators unified to `/`, and Windows spellings of one
+/// file collapsed (see [`collapse_windows_spelling`]).
 fn canonical_key(path: &Path) -> String {
-    normalize_relative_path(path)
+    let key = normalize_relative_path(path)
         .to_string_lossy()
-        .replace('\\', "/")
+        .replace('\\', "/");
+    collapse_windows_spelling(key)
+}
+
+/// `canonicalize()` on Windows yields the verbatim form (`//?/C:/...`,
+/// `//?/UNC/server/share/...`) while build tools write plain paths
+/// (`C:/...`, `//server/share/...`), sometimes with a lower-case drive
+/// letter. Map all of them onto the plain form with an upper-case drive so
+/// both spellings of one file share a key. Operates on `/`-separated text,
+/// so it behaves identically on every host platform.
+fn collapse_windows_spelling(key: String) -> String {
+    let mut plain = if let Some(unc) = key.strip_prefix("//?/UNC/") {
+        format!("//{unc}")
+    } else if let Some(local) = key.strip_prefix("//?/") {
+        local.to_string()
+    } else {
+        key
+    };
+    if plain.as_bytes().get(1) == Some(&b':') {
+        if let Some(drive) = plain.get_mut(..1) {
+            drive.make_ascii_uppercase();
+        }
+    }
+    plain
 }
 
 /// Resolves `.` and `..` relative components of a path without requiring the
@@ -463,6 +487,35 @@ mod tests {
         // Canonical candidate (absolute include-dir form).
         assert_eq!(catalog.by_path(Path::new("/repo/abs/thing.h")), Some(id));
         assert_eq!(catalog.by_path(Path::new("include/missing.h")), None);
+    }
+
+    /// Windows: discovery canonicalizes to the verbatim form (`\\?\C:\...`)
+    /// while compile_commands.json include dirs are plain (`C:\...`). Both
+    /// spellings name the same file and must hit the same catalog entry -
+    /// otherwise every compile-db include stays unresolved (boost fixture:
+    /// 1,776 include edges, zero landing on a node).
+    #[test]
+    fn by_path_matches_verbatim_and_plain_windows_spellings() {
+        let mut record = record("boost/atomic.hpp");
+        record.canonical_path = PathBuf::from(r"\\?\C:\repo\boost\atomic.hpp");
+        let id = record.id;
+        let catalog = FileCatalog::from_records(&[record]);
+        let lookup = |path: &str| catalog.by_path(Path::new(path));
+        assert_eq!(lookup(r"C:\repo\boost\atomic.hpp"), Some(id));
+        assert_eq!(lookup("C:/repo/boost/atomic.hpp"), Some(id));
+        assert_eq!(lookup(r"c:\repo\boost\atomic.hpp"), Some(id));
+        assert_eq!(lookup(r"\\?\C:\repo\boost\atomic.hpp"), Some(id));
+        assert_eq!(lookup(r"C:\repo\boost\missing.hpp"), None);
+    }
+
+    #[test]
+    fn by_path_matches_verbatim_unc_and_plain_unc_spellings() {
+        let mut record = record("lib/a.h");
+        record.canonical_path = PathBuf::from(r"\\?\UNC\server\share\lib\a.h");
+        let id = record.id;
+        let catalog = FileCatalog::from_records(&[record]);
+        let plain_unc = Path::new(r"\\server\share\lib\a.h");
+        assert_eq!(catalog.by_path(plain_unc), Some(id));
     }
 
     // ── by_module_path_suffix (plan M20 D12) ──
