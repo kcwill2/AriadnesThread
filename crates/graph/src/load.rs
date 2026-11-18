@@ -52,6 +52,25 @@ pub struct LoadMetric {
 }
 
 impl LoadMetric {
+    /// Scalar-only copy: target identity and the four loads, with every
+    /// detail vector empty and no largest source - the shape the persisted
+    /// symbol summary rows reload as (`metrics_io.rs` DP-2 payload).
+    pub fn summary_only(&self) -> LoadMetric {
+        LoadMetric {
+            target_name: self.target_name.clone(),
+            target_file: self.target_file.clone(),
+            semantic_load: self.semantic_load,
+            include_load: self.include_load,
+            collateral_load: self.collateral_load,
+            total_load: self.total_load,
+            semantic_symbols: Vec::new(),
+            collateral_symbols: Vec::new(),
+            collateral_sources: Vec::new(),
+            largest_collateral_source: None,
+            semantic_sources: Vec::new(),
+        }
+    }
+
     pub fn format_summary(&self) -> String {
         self.render_summary("Include")
     }
@@ -142,23 +161,6 @@ pub struct ExtractionImpact {
     pub root_closure_after: usize,
     /// Σ symbol_count over `dropped_from_root` only.
     pub symbols_no_longer_parsed: usize,
-}
-
-/// Physical expansion of ONE defining file (the union of `file_symbols` over
-/// the file's transitive includes, the file included), tagged with that file.
-/// Built by `LoadAnalyzer::physical_expansion`; the tag lets
-/// `analyze_symbol_load_with_expansion` reject a symbol from another file.
-#[derive(Debug, Clone)]
-pub struct DefFileExpansion {
-    def_file: FileId,
-    symbols: Arc<HashSet<SymbolId>>,
-}
-
-impl DefFileExpansion {
-    /// The defining file this expansion was built for.
-    pub fn def_file(&self) -> FileId {
-        self.def_file
-    }
 }
 
 /// Single-pass split of the physical expansion into `(semantic, collateral)`
@@ -602,50 +604,6 @@ impl<'a> LoadAnalyzer<'a> {
         Ok((record, def_file))
     }
 
-    /// Physical expansion of one defining file, tagged with that file so
-    /// `analyze_symbol_load_with_expansion` can refuse a mismatched symbol.
-    /// Served through the memo (an admitted entry is a refcount bump), so a
-    /// caller that groups symbols by defining file expands each file once
-    /// even after the capped boot memo is full.
-    pub fn physical_expansion(&self, def_file: FileId) -> DefFileExpansion {
-        DefFileExpansion {
-            def_file,
-            symbols: self
-                .memo
-                .cached_physical_expansion(self.include_graph, self.model, def_file),
-        }
-    }
-
-    /// Symbol load over a caller-held expansion of the symbol's defining
-    /// file: identical metric to `analyze_symbol_load_by_id`, without
-    /// re-expanding the file per symbol. Errors on the by-id miss paths,
-    /// and when `expansion` belongs to a different defining file.
-    pub fn analyze_symbol_load_with_expansion(
-        &self,
-        symbol_id: &SymbolId,
-        expansion: &DefFileExpansion,
-    ) -> Result<LoadMetric> {
-        let (record, def_file) = self.symbol_record_and_def_file(symbol_id)?;
-        if def_file != expansion.def_file {
-            return Err(anyhow!(
-                "Expansion is for a different defining file than symbol: {}",
-                symbol_id.0
-            ));
-        }
-        let target_file_path = self.include_graph.file_paths.get(&def_file).cloned();
-        // Borrow the memoized `Arc` closure directly: the per-symbol pass
-        // calls this once per symbol, so cloning the set is the cost to avoid.
-        let semantic_closure = self
-            .memo
-            .cached_single_seed_closure(self.model, symbol_id);
-        Ok(self.build_metric(
-            record.name.clone(),
-            target_file_path,
-            &expansion.symbols,
-            &semantic_closure,
-        ))
-    }
-
     /// Name entry: resolve via `symbol_id_by_name`, then delegate. Zero
     /// behavior change — the metric body lives in `analyze_symbol_load_by_id`
     /// alone, so the two entries can never drift (mirrors the
@@ -715,6 +673,14 @@ impl<'a> LoadAnalyzer<'a> {
 mod caches;
 
 pub use caches::LoadMemo;
+
+/// Shared-expansion entries (2026-11-18 boost collateral-pass fixes):
+/// `DefFileExpansion`, the full and counts-only symbol entries over it.
+/// Relocated to a sibling module to keep this file under the R2 limit.
+#[path = "load_expansion.rs"]
+mod expansion;
+
+pub use expansion::DefFileExpansion;
 
 /// Explanation surface (`LoadExplanation` + the `explain_*` methods and
 /// their shared shortest-path BFS) relocated to a sibling module to keep

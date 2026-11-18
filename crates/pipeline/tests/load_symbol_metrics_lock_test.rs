@@ -200,11 +200,11 @@ fn cpp_lane_symbol_metrics_match_recorded_literal() {
     let fixture = setup_cpp_repo();
     let rendered = render_symbol_pass(fixture.path());
     let expected: &[&str] = &[
-        "name=Common file=include/common.h sem=1 inc=1 col=0 tot=1 sem_syms=[Common] col_syms=[] sem_srcs=[1:include/common.h:Common] col_srcs=[] lcs=",
-        "name=ThingA file=include/header_a.h sem=2 inc=2 col=0 tot=2 sem_syms=[Common,ThingA] col_syms=[] sem_srcs=[1:include/common.h:Common + 1:include/header_a.h:ThingA] col_srcs=[] lcs=",
-        "name=ThingB file=include/header_b.h sem=1 inc=1 col=0 tot=1 sem_syms=[ThingB] col_syms=[] sem_srcs=[1:include/header_b.h:ThingB] col_srcs=[] lcs=",
-        "name=use_a file=src/tu1.cpp sem=3 inc=3 col=0 tot=3 sem_syms=[Common,ThingA,use_a] col_syms=[] sem_srcs=[1:include/common.h:Common + 1:include/header_a.h:ThingA + 1:src/tu1.cpp:use_a] col_srcs=[] lcs=",
-        "name=use_b file=src/tu2.cpp sem=2 inc=2 col=0 tot=2 sem_syms=[ThingB,use_b] col_syms=[] sem_srcs=[1:include/header_b.h:ThingB + 1:src/tu2.cpp:use_b] col_srcs=[] lcs=",
+        "name=Common file=include/common.h sem=1 inc=1 col=0 tot=1 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
+        "name=ThingA file=include/header_a.h sem=2 inc=2 col=0 tot=2 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
+        "name=ThingB file=include/header_b.h sem=1 inc=1 col=0 tot=1 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
+        "name=use_a file=src/tu1.cpp sem=3 inc=3 col=0 tot=3 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
+        "name=use_b file=src/tu2.cpp sem=2 inc=2 col=0 tot=2 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
     ];
     assert_eq!(
         rendered.lines().collect::<Vec<_>>(),
@@ -223,8 +223,8 @@ fn scala_lane_name_collision_keeps_first_wins_metric() {
     let fixture = setup_scala_repo();
     let rendered = render_symbol_pass(fixture.path());
     let expected: &[&str] = &[
-        "name=Widget file=src/main/scala/a/widget.scala sem=1 inc=1 col=0 tot=1 sem_syms=[a.Widget] col_syms=[] sem_srcs=[1:src/main/scala/a/widget.scala:a.Widget] col_srcs=[] lcs=",
-        "name=Widget file=src/main/scala/a/widget.scala sem=1 inc=1 col=0 tot=1 sem_syms=[a.Widget] col_syms=[] sem_srcs=[1:src/main/scala/a/widget.scala:a.Widget] col_srcs=[] lcs=",
+        "name=Widget file=src/main/scala/a/widget.scala sem=1 inc=1 col=0 tot=1 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
+        "name=Widget file=src/main/scala/a/widget.scala sem=1 inc=1 col=0 tot=1 sem_syms=[] col_syms=[] sem_srcs=[] col_srcs=[] lcs=",
     ];
     assert_eq!(
         rendered.lines().collect::<Vec<_>>(),

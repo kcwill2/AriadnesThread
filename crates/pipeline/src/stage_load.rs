@@ -403,6 +403,9 @@ fn group_walk_by_def_file(
 
 /// One defining file's group: expand the file once, then analyze its symbols
 /// in parallel over that shared expansion, tagged with their walk positions.
+/// Counts-only (2026-11-18 boost memory fix): the symbol metrics carry the
+/// six scalars the persisted report keeps, with empty detail vectors - the
+/// detail was never read and cost ~26 GB of cloned ids at boost scale.
 fn analyze_def_file_group(
     analyzer: &LoadAnalyzer<'_>,
     def_file: FileId,
@@ -414,7 +417,7 @@ fn analyze_def_file_group(
         .par_iter()
         .filter_map(|&position| {
             analyzer
-                .analyze_symbol_load_with_expansion(walk[position], &expansion)
+                .analyze_symbol_load_counts_with_expansion(walk[position], &expansion)
                 .ok()
                 .map(|metric| (position, metric))
         })

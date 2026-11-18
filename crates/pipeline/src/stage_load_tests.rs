@@ -404,7 +404,10 @@ struct Spare { int unused; };",
             .values()
             .filter_map(|record| {
                 let symbol_id = reference_analyzer.symbol_id_by_name(&record.name)?;
-                reference_analyzer.analyze_symbol_load_by_id(&symbol_id).ok()
+                reference_analyzer
+                    .analyze_symbol_load_by_id(&symbol_id)
+                    .ok()
+                    .map(|metric| metric.summary_only())
             })
             .collect();
         assert_eq!(grouped, reference, "grouped pass must keep the walk order");

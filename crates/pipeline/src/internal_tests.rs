@@ -121,8 +121,10 @@ fn test_load_report_matches_sequential_reference() {
 
     let mut expected_symbol_metrics = Vec::new();
     for sym_record in reduced.symbols.values() {
+        // Counts-only symbol pass (2026-11-18 boost memory fix): the
+        // in-memory report carries the persisted scalar shape.
         if let Ok(metric) = reference.analyze_symbol_load(&sym_record.name) {
-            expected_symbol_metrics.push(metric);
+            expected_symbol_metrics.push(metric.summary_only());
         }
     }
     let mut expected_file_metrics = Vec::new();
@@ -164,8 +166,10 @@ fn test_load_report_matches_sequential_reference_with_scoped_pool() {
 
     let mut expected_symbol_metrics = Vec::new();
     for sym_record in reduced.symbols.values() {
+        // Counts-only symbol pass (2026-11-18 boost memory fix): the
+        // in-memory report carries the persisted scalar shape.
         if let Ok(metric) = reference.analyze_symbol_load(&sym_record.name) {
-            expected_symbol_metrics.push(metric);
+            expected_symbol_metrics.push(metric.summary_only());
         }
     }
     let mut expected_file_metrics = Vec::new();

@@ -205,3 +205,64 @@ fn shared_expansion_keeps_the_by_id_miss_errors() {
         .expect_err("unregistered id must error");
     assert_eq!(error.to_string(), "Symbol record not found for: absent");
 }
+
+/// Counts-only symbol entry (2026-11-18 boost memory fix): the six scalars
+/// the persisted report keeps, with the never-read detail vectors empty -
+/// the exact shape a reloaded `report.bin` row already has.
+#[test]
+fn counts_entry_matches_full_metric_scalars_with_no_detail() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    for (name, file) in [("a", 1), ("b", 1), ("c", 2), ("e", 3)] {
+        let symbol_id = SymbolId::new(name);
+        let expansion = analyzer.physical_expansion(FileId(file));
+        let counts = analyzer
+            .analyze_symbol_load_counts_with_expansion(&symbol_id, &expansion)
+            .expect("counts analysis");
+        let full = analyzer
+            .analyze_symbol_load_by_id(&symbol_id)
+            .expect("full analysis");
+        assert_eq!(counts, full.summary_only(), "symbol {name}");
+        assert!(counts.semantic_symbols.is_empty() && counts.collateral_sources.is_empty());
+    }
+}
+
+#[test]
+fn summary_only_keeps_scalars_and_drops_detail() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    let full = analyzer
+        .analyze_symbol_load_by_id(&SymbolId::new("a"))
+        .expect("full analysis");
+    let summary = full.summary_only();
+    assert_eq!(
+        (summary.semantic_load, summary.include_load, summary.collateral_load),
+        (full.semantic_load, full.include_load, full.collateral_load)
+    );
+    assert_eq!(summary.total_load, full.total_load);
+    assert_eq!(summary.target_name, full.target_name);
+    assert_eq!(summary.target_file, full.target_file);
+    assert!(summary.semantic_symbols.is_empty());
+    assert!(summary.collateral_symbols.is_empty());
+    assert!(summary.semantic_sources.is_empty());
+    assert!(summary.collateral_sources.is_empty());
+    assert!(summary.largest_collateral_source.is_none());
+}
+
+#[test]
+fn counts_entry_keeps_the_mismatch_and_miss_errors() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    let expansion = analyzer.physical_expansion(FileId(1));
+    let mismatch = analyzer
+        .analyze_symbol_load_counts_with_expansion(&SymbolId::new("c"), &expansion)
+        .expect_err("c is defined in file 2");
+    assert_eq!(
+        mismatch.to_string(),
+        "Expansion is for a different defining file than symbol: c"
+    );
+    let missing = analyzer
+        .analyze_symbol_load_counts_with_expansion(&SymbolId::new("absent"), &expansion)
+        .expect_err("unregistered id");
+    assert_eq!(missing.to_string(), "Symbol record not found for: absent");
+}
