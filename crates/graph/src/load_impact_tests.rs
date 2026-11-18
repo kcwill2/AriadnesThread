@@ -403,3 +403,47 @@ fn test_impact_source_still_arrives_in_closure_after() {
     assert!(impact.root_closure_after >= 1);
     assert_eq!(impact.root_closure_after, 2); // {fat (S, kept), base (R)}
 }
+
+// Summary entry (2026-11-18 boost justification fix): the bounded payload
+// needs only counts plus the first `sample_max` dropped rows, so the summary
+// must equal exactly what the full impact yields for every scenario.
+fn assert_summary_matches_full(
+    analyzer: &LoadAnalyzer,
+    root: FileId,
+    source: FileId,
+    seeds: &[SymbolId],
+) {
+    let full = analyzer.extraction_impact(root, source, seeds);
+    for sample_max in [0usize, 1, 2, 8] {
+        let summary = analyzer.extraction_impact_summary(root, source, seeds, sample_max);
+        let Some(full) = full.as_ref() else {
+            assert_eq!(summary, None);
+            continue;
+        };
+        let summary = summary.expect("summary must exist when the full impact does");
+        let expected_sample: Vec<ImpactHeader> =
+            full.dropped_from_root.iter().take(sample_max).cloned().collect();
+        assert_eq!(summary.dropped_sample, expected_sample, "sample_max={sample_max}");
+        assert_eq!(summary.dropped_from_root_count, full.dropped_from_root.len());
+        assert_eq!(summary.still_reachable_count, full.still_reachable.len());
+        assert_eq!(summary.root_closure_before, full.root_closure_before);
+        assert_eq!(summary.root_closure_after, full.root_closure_after);
+        assert_eq!(summary.symbols_no_longer_parsed, full.symbols_no_longer_parsed);
+    }
+}
+
+#[test]
+fn test_impact_summary_matches_full_impact_in_every_scenario() {
+    let fat_seeds = [SymbolId::new("FatA"), SymbolId::new("FatB")];
+    let extras: [&[(FileId, FileId, &str)]; 3] =
+        [&[], &[(MAIN, D_H, "d.h")], &[(MAIN, C_H, "c.h")]];
+    for extra in extras {
+        let (ig, model) = setup_impact_fixture(extra, true);
+        let analyzer = LoadAnalyzer::new(&ig, &model);
+        assert_summary_matches_full(&analyzer, MAIN, FAT, &fat_seeds);
+        assert_summary_matches_full(&analyzer, MAIN, FAT, &[SymbolId::new("Lone")]);
+        assert_summary_matches_full(&analyzer, MAIN, FAT, &[]);
+        assert_summary_matches_full(&analyzer, FAT, FAT, &fat_seeds);
+        assert_summary_matches_full(&analyzer, FileId(999), FAT, &fat_seeds);
+    }
+}

@@ -415,16 +415,16 @@ fn justification_root(
         let collateral_count = s.collateral.map_or(0, |x| x.symbol_count);
         let mut impact = None;
         if impact_slots < IMPACT_MAX_ENTRIES_PER_ROOT {
-            impact = entry_extraction_impact(
-                analyzer,
-                ariadne_repo::FileId(*root_id),
-                id,
-                s.justified,
-                justified_count,
-                collateral_count,
-            )
-            .as_ref()
-            .map(impact_summary_from);
+            impact = eligible_impact_symbols(*root_id, id, s.justified, collateral_count)
+                .and_then(|symbols| {
+                    analyzer.extraction_impact_summary(
+                        ariadne_repo::FileId(*root_id),
+                        ariadne_repo::FileId(id),
+                        symbols,
+                        IMPACT_DROPPED_SAMPLE_MAX,
+                    )
+                })
+                .map(|summary| impact_summary_from_bounded(&summary));
             if impact.is_some() {
                 impact_slots += 1;
             }
@@ -533,7 +533,6 @@ pub fn build_file_justification_detail(
             root,
             id,
             s.justified,
-            justified_count,
             collateral_count,
         );
         entries.push(SourceJustification {
@@ -570,36 +569,41 @@ fn entry_extraction_impact(
     root: ariadne_repo::FileId,
     source_id: u64,
     justified: Option<&ariadne_graph::ContributingSource>,
-    justified_count: usize,
     collateral_count: usize,
 ) -> Option<ariadne_graph::ExtractionImpact> {
-    if justified_count == 0 || collateral_count == 0 || root.0 == source_id {
-        return None;
-    }
-    let symbols = justified?.symbols.as_slice();
+    let symbols = eligible_impact_symbols(root.0, source_id, justified, collateral_count)?;
     analyzer.extraction_impact(root, ariadne_repo::FileId(source_id), symbols)
 }
 
-/// Map a full `ExtractionImpact` to its bounded payload summary (E-I4): counts
-/// plus the first `IMPACT_DROPPED_SAMPLE_MAX` basenames of the path-asc-sorted
-/// `dropped_from_root`; the `truncated` flag is set iff that list exceeds the
+/// E-I3/E-I4 eligibility shared by the payload and route paths: the justified
+/// symbols when both sides are non-empty and the edge is not a self-edge.
+fn eligible_impact_symbols(
+    root_id: u64,
+    source_id: u64,
+    justified: Option<&ariadne_graph::ContributingSource>,
+    collateral_count: usize,
+) -> Option<&[ariadne_index::SymbolId]> {
+    let justified = justified.filter(|j| j.symbol_count > 0)?;
+    if collateral_count == 0 || root_id == source_id {
+        return None;
+    }
+    Some(justified.symbols.as_slice())
+}
+
+/// Bounded payload summary (E-I4) from the graph crate's summary entry:
+/// counts plus the basenames of the first `IMPACT_DROPPED_SAMPLE_MAX`
+/// path-asc `dropped_from_root` rows; `truncated` iff that list exceeds the
 /// cap. Closure sizes pass through unchanged (already seed-excluded by the
-/// graph crate — never re-add the root).
-pub fn impact_summary_from(impact: &ariadne_graph::ExtractionImpact) -> ImpactSummary {
-    let dropped_from_root_count = impact.dropped_from_root.len();
+/// graph crate; never re-add the root).
+fn impact_summary_from_bounded(summary: &ariadne_graph::ExtractionImpactSummary) -> ImpactSummary {
     ImpactSummary {
-        dropped_from_root_count,
-        still_reachable_count: impact.still_reachable.len(),
-        dropped_sample: impact
-            .dropped_from_root
-            .iter()
-            .take(IMPACT_DROPPED_SAMPLE_MAX)
-            .map(|h| path_basename(&h.path))
-            .collect(),
-        dropped_sample_truncated: dropped_from_root_count > IMPACT_DROPPED_SAMPLE_MAX,
-        root_closure_before: impact.root_closure_before,
-        root_closure_after: impact.root_closure_after,
-        symbols_no_longer_parsed: impact.symbols_no_longer_parsed,
+        dropped_from_root_count: summary.dropped_from_root_count,
+        still_reachable_count: summary.still_reachable_count,
+        dropped_sample: summary.dropped_sample.iter().map(|h| path_basename(&h.path)).collect(),
+        dropped_sample_truncated: summary.dropped_from_root_count > IMPACT_DROPPED_SAMPLE_MAX,
+        root_closure_before: summary.root_closure_before,
+        root_closure_after: summary.root_closure_after,
+        symbols_no_longer_parsed: summary.symbols_no_longer_parsed,
     }
 }
 
@@ -644,16 +648,37 @@ fn justification_required_headers(
         return Vec::new();
     }
     let excluded = path_basename(source_path);
-    let mut headers: Vec<String> = analyzer
-        .required_headers_for_symbols(justified)
-        .into_iter()
-        .map(|(_, path, _)| path_basename(&path))
-        .filter(|name| *name != excluded)
-        .collect();
-    headers.sort();
-    headers.dedup();
-    headers.truncate(max_headers);
-    headers
+    // Basenames only, kept as the sorted distinct `max_headers` smallest,
+    // compared BORROWED from an allocation-free visitor (2026-11-18 boost
+    // fix: a fresh id set plus one owned String per required header, sorted
+    // in full and cut to 8, serialized 24 threads on the Windows heap). Every
+    // visited id is registered in `file_paths` by its header filter.
+    let file_paths = &analyzer.include_graph.file_paths;
+    let mut headers: Vec<std::borrow::Cow<'_, str>> = Vec::new();
+    analyzer.for_each_required_header_file(justified, |file_id| {
+        let Some(name) = file_paths.get(&file_id).map(|p| path_basename_cow(p)) else {
+            return;
+        };
+        if name.as_ref() == excluded {
+            return;
+        }
+        if let Err(position) = headers.binary_search(&name) {
+            if position < max_headers {
+                headers.insert(position, name);
+                headers.truncate(max_headers);
+            }
+        }
+    });
+    headers.into_iter().map(std::borrow::Cow::into_owned).collect()
+}
+
+/// Borrowed twin of `path_basename` (identical text, allocation only for
+/// non-UTF-8 names): the same final-component-else-full-path fallback.
+fn path_basename_cow(path: &std::path::Path) -> std::borrow::Cow<'_, str> {
+    match path.file_name() {
+        Some(name) => name.to_string_lossy(),
+        None => path.to_string_lossy(),
+    }
 }
 
 /// Mirrors the graph crate's basename fallback for paths without a final

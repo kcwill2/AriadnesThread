@@ -266,3 +266,86 @@ fn counts_entry_keeps_the_mismatch_and_miss_errors() {
         .expect_err("unregistered id");
     assert_eq!(missing.to_string(), "Symbol record not found for: absent");
 }
+
+/// File-level required headers (2026-11-18 boost justification fix): the
+/// justification payload and `extraction_impact` only ever consumed the FILE
+/// IDS of `required_headers_for_symbols`, yet each call materialized and
+/// memoized whole symbol closures. The file-level entry must return exactly
+/// those ids for every seed subset.
+#[test]
+fn required_header_files_match_required_headers_ids_for_every_seed_subset() {
+    let (graph, model) = fixture();
+    let all = ["a", "b", "c", "d", "e", "x", "absent"];
+    for mask in 1u32..(1 << all.len()) {
+        let seeds: Vec<&str> = (0..all.len())
+            .filter(|bit| mask & (1 << bit) != 0)
+            .map(|bit| all[bit])
+            .collect();
+        let analyzer = LoadAnalyzer::new(&graph, &model);
+        let expected: HashSet<FileId> = analyzer
+            .required_headers_for_symbols(&ids(&seeds))
+            .into_iter()
+            .map(|(file_id, _, _)| file_id)
+            .collect();
+        let fresh = LoadAnalyzer::new(&graph, &model);
+        assert_eq!(
+            fresh.required_header_files_for_symbols(&ids(&seeds)),
+            expected,
+            "seed subset {seeds:?}"
+        );
+    }
+}
+
+#[test]
+fn required_header_files_reach_across_files_and_exclude_seed_files() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    assert_eq!(
+        analyzer.required_header_files_for_symbols(&ids(&["a"])),
+        HashSet::from([FileId(2)]),
+        "a -> b -> c: c lives in two.h; one.h is the seed's own file"
+    );
+}
+
+#[test]
+fn required_header_files_memoize_per_seed_without_growing_symbol_closures() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    analyzer.required_header_files_for_symbols(&ids(&["a", "d"]));
+    let walks_after_first = analyzer.semantic_bfs_traversal_count();
+    assert_eq!(
+        analyzer.semantic_closure_cache_len(),
+        0,
+        "file-level entry must not retain whole symbol closures"
+    );
+    analyzer.required_header_files_for_symbols(&ids(&["d", "a"]));
+    assert_eq!(
+        analyzer.semantic_bfs_traversal_count(),
+        walks_after_first,
+        "repeat seeds are served from the per-seed file memo"
+    );
+}
+
+/// Allocation-free visitor (2026-11-18 boost heap-contention fix): visits
+/// exactly the owned entry's ids, each once, for every seed subset, with
+/// one analyzer reused across calls so per-thread scratch never leaks state
+/// from one call into the next.
+#[test]
+fn required_header_file_visitor_matches_owned_set_for_every_seed_subset() {
+    let (graph, model) = fixture();
+    let analyzer = LoadAnalyzer::new(&graph, &model);
+    let all = ["a", "b", "c", "d", "e", "x", "absent"];
+    for mask in 1u32..(1 << all.len()) {
+        let seeds: Vec<&str> = (0..all.len())
+            .filter(|bit| mask & (1 << bit) != 0)
+            .map(|bit| all[bit])
+            .collect();
+        let expected = analyzer.required_header_files_for_symbols(&ids(&seeds));
+        let mut visited: Vec<FileId> = Vec::new();
+        analyzer.for_each_required_header_file(&ids(&seeds), |file_id| visited.push(file_id));
+        let visited_len = visited.len();
+        let visited_set: HashSet<FileId> = visited.into_iter().collect();
+        assert_eq!(visited_len, visited_set.len(), "each file once: {seeds:?}");
+        assert_eq!(visited_set, expected, "seed subset {seeds:?}");
+    }
+}

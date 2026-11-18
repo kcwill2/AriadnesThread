@@ -150,7 +150,12 @@ struct PlanningContext<'a> {
     frontier_analyzer: FrontierAnalyzer,
     policies: FilePolicyMaps,
     checker: ConstraintChecker,
-    mapped_edges: Vec<ariadne_index::types::SemanticEdge>,
+    /// Symbol adjacency over the model's semantic edges, built ONCE per run
+    /// (2026-11-18 boost fix): the per-candidate SCC step used to rebuild it
+    /// from all edges for every candidate - ~5k candidates x 162k edges on
+    /// boost. Same edges in the same order, so neighbor order (and thus the
+    /// Tarjan output) is unchanged.
+    symbol_adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
     aggregation_consumers: HashMap<FileId, Vec<FileId>>,
     cold_analyzer: Option<LoadAnalyzer<'a>>,
 }
@@ -159,7 +164,7 @@ impl<'a> PlanningContext<'a> {
     fn build(planner: &'a OptimizationPlanner<'a>) -> Self {
         let policies = planner.collect_file_policies();
         let checker = ConstraintChecker::new(policies.policy_by_path.clone(), HashSet::new());
-        let mapped_edges = planner.model_edges_without_file_endpoints();
+        let symbol_adjacency = planner.model_symbol_adjacency();
         // Facts path: reuse the include stage's closures instead of
         // recomputing them (`map_aggregation_consumers` would re-derive them).
         let aggregation_consumers = match planner.stage_closures {
@@ -178,7 +183,7 @@ impl<'a> PlanningContext<'a> {
             frontier_analyzer: FrontierAnalyzer::new(),
             policies,
             checker,
-            mapped_edges,
+            symbol_adjacency,
             aggregation_consumers,
             cold_analyzer,
         }
@@ -315,7 +320,7 @@ impl<'a> OptimizationPlanner<'a> {
     fn candidate_plan(&self, context: &PlanningContext<'a>, file_id: FileId) -> Option<PendingPlan> {
         let candidate = self.candidate_aggregation_file(file_id, context)?;
         let proposed_extractions =
-            self.propose_extractions(&candidate, &context.mapped_edges, &context.checker);
+            self.propose_extractions(&candidate, &context.symbol_adjacency, &context.checker);
         if proposed_extractions.is_empty() {
             return None;
         }
@@ -442,20 +447,19 @@ impl<'a> OptimizationPlanner<'a> {
         })
     }
 
-    /// Semantic edges with their file endpoints erased, as consumed by the
-    /// per-file SCC computation.
-    fn model_edges_without_file_endpoints(&self) -> Vec<ariadne_index::types::SemanticEdge> {
-        self.model
-            .edges
-            .iter()
-            .map(|e| ariadne_index::types::SemanticEdge {
-                src_symbol: e.src_symbol.clone(),
-                dst_symbol: e.dst_symbol.clone(),
-                kind: e.kind,
-                src_file: FileId(0),
-                dst_file: FileId(0),
-            })
-            .collect()
+    /// Symbol adjacency consumed by the per-file SCC computation, in model
+    /// edge order - the exact map `scc::build_symbol_adjacency` used to build
+    /// from the file-endpoint-erased copy of these edges, without the copy.
+    fn model_symbol_adjacency(&self) -> HashMap<&'a SymbolId, Vec<&'a SymbolId>> {
+        let model: &'a ReducedSemanticModel = self.model;
+        let mut adjacency: HashMap<&'a SymbolId, Vec<&'a SymbolId>> = HashMap::new();
+        for edge in &model.edges {
+            adjacency
+                .entry(&edge.src_symbol)
+                .or_default()
+                .push(&edge.dst_symbol);
+        }
+        adjacency
     }
 
     /// One proposal batch per SCC (union-merged by colocated constraints);
@@ -465,7 +469,7 @@ impl<'a> OptimizationPlanner<'a> {
     fn propose_extractions(
         &self,
         candidate: &AggregationCandidate,
-        mapped_edges: &[ariadne_index::types::SemanticEdge],
+        symbol_adjacency: &HashMap<&'a SymbolId, Vec<&'a SymbolId>>,
         checker: &ConstraintChecker,
     ) -> Vec<ProposedExtraction> {
         let file_symbols = self
@@ -474,7 +478,7 @@ impl<'a> OptimizationPlanner<'a> {
             .get(&candidate.file_id)
             .cloned()
             .unwrap_or_default();
-        let sccs = scc::compute_symbol_sccs(&file_symbols, mapped_edges);
+        let sccs = scc::compute_symbol_sccs_from_adj(&file_symbols, symbol_adjacency);
         let cycle_members: HashSet<&SymbolId> = sccs
             .iter()
             .filter(|component| component.symbols.len() > 1)

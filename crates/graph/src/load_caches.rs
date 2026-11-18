@@ -27,7 +27,7 @@ use crate::{IncludeClosure, IncludeGraph, ReducedSemanticModel};
 use ariadne_index::types::SymbolId;
 use ariadne_repo::FileId;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 // Only the test-only counters touch atomics; the import stays gated so
 // release builds emit no unused-import warning. `feature = "test-instrument"`
@@ -67,6 +67,17 @@ pub struct LoadMemo {
     /// one `Arc<HashSet<SymbolId>>` per admitted def-file, bounded by the
     /// cap.
     physical_expansion_cache: Mutex<HashMap<FileId, Arc<HashSet<SymbolId>>>>,
+    /// Memo of the DEFINING FILES reached by each seed's semantic closure
+    /// (2026-11-18 boost justification fix), sorted ascending. Required-header
+    /// queries need only these file ids, so a miss walks the closure once,
+    /// keeps the (small) file set and drops the (large) symbol set - the
+    /// symbol closure is never admitted to `semantic_closure_cache`. Entries
+    /// are permanent like the other memos (immutable inputs); uncapped,
+    /// because a file set is bounded by the file count, not the symbol count.
+    /// An `RwLock` read once per QUERY, not per seed: a justification
+    /// query carries thousands of seeds, and a per-seed `Mutex` convoyed the
+    /// rayon workers down to ~2 busy cores on boost.
+    seed_defining_files_cache: RwLock<HashMap<SymbolId, Arc<Vec<FileId>>>>,
     /// Entry-count bound of `semantic_closure_cache` (policy documented on
     /// `with_closures_and_capacity`); `usize::MAX` = uncapped, the behavior
     /// every pre-M28 constructor keeps.
@@ -186,6 +197,7 @@ impl LoadMemo {
             file_adjacency: OnceLock::new(),
             semantic_closure_cache: Mutex::new(HashMap::new()),
             physical_expansion_cache: Mutex::new(HashMap::new()),
+            seed_defining_files_cache: RwLock::new(HashMap::new()),
             semantic_closure_cap,
             physical_expansion_cap,
             #[cfg(any(test, feature = "test-instrument"))]
@@ -256,6 +268,83 @@ impl LoadMemo {
             visited.extend(self.cached_single_seed_closure(model, seed).iter().cloned());
         }
         visited
+    }
+
+    /// Defining files of `closure(seeds)` - the union of each seed's memoized
+    /// defining-file set, equal by seed-locality to mapping the multi-seed
+    /// closure to defining files. Symbols without a defining file (and
+    /// unknown seeds) contribute nothing.
+    pub fn defining_files_of_semantic_closure(
+        &self,
+        model: &ReducedSemanticModel,
+        seeds: &[SymbolId],
+    ) -> HashSet<FileId> {
+        let mut files = HashSet::new();
+        self.extend_with_defining_files_of_semantic_closure(model, seeds, &mut files);
+        files
+    }
+
+    /// In-place form of `defining_files_of_semantic_closure`: extends `files`
+    /// (caller-owned, typically reused per-thread scratch) instead of
+    /// allocating a fresh set per call. Cached seeds are copied out under ONE
+    /// read guard; misses resolve after it is released.
+    pub fn extend_with_defining_files_of_semantic_closure(
+        &self,
+        model: &ReducedSemanticModel,
+        seeds: &[SymbolId],
+        files: &mut HashSet<FileId>,
+    ) {
+        let mut uncached_seeds: Vec<&SymbolId> = Vec::new();
+        {
+            let cache = self.seed_defining_files_cache.read().unwrap();
+            for seed in seeds {
+                match cache.get(seed) {
+                    Some(seed_files) => files.extend(seed_files.iter().copied()),
+                    None => uncached_seeds.push(seed),
+                }
+            }
+        }
+        for seed in uncached_seeds {
+            files.extend(self.cached_seed_defining_files(model, seed).iter().copied());
+        }
+    }
+
+    /// One seed's defining-file set from `seed_defining_files_cache`. A miss
+    /// reuses an already memoized symbol closure when there is one, else
+    /// walks it fresh WITHOUT admitting it; the guard covers only the map
+    /// lookup and the insert, never the walk.
+    fn cached_seed_defining_files(
+        &self,
+        model: &ReducedSemanticModel,
+        seed: &SymbolId,
+    ) -> Arc<Vec<FileId>> {
+        let memoized = self
+            .seed_defining_files_cache
+            .read()
+            .unwrap()
+            .get(seed)
+            .cloned();
+        if let Some(files) = memoized {
+            return files;
+        }
+        let cached_closure = self.semantic_closure_cache.lock().unwrap().get(seed).cloned();
+        let closure = match cached_closure {
+            Some(closure) => closure,
+            None => Arc::new(self.compute_single_seed_closure(model, seed)),
+        };
+        let mut files: Vec<FileId> = closure
+            .iter()
+            .filter_map(|symbol| model.symbols.get(symbol).and_then(|r| r.defining_file))
+            .collect::<HashSet<FileId>>()
+            .into_iter()
+            .collect();
+        files.sort();
+        let files = Arc::new(files);
+        self.seed_defining_files_cache
+            .write()
+            .unwrap()
+            .insert(seed.clone(), Arc::clone(&files));
+        files
     }
 
     /// True when the first-N admission policy will reject every new entry.
@@ -457,6 +546,15 @@ impl LoadMemo {
             .get(&file_id)
             .map(|c| c.transitive_includes.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Borrowed strict closure of one file (empty when unknown): sorted and
+    /// deduped by `IncludeClosure::new`, so callers may binary-search it and
+    /// count it without copying it into a set.
+    pub fn strict_closure_slice(&self, include_graph: &IncludeGraph, file_id: FileId) -> &[FileId] {
+        self.closures_map(include_graph)
+            .get(&file_id)
+            .map_or(&[], |c| c.transitive_includes.as_slice())
     }
 
     /// Include adjacency map from the `file_adjacency` memo. `get_or_init`
