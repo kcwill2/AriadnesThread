@@ -152,6 +152,9 @@ impl StepBarRenderer {
 pub struct TerminalStepBars {
     renderer: std::sync::Mutex<StepBarRenderer>,
     sink: std::sync::Arc<std::sync::Mutex<dyn std::io::Write + Send>>,
+    /// Queried per frame so a resize mid-load is honoured; `None` = no
+    /// fitting (piped output, or a test sink).
+    terminal_width: Box<dyn Fn() -> Option<usize> + Send + Sync>,
 }
 
 impl Default for TerminalStepBars {
@@ -162,7 +165,10 @@ impl Default for TerminalStepBars {
 
 impl TerminalStepBars {
     pub fn new() -> Self {
-        Self::with_sink(std::sync::Arc::new(std::sync::Mutex::new(std::io::stdout())))
+        let mut bars =
+            Self::with_sink(std::sync::Arc::new(std::sync::Mutex::new(std::io::stdout())));
+        bars.terminal_width = Box::new(crate::commands::progress_fit::detect_terminal_width);
+        bars
     }
 
     pub fn with_sink(
@@ -171,7 +177,36 @@ impl TerminalStepBars {
         Self {
             renderer: std::sync::Mutex::new(StepBarRenderer::new()),
             sink,
+            terminal_width: Box::new(|| None),
         }
+    }
+
+    /// A sink rendered as if attached to a terminal `columns` wide.
+    pub fn with_sink_and_width(
+        sink: std::sync::Arc<std::sync::Mutex<dyn std::io::Write + Send>>,
+        columns: usize,
+    ) -> Self {
+        let mut bars = Self::with_sink(sink);
+        bars.terminal_width = Box::new(move || Some(columns));
+        bars
+    }
+
+    /// The message shortened so the whole frame fits one terminal row.
+    fn fitted_message(
+        &self,
+        stage: usize,
+        total_steps: usize,
+        phase: &str,
+        step_percent: usize,
+        message: &str,
+    ) -> String {
+        let Some(columns) = (self.terminal_width)() else {
+            return message.to_string();
+        };
+        let prefix_chars = format_step_bar(stage, total_steps, phase, step_percent, "")
+            .chars()
+            .count();
+        crate::commands::progress_fit::fit_message(message, prefix_chars, columns)
     }
 
     pub fn render(
@@ -182,12 +217,13 @@ impl TerminalStepBars {
         step_percent: usize,
         message: &str,
     ) {
+        let message = self.fitted_message(stage, total_steps, phase, step_percent, message);
         let frame = {
             let mut renderer = self
                 .renderer
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            renderer.frame(stage, total_steps, phase, step_percent, message)
+            renderer.frame(stage, total_steps, phase, step_percent, &message)
         };
         let mut sink = self
             .sink
@@ -390,6 +426,49 @@ mod step_bar_tests {
             1,
             "the finalize newline is the only commit; drop must not add one"
         );
+    }
+
+    /// A frame wider than the terminal wraps, and `\r` then redraws on a new
+    /// row each time (boost's absolute compile-db paths hit this). Every
+    /// written frame must fit in width-1 columns, keeping count and file.
+    fn render_boost_frame(columns: usize) -> String {
+        let sink = MemorySink::new();
+        let bars = TerminalStepBars::with_sink_and_width(sink.handle(), columns);
+        let long_path = "C:/Users/admin/Documents/Code/AriadnesThread/tests/fixtures/\
+                         boost/boost_1_92_0/libs/cobalt/src/channel.cpp";
+        bars.render(
+            2,
+            5,
+            "[2/5] Indexing translation units...",
+            10,
+            &format!("34/327 TUs  {long_path}"),
+        );
+        let written = sink.text();
+        written.trim_start_matches('\r').to_string()
+    }
+
+    #[test]
+    fn test_frames_are_fitted_to_the_terminal_width() {
+        let frame = render_boost_frame(120);
+        assert!(frame.chars().count() <= 119, "frame wider than 119 cols: {frame}");
+        assert!(frame.contains("34/327 TUs  ..."), "count whole, path elided: {frame}");
+        assert!(frame.ends_with("/src/channel.cpp"), "file name must survive: {frame}");
+    }
+
+    #[test]
+    fn test_narrow_terminal_keeps_the_count() {
+        let frame = render_boost_frame(80);
+        assert!(frame.chars().count() <= 79, "frame wider than 79 cols: {frame}");
+        assert!(frame.ends_with("34/327 TUs"), "count survives alone: {frame}");
+    }
+
+    #[test]
+    fn test_sink_without_width_keeps_full_frames() {
+        let sink = MemorySink::new();
+        let bars = TerminalStepBars::with_sink(sink.handle());
+        let message = format!("1/2 TUs  {}", "d/".repeat(80));
+        bars.render(2, 5, "[2/5] Indexing translation units...", 50, &message);
+        assert!(sink.text().ends_with(&message), "piped output stays verbatim");
     }
 
     #[test]
