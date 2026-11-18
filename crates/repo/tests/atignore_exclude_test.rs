@@ -50,17 +50,13 @@ fn without_atignore_discovery_is_unchanged() {
 #[test]
 fn atignore_prunes_matching_directories_and_files() {
     let repo = boost_shaped_repo();
-    // One literal per line: tools/hygiene_check.py's lexer mis-reads a
-    // multi-line string holding `/*` as an unterminated block comment.
-    let atignore_lines = [
-        "# boost: keep headers and real library sources only",
-        "",
-        "libs/*/test/**",
-        "libs/*/example/",
-        "/doc",
-        "scratch.cpp",
-    ];
-    write_file(repo.path(), ".atignore", &atignore_lines.join("\n"));
+    let atignore = "# boost: keep headers and real library sources only\n\
+                    \n\
+                    libs/*/test/**\n\
+                    libs/*/example/\n\
+                    /doc\n\
+                    scratch.cpp";
+    write_file(repo.path(), ".atignore", atignore);
     assert_eq!(
         discovered_paths(repo.path()),
         vec![
