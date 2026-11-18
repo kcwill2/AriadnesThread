@@ -5,6 +5,7 @@ pub mod index;
 pub mod measure;
 pub mod plan;
 pub mod progress;
+pub mod progress_fit;
 pub mod query;
 pub mod transform;
 pub mod ui;

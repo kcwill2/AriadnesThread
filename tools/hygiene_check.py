@@ -28,10 +28,10 @@ ALLOWED_LONG_FILES = frozenset({"report.html"})
 FunctionSpan = namedtuple("FunctionSpan", "line name length")
 
 RUST_CHAR_LITERAL = re.compile(
-    r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[nrt0'\\])|[^\\'\n])'"
+    r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[nrt0'\"\\])|[^\\'\n])'"
 )
 BYTE_CHAR_LITERAL = re.compile(
-    r"b'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[nrt0'\\])|[^\\'\n])'"
+    r"b'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[nrt0'\"\\])|[^\\'\n])'"
 )
 RUST_FUNCTION_NAME = re.compile(r"\s*(r#)?([A-Za-z_][A-Za-z0-9_]*)")
 RUST_SIGNATURE_START = re.compile(r"\s*[<(]")
@@ -197,8 +197,9 @@ def _advance_standard_string(line: str, position: int, state) -> int:
             state.in_string = False
             return position + 1
         position += 1
-    # Rust standard strings cannot contain raw newlines; do not poison later lines.
-    state.in_string = False
+    # Rust strings may span lines, so in_string carries over. A trailing
+    # backslash escapes the newline itself (line continuation), never the
+    # first character of the next line.
     state.escape_pending = False
     return position
 
@@ -292,6 +293,8 @@ class _RustFunctionFinder:
             raise ParseError("unterminated block comment", len(lines))
         if self._state.raw_hashes is not None:
             raise ParseError("unterminated raw string", len(lines))
+        if self._state.in_string:
+            raise ParseError("unterminated string", len(lines))
         if self._start is not None:
             if self._opened:
                 raise ParseError(f"unclosed fn `{self._name}`", self._start)

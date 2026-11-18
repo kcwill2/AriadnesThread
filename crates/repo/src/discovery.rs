@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::exclude::ExcludeRules;
 use crate::policy::classify_ownership_and_policy;
 use crate::types::{
     FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, RepositoryDiscoveryResult,
@@ -37,6 +38,9 @@ pub(crate) fn discover_repository_files_with_progress(
 ) -> Result<Vec<FileRecord>> {
     let mut files = Vec::new();
     let mut hashed_so_far = 0usize;
+    // `.atignore` at the root: matching directories are pruned (never
+    // pushed), matching files are skipped before stat/hash.
+    let exclude_rules = ExcludeRules::load(root);
     // UTB-8: a junction/symlink back into an ancestor makes the stack walk
     // unbounded. A directory is admitted only when its canonical form has
     // not been walked yet; canonicalize failure falls back to the raw path,
@@ -63,6 +67,17 @@ pub(crate) fn discover_repository_files_with_progress(
                 || name_str == "node_modules"
             {
                 continue;
+            }
+
+            if !exclude_rules.is_empty() {
+                let rel_str = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if exclude_rules.is_excluded(&rel_str, path.is_dir()) {
+                    continue;
+                }
             }
 
             if path.is_dir() {

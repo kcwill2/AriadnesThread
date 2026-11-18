@@ -267,6 +267,64 @@ class RustStringAndCommentRegressionTests(unittest.TestCase):
                          span_tuples(hygiene_check.find_rust_functions(text)))
 
 
+class RustMultilineStringTests(unittest.TestCase):
+    def test_multiline_string_with_glob_does_not_open_block_comment(self):
+        text = joined(
+            "fn globs() {",
+            '    let patterns = "vendor/**',
+            "libs/*/test/**",
+            '";',
+            "    run();",
+            "}",
+        )
+        self.assertEqual([(1, "globs", 6)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_multiline_string_braces_do_not_affect_balance(self):
+        text = joined(
+            "fn braces() {",
+            '    let text = "}',
+            "}",
+            '";',
+            "    run();",
+            "}",
+        )
+        self.assertEqual([(1, "braces", 6)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_trailing_backslash_continuation_does_not_escape_next_line(self):
+        text = joined(
+            "fn continued() {",
+            '    let text = "head \\',
+            '";',
+            "    run();",
+            "}",
+        )
+        self.assertEqual([(1, "continued", 5)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_escaped_double_quote_char_literal_does_not_open_string(self):
+        text = joined(
+            "fn quote_chars() {",
+            r"    let quote = '\"';",
+            r"    let byte_quote = b'\"';",
+            "    run();",
+            "}",
+        )
+        self.assertEqual([(1, "quote_chars", 5)],
+                         span_tuples(hygiene_check.find_rust_functions(text)))
+
+    def test_unterminated_standard_string_is_a_parse_error(self):
+        text = joined(
+            "fn dangling() {",
+            '    let text = "never closed;',
+            "}",
+        )
+        with self.assertRaises(hygiene_check.ParseError) as raised:
+            hygiene_check.find_rust_functions(text)
+        self.assertEqual("unterminated string", raised.exception.message)
+
+
 class PythonFunctionLengthTests(unittest.TestCase):
     def test_101_line_def_flagged_and_100_line_def_tolerated(self):
         long_spans = hygiene_check.find_python_functions(long_python_function(100))
