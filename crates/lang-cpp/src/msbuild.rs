@@ -25,9 +25,9 @@ mod findings;
 mod xml_scan;
 
 use ariadne_lang::normalize_relative_path;
-use ariadne_repo::FileRecord;
+use ariadne_repo::{ExcludeRules, FileRecord};
 use findings::Findings;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use xml_scan::{scan, XmlEvent};
@@ -46,13 +46,22 @@ pub(crate) fn msbuild_include_dirs(repo_root: &Path, files: &[FileRecord]) -> Ve
 }
 
 /// Human-readable notes on the MSBuild evaluation: how many projects and
-/// dirs were found, and everything that had to be dropped. Empty when the
-/// repo has no `.vcxproj` files.
+/// dirs were found, and everything that had to be dropped. A repo with
+/// C/C++ files but no `.vcxproj` gets one line saying so (silence there
+/// once hid that no project was ever evaluated); a repo without C/C++
+/// files gets none.
 pub(crate) fn msbuild_notes(repo_root: &Path, files: &[FileRecord]) -> Vec<String> {
+    if !files.iter().any(|record| record.kind.is_source_or_header()) {
+        return Vec::new();
+    }
     let repo_root = plain_windows_path(repo_root);
     let evaluation = evaluate_repo(&repo_root, files);
     if evaluation.project_count == 0 {
-        return Vec::new();
+        return vec![format!(
+            "MSBuild: no .vcxproj files found under {} (outside .atignore'd and \
+             hidden folders); C++ include dirs come only from include/",
+            repo_root.display()
+        )];
     }
     let mut notes = vec![format!(
         "MSBuild: {} project file(s) evaluated, {} include dir(s) found",
@@ -106,25 +115,68 @@ fn plain_windows_path(path: &Path) -> PathBuf {
     }
 }
 
-/// `.vcxproj` files in any directory that holds, or is an ancestor of, a
-/// discovered file; sorted for deterministic evaluation order.
+/// Every `.vcxproj` in the repo, sorted for deterministic evaluation order.
+///
+/// Projects are searched for in the WHOLE tree, not only beside the
+/// sources: Visual Studio layouts often keep projects in their own folders
+/// (`msvc/`, `build/vs2022/`) that point at the code with relative
+/// `ClCompile` paths. The walk skips what repository discovery skips
+/// (hidden entries, `target`, `artifacts`, `node_modules`, `.atignore`
+/// matches) and does not run at all for a repo without C/C++ files.
 fn find_project_files(repo_root: &Path, files: &[FileRecord]) -> Vec<PathBuf> {
-    let mut candidate_dirs = BTreeSet::new();
-    for record in files {
-        let mut current = record.path.parent();
-        while let Some(dir) = current {
-            if !candidate_dirs.insert(dir.to_path_buf()) {
-                break; // its ancestors were inserted with it
+    if !files.iter().any(|record| record.kind.is_source_or_header()) {
+        return Vec::new();
+    }
+    let exclude_rules = ExcludeRules::load(repo_root);
+    let mut walked_dirs = HashSet::new();
+    let mut pending_dirs = vec![repo_root.to_path_buf()];
+    let mut projects = Vec::new();
+    while let Some(dir) = pending_dirs.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if is_skipped_entry(&path, repo_root, &exclude_rules) {
+                continue;
             }
-            current = dir.parent();
+            if path.is_dir() {
+                // Junction/symlink loops: admit each canonical dir once.
+                let walked_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if walked_dirs.insert(walked_key) {
+                    pending_dirs.push(path);
+                }
+            } else if has_extension(&path, "vcxproj") {
+                projects.push(path);
+            }
         }
     }
-    let mut projects: Vec<PathBuf> = candidate_dirs
-        .iter()
-        .flat_map(|dir| files_with_extension(&repo_root.join(dir), "vcxproj"))
-        .collect();
     projects.sort();
     projects
+}
+
+/// Mirrors repository discovery's walk filters (`ariadne_repo::discovery`).
+fn is_skipped_entry(path: &Path, repo_root: &Path, exclude_rules: &ExcludeRules) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    if name.starts_with('.') || matches!(name.as_ref(), "target" | "artifacts" | "node_modules") {
+        return true;
+    }
+    if exclude_rules.is_empty() {
+        return false;
+    }
+    let relative = path
+        .strip_prefix(repo_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    exclude_rules.is_excluded(&relative, path.is_dir())
+}
+
+fn has_extension(path: &Path, extension: &str) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
 }
 
 fn files_with_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
@@ -133,11 +185,7 @@ fn files_with_extension(dir: &Path, extension: &str) -> Vec<PathBuf> {
     };
     entries
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
-                && path.is_file()
-        })
+        .filter(|path| has_extension(path, extension) && path.is_file())
         .collect()
 }
 

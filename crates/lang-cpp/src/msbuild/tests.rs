@@ -288,11 +288,23 @@ fn notes_name_unresolved_macros_missing_dirs_and_imports() {
 }
 
 #[test]
-fn notes_are_empty_for_repos_without_projects() {
+fn notes_say_so_when_cpp_files_have_no_projects() {
     let temp_dir = tempfile::tempdir().unwrap();
     let root = temp_dir.path();
     let files = vec![source_record(root, "src/main.cpp")];
-    assert!(msbuild_notes(root, &files).is_empty());
+    let notes = msbuild_notes(root, &files);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("no .vcxproj files found"), "{notes:?}");
+}
+
+#[test]
+fn notes_are_empty_for_repos_without_cpp_files() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    write(root, "tools/stray.vcxproj", &project(""));
+    let mut scala = source_record(root, "src/main/scala/App.scala");
+    scala.kind = FileKind::ScalaSource;
+    assert!(msbuild_notes(root, &[scala]).is_empty());
 }
 
 /// MSBuild evaluates every property (through all imports) before any item
@@ -333,4 +345,41 @@ fn item_definitions_see_properties_defined_by_later_imports() {
     let dirs = msbuild_include_dirs(root, &files);
 
     assert_eq!(sorted(dirs), sorted(vec![sdk, shared]));
+}
+
+/// Visual Studio solutions often keep projects in their own folder (no
+/// sources there) pointing at the code via relative ClCompile paths; such
+/// projects must still be found.
+#[test]
+fn projects_in_folders_without_sources_are_found() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let api = mkdir(root, "baselibs/core/include");
+    let files = vec![source_record(root, "baselibs/core/src/core.cpp")];
+    write(
+        root,
+        "baselibs/msvc/core/core.vcxproj",
+        &project(&compile_dirs("$(ProjectDir)../../core/include")),
+    );
+
+    let dirs = msbuild_include_dirs(root, &files);
+
+    assert_eq!(dirs, vec![api]);
+}
+
+#[test]
+fn atignored_and_hidden_folders_are_not_searched_for_projects() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    mkdir(root, "kept/include");
+    mkdir(root, "skipped/include");
+    let files = vec![source_record(root, "src/main.cpp")];
+    write(root, ".atignore", "vendor/\n");
+    write(root, "vendor/v.vcxproj", &project(&compile_dirs("$(SolutionDir)skipped/include")));
+    write(root, ".git/g.vcxproj", &project(&compile_dirs("$(SolutionDir)skipped/include")));
+    write(root, "tools/k.vcxproj", &project(&compile_dirs("$(SolutionDir)kept/include")));
+
+    let dirs = msbuild_include_dirs(root, &files);
+
+    assert_eq!(dirs, vec![root.join("kept/include")]);
 }
