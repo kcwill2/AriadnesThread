@@ -36,16 +36,33 @@ const INCLUDE_PATH_PROPERTIES: [&str; 2] = ["includepath", "externalincludepath"
 /// Existing header search dirs declared by the repo's `.vcxproj` files, in
 /// first-seen order without duplicates. Empty when the repo has none.
 pub(crate) fn msbuild_include_dirs(repo_root: &Path, files: &[FileRecord]) -> Vec<PathBuf> {
+    let repo_root = plain_windows_path(repo_root);
     let mut seen = HashSet::new();
     let mut dirs = Vec::new();
-    for project_path in find_project_files(repo_root, files) {
-        for dir in ProjectEvaluation::run(repo_root, &project_path) {
+    for project_path in find_project_files(&repo_root, files) {
+        for dir in ProjectEvaluation::run(&repo_root, &project_path) {
             if dir.is_dir() && seen.insert(dir.clone()) {
                 dirs.push(dir);
             }
         }
     }
     dirs
+}
+
+/// `canonicalize()` on Windows yields the verbatim form (`\\?\C:\...`,
+/// `\\?\UNC\server\...`), in which `/` is NOT a separator. Macro values are
+/// spliced as text and project files freely mix `/` and `\`, so evaluation
+/// works on the plain spelling instead (the file catalog keys both forms
+/// alike).
+fn plain_windows_path(path: &Path) -> PathBuf {
+    let spelled = path.to_string_lossy();
+    if let Some(unc) = spelled.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else if let Some(local) = spelled.strip_prefix(r"\\?\") {
+        PathBuf::from(local)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// `.vcxproj` files in any directory that holds, or is an ancestor of, a

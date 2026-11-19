@@ -153,14 +153,10 @@ fn shaper_selection_and_unit_truth_on_the_fixture() -> Result<()> {
     let discovery = repository.discover()?;
     let shaper = registry
         .unit_shaper_for_repo(&repository.root)
-        .expect("the cargo marker at the fixture root selects a registered shaper");
-    assert_eq!(
-        shaper.build_markers(),
-        vec!["Cargo.toml"],
-        "D22 marker selection reached the Rust shaper (the C++/Scala markers \
-         are absent at this root; first-registration order still answers first \
-         wherever THEIR markers are)"
-    );
+        .expect("registered plugins provide shapers");
+    // The registry shapes with every plugin; on this pure-Rust fixture the
+    // C++/Scala shapers claim nothing, which the single rustc context and
+    // the unit truth below lock.
 
     let build = BuildDiscoverer::new(&repository.root)
         .with_repo_discovery(&discovery)

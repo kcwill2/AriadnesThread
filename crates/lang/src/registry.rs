@@ -11,7 +11,6 @@ use crate::validator::CompilerValidator;
 use ariadne_lang_api::capability::LanguageCapabilities;
 use ariadne_lang_api::identity::LanguageId;
 use ariadne_lang_api::modeling::LanguageModeling;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Bundles all language-specific pipeline components into one object.
@@ -154,30 +153,20 @@ pub fn detect_language(&self, path: &Path) -> Option<LanguageId> {
         self.plugins.iter().find_map(|p| p.shaper())
     }
 
-    /// Build-stage unit shaper selected from the repository root
-    /// (plan M22 D22): the FIRST plugin in registration order that
-    /// provides a shaper declaring a `build_markers()` entry present at
-    /// `repo_root` wins; when NO plugin's markers are present the
-    /// registry falls back to first-wins [`Self::unit_shaper_for`] —
-    /// today's behavior, byte-identical. Selection differs from
-    /// first-wins ONLY where a later plugin's markers are present while
-    /// every earlier plugin's are absent.
+    /// Build-stage unit shaper for the repository at `repo_root`: the
+    /// registry itself, shaping with EVERY plugin that provides a shaper
+    /// (see `combined_shaper`). `None` only when no plugin provides one.
     ///
-    /// Marker presence rule (honest statement): a marker names an entry
-    /// (file or directory) of the repository root. A non-dot marker
-    /// (e.g. `CMakeLists.txt`) is present only on an exact-name match; a
-    /// dot-prefixed marker (e.g. `.vcxproj`) is a SUFFIX-style project
-    /// file extension and is present when ANY root entry name ends with
-    /// it (so `Foo.vcxproj` matches `.vcxproj`). Registry iteration is
-    /// pure data — no language identity is referenced (R2/R3).
+    /// This replaced the M22 D22 root-marker selection, which handed a
+    /// mixed repo to a single language: a root `build.sbt` left over in a
+    /// Bazel-built C++/Scala monorepo made the Scala shaper the only one,
+    /// and every C++ unit (with its `.vcxproj` include dirs) vanished.
+    /// `repo_root` stays in the signature for the call sites; selection no
+    /// longer depends on it.
     pub fn unit_shaper_for_repo(&self, repo_root: &Path) -> Option<&dyn UnitShaper> {
-        self.plugins
-            .iter()
-            .find_map(|plugin| {
-                let shaper = plugin.shaper()?;
-                has_root_marker(repo_root, &shaper.build_markers()).then_some(shaper)
-            })
-            .or_else(|| self.unit_shaper_for())
+        let _ = repo_root;
+        self.unit_shaper_for()?;
+        Some(self)
     }
 
     /// The only registered plugin (M18.3): `Some` exactly when the registry
@@ -201,33 +190,7 @@ impl Default for LanguageRegistry {
     }
 }
 
-/// True when any of `markers` is present at `repo_root` — presence rule
-/// documented on [`LanguageRegistry::unit_shaper_for_repo`].
-fn has_root_marker(repo_root: &Path, markers: &[&'static str]) -> bool {
-    markers
-        .iter()
-        .any(|marker| root_marker_present(repo_root, marker))
-}
-
-fn root_marker_present(repo_root: &Path, marker: &str) -> bool {
-    if repo_root.join(marker).exists() {
-        return true;
-    }
-    marker.starts_with('.') && root_entries_end_with(repo_root, marker)
-}
-
-fn root_entries_end_with(repo_root: &Path, suffix: &str) -> bool {
-    fs::read_dir(repo_root)
-        .map(|entries| {
-            entries.flatten().any(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(suffix)
-            })
-        })
-        .unwrap_or(false)
-}
+mod combined_shaper;
 
 #[cfg(test)]
 mod tests {
@@ -654,100 +617,45 @@ mod tests {
         );
     }
 
-    // ── unit_shaper_for_repo (plan M22 D22: marker-based selection) ──────────
+    // -- unit_shaper_for_repo: the registry shapes with every plugin --------
 
-    const FIRST_MARKER: &str = "alpha.marker";
-    const SECOND_MARKER: &str = "beta.marker";
-
-    fn marker_shaper_registry() -> LanguageRegistry {
+    fn two_shaper_registry() -> LanguageRegistry {
         LanguageRegistry::new()
             .register(Box::new(MockPlugin::with_marker_shaper(
                 "one",
                 LanguageId::Cpp,
-                &[FIRST_MARKER],
+                &["alpha.marker"],
                 "shaper-one",
             )))
             .register(Box::new(MockPlugin::with_marker_shaper(
                 "two",
                 LanguageId::Scala,
-                &[SECOND_MARKER],
+                &["beta.marker"],
                 "shaper-two",
             )))
     }
 
-    fn selected_shaper_identity(registry: &LanguageRegistry, root: &Path) -> String {
-        registry
-            .unit_shaper_for_repo(root)
-            .expect("a shaper-providing plugin is registered")
-            .default_compiler()
-            .to_string()
-    }
-
-    fn repo_root_with_markers(markers: &[&str]) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().expect("temp repo root");
-        for marker in markers {
-            std::fs::write(dir.path().join(marker), "").expect("write marker");
-        }
-        dir
-    }
-
     #[test]
-    fn unit_shaper_for_repo_selects_the_later_plugin_when_only_its_marker_is_present() {
-        let registry = marker_shaper_registry();
-        let root = repo_root_with_markers(&[SECOND_MARKER]);
+    fn unit_shaper_for_repo_answers_each_language_with_its_own_compiler() {
+        let registry = two_shaper_registry();
+        let shaper = registry
+            .unit_shaper_for_repo(Path::new("any-root"))
+            .expect("shaper-providing plugins are registered");
+        assert_eq!(shaper.compiler_for(&LanguageId::Cpp), "shaper-one");
+        assert_eq!(shaper.compiler_for(&LanguageId::Scala), "shaper-two");
         assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
-            "shaper-two",
-            "the later-registered plugin wins when its marker is present \
-             and the first plugin's is absent (D22)"
-        );
-    }
-
-    #[test]
-    fn unit_shaper_for_repo_registration_order_wins_when_both_markers_are_present() {
-        let registry = marker_shaper_registry();
-        let root = repo_root_with_markers(&[FIRST_MARKER, SECOND_MARKER]);
-        assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
+            shaper.compiler_for(&LanguageId::Rust),
             "shaper-one",
-            "registration order breaks the marker tie (D22)"
+            "a language no shaper owns falls back to the first shaper's compiler"
         );
+        assert_eq!(shaper.default_compiler(), "shaper-one");
     }
 
     #[test]
-    fn unit_shaper_for_repo_selects_the_first_plugin_when_only_its_marker_is_present() {
-        let registry = marker_shaper_registry();
-        let root = repo_root_with_markers(&[FIRST_MARKER]);
-        assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
-            "shaper-one",
-            "the first plugin's own marker selects its shaper"
-        );
-    }
-
-    #[test]
-    fn unit_shaper_for_repo_falls_back_to_first_wins_when_no_marker_is_present() {
-        let registry = marker_shaper_registry();
-        let root = repo_root_with_markers(&[]);
-        assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
-            "shaper-one",
-            "no marker present anywhere ⇒ today's first-wins unit_shaper_for() \
-             behavior (IV2 fallback)"
-        );
-    }
-
-    #[test]
-    fn unit_shaper_for_repo_treats_dot_markers_as_name_suffixes() {
-        let registry = LanguageRegistry::new().register(Box::new(
-            MockPlugin::with_marker_shaper("one", LanguageId::Cpp, &[".proj"], "shaper-dot"),
-        ));
-        let root = repo_root_with_markers(&["Anything.proj"]);
-        assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
-            "shaper-dot",
-            "a dot-prefixed marker matches any root entry ending in it"
-        );
+    fn unit_shaper_for_repo_unions_every_shapers_markers() {
+        let registry = two_shaper_registry();
+        let shaper = registry.unit_shaper_for_repo(Path::new("any-root")).unwrap();
+        assert_eq!(shaper.build_markers(), vec!["alpha.marker", "beta.marker"]);
     }
 
     #[test]
@@ -757,25 +665,26 @@ mod tests {
             .register(Box::new(MockPlugin::with_marker_shaper(
                 "two",
                 LanguageId::Scala,
-                &[SECOND_MARKER],
+                &["beta.marker"],
                 "shaper-two",
             )));
-        let root = repo_root_with_markers(&[SECOND_MARKER]);
+        let shaper = registry.unit_shaper_for_repo(Path::new("any-root")).unwrap();
+        assert_eq!(shaper.default_compiler(), "shaper-two");
         assert_eq!(
-            selected_shaper_identity(&registry, root.path()),
+            shaper.compiler_for(&LanguageId::Cpp),
             "shaper-two",
-            "a shaper-less plugin can never win marker selection"
+            "a shaper-less plugin contributes no compiler of its own"
         );
     }
 
     #[test]
-    fn unit_shaper_for_repo_empty_registry_is_none() {
-        let root = repo_root_with_markers(&[FIRST_MARKER]);
-        assert!(
-            LanguageRegistry::new()
-                .unit_shaper_for_repo(root.path())
-                .is_none()
-        );
+    fn unit_shaper_for_repo_is_none_without_any_shaper() {
+        assert!(LanguageRegistry::new()
+            .unit_shaper_for_repo(Path::new("any-root"))
+            .is_none());
+        let shaperless = LanguageRegistry::new()
+            .register(Box::new(MockPlugin::with_extension("plain", LanguageId::Cpp)));
+        assert!(shaperless.unit_shaper_for_repo(Path::new("any-root")).is_none());
     }
 
     #[test]
@@ -791,14 +700,5 @@ mod tests {
              to the first non-Other answer instead of stopping at the miss"
         );
         assert_eq!(registry.detect(Path::new("src/a.three")), SourceFileKind::Other);
-    }
-
-    #[test]
-    fn pin_root_entries_end_with_nonexistent_root_is_false() {
-        assert!(
-            !root_entries_end_with(Path::new("definitely-missing-repo-root-uta-t3"), ".proj"),
-            "fs::read_dir failure maps through unwrap_or(false): a missing root \
-             has no matching entries rather than panicking"
-        );
     }
 }
