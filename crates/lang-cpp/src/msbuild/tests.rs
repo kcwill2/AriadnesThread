@@ -78,6 +78,37 @@ fn relative_and_project_dir_entries_resolve_against_the_project() {
 }
 
 #[test]
+fn notes_list_imported_props_files_with_project_counts() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let files = vec![source_record(root, "App/main.cpp")];
+    write(root, "Directory.Build.props", &project(""));
+    write(root, "Props/Common.props", &project(""));
+    let import_common = "<ImportGroup><Import Project=\"..\\Props\\Common.props\" /></ImportGroup>";
+    write(root, "App/App.vcxproj", &project(import_common));
+    write(root, "Lib/Lib.vcxproj", &project(import_common));
+    write(root, "Solo/Solo.vcxproj", &project(""));
+
+    let notes = msbuild_notes(root, &files);
+
+    let listing: Vec<&str> = notes
+        .iter()
+        .map(String::as_str)
+        .skip_while(|line| !line.starts_with("MSBuild: 2 props file(s) imported"))
+        .take(3)
+        .collect();
+    assert_eq!(
+        listing,
+        vec![
+            "MSBuild: 2 props file(s) imported:",
+            "  Directory.Build.props (3 projects)",
+            "  Props/Common.props (2 projects)",
+        ],
+        "notes were: {notes:#?}"
+    );
+}
+
+#[test]
 fn imported_props_supply_user_macros_and_this_file_directory() {
     let temp_dir = tempfile::tempdir().unwrap();
     let root = temp_dir.path();

@@ -309,6 +309,9 @@ impl<'a> ProjectEvaluation<'a> {
         let Some(document) = read_project_text(path) else {
             return;
         };
+        if !has_extension(path, "vcxproj") {
+            self.findings.record_imported_file(path);
+        }
         let file_dir = path.parent().unwrap_or(self.repo_root).to_path_buf();
         let this_dir_key = "msbuildthisfiledirectory".to_string();
         let outer_this_dir = self
