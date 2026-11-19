@@ -106,14 +106,14 @@ fn stage_one_to_four_frames() -> Vec<ProgressReport> {
 /// through `stage_progress_callback`), plus the `build_ui_payload` tail.
 /// The mapping is frozen by
 /// `progress_contract_tests::test_stage_five_milestone_sequence_is_monotonic_and_contained`:
-/// globals 80, 81, 81x5, 82, 85, 85, 85, 86, 99, 100.
+/// globals 80, 83, 83, 85, 88, 90, 93, 94, 94, 94, 96, 99, 100.
 fn stage_five_calibrated_frames() -> Vec<ProgressReport> {
     let mut reports = seam_stage_frames()[7..].to_vec();
     reports.extend(build_payload_tail_frames());
     let pinned_globals: Vec<usize> = reports.iter().map(|r| r.percent).collect();
     assert_eq!(
         pinned_globals,
-        vec![80, 81, 81, 81, 81, 81, 82, 85, 85, 85, 86, 99, 100],
+        vec![80, 83, 83, 85, 88, 90, 93, 94, 94, 94, 96, 99, 100],
         "stage-5 replay globals must equal the sequence pinned in progress_contract_tests"
     );
     reports
@@ -234,7 +234,7 @@ fn test_i1_stage_five_row_matches_pinned_step_percent_sequence() {
         .collect();
     assert_eq!(
         step_percents,
-        vec![0, 5, 5, 5, 5, 5, 10, 25, 25, 25, 30, 95, 100],
+        vec![0, 15, 15, 25, 40, 50, 65, 70, 70, 70, 80, 95, 100],
         "stage-5 row percents must equal the shape's pinned sequence"
     );
 }

@@ -14,10 +14,11 @@
 
     /// The ordered static milestones exactly as `build_ui_payload` emits them,
     /// built from the same constants and helpers the real code path calls.
-    /// A4: stage 5's milestone set is {80 start, 81 "Symbols analyzed",
-    /// [81,82] file-event span, 85 artifacts-saved / "Collateral mapped" /
-    /// "Planning extractions", 86 "Justifying symbols...", 99 "Symbols
-    /// justified", 100 payload finalization}, all within [80, 100].
+    /// Stage 5's milestone set (recalibrated 2026-11-19) is {80 start, 83
+    /// "Symbols analyzed", [83,93] file-event span, 94 artifacts-saved /
+    /// "Collateral mapped" / "Planning extractions", 96 "Justifying
+    /// symbols...", 99 "Symbols justified", 100 payload finalization}, all
+    /// within [80, 100].
     fn emitted_milestones() -> Vec<(usize, &'static str)> {
         vec![
             (stage_start_percent(1), ARTIFACTS_PHASE),
@@ -107,14 +108,35 @@
         }
     }
 
+    /// Stage 3: the cold reduce's `ModelReduced` event moves the stage-3 bar
+    /// to its measured build/save split, inside the stage's own span.
+    #[test]
+    fn test_model_reduced_maps_inside_stage_three() {
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut event_cb = stage_progress_callback(progress);
+        event_cb(&ProgressEvent::ModelReduced);
+        let reports = collected.lock().unwrap();
+        assert_eq!(reports.len(), 1);
+        let report = &reports[0];
+        assert_eq!(report.stage, 3);
+        assert_eq!(report.message, "Saving reduced model");
+        assert!(
+            stage_start_percent(3) < report.percent && report.percent < stage_end_percent(3),
+            "{}% must sit strictly inside stage 3",
+            report.percent
+        );
+    }
+
     #[test]
     fn test_collateral_events_stay_in_stage_five_span() {
         assert_eq!(
             collateral_file_percent(0, 0),
-            81,
+            SYMBOLS_ANALYZED_PERCENT,
             "empty collateral set must sit at the file-loop floor"
         );
-        assert_eq!(collateral_file_percent(0, 7), 81);
+        assert_eq!(collateral_file_percent(0, 7), SYMBOLS_ANALYZED_PERCENT);
         assert_eq!(collateral_file_percent(7, 7), COLLATERAL_FILE_SPAN_END);
         let mut previous = collateral_file_percent(0, 9);
         for done in 1..=9 {
@@ -192,16 +214,16 @@
             sequence,
             vec![
                 (80, "Load analysis"),
-                (81, "21 symbols analyzed"),
-                (81, "0/4 files"),
-                (81, "1/4 files"),
-                (81, "2/4 files"),
-                (81, "3/4 files"),
-                (82, "4/4 files"),
-                (85, "Load artifacts saved"),
-                (85, "Collateral mapped"),
-                (85, "Planning extractions"),
-                (86, "Justifying symbols..."),
+                (83, "21 symbols analyzed"),
+                (83, "0/4 files"),
+                (85, "1/4 files"),
+                (88, "2/4 files"),
+                (90, "3/4 files"),
+                (93, "4/4 files"),
+                (94, "Load artifacts saved"),
+                (94, "Collateral mapped"),
+                (94, "Planning extractions"),
+                (96, "Justifying symbols..."),
                 (99, "Symbols justified"),
                 (100, "Payload assembled"),
             ],

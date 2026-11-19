@@ -112,10 +112,10 @@ pub fn drive_stage_frames(
     ));
     advance(StageCall::Load)?;
     // A4: on a cold rebuild the pipeline callback has already emitted the
-    // "Load artifacts saved" milestone at 85; this frame repeats that
+    // "Load artifacts saved" milestone; this frame repeats that
     // percent under the stage's own label. On a warm load-stage reuse no
     // pipeline events fire at all, so this is the only load-complete marker
-    // and the bar honestly jumps 80 -> 85 once the cached stage returned.
+    // and the bar honestly jumps 80 -> 94 once the cached stage returned.
     progress(super::stage_report(
         5,
         super::ARTIFACTS_SAVED_PERCENT,

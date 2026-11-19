@@ -35,59 +35,41 @@ pub const DISCOVERY_HASHED_SPAN_END: usize = 10;
 // frame `(1, 20)` keeps sole ownership of 20 (I9, contract test 4).
 pub const INCLUDE_SCAN_SPAN_END: usize = 19;
 
+// Stage-3 split: the cold reduce reports `ModelReduced` between building
+// the model and saving its artifacts. Measured on a generated 1500-TU,
+// 2500-file repo (release, 2026-11-19): reduce 1.51 s, save 0.66 s, so the
+// build ends at ~70% of the stage: 40 + 14.
+pub const MODEL_REDUCED_PERCENT: usize = 54;
+
 // ---------------------------------------------------------------------------
-// A4: calibrated stage-5 sub-spans, replacing the old fixed [80,95] lie that
-// burned 75% of the stage on the ~75 ms file loop while the real tail ran
-// with a frozen bar. Calibration = the tail bench on the 520-header/40-TU
-// fixture (crates/cli/tests/payload_tail_bench.rs), post-A4 re-run table of
-// 2026-09-29: symbol_pass+prep 301ms · file_pass 75.4ms ·
-// save_load_artifacts+cache 1417.8ms · ensure_load total 1794.2ms (vs the
-// post-A6 runs 1893/1743 — milestone notifies cost nothing measurable) ·
-// generate_report+detect_cycles 4.7ms · build_include_elements 5.1ms ·
-// path_to_id+file_collateral 28.9ms · planner facts+closures 232.4ms ·
-// build_file_justification_with_memo 5313.4ms (DOMINANT) · conservative
-// 0.0ms. The stage-5 window totals ~7.38 s over the 20-point global span
-// [80,100], so 1 point ~= 0.37 s.
-// Re-pin 2026-10-04 (M23.5 T3.2): the cycle row above is now
-// detect_cycle_groups at a measured 5.6 ms (--release run of the tail
-// bench, 2026-10-04). It replaces 4.7 ms, which already disagreed with
-// payload_tail_bench.rs's own 2026-09-29 row of 5.8 ms for the same
-// combined call; the measured 5.6 sits with the bench table (parity
-// within single-run noise, as linear-time SCC predicts), so the
-// pre-existing 4.7-vs-5.8 split is recorded, not papered over.
-// UNVERIFIED against bench_compare.py: that tool is off the reviewer
-// allowlist (ledger M23.5 F10) and was not run; 5.6 ms is a single local
-// measurement, not bench-compare-verified perf evidence. The percent
-// constants below are unmoved: this span is a fraction of a point either
-// way. Full provenance: payload_tail_bench.rs header + T3-B journal.
-// Every milestone sits at the nearest integer point of its CUMULATIVE
-// measured time (milestone boundaries within ~0.2 pt of measured reality).
-// The largest forward error is <=1 pt mid-file-loop, where the loop-end
-// rounding leads briefly and the save milestone reclaims the slack.
+// Stage-5 sub-spans, recalibrated 2026-11-19 after the store-once index and
+// the compact file metric. The earlier A4 table (2026-09-29, 40-TU fixture)
+// had the justification memo dominant (5.3 s) and gave the file pass one
+// point, so on large repos the bar sat at "5%" through the longest step.
+// Release measurement on the generated 1500-TU, 2500-file repo, cold load
+// stage: symbol pass ~1 s, file pass 4-7 s (one CollateralFile event per
+// file), save <0.1 s, include report + cycles 0.15 s, planner 0.5 s, path
+// maps + collateral map 0.44 s, justification 0.41 s, payload 0.1 s. The
+// stage totals ~7-10 s over 20 points, so 1 point ~= 0.4 s; every
+// milestone sits at the nearest point of its cumulative share.
 // ---------------------------------------------------------------------------
-/// Symbol pass + analyzer prep (~301ms -> 0.8 pt, nearest integer 81): the
-/// bar leaves the stage-start tick only once the symbol pass has really
-/// collected.
-pub const SYMBOLS_ANALYZED_PERCENT: usize = 81;
-/// File loop upper bound (~75ms of events, rounded up to 1 pt; the loop is
-/// a fast pass since A2 — the old [80,95] span it owned is what made the
-/// bar look frozen everywhere else).
-pub const COLLATERAL_FILE_SPAN_END: usize = 82;
-/// `save_load_artifacts` + cache wrap complete (~1418ms; cumulative
-/// ~1794ms -> 84.9 pt). Emitted by the pipeline milestone only when the
-/// bytes are on disk.
-pub const ARTIFACTS_SAVED_PERCENT: usize = 85;
-/// Emitted right before `build_extraction_proposals`: the maps before the
-/// planner are ~39ms, so cumulative stays ~85.0 pt.
-pub const PLANNING_EXTRACTIONS_PERCENT: usize = 85;
-/// Emitted right before `build_file_justification_with_memo`: the planner
-/// facts+closures run just before (~232ms; cumulative ~2066ms -> 85.6).
-pub const JUSTIFYING_SYMBOLS_PERCENT: usize = 86;
-/// Emitted after the justification memo returns: the dominant tail
-/// (~5313ms ~= 14.4 of the 15 points left after the save) would run past
-/// 100 exactly, so it is capped one point short — the terminal 100% frame
-/// is reserved for "Payload assembled" (progress.rs finalizes only a
-/// step-5 100% frame, so the run must end on that milestone).
+/// Symbol pass + analyzer prep (~1 s -> 3 pt).
+pub const SYMBOLS_ANALYZED_PERCENT: usize = 83;
+/// File pass upper bound: the dominant step, mapped per file over [83, 93].
+pub const COLLATERAL_FILE_SPAN_END: usize = 93;
+/// `save_load_artifacts` + cache wrap complete. Emitted by the pipeline
+/// milestone only when the bytes are on disk.
+pub const ARTIFACTS_SAVED_PERCENT: usize = 94;
+/// Emitted right before the planner; the include report and cycle groups
+/// before it take a fraction of a point.
+pub const PLANNING_EXTRACTIONS_PERCENT: usize = 94;
+/// Emitted after the planner (~0.5 s -> 2 pt), before the path maps and
+/// the justification memo.
+pub const JUSTIFYING_SYMBOLS_PERCENT: usize = 96;
+/// Emitted after the justification memo returns (path maps + memo ~0.85 s
+/// -> 3 pt). The terminal 100% frame stays reserved for "Payload
+/// assembled" (progress.rs finalizes only a step-5 100% frame, so the run
+/// must end on that milestone).
 pub const JUSTIFICATION_COMPLETE_PERCENT: usize = 99;
 /// Terminal milestone after payload assembly, before the build returns.
 /// `swap_into_state` separately marks the web state "Ready".

@@ -19,7 +19,7 @@ use stage_spans::{
     collateral_file_percent, discovery_hashed_percent, include_scan_percent, stage_end_percent,
     stage_start_percent, step_percent, tu_index_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT,
     CALL_GRAPH_PHASE, COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
-    PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, REDUCTION_PHASE, RUN_PHASES,
+    MODEL_REDUCED_PERCENT, PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, REDUCTION_PHASE, RUN_PHASES,
     STAGES_PER_RUN, SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
 };
 // Re-exported after the verbatim move to `ui/boot_progress.rs`: EXACTLY the
@@ -204,6 +204,12 @@ fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent
             // I10 verbatim literal: double space before the relative path.
             &format!("{done}/{total} TUs  {}", source.display()),
         )),
+        ProgressEvent::ModelReduced => (cb_progress)(stage_report(
+            3,
+            MODEL_REDUCED_PERCENT,
+            REDUCTION_PHASE,
+            "Saving reduced model",
+        )),
     }
 }
 
@@ -243,8 +249,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     // reuse the stage closures, before the memo below takes them.
     // Milestones follow the CALL ORDER, not the cost order: the planner
     // really runs before the justification memo, so "Planning extractions"
-    // is emitted here (A4 honesty rule — the boot-time ms table in the
-    // constants block shows why the planner earns only ~0.6 pt).
+    // is emitted here (A4 honesty rule; the measured table in
+    // stage_spans.rs gives the planner ~2 pt).
     stage5_report(
         &progress,
         PLANNING_EXTRACTIONS_PERCENT,
@@ -259,8 +265,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
     // live route share it; rebuilds swap graph+model+memo as one unit.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
-    // Span floor of the dominant tail: the memo call emits no per-file
-    // events, so 86 -> 99 is one honest span, not a frozen 12-point jump.
+    // Span floor of the justification tail (path maps + memo): neither
+    // emits per-file events, so 96 -> 99 is one measured span.
     stage5_report(
         &progress,
         JUSTIFYING_SYMBOLS_PERCENT,
