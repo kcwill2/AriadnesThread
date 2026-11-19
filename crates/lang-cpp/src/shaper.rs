@@ -34,6 +34,20 @@ fn default_include_dirs(root: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// The `include/` default, then the search dirs the repo's `.vcxproj` files
+/// declare (`AdditionalIncludeDirectories` and VC++ Directories, through
+/// their `.props` imports). Every unit shares the one synthetic context, so
+/// all units carry the union.
+fn shaped_include_dirs(root: &Path, files: &[FileRecord]) -> Vec<PathBuf> {
+    let mut include_dirs = default_include_dirs(root);
+    for dir in crate::msbuild::msbuild_include_dirs(root, files) {
+        if !include_dirs.contains(&dir) {
+            include_dirs.push(dir);
+        }
+    }
+    include_dirs
+}
+
 fn synthesized_invocation(canonical_path: &Path) -> Vec<String> {
     // Byte-identical to the old `vec!["cl.exe", "/c", <lossy canonical>]`.
     vec![
@@ -63,7 +77,7 @@ impl UnitShaper for CppUnitShaper {
     fn shape_units(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<UnitDescriptor> {
         let context_name = self.context_name_for_defines(&[]);
         let defines = default_context_defines();
-        let include_dirs = default_include_dirs(repo_root);
+        let include_dirs = shaped_include_dirs(repo_root, files);
 
         files
             .iter()
@@ -213,6 +227,32 @@ mod tests {
         assert_eq!(units.len(), 4, "cpp|cc|cxx|c only, headers excluded");
         // No include/ dir on this root: no search dirs, exactly as today.
         assert!(units.iter().all(|u| u.include_dirs.is_empty()));
+    }
+
+    /// A Visual Studio repo's `AdditionalIncludeDirectories` join the
+    /// default `include/` dir on every unit, after it.
+    #[test]
+    fn shape_units_appends_vcxproj_include_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::create_dir_all(root.join("Common/Include")).unwrap();
+        std::fs::create_dir_all(root.join("App")).unwrap();
+        std::fs::write(
+            root.join("App/App.vcxproj"),
+            "<Project><ItemDefinitionGroup><ClCompile>\
+             <AdditionalIncludeDirectories>..\\Common\\Include</AdditionalIncludeDirectories>\
+             </ClCompile></ItemDefinitionGroup></Project>",
+        )
+        .unwrap();
+
+        let units = CppUnitShaper.shape_units(root, &[record(root, "App/main.cpp")]);
+
+        assert_eq!(units.len(), 1);
+        assert_eq!(
+            units[0].include_dirs,
+            vec![root.join("include"), root.join("Common").join("Include")]
+        );
     }
 
     #[test]
