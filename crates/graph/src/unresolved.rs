@@ -76,7 +76,7 @@ mod tests {
             kind,
             raw_path: raw_path.to_string(),
             resolved_path: None,
-            language: LanguageId::Cpp,
+            language: LanguageId::cpp(),
         }
     }
 

@@ -2,7 +2,7 @@
 //! small Visual Studio tree in a tempdir and asserts the resolved search
 //! dirs `msbuild_include_dirs` hands to the shaper.
 
-use super::msbuild_include_dirs;
+use super::{msbuild_include_dirs, msbuild_notes};
 use ariadne_repo::{FileId, FileKind, FileOwnership, FileRecord, OptimizationPolicy, SourceLanguage};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -245,4 +245,92 @@ fn repos_without_projects_yield_nothing() {
     let files = vec![source_record(root, "src/main.cpp")];
 
     assert!(msbuild_include_dirs(root, &files).is_empty());
+}
+
+#[test]
+fn notes_name_unresolved_macros_missing_dirs_and_imports() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    mkdir(root, "App/inc");
+    let files = vec![source_record(root, "App/main.cpp")];
+    write(
+        root,
+        "Props/Sdk.props",
+        &project(&compile_dirs(
+            "$(EnGenSDKRoot)\\include;$(EnGenSDKRoot)\\lib\\include;%(AdditionalIncludeDirectories)",
+        )),
+    );
+    write(
+        root,
+        "App/App.vcxproj",
+        &project(&format!(
+            "<Import Project=\"..\\Props\\Sdk.props\" />\
+             <Import Project=\"$(UserRootDir)\\Microsoft.Cpp.x64.user.props\" />{}",
+            compile_dirs("inc;gone\\dir")
+        )),
+    );
+
+    let notes = msbuild_notes(root, &files).join("\\n");
+
+    assert!(notes.contains("1 project file"), "{notes}");
+    assert!(notes.contains("1 include dir"), "{notes}");
+    assert!(
+        notes.contains("$(EnGenSDKRoot)") && notes.contains("2 entries")
+            && notes.contains("Props/Sdk.props"),
+        "unknown macro, its drop count and where it was used: {notes}"
+    );
+    assert!(
+        !notes.contains("%(AdditionalIncludeDirectories)"),
+        "item-metadata inheritance is normal, not a miss: {notes}"
+    );
+    assert!(notes.contains("gone/dir") && notes.contains("App/App.vcxproj"), "{notes}");
+    assert!(notes.contains("$(UserRootDir)"), "unresolvable import: {notes}");
+}
+
+#[test]
+fn notes_are_empty_for_repos_without_projects() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let files = vec![source_record(root, "src/main.cpp")];
+    assert!(msbuild_notes(root, &files).is_empty());
+}
+
+/// MSBuild evaluates every property (through all imports) before any item
+/// definition, so a macro defined in a props imported AFTER the item
+/// definition that uses it still resolves.
+#[test]
+fn item_definitions_see_properties_defined_by_later_imports() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let sdk = mkdir(root, "sdk/include");
+    let shared = mkdir(root, "Props/shared");
+    let files = vec![source_record(root, "App/main.cpp")];
+    write(
+        root,
+        "Props/Uses.props",
+        &project(&compile_dirs(
+            "$(EnGenSDKRoot)include;$(MSBuildThisFileDirectory)shared",
+        )),
+    );
+    write(
+        root,
+        "Props/Defines.props",
+        &project(
+            "<PropertyGroup Label=\"UserMacros\">\
+             <EnGenSDKRoot>$(MSBuildThisFileDirectory)..\\sdk\\</EnGenSDKRoot>\
+             </PropertyGroup>",
+        ),
+    );
+    write(
+        root,
+        "App/App.vcxproj",
+        &project(
+            "<Import Project=\"..\\Props\\Uses.props\" />\
+             <Import Project=\"..\\Props\\Defines.props\" />",
+        ),
+    );
+
+    let dirs = msbuild_include_dirs(root, &files);
+
+    assert_eq!(sorted(dirs), sorted(vec![sdk, shared]));
 }

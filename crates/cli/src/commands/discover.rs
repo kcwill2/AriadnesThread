@@ -100,8 +100,9 @@ pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
     // D22: the unit shaper is selected through the registry's marker-based
     // lookup against the repository root (first-wins fallback preserved).
     let registry = crate::registry::default_registry();
+    let unit_shaper = registry.unit_shaper_for_repo(&repository.root);
     let discoverer = BuildDiscoverer::new(&repository.root)
-        .with_unit_shaper(registry.unit_shaper_for_repo(&repository.root))
+        .with_unit_shaper(unit_shaper)
         .with_repo_discovery(&repo_discovery);
     let build_result = discoverer.discover()?;
 
@@ -124,6 +125,16 @@ pub fn discover_build_contexts(repo_path: &PathBuf) -> Result<()> {
         "Translation units: {}",
         build_result.translation_units.len()
     );
+    let notes = unit_shaper
+        .map(|shaper| shaper.discovery_notes(&repository.root, &repo_discovery.files))
+        .unwrap_or_default();
+    if !notes.is_empty() {
+        println!();
+        println!("Discovery notes:");
+        for note in &notes {
+            println!("  {note}");
+        }
+    }
 
     let artifacts = ArtifactManager::prepare_for_repo(&repository)?;
     let hashes: Vec<_> = repo_discovery

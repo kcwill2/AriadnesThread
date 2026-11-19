@@ -32,6 +32,14 @@ pub trait UnitShaper: Send + Sync {
     /// their context.
     fn shape_units(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<UnitDescriptor>;
 
+    /// Human-readable notes about how units were shaped for this repo
+    /// (e.g. build-file settings that could not be used), printed by
+    /// `build discover`. Diagnostic only: shaping never depends on them.
+    fn discovery_notes(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<String> {
+        let _ = (repo_root, files);
+        Vec::new()
+    }
+
     /// Build-context name inferred from a compilation database's defines
     /// (plan M18.4: the `DEBUG`/`NDEBUG` naming semantics are language
     /// toolchain knowledge; `build` keeps only neutral plumbing). The
