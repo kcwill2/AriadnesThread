@@ -7,11 +7,16 @@
 //! explicit test-root check documents that intent and guards against
 //! pathological paths containing both segments.
 //!
+//! Bazel repos override that rule: a file owned by a Bazel package is
+//! named after the package's repo-relative path and leftover `*.sbt` files
+//! are ignored (rules and test-source exclusion in [`crate::bazel`]).
+//!
 //! sbt invocation text is M23 toolchain work: `build_spec` stays empty and
 //! `default_compiler()` hands `"scalac"` to `build`'s shaper plumbing
 //! (`crates/build/src/discovery.rs`), which fills
 //! `CompilationContext.compiler` from it.
 
+use crate::bazel;
 use ariadne_lang::{LanguageId, UnitDescriptor, UnitKind, UnitShaper};
 use ariadne_repo::{FileKind, FileRecord};
 use std::fs;
@@ -26,7 +31,7 @@ const TEST_SOURCE_ROOT: [&str; 3] = ["src", "test", "scala"];
 /// Root-context name used for the sbt root project (and as the fallback
 /// when no module `*.sbt` ancestor exists): `"root"` keeps test assertions
 /// independent of the machine-specific tempdir name.
-const ROOT_CONTEXT: &str = "root";
+pub(crate) const ROOT_CONTEXT: &str = "root";
 
 fn path_contains_components(path: &Path, pattern: &[&str]) -> bool {
     let components: Vec<String> = path
@@ -108,18 +113,39 @@ impl UnitShaper for ScalaUnitShaper {
         "scalac"
     }
 
-    /// One unit per main-root Scala source, in input order; the sbt module
-    /// whose `*.sbt` file is the nearest ancestor names the context.
+    /// One unit per Scala source, in input order. A file owned by a Bazel
+    /// package (see [`crate::bazel`]) is named after that package and test
+    /// sources are dropped; in a Bazel workspace a file no package owns is
+    /// not built, so it is no unit. Everything else keeps the sbt rule:
+    /// main-root sources only, named by the nearest `*.sbt` ancestor.
     fn shape_units(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<UnitDescriptor> {
+        let workspace_present = bazel::has_workspace_marker(repo_root);
         files
             .iter()
-            .filter(|record| is_scala_main_source(record))
-            .map(|record| {
+            .filter(|record| record.kind == FileKind::ScalaSource)
+            .filter_map(|record| {
                 let file_dir = record.canonical_path.parent().unwrap_or(repo_root);
-                descriptor_for(record, sbt_context_name(file_dir, repo_root))
+                let context = context_for(record, file_dir, repo_root, workspace_present)?;
+                Some(descriptor_for(record, context))
             })
             .collect()
     }
+}
+
+/// Context name for one Scala source, or `None` when it is not a unit.
+fn context_for(
+    record: &FileRecord,
+    file_dir: &Path,
+    repo_root: &Path,
+    workspace_present: bool,
+) -> Option<String> {
+    if let Some(package) = bazel::package_context_name(file_dir, repo_root, workspace_present) {
+        return (!bazel::is_test_source(&record.path)).then_some(package);
+    }
+    if workspace_present || !is_scala_main_source(record) {
+        return None;
+    }
+    Some(sbt_context_name(file_dir, repo_root))
 }
 
 #[cfg(test)]
@@ -304,6 +330,146 @@ mod tests {
         assert_eq!(
             units[1].file_id,
             FileId::from_relative_path("src/main/scala/com/example/Main.scala")
+        );
+    }
+
+    #[test]
+    fn bazel_repo_names_contexts_after_nearest_build_package_and_ignores_sbt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        create_tree(
+            root,
+            &[
+                "WORKSPACE",
+                "build.sbt",
+                "features/build.sbt",
+                "features/billing/BUILD.bazel",
+                "features/billing/Invoice.scala",
+                "features/billing/model/Line.scala",
+                "baselibs/core/BUILD",
+                "baselibs/core/src/main/scala/Core.scala",
+                "baselibs/core/util/BUILD",
+                "baselibs/core/util/Strings.scala",
+            ],
+        );
+        let files = vec![
+            scala_record(root, "features/billing/Invoice.scala"),
+            scala_record(root, "features/billing/model/Line.scala"),
+            scala_record(root, "baselibs/core/src/main/scala/Core.scala"),
+            scala_record(root, "baselibs/core/util/Strings.scala"),
+        ];
+
+        let names: Vec<String> = ScalaUnitShaper
+            .shape_units(root, &files)
+            .into_iter()
+            .map(|unit| unit.context_name)
+            .collect();
+
+        assert_eq!(
+            names,
+            vec![
+                "features/billing",
+                "features/billing",
+                "baselibs/core",
+                "baselibs/core/util",
+            ],
+            "repo-relative package path names the context; sbt files are ignored"
+        );
+    }
+
+    #[test]
+    fn bazel_repo_excludes_test_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        create_tree(
+            root,
+            &[
+                "MODULE.bazel",
+                "lib/BUILD.bazel",
+                "lib/Lib.scala",
+                "lib/LibTest.scala",
+                "lib/LibSpec.scala",
+                "lib/LibSuite.scala",
+                "lib/test/BUILD",
+                "lib/test/Helper.scala",
+                "lib/src/test/scala/Fixture.scala",
+                "lib/tests/Other.scala",
+            ],
+        );
+        let files: Vec<FileRecord> = [
+            "lib/Lib.scala",
+            "lib/LibTest.scala",
+            "lib/LibSpec.scala",
+            "lib/LibSuite.scala",
+            "lib/test/Helper.scala",
+            "lib/src/test/scala/Fixture.scala",
+            "lib/tests/Other.scala",
+        ]
+        .iter()
+        .map(|rel| scala_record(root, rel))
+        .collect();
+
+        let units = ScalaUnitShaper.shape_units(root, &files);
+
+        assert_eq!(units.len(), 1, "only the library source is a unit");
+        assert_eq!(units[0].file_id, FileId::from_relative_path("lib/Lib.scala"));
+    }
+
+    #[test]
+    fn bazel_repo_drops_sources_outside_any_package_and_names_root_package_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        create_tree(
+            root,
+            &["WORKSPACE.bazel", "BUILD", "Top.scala", "loose/Orphan.scala"],
+        );
+        let files = vec![
+            scala_record(root, "Top.scala"),
+            scala_record(root, "loose/Orphan.scala"),
+        ];
+
+        let units = ScalaUnitShaper.shape_units(root, &files);
+
+        assert_eq!(units.len(), 2, "the root BUILD package owns both files");
+        assert!(units.iter().all(|unit| unit.context_name == "root"));
+
+        fs::remove_file(root.join("BUILD")).unwrap();
+        assert!(
+            ScalaUnitShaper.shape_units(root, &files).is_empty(),
+            "a .scala file no Bazel package owns is not built, so not a unit"
+        );
+    }
+
+    #[test]
+    fn build_bazel_names_packages_even_without_a_workspace_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        create_tree(
+            root,
+            &[
+                "build.sbt",
+                "billing/BUILD.bazel",
+                "billing/Invoice.scala",
+                "pants/BUILD",
+                "pants/src/main/scala/Legacy.scala",
+            ],
+        );
+        let files = vec![
+            scala_record(root, "billing/Invoice.scala"),
+            scala_record(root, "pants/src/main/scala/Legacy.scala"),
+        ];
+
+        let names: Vec<String> = ScalaUnitShaper
+            .shape_units(root, &files)
+            .into_iter()
+            .map(|unit| unit.context_name)
+            .collect();
+
+        assert_eq!(
+            names,
+            vec!["billing", "root"],
+            "BUILD.bazel is unambiguous; plain BUILD needs a workspace marker, \
+             so the second file keeps the sbt rule"
         );
     }
 
