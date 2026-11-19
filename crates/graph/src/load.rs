@@ -660,6 +660,13 @@ mod expansion;
 
 pub use expansion::DefFileExpansion;
 
+/// Compact file load for the stage-5 collateral pass (counts plus sample
+/// names on the collateral side), relocated for the R2 limit.
+#[path = "load_compact.rs"]
+mod compact;
+
+pub use compact::{CompactShape, COLLATERAL_NAMED_SOURCES, COLLATERAL_SAMPLE_SIZE};
+
 /// Extraction-impact entries (full + bounded summary over one shared set
 /// computation), relocated to a sibling module for the R2 limit.
 #[path = "load_impact.rs"]

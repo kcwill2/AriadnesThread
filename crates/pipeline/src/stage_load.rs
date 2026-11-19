@@ -27,7 +27,8 @@ use anyhow::{anyhow, Result};
 use rayon::prelude::*;
 
 use ariadne_graph::{
-    IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMemo, LoadMetric, ReducedSemanticModel,
+    CompactShape, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMemo, LoadMetric,
+    ReducedSemanticModel,
 };
 use ariadne_index::types::SymbolId;
 use ariadne_repo::{FileId, SourceLanguage};
@@ -488,8 +489,11 @@ fn analyze_file_chunk(
     file_ids
         .par_iter()
         .map(|&file_id| {
+            // Compact metric: the collateral side keeps counts, plus sample
+            // names for the sources a capped list can show (full lists made
+            // this pass files x closure-symbols).
             let metric = if graph.file_paths.contains_key(&file_id) {
-                analyzer.analyze_file_load_by_id(file_id).ok()
+                Some(analyzer.analyze_file_load_compact_by_id(file_id, CompactShape::default()))
             } else {
                 None
             };
