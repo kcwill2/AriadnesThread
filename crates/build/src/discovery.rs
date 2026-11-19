@@ -240,8 +240,10 @@ impl<'a> BuildDiscoverer<'a> {
         let ctx = contexts_map
             .entry(descriptor.context_name.clone())
             .or_insert_with(|| {
-                let mut ctx =
-                    CompilationContext::new(&descriptor.context_name, shaper.default_compiler());
+                let mut ctx = CompilationContext::new(
+                    &descriptor.context_name,
+                    shaper.compiler_for(&descriptor.language),
+                );
                 // M24 Part A (ADAPT-8): the unit's language label is the
                 // FILE-KIND label from the discovered record, not the shaper's
                 // plugin identity. `CompilationContext.language` stays

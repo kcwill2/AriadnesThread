@@ -299,8 +299,9 @@ fn parity_fixture_discovery_and_unit_shaping() -> Result<()> {
 
     let shaper = registry
         .unit_shaper_for_repo(&repository.root)
-        .expect("the cargo marker at the copy root selects the Rust shaper");
-    assert_eq!(shaper.build_markers(), vec!["Cargo.toml"]);
+        .expect("registered plugins provide shapers");
+    // Every plugin shapes; only the Rust shaper claims files here, which the
+    // single rustc context and the unit count below lock.
     let build = BuildDiscoverer::new(&repository.root)
         .with_repo_discovery(&discovery)
         .with_unit_shaper(Some(shaper))

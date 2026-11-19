@@ -240,10 +240,12 @@ fn cpp_filter_on_scala_marker_repo_matches_mirrored_sequence() {
     let pipeline =
         Pipeline::for_incremental(dir.path(), Some(SourceLanguage::Cpp))
             .expect("constructor constructs");
+    // Every language is shaped (the root build.sbt no longer hides C++), so
+    // the Cpp filter keeps exactly src/legacy.cpp and drops App.scala.
     assert_eq!(
-        state.retained_units, 0,
-        "fixture guard: the Cpp filter must truly narrow the Scala-shaped set \
-         (mutation-sensitivity of this lock)"
+        state.retained_units, 1,
+        "fixture guard: the Cpp filter must keep the C++ unit of the mixed \
+         repo and nothing else (mutation-sensitivity of this lock)"
     );
     assert!(
         !state.artifacts_are_authoritative(),

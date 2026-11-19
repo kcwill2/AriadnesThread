@@ -4,6 +4,7 @@
 //! `None` means the pipeline keeps its built-in CMake/VS/compile_commands
 //! shaper. `UnitDescriptor` itself lives in `ariadne-lang-api`.
 
+use ariadne_lang_api::identity::LanguageId;
 use ariadne_lang_api::unit::UnitDescriptor;
 use ariadne_repo::FileRecord;
 use std::path::Path;
@@ -18,6 +19,14 @@ pub trait UnitShaper: Send + Sync {
     /// Compiler binary name used for context/measurements; may legitimately
     /// be absent (`ToolchainStatus::Missing`).
     fn default_compiler(&self) -> &str;
+
+    /// Compiler for a context holding `language` units. A single-language
+    /// shaper answers its own compiler; a shaper that combines several
+    /// languages (the registry's) answers per language.
+    fn compiler_for(&self, language: &LanguageId) -> &str {
+        let _ = language;
+        self.default_compiler()
+    }
 
     /// Language-specific: which discovered files become analysis units, and
     /// their context.
