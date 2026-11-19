@@ -620,7 +620,9 @@ fn justification_names(
     };
     let mut ids: Vec<&ariadne_index::SymbolId> = side.symbols.iter().collect();
     ids.sort();
-    let truncated = ids.len() > max_names;
+    // `symbol_count`, not the list length: stage-5 collateral sources carry
+    // only a sorted sample of their symbols (`COLLATERAL_SAMPLE_SIZE`).
+    let truncated = side.symbol_count > max_names;
     let names = ids
         .into_iter()
         .take(max_names)

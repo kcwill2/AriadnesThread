@@ -343,6 +343,31 @@ fn test_load_deterministic_across_pipelines() {
     );
 }
 
+/// A cold reduce reports `ModelReduced` once the model is built and before
+/// its artifacts save, so the stage-3 bar moves between the two; a warm
+/// load (artifacts fresh) builds nothing and reports nothing.
+#[test]
+fn test_model_reduced_event_fires_on_cold_reduce_only() {
+    let dir = setup_repo();
+    let count_reduced = |events: &Arc<Mutex<Vec<ProgressEvent>>>| {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| matches!(event, ProgressEvent::ModelReduced))
+            .count()
+    };
+    for (run, expected) in [("cold", 1), ("warm", 0)] {
+        let events: Arc<Mutex<Vec<ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorder = events.clone();
+        let mut pipeline = Pipeline::new(dir.path(), None)
+            .unwrap()
+            .with_progress(move |event| recorder.lock().unwrap().push(event.clone()));
+        pipeline.ensure_reduced().unwrap();
+        assert_eq!(count_reduced(&events), expected, "{run} reduce");
+    }
+}
+
 /// A4: the load stage must bracket its work with honest milestones. On a
 /// cold rebuild the emitted sequence must be: `SymbolsAnalyzed { symbols > 0 }`
 /// strictly before the first `CollateralFile` event (the symbol pass runs

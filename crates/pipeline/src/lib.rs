@@ -147,6 +147,9 @@ pub enum ProgressEvent {
         total: usize,
         source: std::path::PathBuf,
     },
+    /// Stage 3: the cold reduce has built the model and its artifact save
+    /// starts (about a third of the stage's time on large repos).
+    ModelReduced,
 }
 
 /// Load-stage milestones (plan load-tail A4). `SymbolsAnalyzed` fires once
@@ -574,6 +577,7 @@ impl Pipeline {
             .as_ref()
             .context("index stage cache must exist after ensure_index")?;
         let model = ReducedSemanticModel::reduce(index);
+        self.notify(&ProgressEvent::ModelReduced);
         self.manager
             .save_reduced_artifacts(&model, &self.fps.reduced)?;
         self.reduced_cache = Some(model);
