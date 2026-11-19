@@ -318,6 +318,7 @@ mod reduce_characterization {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         }
     }
 
@@ -387,6 +388,7 @@ mod reduce_characterization {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         }
     }
 
@@ -411,6 +413,7 @@ mod reduce_characterization {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         }
     }
 
@@ -633,6 +636,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
@@ -646,6 +650,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let analyses = vec![tu1, tu2];

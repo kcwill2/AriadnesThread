@@ -155,7 +155,7 @@ fn test_m27_nonascii_corpus_cold_index_completes() {
     );
 
     let source_lines = load_specimen_line_index(&repo_path);
-    let shard_dir = repo_path.join("artifacts").join("shards");
+    let shard_dir = repo_path.join("artifacts").join("file_shards");
     let shard_paths = shard_json_paths(&shard_dir);
     assert!(
         !shard_paths.is_empty(),

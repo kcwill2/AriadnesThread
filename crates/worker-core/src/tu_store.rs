@@ -119,7 +119,7 @@ fn unreadable_hash(file_id: FileId) -> String {
     format!("unreadable:{}", file_id.0)
 }
 
-fn record_hash(
+pub(crate) fn record_hash(
     ctx: &TuStoreContext,
     repo_root: &Path,
     file_id: &FileId,
@@ -142,7 +142,7 @@ fn record_hash(
 
 /// Compilation context a TU's closure analysis runs under: the context with
 /// the matching name, or a bare one named after the TU.
-fn context_for_tu(tu: &TranslationUnit, ctx: &TuStoreContext) -> CompilationContext {
+pub(crate) fn context_for_tu(tu: &TranslationUnit, ctx: &TuStoreContext) -> CompilationContext {
     ctx.contexts
         .iter()
         .find(|c| c.name == tu.context_name)
@@ -237,6 +237,7 @@ pub fn analyze_closure_with(
         language,
 
         extends_edges: combined_extends_edges,
+        shared_files: Vec::new(),
     }
 }
 
@@ -291,7 +292,7 @@ fn on_disk_include_fallback(
 /// Resolve one directive edge to the `(FileId, repo-relative path)` pairs the
 /// plugin walk must visit, through the outcome-parity table documented on
 /// [`compute_tu_closure_plugin`].
-fn edge_destinations(
+pub(crate) fn edge_destinations(
     edge: &RawDepEdge,
     resolver: &dyn DependencyResolver,
     catalog: &FileCatalog,
@@ -532,6 +533,7 @@ mod tests {
             language: ariadne_repo::SourceLanguage::Cpp,
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
         fs::write(
             shard_file(path, old.tu_file_id),

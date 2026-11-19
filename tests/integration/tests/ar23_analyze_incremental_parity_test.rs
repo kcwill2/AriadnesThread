@@ -37,6 +37,8 @@ fn captured_authoritative_artifact_set() -> Vec<String> {
     [
         "index/index.json",
         "index/manifest.json",
+        // Store-once side channel (per-unit shared-file lists).
+        "index/shared_files.bin",
         "index/tu_analyses.bin",
         "reduced/edges.bin",
         "reduced/extends-edges.bin",

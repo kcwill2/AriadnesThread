@@ -113,12 +113,25 @@ fn declaration_spans(analysis: &TuAnalysis) -> Vec<(String, usize, usize)> {
 // Shard envelope helpers (m21 mechanism, cited not edited)
 // ---------------------------------------------------------------------------
 
-fn shard_file_name(rel_path: &str) -> String {
-    format!("{}.json", FileId::from_relative_path(rel_path).0)
+/// Per-file cache entry name prefix (store-once index): entries are named
+/// `{file_id}-{context hash}.json` under `artifacts/file_shards`.
+fn shard_file_prefix(rel_path: &str) -> String {
+    format!("{}-", FileId::from_relative_path(rel_path).0)
 }
 
 fn envelope_path(root: &Path, rel: &str) -> PathBuf {
-    root.join("artifacts").join("shards").join(shard_file_name(rel))
+    let dir = root.join("artifacts").join("file_shards");
+    let prefix = shard_file_prefix(rel);
+    fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            name.starts_with(&prefix) && name.ends_with(".json")
+        })
+        .unwrap_or_else(|| dir.join(format!("{prefix}missing.json")))
 }
 
 fn envelope_bytes(root: &Path, rel: &str) -> Vec<u8> {

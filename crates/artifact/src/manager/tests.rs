@@ -162,6 +162,30 @@ fn test_save_index_artifacts() {
 }
 
 #[test]
+fn shared_file_lists_survive_an_index_round_trip() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::locate(dir.path()).unwrap();
+    let mgr = ArtifactManager::prepare_for_repo(&repo).unwrap();
+    let unit = |file: u64, shared: Vec<u64>| ariadne_index::TuAnalysis {
+        tu_file_id: FileId(file),
+        shared_files: shared.into_iter().map(FileId).collect(),
+        ..ariadne_index::TuAnalysis::default()
+    };
+    let index_result =
+        ariadne_index::IndexResult::new(repo.root.clone(), vec![unit(1, vec![]), unit(2, vec![7, 8])]);
+
+    let index_dir = mgr.save_index_artifacts(&index_result, FP, None).unwrap();
+    let loaded = mgr.load_index_checked(FP).unwrap();
+    assert_eq!(loaded.tu_analyses, index_result.tu_analyses);
+
+    // An index from before store-once indexing has no side file: units
+    // load with empty lists (they carry full closures).
+    std::fs::remove_file(index_dir.join("shared_files.bin")).unwrap();
+    let legacy = mgr.load_index_checked(FP).unwrap();
+    assert!(legacy.tu_analyses.iter().all(|tu| tu.shared_files.is_empty()));
+}
+
+#[test]
 fn test_save_reduced_artifacts() {
     let dir = tempdir().unwrap();
     let root = dir.path();

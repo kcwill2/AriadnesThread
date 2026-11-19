@@ -307,6 +307,7 @@ fn fixture_tu_analysis() -> ariadne_index::TuAnalysis {
         call_sites: vec![],
         language: Default::default(),
         extends_edges: vec![],
+        shared_files: Vec::new(),
     }
 }
 

@@ -117,6 +117,7 @@ impl ScalaSourceParser {
             call_sites: occurrences.call_sites,
             language: SourceLanguage::Scala,
             extends_edges: dedupe_extends(occurrences.extends_edges),
+            shared_files: Vec::new(),
         }
     }
 }

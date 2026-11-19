@@ -23,6 +23,8 @@ pub use shard::*;
 // consumers around these shims (shape 4.2/4.4 - the compat contract).
 pub use ariadne_worker_core::tu_store;
 pub use ariadne_worker_core::tu_store::*;
+// Store-once indexing vocabulary (per-file analysis store + memoized walk).
+pub use ariadne_worker_core::{closure_memo, file_store};
 
 pub mod engine;
 pub use engine::*;

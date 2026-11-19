@@ -43,6 +43,7 @@ pub use registry::{build_default_registry, default_registry};
 // and load stages are `impl Pipeline` blocks in these modules; behavior
 // zero-change. M27 T3/T4 add INTO these modules, not `lib.rs`.
 mod stage_index;
+mod stage_index_store_once;
 mod stage_load;
 
 // A6 (AR-22): the `for_incremental` construction seam (an `impl Pipeline`

@@ -50,6 +50,7 @@ impl CppSemanticAnalyzer {
             language: SourceLanguage::Cpp,
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         }
     }
 

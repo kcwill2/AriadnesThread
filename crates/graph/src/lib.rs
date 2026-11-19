@@ -7,6 +7,7 @@ pub mod cycle_groups;
 pub mod graph;
 pub mod load;
 pub mod reduced;
+mod shared_usage;
 pub mod traversal;
 pub mod types;
 pub mod unresolved;

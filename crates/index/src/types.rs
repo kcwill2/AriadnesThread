@@ -101,6 +101,7 @@ mod tests {
             language: SourceLanguage::Cpp,
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let result = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -180,6 +181,7 @@ mod tests {
             language: SourceLanguage::Cpp,
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
         let analysis_b = TuAnalysis {
             tu_file_id: unit_b,
@@ -192,6 +194,7 @@ mod tests {
             language: SourceLanguage::Cpp,
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let result = IndexResult::new(PathBuf::from("/pin"), vec![analysis_a, analysis_b]);
