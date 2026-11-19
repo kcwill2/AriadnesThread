@@ -9,6 +9,7 @@ pub mod load;
 pub mod reduced;
 pub mod traversal;
 pub mod types;
+pub mod unresolved;
 
 pub use builder::*;
 pub use callgraph::*;
@@ -18,3 +19,4 @@ pub use load::*;
 pub use reduced::*;
 pub use traversal::*;
 pub use types::*;
+pub use unresolved::*;
