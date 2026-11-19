@@ -13,14 +13,20 @@
 //!   and an auto-imported `Directory.Build.props`, with the reserved macros
 //!   AT can derive (`$(ProjectDir)`, `$(MSBuildThisFileDirectory)`,
 //!   `$(SolutionDir)`, ...) and environment variables as fallback.
+//! - Like MSBuild's own two passes, include-dir item definitions are
+//!   expanded only after EVERY property is known, so a macro defined by a
+//!   props imported later still resolves.
 //! - `Condition` attributes are ignored, so every configuration's dirs are
 //!   unioned. Entries that still hold an unknown macro, item metadata
-//!   (`%(...)`) or point at a missing directory are dropped.
+//!   (`%(...)`) or point at a missing directory are dropped, and the drops
+//!   are reported through [`msbuild_notes`].
 
+mod findings;
 mod xml_scan;
 
 use ariadne_lang::normalize_relative_path;
 use ariadne_repo::FileRecord;
+use findings::Findings;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,17 +42,52 @@ const INCLUDE_PATH_PROPERTIES: [&str; 2] = ["includepath", "externalincludepath"
 /// Existing header search dirs declared by the repo's `.vcxproj` files, in
 /// first-seen order without duplicates. Empty when the repo has none.
 pub(crate) fn msbuild_include_dirs(repo_root: &Path, files: &[FileRecord]) -> Vec<PathBuf> {
+    evaluate_repo(&plain_windows_path(repo_root), files).include_dirs
+}
+
+/// Human-readable notes on the MSBuild evaluation: how many projects and
+/// dirs were found, and everything that had to be dropped. Empty when the
+/// repo has no `.vcxproj` files.
+pub(crate) fn msbuild_notes(repo_root: &Path, files: &[FileRecord]) -> Vec<String> {
     let repo_root = plain_windows_path(repo_root);
+    let evaluation = evaluate_repo(&repo_root, files);
+    if evaluation.project_count == 0 {
+        return Vec::new();
+    }
+    let mut notes = vec![format!(
+        "MSBuild: {} project file(s) evaluated, {} include dir(s) found",
+        evaluation.project_count,
+        evaluation.include_dirs.len()
+    )];
+    notes.extend(evaluation.findings.note_lines(&repo_root));
+    notes
+}
+
+struct RepoEvaluation {
+    project_count: usize,
+    include_dirs: Vec<PathBuf>,
+    findings: Findings,
+}
+
+fn evaluate_repo(repo_root: &Path, files: &[FileRecord]) -> RepoEvaluation {
+    let projects = find_project_files(repo_root, files);
     let mut seen = HashSet::new();
-    let mut dirs = Vec::new();
-    for project_path in find_project_files(&repo_root, files) {
-        for dir in ProjectEvaluation::run(&repo_root, &project_path) {
-            if dir.is_dir() && seen.insert(dir.clone()) {
-                dirs.push(dir);
+    let mut include_dirs = Vec::new();
+    let mut findings = Findings::default();
+    for project_path in &projects {
+        let (dirs, project_findings) = ProjectEvaluation::run(repo_root, project_path);
+        findings.merge(project_findings);
+        for dir in dirs {
+            if seen.insert(dir.clone()) {
+                include_dirs.push(dir);
             }
         }
     }
-    dirs
+    RepoEvaluation {
+        project_count: projects.len(),
+        include_dirs,
+        findings,
+    }
 }
 
 /// `canonicalize()` on Windows yields the verbatim form (`\\?\C:\...`,
@@ -145,12 +186,14 @@ struct ProjectEvaluation<'a> {
     /// case-insensitive).
     properties: HashMap<String, String>,
     visited_files: HashSet<PathBuf>,
-    /// Expanded, still `;`-joined include-dir lists in discovery order.
-    include_lists: Vec<String>,
+    /// Unexpanded, `;`-joined include-dir lists with the file that declared
+    /// each, in discovery order; expanded once all properties are known.
+    include_lists: Vec<(String, PathBuf)>,
+    findings: Findings,
 }
 
 impl<'a> ProjectEvaluation<'a> {
-    fn run(repo_root: &'a Path, project_path: &Path) -> Vec<PathBuf> {
+    fn run(repo_root: &'a Path, project_path: &Path) -> (Vec<PathBuf>, Findings) {
         let project_dir = project_path.parent().unwrap_or(repo_root).to_path_buf();
         let mut evaluation = Self {
             repo_root,
@@ -158,6 +201,7 @@ impl<'a> ProjectEvaluation<'a> {
             properties: HashMap::new(),
             visited_files: HashSet::new(),
             include_lists: Vec::new(),
+            findings: Findings::default(),
         };
         evaluation.seed_reserved_properties(project_path);
         if let Some(build_props) = evaluation.directory_build_props() {
@@ -166,10 +210,11 @@ impl<'a> ProjectEvaluation<'a> {
         evaluation.evaluate_file(project_path, 0);
         for name in INCLUDE_PATH_PROPERTIES {
             if let Some(value) = evaluation.properties.get(name).cloned() {
-                evaluation.include_lists.push(value);
+                evaluation.include_lists.push((value, project_path.to_path_buf()));
             }
         }
-        evaluation.resolve_include_lists()
+        let dirs = evaluation.resolve_include_lists();
+        (dirs, evaluation.findings)
     }
 
     fn seed_reserved_properties(&mut self, project_path: &Path) {
@@ -221,7 +266,7 @@ impl<'a> ProjectEvaluation<'a> {
         let outer_this_dir = self
             .properties
             .insert(this_dir_key.clone(), dir_with_separator(&file_dir));
-        self.evaluate_events(&scan(&document), &file_dir, depth);
+        self.evaluate_events(&scan(&document), path, depth);
         match outer_this_dir {
             Some(value) => self.properties.insert(this_dir_key, value),
             None => self.properties.remove(&this_dir_key),
@@ -230,7 +275,7 @@ impl<'a> ProjectEvaluation<'a> {
 
     /// Walks the events once, tracking open elements so a text-only element
     /// (a "leaf") can be told apart from a container.
-    fn evaluate_events(&mut self, events: &[XmlEvent], file_dir: &Path, depth: usize) {
+    fn evaluate_events(&mut self, events: &[XmlEvent], file: &Path, depth: usize) {
         // (element name, has child elements)
         let mut open_elements: Vec<(&str, bool)> = Vec::new();
         let mut pending_text = "";
@@ -245,7 +290,7 @@ impl<'a> ProjectEvaluation<'a> {
                         parent.1 = true;
                     }
                     if name.eq_ignore_ascii_case("Import") {
-                        self.import(attributes, file_dir, depth);
+                        self.import(attributes, file, depth);
                     }
                     if !self_closing {
                         open_elements.push((name, false));
@@ -257,7 +302,7 @@ impl<'a> ProjectEvaluation<'a> {
                     if let Some((name, has_children)) = open_elements.pop() {
                         if !has_children {
                             let parent = open_elements.last().map(|(parent, _)| *parent);
-                            self.on_leaf(parent, name, pending_text);
+                            self.on_leaf(parent, name, pending_text, file);
                         }
                     }
                     pending_text = "";
@@ -266,17 +311,17 @@ impl<'a> ProjectEvaluation<'a> {
         }
     }
 
-    fn on_leaf(&mut self, parent: Option<&str>, name: &str, text: &str) {
+    fn on_leaf(&mut self, parent: Option<&str>, name: &str, text: &str, file: &Path) {
         if name.eq_ignore_ascii_case("AdditionalIncludeDirectories") {
-            let expanded = self.expand(text);
-            self.include_lists.push(expanded);
+            // Item definition: expanded after the property pass completes.
+            self.include_lists.push((text.to_string(), file.to_path_buf()));
         } else if parent.is_some_and(|parent| parent.eq_ignore_ascii_case("PropertyGroup")) {
             let expanded = self.expand(text);
             self.properties.insert(name.to_ascii_lowercase(), expanded);
         }
     }
 
-    fn import(&mut self, attributes: &[(String, String)], file_dir: &Path, depth: usize) {
+    fn import(&mut self, attributes: &[(String, String)], file: &Path, depth: usize) {
         let Some((_, project)) = attributes
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case("Project"))
@@ -285,11 +330,15 @@ impl<'a> ProjectEvaluation<'a> {
         };
         let expanded = self.expand(project);
         if has_unresolved_reference(&expanded) || expanded.contains('*') {
+            self.findings.record_unresolved_import(&expanded, file);
             return;
         }
+        let file_dir = file.parent().unwrap_or(self.repo_root);
         let target = normalize_relative_path(&file_dir.join(expanded.trim().replace('\\', "/")));
         if target.is_file() {
             self.evaluate_file(&target, depth + 1);
+        } else {
+            self.findings.record_unresolved_import(&expanded, file);
         }
     }
 
@@ -324,24 +373,60 @@ impl<'a> ProjectEvaluation<'a> {
             .or_else(|| std::env::var(name).ok())
     }
 
-    /// Splits the collected lists into paths, resolving relative entries
-    /// against the project directory (cl.exe's working directory).
-    fn resolve_include_lists(&self) -> Vec<PathBuf> {
-        self.include_lists
-            .iter()
-            .flat_map(|list| list.split(';'))
-            .map(|entry| entry.trim().trim_matches('"').trim())
-            .filter(|entry| !entry.is_empty() && !has_unresolved_reference(entry))
-            .map(|entry| {
+    /// Expands each collected list with the final properties (and its own
+    /// file's `$(MSBuildThisFileDirectory)`), then splits it into existing
+    /// dirs; relative entries resolve against the project directory
+    /// (cl.exe's working directory). Every drop is recorded.
+    fn resolve_include_lists(&mut self) -> Vec<PathBuf> {
+        let lists = std::mem::take(&mut self.include_lists);
+        let mut dirs = Vec::new();
+        for (raw_list, defining_file) in &lists {
+            let expanded = self.expand_in_file(raw_list, defining_file);
+            for entry in expanded.split(';') {
+                let entry = entry.trim().trim_matches('"').trim();
+                if entry.is_empty() || is_item_reference(entry) {
+                    continue;
+                }
+                if entry.contains("$(") {
+                    self.findings.record_unresolved_entry(entry, defining_file);
+                    continue;
+                }
                 let path = PathBuf::from(entry.replace('\\', "/"));
-                normalize_relative_path(&self.project_dir.join(path))
-            })
-            .collect()
+                let dir = normalize_relative_path(&self.project_dir.join(path));
+                if dir.is_dir() {
+                    dirs.push(dir);
+                } else {
+                    self.findings.record_missing_dir(&dir, defining_file);
+                }
+            }
+        }
+        dirs
+    }
+
+    fn expand_in_file(&mut self, text: &str, file: &Path) -> String {
+        let this_dir_key = "msbuildthisfiledirectory".to_string();
+        let file_dir = file.parent().unwrap_or(self.repo_root);
+        let outer = self
+            .properties
+            .insert(this_dir_key.clone(), dir_with_separator(file_dir));
+        let expanded = self.expand(text);
+        match outer {
+            Some(value) => self.properties.insert(this_dir_key, value),
+            None => self.properties.remove(&this_dir_key),
+        };
+        expanded
     }
 }
 
 fn has_unresolved_reference(text: &str) -> bool {
-    text.contains("$(") || text.contains("%(") || text.contains("@(")
+    text.contains("$(") || is_item_reference(text)
+}
+
+/// `%(...)` item metadata (usually `%(AdditionalIncludeDirectories)`
+/// inheriting earlier definitions) and `@(...)` item lists: normal MSBuild,
+/// never a reportable miss.
+fn is_item_reference(text: &str) -> bool {
+    text.contains("%(") || text.contains("@(")
 }
 
 #[cfg(test)]

@@ -86,6 +86,12 @@ impl UnitShaper for CppUnitShaper {
             .collect()
     }
 
+    /// The MSBuild report: projects evaluated, include dirs found, and the
+    /// macros / dirs / imports that had to be dropped.
+    fn discovery_notes(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<String> {
+        crate::msbuild::msbuild_notes(repo_root, files)
+    }
+
     /// The old `infer_context_name` naming semantics, now plugin knowledge.
     fn context_name_for_defines(&self, defines: &[String]) -> String {
         if defines.iter().any(|d| d == "DEBUG" || d == "_DEBUG") {

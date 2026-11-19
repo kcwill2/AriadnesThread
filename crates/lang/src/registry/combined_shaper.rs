@@ -58,6 +58,12 @@ impl UnitShaper for LanguageRegistry {
             .collect()
     }
 
+    fn discovery_notes(&self, repo_root: &Path, files: &[FileRecord]) -> Vec<String> {
+        self.shapers()
+            .flat_map(|shaper| shaper.discovery_notes(repo_root, files))
+            .collect()
+    }
+
     /// Compilation databases are C/C++ artifacts named by the first
     /// registered shaper, exactly as the former first-wins fallback did.
     fn context_name_for_defines(&self, defines: &[String]) -> String {
