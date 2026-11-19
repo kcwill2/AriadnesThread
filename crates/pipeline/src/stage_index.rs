@@ -1,27 +1,23 @@
-//! Index stage of the artifact pipeline: shard-store TU reuse
-//! (`ensure_index`, `rebuild_index_single_threaded`), the `--lang` unit
-//! reshaping, and the plugin/closure/shard helpers the rebuild walks.
+//! Index stage of the artifact pipeline: stage reuse (`ensure_index`), the
+//! in-process store-once rebuild (`rebuild_index_in_process`, see
+//! [`crate::stage_index_store_once`]), the `--workers` production path, and
+//! the `--lang` unit reshaping.
 //!
-//! Extracted VERBATIM from `lib.rs` (boot-progress-visibility V3a, hygiene
-//! sec. 9: `lib.rs` sat AT the 1000-line ceiling). Same items, same
-//! signatures, same bodies - a pure move landing before any behavior
-//! change; M27 T3/T4 add into this module, not `lib.rs`.
+//! Extracted from `lib.rs` (boot-progress-visibility V3a, hygiene sec. 9:
+//! `lib.rs` sat AT the 1000-line ceiling).
 
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
-use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult, TranslationUnit};
-use ariadne_index::{IncrementalStats, IndexResult, TuAnalysis, CURRENT_ANALYSIS_VERSION};
-use ariadne_lang::{LanguageId, LanguagePlugin, LanguageRegistry, UnitShaper};
+use ariadne_build::{BuildDiscoverer, BuildDiscoveryResult};
+use ariadne_index::{IncrementalStats, IndexResult};
+use ariadne_lang::{LanguageId, LanguageRegistry, UnitShaper};
 use ariadne_repo::SourceLanguage;
-use ariadne_scheduler::{
-    analyze_closure_with, compute_tu_closure_plugin, load_shard, save_shard, shard_dir,
-    ProductionAnalyzer, SharedPluginWorkerBackend, SharedTuStoreContext, ShardCheckpoint,
-    TuClosure, TuStoreContext,
-};
+use ariadne_scheduler::{ProductionAnalyzer, SharedPluginWorkerBackend, TuStoreContext};
 
+use crate::stage_index_store_once::{rebuild_index_store_once, StoreOnceInputs};
 use crate::{Pipeline, ProgressEvent, StageReuse, STAGE_INDEX};
 
 impl Pipeline {
@@ -64,7 +60,7 @@ impl Pipeline {
                 (analysis_result.index_result, reuse, Some(production))
             }
             None => {
-                let (index_result, stats) = self.rebuild_index_single_threaded(&indexed_build)?;
+                let (index_result, stats) = self.rebuild_index_in_process(&indexed_build)?;
                 (index_result, stats, None)
             }
         };
@@ -131,62 +127,28 @@ impl Pipeline {
         Ok(build)
     }
 
-    fn rebuild_index_single_threaded(
+    /// In-process rebuild (no `--workers`): store-once indexing, so a header
+    /// shared by many units is analyzed and stored once (see
+    /// [`crate::stage_index_store_once`]). Runs on the global rayon pool.
+    fn rebuild_index_in_process(
         &mut self,
         build: &BuildDiscoveryResult,
     ) -> Result<(IndexResult, IncrementalStats)> {
-        let store_dir = shard_dir(&self.repo.root);
-        let store_ctx = self.store_ctx.clone();
-        let repo_root = self.repo.root.clone();
         let mut progress = self.progress.take();
         let mut notify = |event: &ProgressEvent| {
             if let Some(cb) = progress.as_mut() {
                 cb(event);
             }
         };
-
-        let mut reused = 0usize;
-        let mut reanalyzed = 0usize;
-        let mut analyses = Vec::new();
-
-        let total = build.translation_units.len();
-        for (i, tu) in build.translation_units.iter().enumerate() {
-            // R7 (V3): exactly one event per TU - TuStarted REPLACES the
-            // per-TU TuIndex, carrying the repo-relative source path
-            // verbatim (I10); strip_prefix falls back to the path as-is.
-            // The terminal TuIndex below stays as the bar's final frame.
-            notify(&ProgressEvent::TuStarted {
-                done: i,
-                total,
-                source: tu
-                    .source_path
-                    .strip_prefix(&repo_root)
-                    .unwrap_or(&tu.source_path)
-                    .to_path_buf(),
-            });
-
-            let (analysis, was_reused) = index_unit_with_plugin(
-                tu,
-                &repo_root,
-                &store_ctx,
-                &store_dir,
-                plugin_for_path(&self.registry, &tu.source_path)?,
-            )?;
-            if was_reused {
-                reused += 1;
-            } else {
-                reanalyzed += 1;
-            }
-            analyses.push(analysis);
-        }
-        notify(&ProgressEvent::TuIndex { done: total, total });
-
+        let inputs = StoreOnceInputs {
+            repo_root: &self.repo.root,
+            store_ctx: &self.store_ctx,
+            registry: &self.registry,
+            pool: None,
+        };
+        let outcome = rebuild_index_store_once(&build.translation_units, &inputs, &mut notify);
         self.progress = progress;
-        let index_result = IndexResult::new(repo_root, analyses);
-        Ok((
-            index_result,
-            IncrementalStats::calculate(reused, reanalyzed),
-        ))
+        outcome
     }
 
     pub fn get_or_build_index(&mut self) -> Result<IndexResult> {
@@ -214,75 +176,4 @@ fn select_unit_shaper<'a>(
             .and_then(|plugin| plugin.shaper()),
         None => registry.unit_shaper_for_repo(repo_root),
     }
-}
-
-/// Plugin that owns `path`'s language (plan §3.3 fact 3): the registry
-/// detection is the dispatch key, and an unclaimed path is reported as
-/// "unhandled language" rather than silently parsed with some other plugin.
-fn plugin_for_path<'a>(
-    registry: &'a LanguageRegistry,
-    path: &Path,
-) -> Result<&'a dyn LanguagePlugin> {
-    let language = registry.detect_language(path).ok_or_else(|| {
-        anyhow!(
-            "unhandled language for {} (no registered plugin claims it)",
-            path.display()
-        )
-    })?;
-    registry
-        .plugin_for_id(language.clone())
-        .ok_or_else(|| anyhow!("language plugin not registered: {language:?}"))
-}
-
-/// Shard-backed analysis of one unit through the plugin resolver/analyzer
-/// (plan M18.3, the only path since M18.11). `compute_tu_closure_plugin`
-/// reproduces the canonical closure file order byte-for-byte (locked by the
-/// vendored oracles in `m18_cpp_plugin_parity_test`), so shard envelopes and
-/// merged analyses are identical to the pre-M11 hardcoded-C++ path.
-fn index_unit_with_plugin(
-    tu: &TranslationUnit,
-    repo_root: &Path,
-    store_ctx: &SharedTuStoreContext,
-    store_dir: &Path,
-    plugin: &dyn LanguagePlugin,
-) -> Result<(TuAnalysis, bool)> {
-    let closure = compute_tu_closure_plugin(
-        tu,
-        repo_root,
-        store_ctx,
-        CURRENT_ANALYSIS_VERSION,
-        plugin.resolver(),
-        // M18.10 fingerprint identity: `LanguageId` IS `SourceLanguage`
-        // (plan §3.2), and for C++ these two values equal the constants the
-        // pre-M11 walk hardcoded — keeping shard envelopes byte-identical.
-        plugin.id(),
-        &plugin.analysis_fingerprint(),
-    )?;
-    sharded_analysis(tu, &closure, store_dir, || {
-        analyze_closure_with(tu, &closure, plugin.analyzer())
-    })
-}
-
-/// Shared shard envelope contract of both unit paths: reuse the checkpoint
-/// when the closure fingerprint still matches, else analyze and re-stamp.
-fn sharded_analysis(
-    tu: &TranslationUnit,
-    closure: &TuClosure,
-    store_dir: &Path,
-    analyze: impl FnOnce() -> TuAnalysis,
-) -> Result<(TuAnalysis, bool)> {
-    if let Some(shard) = load_shard(store_dir, tu.file_id) {
-        if shard.fingerprint == closure.fingerprint.combined_hash {
-            return Ok((shard.analysis, true));
-        }
-    }
-    let analysis = analyze();
-    save_shard(
-        store_dir,
-        &ShardCheckpoint {
-            fingerprint: closure.fingerprint.combined_hash.clone(),
-            analysis: analysis.clone(),
-        },
-    )?;
-    Ok((analysis, false))
 }

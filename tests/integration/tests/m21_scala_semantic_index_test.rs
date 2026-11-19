@@ -120,21 +120,26 @@ fn index_scala(root: &Path) -> Result<IndexResult> {
 // same value, which the warm test below cross-checks.
 // ---------------------------------------------------------------------------
 
+/// Key of a file's per-file cache entry: its path-derived FileId. Entries
+/// are named `{file_id}-{context hash}.json` (store-once index); each Scala
+/// file here is analyzed under one context, so the id alone is unique.
 fn shard_file_name(rel_path: &str) -> String {
-    format!("{}.json", FileId::from_relative_path(rel_path).0)
+    FileId::from_relative_path(rel_path).0.to_string()
 }
 
-/// Raw bytes of every `artifacts/shards/*.json` envelope, keyed by file name
-/// (the write-tmp files end in `.tmp` and are excluded).
+/// Raw bytes of every `artifacts/file_shards/*.json` envelope, keyed by the
+/// file-id prefix of its name (the write-tmp files end in `.tmp` and are
+/// excluded).
 fn read_shard_envelopes(root: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
-    let dir = root.join("artifacts").join("shards");
+    let dir = root.join("artifacts").join("file_shards");
     let mut envelopes = BTreeMap::new();
     if dir.is_dir() {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".json") {
-                envelopes.insert(name, fs::read(entry.path())?);
+            if let Some(stem) = name.strip_suffix(".json") {
+                let file_id = stem.split('-').next().unwrap_or(stem).to_string();
+                envelopes.insert(file_id, fs::read(entry.path())?);
             }
         }
     }
@@ -352,8 +357,9 @@ fn warm_run_reuses_every_unit_with_zero_analyzer_invocations() -> Result<()> {
     let actual_names: Vec<String> = first.keys().cloned().collect();
     assert_eq!(
         actual_names, expected_names,
-        "one envelope per unit, named {{FileId::from_relative_path(rel).0}}.json \
-         (tu_store.rs:37-39 + repo/src/types.rs:15-21)"
+        "one per-file envelope per source, named \
+         {{FileId::from_relative_path(rel).0}}-<context hash>.json \
+         (file_store.rs file_shard_path + repo/src/types.rs:15-21)"
     );
     for rel in MAIN_ROOT_RELS {
         let bytes = envelope(&first, rel);
@@ -392,13 +398,14 @@ fn warm_run_reuses_every_unit_with_zero_analyzer_invocations() -> Result<()> {
 
 // ---------------------------------------------------------------------------
 // 3. Edit reanalysis (D21) — a content-only edit to the copy's
-//    models/Order.scala re-stamps exactly {Order.scala, OrderService.scala}
-//    (OrderService's closure contains Order via the M20 import edge) and
-//    leaves {Main, User, all} byte-identical to the first run.
+//    models/Order.scala re-stamps exactly Order.scala's per-file envelope.
+//    Store-once indexing caches each FILE's analysis, which depends only on
+//    that file's content, so OrderService (whose closure reaches Order via
+//    the M20 import edge) keeps its envelope, as do {Main, User, all}.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn order_edit_reanalyzes_exactly_its_import_dependents() -> Result<()> {
+fn order_edit_reanalyzes_exactly_the_edited_file() -> Result<()> {
     let repo = isolated_scala_repo("edit")?;
     index_scala(&repo.root)?;
     let baseline = read_shard_envelopes(&repo.root)?;
@@ -419,7 +426,7 @@ fn order_edit_reanalyzes_exactly_its_import_dependents() -> Result<()> {
 
     let after = read_shard_envelopes(&repo.root)?;
     assert_eq!(after.len(), 5, "the edit run adds no new shard files");
-    let reanalyzed: [&str; 2] = [ORDER_REL, ORDER_SERVICE_REL];
+    let reanalyzed: [&str; 1] = [ORDER_REL];
     for rel in MAIN_ROOT_RELS {
         let before = envelope(&baseline, rel);
         let current = envelope(&after, rel);
@@ -427,8 +434,7 @@ fn order_edit_reanalyzes_exactly_its_import_dependents() -> Result<()> {
         if reanalyzed.contains(&rel) {
             assert!(
                 fingerprint_moved,
-                "{rel}: its own content or a reached import changed, so the envelope \
-                 fingerprint must be new (D21 import-dependents)"
+                "{rel}: its own content changed, so the envelope fingerprint must be new"
             );
         } else {
             assert!(

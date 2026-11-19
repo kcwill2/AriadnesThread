@@ -31,6 +31,17 @@ impl ArtifactManager {
             .context("Failed to serialize tu analyses to binary")?;
         write_atomic(&tu_analyses_path, &tu_analyses_bin)?;
 
+        // 1b. shared_files.bin: store-once side channel, one list per unit in
+        // tu_analyses order (kept out of tu_analyses.bin's frozen layout).
+        let shared_files: Vec<&Vec<ariadne_repo::FileId>> = index_result
+            .tu_analyses
+            .iter()
+            .map(|tu| &tu.shared_files)
+            .collect();
+        let shared_files_bin = bincode::serialize(&shared_files)
+            .context("Failed to serialize shared file lists to binary")?;
+        write_atomic(&index_artifact_dir.join(SHARED_FILES_BIN), &shared_files_bin)?;
+
         // 2. index.json
         let index_path = index_artifact_dir.join("index.json");
         let index_json = serde_json::to_string_pretty(index_result)
@@ -65,11 +76,37 @@ impl ArtifactManager {
         let tu_analyses_path = self.artifact_root.join("index").join("tu_analyses.bin");
         let tu_analyses_bin = fs::read(&tu_analyses_path)
             .with_context(|| format!("Failed to read tu_analyses.bin at {:?}", tu_analyses_path))?;
-        let tu_analyses: Vec<ariadne_index::TuAnalysis> =
+        let mut tu_analyses: Vec<ariadne_index::TuAnalysis> =
             deserialize_bounded(&tu_analyses_bin).context("Failed to deserialize tu analyses")?;
+        self.restore_shared_files(&mut tu_analyses)?;
         Ok(ariadne_index::IndexResult::new(
             self.repo_root(),
             tu_analyses,
         ))
     }
+
+    /// Re-attach each unit's shared-file list. An index written before
+    /// store-once indexing has no side file; its units carry full closures,
+    /// so empty lists are exactly right. A list count that disagrees with
+    /// the unit count is a torn write and fails the load (forcing a rebuild).
+    fn restore_shared_files(&self, tu_analyses: &mut [ariadne_index::TuAnalysis]) -> Result<()> {
+        let path = self.artifact_root.join("index").join(SHARED_FILES_BIN);
+        let Ok(bytes) = fs::read(&path) else {
+            return Ok(());
+        };
+        let lists: Vec<Vec<ariadne_repo::FileId>> =
+            deserialize_bounded(&bytes).context("Failed to deserialize shared file lists")?;
+        anyhow::ensure!(
+            lists.len() == tu_analyses.len(),
+            "shared_files.bin has {} lists for {} units",
+            lists.len(),
+            tu_analyses.len()
+        );
+        for (tu, list) in tu_analyses.iter_mut().zip(lists) {
+            tu.shared_files = list;
+        }
+        Ok(())
+    }
 }
+
+const SHARED_FILES_BIN: &str = "shared_files.bin";

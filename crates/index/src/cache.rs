@@ -353,6 +353,7 @@ mod tests {
                 language: ariadne_repo::SourceLanguage::Cpp,
 
                 extends_edges: Vec::new(),
+                shared_files: Vec::new(),
             },
         }
         .is_valid(&fp1));
@@ -373,6 +374,7 @@ mod tests {
                 language: ariadne_repo::SourceLanguage::Cpp,
 
                 extends_edges: Vec::new(),
+                shared_files: Vec::new(),
             },
         }
         .is_valid(&fp2));

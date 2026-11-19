@@ -450,6 +450,7 @@ mod tests {
             ],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -652,6 +653,7 @@ mod tests {
             ],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -707,6 +709,7 @@ mod tests {
             }],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);
         let model = ReducedSemanticModel::reduce(&index_result);
@@ -786,6 +789,7 @@ mod tests {
             }],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index_result = ariadne_index::IndexResult::new(PathBuf::from("/test"), vec![tu]);

@@ -160,6 +160,10 @@ impl ReducedSemanticModel {
             }
         }
 
+        // Store-once indexes keep a shared header's records in one unit;
+        // every unit that shares it still uses its symbols.
+        crate::shared_usage::credit_shared_file_usage(index_result, &mut tu_usage);
+
         // Convert raw_edges to deterministic sorted vec
         for ((src, dst), kind) in raw_edges {
             edges.push(ReducedSemanticEdge {
@@ -370,6 +374,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
@@ -407,6 +412,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2])
@@ -518,6 +524,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -569,6 +576,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -617,6 +625,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu]);
@@ -665,6 +674,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let tu_class = TuAnalysis {
@@ -687,6 +697,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu_fn, tu_class]);
@@ -727,6 +738,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let tu2 = TuAnalysis {
@@ -752,6 +764,7 @@ mod tests {
             call_sites: vec![],
 
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(PathBuf::from("/test"), vec![tu1, tu2]);
@@ -822,6 +835,7 @@ mod tests {
             references: vec![],
             call_sites: vec![],
             extends_edges: vec![(SymbolId::new("sub"), SymbolId::new("sup"))],
+            shared_files: Vec::new(),
         };
         let tu_b = TuAnalysis {
             tu_file_id: FileId::from_relative_path("src/other.scala"),
@@ -845,6 +859,7 @@ mod tests {
                 (SymbolId::new("sub"), SymbolId::new("sup")),
                 (SymbolId::new("other"), SymbolId::new("sup")),
             ],
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(
@@ -893,6 +908,7 @@ mod tests {
             references: vec![],
             call_sites: vec![],
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
         let tu_incomplete_second = TuAnalysis {
             tu_file_id: f2,
@@ -904,6 +920,7 @@ mod tests {
             references: vec![],
             call_sites: vec![],
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         };
 
         let index = IndexResult::new(

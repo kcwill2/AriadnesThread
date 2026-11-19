@@ -1,6 +1,6 @@
 {
   "analysis_version": "<ANALYSIS_VERSION>",
-  "complete_edges": 17,
+  "complete_edges": 11,
   "hit_rate": 0.0,
   "incomplete_edges": 1,
   "input_fingerprint": "<INPUT_FINGERPRINT>",
@@ -8,7 +8,7 @@
   "repository_root": "<ROOT>",
   "reused_tus": 0,
   "total_cached_tus": 2,
-  "total_edges": 18,
+  "total_edges": 12,
   "total_symbols": 7,
   "total_translation_units": 2
 }

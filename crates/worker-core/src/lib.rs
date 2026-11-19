@@ -12,6 +12,9 @@
 pub mod tu_store;
 pub use tu_store::*;
 
+pub mod closure_memo;
+pub mod file_store;
+
 pub mod task;
 pub use task::*;
 

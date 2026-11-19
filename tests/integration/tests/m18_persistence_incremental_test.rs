@@ -3,6 +3,7 @@ use tempfile::TempDir;
 
 use ariadne_pipeline::{Pipeline, StageReuse};
 use ariadne_repo::FileId;
+use ariadne_scheduler::file_store::{file_shard_dir, file_shard_path, FileShard};
 
 const STAGES: [&str; 5] = [
     ariadne_pipeline::STAGE_INCLUDE_GRAPH,
@@ -87,8 +88,8 @@ fn test_m18_cold_run_persists_every_stage() {
     assert!(root.join("artifacts/callgraph/manifest.json").exists());
     assert!(root.join("artifacts/load/manifest.json").exists());
 
-    let shards = root.join("artifacts").join("shards");
-    assert!(shards.exists(), "shard store should persist");
+    let shards = root.join("artifacts").join("file_shards");
+    assert!(shards.exists(), "per-file analysis store should persist");
 }
 
 #[test]
@@ -199,13 +200,10 @@ fn test_m18_old_plain_shard_is_stale_and_rewritten() {
         .find(|a| a.tu_file_id == tu1_id)
         .expect("tu1 analysis present")
         .clone();
-    fs::write(
-        root.join("artifacts")
-            .join("shards")
-            .join(format!("{}.json", tu1_id.0)),
-        serde_json::to_string(&analysis).unwrap(),
-    )
-    .unwrap();
+    // tu1's own source is cached in the per-file store (store-once index).
+    let tu1_shard = file_shard_path(&file_shard_dir(&root), tu1_id, &analysis.context_name);
+    assert!(tu1_shard.exists(), "tu1.cpp has a per-file cache entry");
+    fs::write(&tu1_shard, serde_json::to_string(&analysis).unwrap()).unwrap();
     // Force the index stage itself stale so the rebuild consults the store.
     fs::remove_dir_all(root.join("artifacts").join("index")).unwrap();
 
@@ -223,15 +221,8 @@ fn test_m18_old_plain_shard_is_stale_and_rewritten() {
     assert_eq!(next.stats.reused_tus, 1, "intact shard still loads");
 
     // The reanalyzed TU was rewritten as a fingerprinted envelope.
-    let envelope: ariadne_scheduler::tu_store::ShardCheckpoint = serde_json::from_str(
-        &fs::read_to_string(
-            root.join("artifacts")
-                .join("shards")
-                .join(format!("{}.json", tu1_id.0)),
-        )
-        .unwrap(),
-    )
-    .expect("shard must now be an envelope");
+    let envelope: FileShard = serde_json::from_str(&fs::read_to_string(&tu1_shard).unwrap())
+        .expect("shard must now be an envelope");
     assert!(!envelope.fingerprint.is_empty());
     let mut again = Pipeline::new(&root, None).unwrap();
     again.ensure_index().unwrap();

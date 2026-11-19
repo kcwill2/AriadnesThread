@@ -217,12 +217,27 @@ pub struct TuAnalysis {
     /// formats always carry it — see [`field_conditional_on_format`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extends_edges: Vec<(SymbolId, SymbolId)>,
+    /// Files this unit's closure reaches whose analysis is stored in an
+    /// EARLIER unit of the same index (store-once indexing): a header shared
+    /// by many units is analyzed and stored once, and every later unit only
+    /// names it here. Consumers that need per-unit facts (which units use a
+    /// symbol) expand through this list. Empty for producers that still merge
+    /// full closures.
+    ///
+    /// Never part of the positional (bincode) layout, so `tu_analyses.bin`
+    /// stays byte-identical across this change (AR-27a lock); the index
+    /// artifact persists it in its own side file. Human-readable output
+    /// shows it when non-empty, and reading JSON back ignores it.
+    #[serde(default, skip_deserializing)]
+    pub shared_files: Vec<FileId>,
 }
 
 impl Serialize for TuAnalysis {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let emit_extends = field_conditional_on_format(&serializer, !self.extends_edges.is_empty());
-        let mut state = serializer.serialize_struct("TuAnalysis", 8 + emit_extends as usize)?;
+        let emit_shared = serializer.is_human_readable() && !self.shared_files.is_empty();
+        let field_count = 8 + emit_extends as usize + emit_shared as usize;
+        let mut state = serializer.serialize_struct("TuAnalysis", field_count)?;
         state.serialize_field("tu_file_id", &self.tu_file_id)?;
         state.serialize_field("context_name", &self.context_name)?;
         state.serialize_field("symbols", &self.symbols)?;
@@ -233,6 +248,9 @@ impl Serialize for TuAnalysis {
         state.serialize_field("language", &self.language)?;
         if emit_extends {
             state.serialize_field("extends_edges", &self.extends_edges)?;
+        }
+        if emit_shared {
+            state.serialize_field("shared_files", &self.shared_files)?;
         }
         state.end()
     }
@@ -250,6 +268,7 @@ impl Default for TuAnalysis {
             call_sites: Vec::new(),
             language: SourceLanguage::default(),
             extends_edges: Vec::new(),
+            shared_files: Vec::new(),
         }
     }
 }
