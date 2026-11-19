@@ -15,38 +15,54 @@ use ariadne_repo::FileId;
 
 /// Credit every unit with the symbols touched by the files it shares.
 /// A no-op for indexes without shared files (full-closure producers).
+///
+/// Works one symbol at a time: the units to credit are the concatenated
+/// sharer lists of the files touching it, merged into its set in one sorted
+/// pass. Crediting (unit, file, symbol) triples one by one cloned a symbol
+/// name per triple and dominated the whole reduce on large repos.
 pub(crate) fn credit_shared_file_usage(
     index_result: &IndexResult,
     tu_usage: &mut BTreeMap<SymbolId, BTreeSet<FileId>>,
 ) {
-    let shared: BTreeSet<FileId> = index_result
-        .tu_analyses
-        .iter()
-        .flat_map(|tu| tu.shared_files.iter().copied())
-        .collect();
-    if shared.is_empty() {
+    let sharers = units_sharing_each_file(&index_result.tu_analyses);
+    if sharers.is_empty() {
         return;
     }
-    let touched = symbols_touched_by_files(&index_result.tu_analyses, &shared);
-    for tu in &index_result.tu_analyses {
-        for file in &tu.shared_files {
-            for symbol in touched.get(file).into_iter().flatten() {
-                tu_usage.entry(symbol.clone()).or_default().insert(tu.tu_file_id);
-            }
-        }
+    let files_by_symbol = files_touching_each_symbol(&index_result.tu_analyses, &sharers);
+    for (symbol, files) in files_by_symbol {
+        let entry = tu_usage.entry(symbol.clone()).or_default();
+        let mut users: Vec<FileId> = files
+            .iter()
+            .flat_map(|file| sharers[file].iter().copied())
+            .chain(entry.iter().copied())
+            .collect();
+        users.sort_unstable();
+        users.dedup();
+        *entry = users.into_iter().collect();
     }
 }
 
-/// Symbols each file in `files` declares, links, or references, gathered
-/// from whichever unit stores that file's records.
-fn symbols_touched_by_files(
-    analyses: &[TuAnalysis],
-    files: &BTreeSet<FileId>,
-) -> BTreeMap<FileId, BTreeSet<SymbolId>> {
-    let mut touched: BTreeMap<FileId, BTreeSet<SymbolId>> = BTreeMap::new();
-    let mut credit = |file: FileId, symbol: &SymbolId| {
-        if files.contains(&file) {
-            touched.entry(file).or_default().insert(symbol.clone());
+/// For each shared file, the units that name it in `shared_files`.
+fn units_sharing_each_file(analyses: &[TuAnalysis]) -> BTreeMap<FileId, Vec<FileId>> {
+    let mut sharers: BTreeMap<FileId, Vec<FileId>> = BTreeMap::new();
+    for tu in analyses {
+        for file in &tu.shared_files {
+            sharers.entry(*file).or_default().push(tu.tu_file_id);
+        }
+    }
+    sharers
+}
+
+/// For each symbol, the shared files that declare, link, or reference it,
+/// gathered from whichever unit stores that file's records.
+fn files_touching_each_symbol<'a>(
+    analyses: &'a [TuAnalysis],
+    shared: &BTreeMap<FileId, Vec<FileId>>,
+) -> BTreeMap<&'a SymbolId, BTreeSet<FileId>> {
+    let mut touching: BTreeMap<&'a SymbolId, BTreeSet<FileId>> = BTreeMap::new();
+    let mut credit = |file: FileId, symbol: &'a SymbolId| {
+        if shared.contains_key(&file) {
+            touching.entry(symbol).or_default().insert(file);
         }
     };
     for tu in analyses {
@@ -61,7 +77,7 @@ fn symbols_touched_by_files(
             credit(reference.file_id, &reference.symbol_id);
         }
     }
-    touched
+    touching
 }
 
 #[cfg(test)]
