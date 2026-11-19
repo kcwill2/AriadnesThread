@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 /// Example rows printed per finding kind; the counts above them are total.
 const EXAMPLE_ROWS: usize = 15;
 
+/// Imported props files are listed in full up to this many; a repo's
+/// shared property sheets are usually a short list worth seeing whole.
+const IMPORTED_FILE_ROWS: usize = 100;
+
 /// One macro that stayed unexpanded, with a representative use.
 #[derive(Debug, Clone)]
 struct MacroMiss {
@@ -28,9 +32,16 @@ pub(super) struct Findings {
     missing_dirs: BTreeMap<PathBuf, PathBuf>,
     /// Import spelling (after expansion) -> the file that imported it.
     unresolved_imports: BTreeMap<String, PathBuf>,
+    /// Imported `.props`/`.targets` file -> number of projects importing it.
+    imported_files: BTreeMap<PathBuf, usize>,
 }
 
 impl Findings {
+    /// Called once per project per imported file (imports are de-duplicated
+    /// within a project), so the count is "projects importing it".
+    pub(super) fn record_imported_file(&mut self, path: &Path) {
+        *self.imported_files.entry(path.to_path_buf()).or_insert(0) += 1;
+    }
     pub(super) fn record_unresolved_entry(&mut self, entry: &str, defining_file: &Path) {
         let macro_name = first_macro_reference(entry);
         let miss = self
@@ -71,11 +82,24 @@ impl Findings {
         for (spelling, file) in other.unresolved_imports {
             self.unresolved_imports.entry(spelling).or_insert(file);
         }
+        for (path, projects) in other.imported_files {
+            *self.imported_files.entry(path).or_insert(0) += projects;
+        }
     }
 
     /// Note lines for `build discover`; paths shown repo-relative.
     pub(super) fn note_lines(&self, repo_root: &Path) -> Vec<String> {
         let mut lines = Vec::new();
+        push_rows(
+            &mut lines,
+            "props file(s) imported",
+            self.imported_files.iter().map(|(path, projects)| {
+                let noun = if *projects == 1 { "project" } else { "projects" };
+                format!("{} ({projects} {noun})", shown(path, repo_root))
+            }),
+            self.imported_files.len(),
+            IMPORTED_FILE_ROWS,
+        );
         if !self.unresolved_macros.is_empty() {
             lines.push(format!(
                 "MSBuild: {} unresolved macro(s); include entries using them were dropped:",
@@ -120,13 +144,23 @@ fn push_examples(
     rows: impl Iterator<Item = String>,
     total: usize,
 ) {
+    push_rows(lines, what, rows, total, EXAMPLE_ROWS);
+}
+
+fn push_rows(
+    lines: &mut Vec<String>,
+    what: &str,
+    rows: impl Iterator<Item = String>,
+    total: usize,
+    max_rows: usize,
+) {
     if total == 0 {
         return;
     }
     lines.push(format!("MSBuild: {total} {what}:"));
-    lines.extend(rows.take(EXAMPLE_ROWS).map(|row| format!("  {row}")));
-    if total > EXAMPLE_ROWS {
-        lines.push(format!("  ... and {} more", total - EXAMPLE_ROWS));
+    lines.extend(rows.take(max_rows).map(|row| format!("  {row}")));
+    if total > max_rows {
+        lines.push(format!("  ... and {} more", total - max_rows));
     }
 }
 
