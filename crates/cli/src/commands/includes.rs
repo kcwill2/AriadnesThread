@@ -84,6 +84,32 @@ fn cycle_groups_label(_vocabulary: Option<&DependencyVocabulary>) -> &'static st
     "  Cycle Groups Detected"
 }
 
+/// Rows of the most frequent unresolved spellings printed under the count.
+const UNRESOLVED_SPELLING_ROWS: usize = 25;
+
+/// Indented detail under the "Unresolved" count: the angled/quoted split
+/// and the most frequent unresolved spellings, so a large count can be
+/// read as "toolchain headers with no search path" vs "repo headers behind
+/// a missing include dir". Silent when everything resolved.
+fn print_unresolved_breakdown(graph: &IncludeGraph) {
+    let breakdown = graph.unresolved_breakdown(UNRESOLVED_SPELLING_ROWS);
+    if breakdown.angled_edges + breakdown.quoted_edges == 0 {
+        return;
+    }
+    println!("    <angled>: {}", breakdown.angled_edges);
+    println!("    \"quoted\": {}", breakdown.quoted_edges);
+    println!("    Distinct spellings: {}", breakdown.distinct_spellings);
+    println!("    Most frequent:");
+    for (spelling, is_angled, count) in &breakdown.top_spellings {
+        let shown = if *is_angled {
+            format!("<{spelling}>")
+        } else {
+            format!("\"{spelling}\"")
+        };
+        println!("      {count:>8}  {shown}");
+    }
+}
+
 pub fn analyze_include_graph(repo_path: &PathBuf) -> Result<()> {
     let mut pipeline = Pipeline::new(repo_path, None)?;
     let (graph, _closures) = pipeline.get_or_build_include_graph()?;
@@ -119,6 +145,7 @@ pub fn analyze_include_graph(repo_path: &PathBuf) -> Result<()> {
         unresolved_label(vocabulary.as_ref()),
         report.unresolved_includes_count
     );
+    print_unresolved_breakdown(&graph);
     println!("{}: {}", cycle_groups_label(vocabulary.as_ref()), report.cycle_count);
     println!();
     println!("{}", pipeline.stats.format_summary());
