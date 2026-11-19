@@ -10,6 +10,7 @@
 //! enforces this edge rule from the moment the crate exists.
 
 pub mod analyzer;
+mod bazel;
 pub mod boundary;
 pub mod constraints;
 pub mod detector;
