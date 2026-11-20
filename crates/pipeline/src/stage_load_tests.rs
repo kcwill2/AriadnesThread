@@ -428,10 +428,18 @@ struct Spare { int unused; };",
             defined_symbols,
             defining_files.len()
         );
+        // Dense pass (2026-11-20): each file's expansion is weighed once on
+        // the integer index, so the string-set memo is never asked at all
+        // (the grouped pass before it asked once per defining file).
         assert_eq!(
             analyzer.memo().physical_expansion_count(),
-            defining_files.len(),
-            "memo off: one physical expansion per defining file, not per symbol"
+            0,
+            "the dense symbol pass must not expand through the string-set memo"
+        );
+        assert_eq!(
+            analyzer.memo().semantic_bfs_traversal_count(),
+            0,
+            "the dense symbol pass must not walk string-keyed closures"
         );
     }
 }

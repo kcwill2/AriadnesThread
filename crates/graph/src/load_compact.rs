@@ -152,7 +152,7 @@ impl<'a> LoadAnalyzer<'a> {
 /// Mirrors the UI justification ranking (`ui::dto::rank_source_ids`): the
 /// includable-header sources of both sides, by combined used + collateral
 /// count descending, then file id; only the first `named_sources` keep names.
-fn keep_names_of_shown_sources(
+pub(super) fn keep_names_of_shown_sources(
     collateral: &mut [ContributingSource],
     semantic: &[ContributingSource],
     named_sources: usize,
