@@ -37,6 +37,7 @@ mod extraction_reader;
 mod extraction_apply;
 mod node_maps;
 mod stage_spans;
+mod substep_eta;
 
 pub struct UiBuildResult {
     pub include_graph: ariadne_graph::IncludeGraph,
@@ -161,6 +162,7 @@ fn run_pipeline_stages(
 /// the new-variant arm is enforced by the compiler, so a future event can
 /// never be silently dropped on the floor here.
 fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent) + Send {
+    let eta = substep_eta::SubstepEta::default();
     move |event| match event {
         ProgressEvent::TuIndex { done, total } => (cb_progress)(stage_report(
             2,
@@ -172,13 +174,13 @@ fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent
             5,
             collateral_symbol_percent(*done, *total),
             COLLATERAL_PHASE,
-            &format!("Analyzing symbols {done}/{total}"),
+            &format!("Analyzing symbols {done}/{total}{}", eta.suffix("symbols", *done, *total)),
         )),
         ProgressEvent::CollateralFile { done, total } => (cb_progress)(stage_report(
             5,
             collateral_file_percent(*done, *total),
             COLLATERAL_PHASE,
-            &format!("{done}/{total} files"),
+            &format!("{done}/{total} files{}", eta.suffix("files", *done, *total)),
         )),
         ProgressEvent::LoadMilestone(milestone) => (cb_progress)(match milestone {
             LoadMilestone::SymbolsAnalyzed { symbols } => stage_report(
@@ -336,6 +338,7 @@ fn justification_progress(progress: &ProgressFn) -> impl Fn(usize, usize) + Sync
     let progress = progress.clone();
     // Rayon workers finish out of order; the lock keeps frames monotone.
     let last_reported = std::sync::Mutex::new(0usize);
+    let eta = substep_eta::SubstepEta::default();
     move |done, total| {
         let step = (total / 100).max(1);
         let mut last = last_reported.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -343,7 +346,8 @@ fn justification_progress(progress: &ProgressFn) -> impl Fn(usize, usize) + Sync
             *last = done;
             let span = JUSTIFICATION_COMPLETE_PERCENT - JUSTIFYING_SYMBOLS_PERCENT;
             let percent = JUSTIFYING_SYMBOLS_PERCENT + (done * span / total.max(1)).min(span - 1);
-            stage5_report(&progress, percent, &format!("Justifying symbols {done}/{total} files"));
+            let left = eta.suffix("justifying", done, total);
+            stage5_report(&progress, percent, &format!("Justifying symbols {done}/{total} files{left}"));
         }
     }
 }

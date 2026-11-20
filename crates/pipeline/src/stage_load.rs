@@ -27,7 +27,7 @@ use anyhow::{anyhow, Result};
 use rayon::prelude::*;
 
 use ariadne_graph::{
-    CompactShape, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMemo, LoadMetric,
+    CompactShape, DenseLoadIndex, IncludeClosure, IncludeGraph, LoadAnalyzer, LoadMemo, LoadMetric,
     ReducedSemanticModel,
 };
 use ariadne_index::types::SymbolId;
@@ -375,10 +375,14 @@ pub(crate) fn collect_symbol_metrics(
     let groups = group_walk_by_def_file(analyzer, &walk);
     let total: usize = groups.iter().map(|(_, positions)| positions.len()).sum();
     let done = AtomicUsize::new(0);
+    // Dense pass (2026-11-20): symbols numbered once and call cycles
+    // collapsed, so a group costs integer walks instead of one string-set
+    // walk per symbol. Dropped with this function, before the file pass.
+    let index = analyzer.dense_load_index();
     let analyzed: Vec<Vec<(usize, LoadMetric)>> = groups
         .par_iter()
         .map(|(def_file, positions)| {
-            let metrics = analyze_def_file_group(analyzer, *def_file, &walk, positions);
+            let metrics = analyze_def_file_group(&index, *def_file, &walk, positions);
             report_symbol_group(progress, &done, positions.len(), total);
             metrics
         })
@@ -434,26 +438,26 @@ fn group_walk_by_def_file(
     groups.into_iter().collect()
 }
 
-/// One defining file's group: expand the file once, then analyze its symbols
-/// in parallel over that shared expansion, tagged with their walk positions.
-/// Counts-only (2026-11-18 boost memory fix): the symbol metrics carry the
-/// six scalars the persisted report keeps, with empty detail vectors - the
-/// detail was never read and cost ~26 GB of cloned ids at boost scale.
+/// One defining file's group through the dense index: the file's physical
+/// expansion is weighed once, then each symbol's semantic load is one
+/// integer walk, tagged with its walk position. Counts-only (2026-11-18
+/// boost memory fix): the symbol metrics carry the six scalars the persisted
+/// report keeps, with empty detail vectors - the detail was never read and
+/// cost ~26 GB of cloned ids at boost scale. Equal to the per-symbol
+/// `analyze_symbol_load_counts_with_expansion` entry element for element
+/// (graph `tests/dense_load_index_equivalence_test.rs`).
 fn analyze_def_file_group(
-    analyzer: &LoadAnalyzer<'_>,
+    index: &DenseLoadIndex<'_>,
     def_file: FileId,
     walk: &[&SymbolId],
     positions: &[usize],
 ) -> Vec<(usize, LoadMetric)> {
-    let expansion = analyzer.physical_expansion(def_file);
+    let symbols: Vec<&SymbolId> = positions.iter().map(|&position| walk[position]).collect();
+    let metrics = index.def_file_group_counts(def_file, &symbols);
     positions
-        .par_iter()
-        .filter_map(|&position| {
-            analyzer
-                .analyze_symbol_load_counts_with_expansion(walk[position], &expansion)
-                .ok()
-                .map(|metric| (position, metric))
-        })
+        .iter()
+        .zip(metrics)
+        .filter_map(|(&position, metric)| metric.map(|metric| (position, metric)))
         .collect()
 }
 
@@ -476,13 +480,17 @@ pub(crate) fn collect_file_metrics(
     progress: &Mutex<Option<ProgressCb>>,
     completed: &AtomicUsize,
 ) -> Vec<LoadMetric> {
+    // Dense pass (2026-11-20): the same integer index the symbol pass
+    // uses, rebuilt here (well under a second at 360k symbols) so the
+    // signature above stays pinned.
+    let index = analyzer.dense_load_index();
     let mut metrics: Vec<LoadMetric> = Vec::new();
     let mut file_id_chunk: Vec<FileId> = Vec::with_capacity(LOAD_PASS_CHUNK);
     for file_id in reduced.file_symbols.keys() {
         file_id_chunk.push(*file_id);
         if file_id_chunk.len() == LOAD_PASS_CHUNK {
             metrics.extend(analyze_file_chunk(
-                analyzer,
+                &index,
                 graph,
                 &file_id_chunk,
                 total_files,
@@ -494,7 +502,7 @@ pub(crate) fn collect_file_metrics(
     }
     if !file_id_chunk.is_empty() {
         metrics.extend(analyze_file_chunk(
-            analyzer,
+            &index,
             graph,
             &file_id_chunk,
             total_files,
@@ -511,7 +519,7 @@ pub(crate) fn collect_file_metrics(
 /// A2); the registration check preserves the old skip contract: an id
 /// without a path yields None and disappears via `flatten()`.
 fn analyze_file_chunk(
-    analyzer: &LoadAnalyzer<'_>,
+    index: &DenseLoadIndex<'_>,
     graph: &IncludeGraph,
     file_ids: &[FileId],
     total_files: usize,
@@ -523,9 +531,11 @@ fn analyze_file_chunk(
         .map(|&file_id| {
             // Compact metric: the collateral side keeps counts, plus sample
             // names for the sources a capped list can show (full lists made
-            // this pass files x closure-symbols).
+            // this pass files x closure-symbols). Computed over the dense
+            // index; equal to `analyze_file_load_compact_by_id` (graph
+            // `tests/dense_load_index_equivalence_test.rs`).
             let metric = if graph.file_paths.contains_key(&file_id) {
-                Some(analyzer.analyze_file_load_compact_by_id(file_id, CompactShape::default()))
+                Some(index.file_load_compact(file_id, CompactShape::default()))
             } else {
                 None
             };

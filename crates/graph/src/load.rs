@@ -673,6 +673,15 @@ mod expansion;
 
 pub use expansion::DefFileExpansion;
 
+/// Dense stage-5 passes: an integer symbol index over collapsed call
+/// cycles; the symbol pass (here) and the file pass (`dense_file`).
+#[path = "load_dense.rs"]
+mod dense;
+#[path = "load_dense_file.rs"]
+mod dense_file;
+
+pub use dense::DenseLoadIndex;
+
 /// Compact file load for the stage-5 collateral pass (counts plus sample
 /// names on the collateral side), relocated for the R2 limit.
 #[path = "load_compact.rs"]
