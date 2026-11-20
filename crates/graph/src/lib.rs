@@ -2,6 +2,7 @@
 
 pub mod builder;
 pub mod callgraph;
+mod call_usage;
 pub(crate) mod closures;
 pub mod cycle_groups;
 pub mod graph;

@@ -1,13 +1,19 @@
 [
   {
     "collateral_load_after": 0,
-    "collateral_load_before": 2,
+    "collateral_load_before": 1,
     "id": "PLAN-001",
     "optimization_frontier": [
       "include/thing.h"
     ],
-    "problem": "2 symbols of collateral load",
+    "problem": "1 symbols of collateral load",
     "proposed_extractions": [
+      {
+        "source_file": 5780424644969596122,
+        "symbol_id": "HeavyTemplate::do_something",
+        "symbol_name": "HeavyTemplate::do_something",
+        "target_header": "include/HeavyTemplate_do_something_extracted.h"
+      },
       {
         "source_file": 5780424644969596122,
         "symbol_id": "Thing",
@@ -27,7 +33,7 @@
         "target_header": "include/heavy_func_extracted.h"
       }
     ],
-    "rationale": "File include/thing.h has 2 collateral symbols mostly from include/heavy.h. Extracting independent symbols.",
+    "rationale": "File include/thing.h has 1 collateral symbols mostly from include/heavy.h. Extracting independent symbols.",
     "risk": "Conservative",
     "target_file": "include/thing.h",
     "target_file_id": 5780424644969596122,

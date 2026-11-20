@@ -57,7 +57,7 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
     assert_eq!(report.total_files, 5);
     assert_eq!(report.total_tus, 2);
     assert_eq!(report.total_symbols, 7);
-    assert_eq!(report.total_semantic_edges, 19);
+    assert_eq!(report.total_semantic_edges, 20); // + main -> Thing::get_id call edge
     assert_eq!(
         report.collateral_opportunities,
         vec![
@@ -66,10 +66,11 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
                 collateral_symbols: 9,
             },
             // 1 own + 6 thing.cpp-defined members it declares (load stage
-            // revision 2 credits those to the declaring header).
+            // revision 2 credits those to the declaring header), minus
+            // Thing::get_id, which main() calls (reduced stage revision 2).
             ariadne_cli::CollateralOpportunity {
                 header_name: "thing.h".to_string(),
-                collateral_symbols: 7,
+                collateral_symbols: 6,
             },
             ariadne_cli::CollateralOpportunity {
                 header_name: "thing_types.h".to_string(),
@@ -84,7 +85,7 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
     assert_eq!(report.validation_passed_tus, 2);
     assert!(report.build_passed);
     assert_eq!(report.committed_transformations, 1);
-    assert_eq!(report.residual_collateral_load, 15); // 9 + 6 now credited to thing.h
+    assert_eq!(report.residual_collateral_load, 14); // 9 + 6 credited to thing.h - called get_id
     Ok(())
 }
 
@@ -240,13 +241,14 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
     );
 
     assert!(rendered.contains("Repository:\n    5 files\n    2 translation units"));
-    assert!(rendered.contains("Analysis:\n    7 symbols\n    19 semantic edges"));
+    assert!(rendered.contains("Analysis:\n    7 symbols\n    20 semantic edges"));
     assert!(rendered.contains("Plan:\n    1 safe transformations available"));
     assert!(rendered.contains("Preview:\n    2 consumer files affected"));
     assert!(rendered.contains("Validation:\n    2 / 2 affected TUs passed"));
     assert!(rendered.contains("Build:\n    PASS"));
     assert!(rendered.contains("Committed:\n    1 transformations"));
-    // 9 + the 6 thing.cpp-defined symbols now credited to thing.h.
-    assert!(rendered.contains("Residual collateral load:\n    15 symbols"));
+    // 9 + the 6 thing.cpp-defined symbols credited to thing.h, less the
+    // called Thing::get_id.
+    assert!(rendered.contains("Residual collateral load:\n    14 symbols"));
     Ok(())
 }

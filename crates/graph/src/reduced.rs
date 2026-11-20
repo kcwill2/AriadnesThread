@@ -164,6 +164,10 @@ impl ReducedSemanticModel {
         // every unit that shares it still uses its symbols.
         crate::shared_usage::credit_shared_file_usage(index_result, &mut tu_usage);
 
+        // Calls are uses too: resolve each call site against what its unit
+        // sees (needs the full symbol table and the shared-file credit).
+        crate::call_usage::add_call_edges(index_result, &symbols, &tu_usage, &mut raw_edges);
+
         // Convert raw_edges to deterministic sorted vec
         for ((src, dst), kind) in raw_edges {
             edges.push(ReducedSemanticEdge {
