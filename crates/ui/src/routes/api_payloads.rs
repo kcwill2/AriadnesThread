@@ -113,6 +113,36 @@ pub(crate) async fn api_status(State(state): State<Arc<UiState>>) -> Json<Status
     })
 }
 
+/// What the live page reads from the payload besides the three graphs:
+/// those have their own routes, and `/api/export` repeats all of them, so on
+/// large repos parsing the export as one JSON text was where the page
+/// stalled (and everything after it in the boot sequence was skipped).
+#[derive(serde::Serialize)]
+struct AnalysisView<'a> {
+    file_justification:
+        &'a std::collections::HashMap<String, std::collections::HashMap<String, crate::dto::JustificationEntry>>,
+    extraction_proposals: &'a [crate::dto::ExtractionProposalDto],
+}
+
+pub(crate) async fn api_analysis(
+    State(state): State<Arc<UiState>>,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let payload = read_state(&state.payload);
+    let payload = payload
+        .as_ref()
+        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    let view = AnalysisView {
+        file_justification: &payload.file_justification,
+        extraction_proposals: &payload.extraction_proposals,
+    };
+    let bytes = serde_json::to_vec(&view)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(axum::response::IntoResponse::into_response((
+        [(header::CONTENT_TYPE, "application/json")],
+        bytes,
+    )))
+}
+
 /// P5 (AR-15): serves the export payload from the generation snapshot
 /// (see `state::ExportSnapshot`). Body bytes, content type, and the 503
 /// while loading are byte-identical to the removed `Json(payload.clone())`
