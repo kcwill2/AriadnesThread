@@ -98,6 +98,11 @@ impl Fingerprint {
 /// declaring header (`LoadAnalyzer::attribution_file`).
 pub const LOAD_STAGE_LABEL: &str = "load/attribution-2";
 
+/// Stage label of the reduced-model fingerprint, revised the same way (the
+/// revision rebuilds reduce and everything downstream, never the parse).
+/// Revision 2: call sites become semantic edges (`graph::call_usage`).
+pub const REDUCED_STAGE_LABEL: &str = "reduced/call-usage-2";
+
 /// The fingerprint chain shared by all pipeline stages. Each downstream stage
 /// is keyed by the fingerprints of its inputs, so a mismatch invalidates the
 /// stage wholesale while TU-level content hashes still allow parse reuse.
@@ -118,7 +123,7 @@ impl StageFingerprints {
         let include_graph =
             Fingerprint::chain("include-graph", &[repository.clone(), contexts.clone()]);
         let index = Fingerprint::chain("index", &[repository.clone(), contexts.clone()]);
-        let reduced = Fingerprint::chain("reduced", std::slice::from_ref(&index));
+        let reduced = Fingerprint::chain(REDUCED_STAGE_LABEL, std::slice::from_ref(&index));
         let callgraph = Fingerprint::chain("callgraph", &[index.clone(), reduced.clone()]);
         let load = Fingerprint::chain(LOAD_STAGE_LABEL, &[include_graph.clone(), reduced.clone()]);
         let plan = Fingerprint::chain("plan", &[include_graph.clone(), reduced.clone()]);
@@ -184,6 +189,13 @@ mod tests {
         let unrevised = Fingerprint::chain("load", &[fps.include_graph.clone(), fps.reduced.clone()]);
         assert_ne!(fps.load, unrevised, "pre-revision load artifacts must read as stale");
         assert_eq!(fps.index, Fingerprint::chain("index", &["repo".to_string(), "ctx".to_string()]));
+    }
+
+    #[test]
+    fn reduced_fingerprint_carries_its_stage_revision() {
+        let fps = StageFingerprints::compute("repo".to_string(), "ctx".to_string());
+        let unrevised = Fingerprint::chain("reduced", std::slice::from_ref(&fps.index));
+        assert_ne!(fps.reduced, unrevised, "pre-call-edge reduced artifacts must read as stale");
     }
 
     #[test]

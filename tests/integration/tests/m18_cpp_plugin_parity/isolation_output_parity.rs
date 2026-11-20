@@ -81,21 +81,28 @@ const BASIC_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
     diff_text: "<ROOT>/src/thing.cpp\n    - #include \"include/thing.h\"\n    + #include \"generated/include/ThingConfig_extracted.h\"\n    + #include \"generated/include/Thing_Thing_extracted.h\"\n    + #include \"generated/include/Thing_extracted.h\"\n    + #include \"generated/include/Thing_get_id_extracted.h\"\n\n<ROOT>/tests/consumer.cpp\n    - #include \"include/thing.h\"\n    + #include \"generated/include/ThingConfig_extracted.h\"\n    + #include \"generated/include/Thing_Thing_extracted.h\"\n    + #include \"generated/include/Thing_extracted.h\"\n    + #include \"generated/include/Thing_get_id_extracted.h\"\n\n",
 }];
 
-/// Same capture for the `expensive` fixture.
+/// Same capture for the `expensive` fixture, re-captured when call sites
+/// became semantic edges (reduced stage revision 2): `use_heavy()` calls
+/// `heavy_func()`, which calls `do_something()`, so each extracted header
+/// now includes its callee's header and `do_something` is extracted too.
 const EXPENSIVE_PLAN_LOCKS: &[PlanLock] = &[PlanLock {
     plan_id: "PLAN-001",
     generated: &[
+        (
+            "include/HeavyTemplate_do_something_extracted.h",
+            "#pragma once\n\n// Symbol: HeavyTemplate::do_something (Function)\n",
+        ),
         (
             "include/Thing_extracted.h",
             "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\nclass Thing {\npublic:\n    void use_heavy() {\n        heavy_func();\n    }\n};\n",
         ),
         (
             "include/Thing_use_heavy_extracted.h",
-            "#pragma once\n\nvoid use_heavy() {\n        heavy_func();\n    }\n",
+            "#pragma once\n\n#include \"include/heavy_func_extracted.h\"\n\nvoid use_heavy() {\n        heavy_func();\n    }\n",
         ),
         (
             "include/heavy_func_extracted.h",
-            "#pragma once\n\n// Symbol: heavy_func (Function)\n",
+            "#pragma once\n\n#include \"include/HeavyTemplate_do_something_extracted.h\"\n\n// Symbol: heavy_func (Function)\n",
         ),
     ],
     preview_json: "{\n  \"plan_id\": \"PLAN-001\",\n  \"rewrites\": []\n}",

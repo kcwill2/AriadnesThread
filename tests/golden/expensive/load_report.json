@@ -29,39 +29,37 @@
       "total_load": 3
     },
     {
-      "collateral_load": 2,
+      "collateral_load": 1,
       "collateral_sources": [
-        {
-          "file_id": 2171065965022647111,
-          "path": "include/heavy.h",
-          "symbol_count": 2,
-          "symbols": [
-            "HeavyTemplate",
-            "HeavyTemplate::do_something"
-          ]
-        }
-      ],
-      "collateral_symbols": [
-        "HeavyTemplate",
-        "HeavyTemplate::do_something"
-      ],
-      "include_load": 5,
-      "largest_collateral_source": {
-        "file_id": 2171065965022647111,
-        "path": "include/heavy.h",
-        "symbol_count": 2,
-        "symbols": [
-          "HeavyTemplate",
-          "HeavyTemplate::do_something"
-        ]
-      },
-      "semantic_load": 3,
-      "semantic_sources": [
         {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
           "symbol_count": 1,
           "symbols": [
+            "HeavyTemplate"
+          ]
+        }
+      ],
+      "collateral_symbols": [
+        "HeavyTemplate"
+      ],
+      "include_load": 5,
+      "largest_collateral_source": {
+        "file_id": 2171065965022647111,
+        "path": "include/heavy.h",
+        "symbol_count": 1,
+        "symbols": [
+          "HeavyTemplate"
+        ]
+      },
+      "semantic_load": 4,
+      "semantic_sources": [
+        {
+          "file_id": 2171065965022647111,
+          "path": "include/heavy.h",
+          "symbol_count": 2,
+          "symbols": [
+            "HeavyTemplate::do_something",
             "heavy_func"
           ]
         },
@@ -76,6 +74,7 @@
         }
       ],
       "semantic_symbols": [
+        "HeavyTemplate::do_something",
         "Thing",
         "Thing::use_heavy",
         "heavy_func"
@@ -85,42 +84,30 @@
       "total_load": 5
     },
     {
-      "collateral_load": 3,
+      "collateral_load": 1,
       "collateral_sources": [
         {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
-          "symbol_count": 2,
-          "symbols": [
-            "HeavyTemplate",
-            "HeavyTemplate::do_something"
-          ]
-        },
-        {
-          "file_id": 5780424644969596122,
-          "path": "include/thing.h",
           "symbol_count": 1,
           "symbols": [
-            "Thing::use_heavy"
+            "HeavyTemplate"
           ]
         }
       ],
       "collateral_symbols": [
-        "HeavyTemplate",
-        "HeavyTemplate::do_something",
-        "Thing::use_heavy"
+        "HeavyTemplate"
       ],
       "include_load": 6,
       "largest_collateral_source": {
         "file_id": 2171065965022647111,
         "path": "include/heavy.h",
-        "symbol_count": 2,
+        "symbol_count": 1,
         "symbols": [
-          "HeavyTemplate",
-          "HeavyTemplate::do_something"
+          "HeavyTemplate"
         ]
       },
-      "semantic_load": 3,
+      "semantic_load": 5,
       "semantic_sources": [
         {
           "file_id": 10757945787003264251,
@@ -133,22 +120,26 @@
         {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
-          "symbol_count": 1,
+          "symbol_count": 2,
           "symbols": [
+            "HeavyTemplate::do_something",
             "heavy_func"
           ]
         },
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 1,
+          "symbol_count": 2,
           "symbols": [
-            "Thing"
+            "Thing",
+            "Thing::use_heavy"
           ]
         }
       ],
       "semantic_symbols": [
+        "HeavyTemplate::do_something",
         "Thing",
+        "Thing::use_heavy",
         "another_func",
         "heavy_func"
       ],
@@ -157,42 +148,30 @@
       "total_load": 6
     },
     {
-      "collateral_load": 3,
+      "collateral_load": 1,
       "collateral_sources": [
         {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
-          "symbol_count": 2,
-          "symbols": [
-            "HeavyTemplate",
-            "HeavyTemplate::do_something"
-          ]
-        },
-        {
-          "file_id": 5780424644969596122,
-          "path": "include/thing.h",
           "symbol_count": 1,
           "symbols": [
-            "Thing::use_heavy"
+            "HeavyTemplate"
           ]
         }
       ],
       "collateral_symbols": [
-        "HeavyTemplate",
-        "HeavyTemplate::do_something",
-        "Thing::use_heavy"
+        "HeavyTemplate"
       ],
       "include_load": 6,
       "largest_collateral_source": {
         "file_id": 2171065965022647111,
         "path": "include/heavy.h",
-        "symbol_count": 2,
+        "symbol_count": 1,
         "symbols": [
-          "HeavyTemplate",
-          "HeavyTemplate::do_something"
+          "HeavyTemplate"
         ]
       },
-      "semantic_load": 3,
+      "semantic_load": 5,
       "semantic_sources": [
         {
           "file_id": 15350901620175634748,
@@ -205,22 +184,26 @@
         {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
-          "symbol_count": 1,
+          "symbol_count": 2,
           "symbols": [
+            "HeavyTemplate::do_something",
             "heavy_func"
           ]
         },
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 1,
+          "symbol_count": 2,
           "symbols": [
-            "Thing"
+            "Thing",
+            "Thing::use_heavy"
           ]
         }
       ],
       "semantic_symbols": [
+        "HeavyTemplate::do_something",
         "Thing",
+        "Thing::use_heavy",
         "heavy_func",
         "main"
       ],
@@ -232,6 +215,6 @@
   "repository_root": "<ROOT>",
   "symbol_summary": {
     "analyzed_symbols": 7,
-    "collateral_load": 19
+    "collateral_load": 11
   }
 }

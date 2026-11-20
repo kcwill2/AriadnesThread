@@ -167,7 +167,7 @@
       "total_load": 6
     },
     {
-      "collateral_load": 4,
+      "collateral_load": 3,
       "collateral_sources": [
         {
           "file_id": 2171065965022647111,
@@ -181,17 +181,15 @@
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 2,
+          "symbol_count": 1,
           "symbols": [
-            "Thing::Thing",
-            "Thing::get_id"
+            "Thing::Thing"
           ]
         }
       ],
       "collateral_symbols": [
         "HeavyData",
         "Thing::Thing",
-        "Thing::get_id",
         "heavy_computation"
       ],
       "include_load": 7,
@@ -204,7 +202,7 @@
           "heavy_computation"
         ]
       },
-      "semantic_load": 3,
+      "semantic_load": 4,
       "semantic_sources": [
         {
           "file_id": 12813084605127730049,
@@ -225,14 +223,16 @@
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 1,
+          "symbol_count": 2,
           "symbols": [
-            "Thing"
+            "Thing",
+            "Thing::get_id"
           ]
         }
       ],
       "semantic_symbols": [
         "Thing",
+        "Thing::get_id",
         "ThingConfig",
         "main"
       ],
@@ -244,6 +244,6 @@
   "repository_root": "<ROOT>",
   "symbol_summary": {
     "analyzed_symbols": 7,
-    "collateral_load": 17
+    "collateral_load": 16
   }
 }
