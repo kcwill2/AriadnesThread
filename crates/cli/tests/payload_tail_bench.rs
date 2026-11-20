@@ -377,6 +377,7 @@ fn run_assembly(
             reduced,
             &path_to_id,
             Some(&load_memo),
+            &|_, _| {},
         )
     });
 

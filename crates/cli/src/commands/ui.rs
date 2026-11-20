@@ -31,6 +31,7 @@ use boot_progress::{
     make_boot_progress, surface_boot_failure, StageCall, StageOutcome,
 };
 
+mod background_drop;
 mod boot_progress;
 mod extraction_reader;
 mod extraction_apply;
@@ -269,13 +270,9 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
     // (`with_closures` pattern of `ensure_load`). Payload assembly and every
     // live route share it; rebuilds swap graph+model+memo as one unit.
     let load_memo = Arc::new(ariadne_graph::LoadMemo::with_closures(closures));
-    // Span floor of the justification tail (path maps + memo): neither
-    // emits per-file events, so 96 -> 99 is one measured span.
-    stage5_report(
-        &progress,
-        JUSTIFYING_SYMBOLS_PERCENT,
-        "Justifying symbols...",
-    );
+    // Span floor of the justification tail; the memo build below reports
+    // per-file frames inside 96 -> 99 (`justification_progress`).
+    stage5_report(&progress, JUSTIFYING_SYMBOLS_PERCENT, "Justifying symbols...");
     let path_to_id = node_maps::build_path_to_id(&include_graph);
     let collateral_index = ariadne_ui::CollateralIndex::from_metrics(&path_to_id, &load_report.file_metrics);
     let collateral_index = Arc::new(collateral_index);
@@ -285,6 +282,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         &reduced_model,
         &path_to_id,
         Some(&load_memo),
+        &justification_progress(&progress),
     );
     stage5_report(&progress, JUSTIFICATION_COMPLETE_PERCENT, "Symbols justified");
     let payload = GraphExportPayload {
@@ -308,8 +306,10 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         file_justification,
         extraction_proposals,
     };
-    let status = stage_status_from_pipeline(&pipeline);
+    let (status, fps) = (stage_status_from_pipeline(&pipeline), pipeline.fps.clone());
     stage5_report(&progress, PAYLOAD_ASSEMBLED_PERCENT, "Payload assembled");
+    // Nothing reads these again; freeing them inline delayed "Ready".
+    background_drop::drop_in_background((pipeline, load_report, node_maps, path_to_id));
     Ok(UiBuildResult {
         include_graph,
         reduced_model,
@@ -317,11 +317,29 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         load_memo,
         payload,
         status,
-        fps: pipeline.fps.clone(),
+        fps,
         extraction_plans,
         install_epoch: 0,
         collateral_index,
     })
+}
+
+/// Per-file "Justifying symbols N/M files" frames inside the 96 -> 99 span,
+/// about one per percent of files so a large repo never looks stalled.
+fn justification_progress(progress: &ProgressFn) -> impl Fn(usize, usize) + Sync {
+    let progress = progress.clone();
+    // Rayon workers finish out of order; the lock keeps frames monotone.
+    let last_reported = std::sync::Mutex::new(0usize);
+    move |done, total| {
+        let step = (total / 100).max(1);
+        let mut last = last_reported.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if done > *last && (done - *last >= step || done == total) {
+            *last = done;
+            let span = JUSTIFICATION_COMPLETE_PERCENT - JUSTIFYING_SYMBOLS_PERCENT;
+            let percent = JUSTIFYING_SYMBOLS_PERCENT + (done * span / total.max(1)).min(span - 1);
+            stage5_report(&progress, percent, &format!("Justifying symbols {done}/{total} files"));
+        }
+    }
 }
 
 fn translation_unit_file_ids(

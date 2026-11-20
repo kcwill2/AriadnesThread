@@ -11,6 +11,7 @@
 
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::OnceLock;
 use std::path::PathBuf;
 
 /// One header's totals over every file that pays for it.
@@ -24,6 +25,9 @@ pub struct CollateralBurden {
 #[derive(Debug, Default)]
 pub struct CollateralIndex {
     rows: HashMap<u64, Vec<(u64, usize)>>,
+    /// Source -> (root, count): the rows transposed on the first column
+    /// request, so later clicks never rescan every row.
+    columns: OnceLock<HashMap<u64, Vec<(u64, usize)>>>,
 }
 
 impl CollateralIndex {
@@ -49,7 +53,7 @@ impl CollateralIndex {
                 rows.insert(*root, row);
             }
         }
-        Self { rows }
+        Self { rows, columns: OnceLock::new() }
     }
 
     /// From the payload's nested string-keyed map (non-numeric ids skipped).
@@ -66,7 +70,7 @@ impl CollateralIndex {
                 rows.insert(root, row);
             }
         }
-        Self { rows }
+        Self { rows, columns: OnceLock::new() }
     }
 
     /// The nested map the offline export embeds as `file_collateral`.
@@ -88,15 +92,21 @@ impl CollateralIndex {
             .unwrap_or_default()
     }
 
-    /// What each file pays for `source`, keyed by root id (one scan).
+    /// What each file pays for `source`, keyed by root id.
     pub fn column(&self, source: u64) -> BTreeMap<String, usize> {
-        let mut column = BTreeMap::new();
-        for (root, row) in &self.rows {
-            if let Some((_, count)) = row.iter().find(|(id, _)| *id == source) {
-                column.insert(root.to_string(), *count);
+        let columns = self.columns.get_or_init(|| {
+            let mut columns: HashMap<u64, Vec<(u64, usize)>> = HashMap::new();
+            for (root, row) in &self.rows {
+                for (id, count) in row {
+                    columns.entry(*id).or_default().push((*root, *count));
+                }
             }
-        }
-        column
+            columns
+        });
+        columns
+            .get(&source)
+            .map(|column| column.iter().map(|(root, count)| (root.to_string(), *count)).collect())
+            .unwrap_or_default()
     }
 
     /// Per header: total collateral paid and how many files pay it.

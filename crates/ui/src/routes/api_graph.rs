@@ -17,32 +17,26 @@ use std::sync::Arc;
 
 pub(crate) async fn api_graph_include(
     State(state): State<Arc<UiState>>,
-) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+) -> Result<axum::response::Response, axum::http::StatusCode> {
     let payload = read_state(&state.payload);
-    payload
-        .as_ref()
-        .map(|p| Json(p.include_graph.clone()))
-        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+    let payload = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    super::api_payloads::json_response(&payload.include_graph)
 }
 
 pub(crate) async fn api_graph_symbol(
     State(state): State<Arc<UiState>>,
-) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+) -> Result<axum::response::Response, axum::http::StatusCode> {
     let payload = read_state(&state.payload);
-    payload
-        .as_ref()
-        .map(|p| Json(p.symbol_graph.clone()))
-        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+    let payload = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    super::api_payloads::json_response(&payload.symbol_graph)
 }
 
 pub(crate) async fn api_graph_call(
     State(state): State<Arc<UiState>>,
-) -> Result<Json<Vec<CytoscapeElement>>, axum::http::StatusCode> {
+) -> Result<axum::response::Response, axum::http::StatusCode> {
     let payload = read_state(&state.payload);
-    payload
-        .as_ref()
-        .map(|p| Json(p.call_graph.clone()))
-        .ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+    let payload = payload.as_ref().ok_or(axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
+    super::api_payloads::json_response(&payload.call_graph)
 }
 
 pub(crate) async fn api_graph_traverse(

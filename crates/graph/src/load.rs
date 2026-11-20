@@ -301,13 +301,26 @@ impl<'a> LoadAnalyzer<'a> {
 
     /// Groups symbols by defining file into contributor entries, applying the
     /// shared `(symbol_count desc, path asc)` ordering contract.
+    /// The file a root includes to see `record`: its defining file when that
+    /// is an includable header, else the lowest-id header declaring it (a
+    /// function declared in foo.h and defined in foo.cpp is foo.h's; no root
+    /// can include foo.cpp), else the defining file unchanged.
+    pub(crate) fn attribution_file(&self, record: &crate::reduced::ReducedSymbolRecord) -> Option<FileId> {
+        let defining = record.defining_file?;
+        let is_header = |file: &FileId| {
+            self.include_graph.file_paths.get(file).is_some_and(|path| is_includable_header(path))
+        };
+        if is_header(&defining) {
+            return Some(defining);
+        }
+        record.declaring_files.iter().copied().filter(is_header).min().or(Some(defining))
+    }
+
     fn contributing_sources(&self, symbols: &[SymbolId]) -> Vec<ContributingSource> {
         let mut by_file: HashMap<FileId, Vec<SymbolId>> = HashMap::new();
         for sym in symbols {
-            if let Some(record) = self.model.symbols.get(sym) {
-                if let Some(f) = record.defining_file {
-                    by_file.entry(f).or_default().push(sym.clone());
-                }
+            if let Some(f) = self.model.symbols.get(sym).and_then(|r| self.attribution_file(r)) {
+                by_file.entry(f).or_default().push(sym.clone());
             }
         }
 
@@ -694,6 +707,12 @@ mod characterization;
 #[cfg(test)]
 #[path = "load_justification_tests.rs"]
 mod justification;
+
+/// Source attribution: symbols defined in a .cpp but declared in a header
+/// are credited to the header a root can actually include.
+#[cfg(test)]
+#[path = "load_attribution_tests.rs"]
+mod attribution;
 
 /// Extraction-impact suite: locks the drop-set semantics of
 /// `extraction_impact` (Pass E, plan 1790521470000).

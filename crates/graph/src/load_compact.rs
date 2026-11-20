@@ -97,7 +97,7 @@ impl<'a> LoadAnalyzer<'a> {
                 continue;
             }
             collateral_load += 1;
-            let defining_file = self.model.symbols.get(*symbol).and_then(|record| record.defining_file);
+            let defining_file = self.model.symbols.get(*symbol).and_then(|record| self.attribution_file(record));
             if let Some(source) = defining_file {
                 tallies.entry(source).or_default().record(symbol, shape.names_per_source);
             }

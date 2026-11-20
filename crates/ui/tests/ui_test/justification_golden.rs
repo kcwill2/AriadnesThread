@@ -12,7 +12,7 @@ use ariadne_graph::{
 };
 use ariadne_index::{DependencyKind, SymbolId, SymbolKind};
 use ariadne_repo::FileId;
-use ariadne_ui::build_file_justification;
+use ariadne_ui::{build_file_justification, build_file_justification_with_memo};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -436,4 +436,19 @@ fn golden_fixture_covers_every_interesting_shape() {
     assert_eq!(model.symbols.len(), 48 * 3 + 12 + 4 + 3);
     assert!(!graph.edges.is_empty());
     assert_eq!(metrics.len(), 55);
+}
+
+/// The boot shows "Justifying symbols N/M files": the callback sees every
+/// metric once, its last count is the total, and the result is unchanged.
+#[test]
+fn progress_callback_counts_every_metric_without_changing_the_output() {
+    let (graph, model, ids, metrics) = fixture();
+    let seen = std::sync::Mutex::new(Vec::new());
+    let record = |done: usize, total: usize| seen.lock().unwrap().push((done, total));
+    let out = build_file_justification_with_memo(&metrics, &graph, &model, &ids, None, &record);
+    let mut seen = seen.into_inner().unwrap();
+    seen.sort_unstable();
+    let expected: Vec<(usize, usize)> = (1..=metrics.len()).map(|done| (done, metrics.len())).collect();
+    assert_eq!(seen, expected);
+    assert_eq!(canonical_json(&out), canonical_json(&build_file_justification(&metrics, &graph, &model, &ids)));
 }

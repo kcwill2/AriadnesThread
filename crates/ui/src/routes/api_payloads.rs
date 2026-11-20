@@ -135,7 +135,16 @@ pub(crate) async fn api_analysis(
         file_justification: &payload.file_justification,
         extraction_proposals: &payload.extraction_proposals,
     };
-    let bytes = serde_json::to_vec(&view)
+    json_response(&view)
+}
+
+/// Serialize straight from the borrowed payload (under the caller's read
+/// lock) instead of cloning a graph first: on large repos the clone was a
+/// second full copy of the element list for every page load.
+pub(crate) fn json_response<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let bytes = serde_json::to_vec(value)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(axum::response::IntoResponse::into_response((
         [(header::CONTENT_TYPE, "application/json")],

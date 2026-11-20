@@ -31,6 +31,7 @@ mod proposals_payload;
 mod repo_info_paths;
 mod server_api;
 mod search_characterization;
+mod selection_view;
 mod source_containment;
 mod static_html;
 mod static_html_sections;
