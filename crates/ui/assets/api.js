@@ -6,11 +6,7 @@
     // binding made that read a silently-swallowed ReferenceError, so the
     // delta branch never ran once the server reported a refresh. Top
     // level is the only scope both sites share.
-    // `exportEtag` carries the /api/export validator across polls so the
-    // live refresh can ask for a delta instead of re-transferring and
-    // re-parsing an unchanged payload (server answers 304 on match).
     let lastSeenRefresh = 0;
-    let exportEtag = null;
     // Live collateral loads on demand: graphData.file_collateral caches whole
     // rows (root -> {header: count}) as they arrive, and this caches columns
     // (header -> {root: count}) for the payer-side heat view. A row lands in
@@ -82,25 +78,7 @@
                 lastSeenRefresh = status.last_refresh || 0;
                 
                 updateProgress(90, 'Fetching graph endpoints...');
-                const [incRes, symRes, callRes, exportRes] = await Promise.all([
-                  fetch('/api/graph/include').catch(() => null),
-                  fetch('/api/graph/symbol').catch(() => null),
-                  fetch('/api/graph/call').catch(() => null),
-                  fetch('/api/export').catch(() => null),
-                ]);
-
-                if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
-                if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
-                if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
-                if (exportRes && exportRes.ok) {
-                  // AR-15: keep the validator for the live-refresh delta.
-                  exportEtag = exportRes.headers.get('ETag');
-                  const exportPayload = await exportRes.json();
-                  graphData.file_collateral = exportPayload.file_collateral || {};
-                  graphData.file_justification = exportPayload.file_justification || {};
-                  graphData.extraction_proposals = exportPayload.extraction_proposals || [];
-                }
-                await resetLiveCollateral();
+                await loadLiveDatasets();
 
                 updateProgress(100, 'Rendering visualization... 100%');
                 applyLoadedData();
@@ -126,6 +104,52 @@
       }
     }
 
+    // Each live dataset downloads and parses on its own, so one that fails
+    // (on large repos, a text too big to parse) cannot skip the others. The
+    // page reads justification and proposals from the lean /api/analysis
+    // (the export repeats all three graphs); collateral comes on demand; the
+    // symbol and call graphs, often the largest, load when their tab opens.
+    async function fetchLiveJson(path) {
+      try {
+        const res = await fetch(path);
+        if (!res || !res.ok) return null;
+        return await res.json();
+      } catch (e) {
+        console.warn('Live fetch failed: ' + path, e);
+        return null;
+      }
+    }
+
+    let lazyGraphsLoaded = { symbol: false, call: false };
+
+    async function loadLiveDatasets() {
+      lazyGraphsLoaded = { symbol: false, call: false };
+      const [include, analysis] = await Promise.all([
+        fetchLiveJson('/api/graph/include'),
+        fetchLiveJson('/api/analysis'),
+        resetLiveCollateral(),
+      ]);
+      if (include) graphData.include_graph = include;
+      if (analysis) {
+        graphData.file_justification = analysis.file_justification || {};
+        graphData.extraction_proposals = analysis.extraction_proposals || [];
+      }
+      if (!lazyGraphReady(currentTab)) await ensureLazyGraph(currentTab);
+    }
+
+    function lazyGraphReady(tab) {
+      return isStandaloneReport() || !(tab in lazyGraphsLoaded) || lazyGraphsLoaded[tab];
+    }
+
+    // One attempt per generation: a failed load renders the tab empty
+    // instead of retrying in a loop; the next live refresh tries again.
+    async function ensureLazyGraph(tab) {
+      if (lazyGraphReady(tab)) return;
+      const elements = await fetchLiveJson('/api/graph/' + tab);
+      if (elements) graphData[tab + '_graph'] = elements;
+      lazyGraphsLoaded[tab] = true;
+    }
+
     function startLiveRefresh() {
       const chip = document.getElementById('refreshChip');
       const loop = async () => {
@@ -142,31 +166,9 @@
             if (s.last_refresh && s.last_refresh !== lastSeenRefresh) {
               lastSeenRefresh = s.last_refresh;
               if (s.stats) graphData.stats = s.stats;
-              const [incRes, symRes, callRes, exportRes] = await Promise.all([
-                fetch('/api/graph/include').catch(() => null),
-                fetch('/api/graph/symbol').catch(() => null),
-                fetch('/api/graph/call').catch(() => null),
-                // AR-15 ETag/delta-aware: carry the validator so an unchanged
-                // export costs a 304 instead of a full transfer + parse.
-                fetch('/api/export', exportEtag ? { headers: { 'If-None-Match': exportEtag } } : undefined).catch(() => null),
-              ]);
-              if (incRes && incRes.ok) graphData.include_graph = await incRes.json();
-              if (symRes && symRes.ok) graphData.symbol_graph = await symRes.json();
-              if (callRes && callRes.ok) graphData.call_graph = await callRes.json();
-              if (exportRes && exportRes.status === 304) {
-                // Delta path: export bytes unchanged (exact ETag match at the
-                // server), so the export-derived fields below stay as they
-                // are; the three graph datasets above may still have changed.
-              } else if (exportRes && exportRes.ok) {
-                exportEtag = exportRes.headers.get('ETag');
-                const p = await exportRes.json();
-                graphData.file_collateral = p.file_collateral || {};
-                graphData.file_justification = p.file_justification || {};
-                graphData.extraction_proposals = p.extraction_proposals || [];
-              }
+              await loadLiveDatasets();
               // Payload swap: drop per-node /api/justification detail cached against the previous build.
               justificationCache = {};
-              await resetLiveCollateral();
               applyLoadedData();
             }
           }

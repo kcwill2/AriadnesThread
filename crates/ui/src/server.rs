@@ -22,7 +22,7 @@ use crate::routes::api_graph::{
     api_graph_symbol, api_graph_traverse,
 };
 use crate::routes::api_payloads::{
-    api_export, api_index, api_status, asset_api_js, asset_extraction_wizard_js,
+    api_analysis, api_export, api_index, api_status, asset_api_js, asset_extraction_wizard_js,
     asset_file_view_js, asset_graph_js, asset_hotspots_js, asset_icon_svg, asset_main_js,
     asset_preview_js, asset_provenance_js, asset_styles_css, asset_theme_js, asset_themes_css,
     asset_traversal_js,
@@ -79,6 +79,7 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/graph/collateral", get(api_graph_collateral))
         .route("/api/graph/traversal", get(api_graph_traversal))
         .route("/api/justification", get(api_justification))
+        .route("/api/analysis", get(api_analysis))
         .route("/api/collateral/row", get(api_collateral_row))
         .route("/api/collateral/column", get(api_collateral_column))
         .route("/api/collateral/burden", get(api_collateral_burden))

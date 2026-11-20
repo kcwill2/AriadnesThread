@@ -78,3 +78,19 @@ fn the_index_round_trips_the_nested_map() {
     let index = CollateralIndex::from_nested_map(&nested_fixture());
     assert_eq!(index.to_nested_map(), nested_fixture());
 }
+
+/// The live page reads justification and proposals from this lean route;
+/// the three graphs have their own routes and are not repeated here.
+#[tokio::test]
+async fn analysis_route_carries_justification_without_the_graphs() {
+    let mut payload = common::empty_export_payload();
+    payload.file_justification.insert("1".to_string(), HashMap::new());
+    let app = router_with(payload, None);
+    let (status, _, body) = common::request_route(app, "/api/analysis").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["file_justification"], json!({"1": {}}));
+    assert_eq!(body["extraction_proposals"], json!([]));
+    for graph in ["include_graph", "symbol_graph", "call_graph", "file_collateral"] {
+        assert!(body.get(graph).is_none(), "/api/analysis must not repeat {graph}");
+    }
+}

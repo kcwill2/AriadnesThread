@@ -211,11 +211,16 @@ fn test_ui_heat_map_coloring() {
 fn test_ui_live_mode_fetches_file_collateral() {
     let html = common::page_content();
 
-    // Live server mode must fetch the full payload (incl. file_collateral) from /api/export;
-    // regression guard: without it, heat map and Collateral Breakdown show 0 for every file.
+    // Live server mode reads justification/proposals from the lean /api/analysis
+    // and collateral rows on demand (/api/collateral/*); regression guard:
+    // without them, heat map and Collateral Breakdown show 0 for every file.
     assert!(
-        html.contains("fetch('/api/export')"),
-        "live mode must fetch /api/export for file_collateral"
+        html.contains("fetchLiveJson('/api/analysis')"),
+        "live mode must fetch /api/analysis"
+    );
+    assert!(
+        html.contains("/api/collateral/row?file=") && html.contains("/api/collateral/burden"),
+        "live mode must load collateral rows and burden on demand"
     );
     assert!(
         html.contains("graphData.file_collateral ="),
@@ -410,9 +415,17 @@ fn test_ui_justification_cache_reset_on_live_refresh() {
         .expect("isStandaloneReport function");
     assert!(live < standalone);
     let body = &api[live..standalone];
+    // The payload fields are reassigned inside loadLiveDatasets().
     let payload = body
-        .find("graphData.extraction_proposals =")
+        .find("await loadLiveDatasets()")
         .expect("live refresh must reassign the export payload");
+    let loader = api
+        .find("async function loadLiveDatasets(")
+        .expect("loadLiveDatasets function");
+    assert!(
+        api[loader..].contains("graphData.extraction_proposals ="),
+        "loadLiveDatasets must reassign the payload fields"
+    );
     let reset = body
         .find("justificationCache = {};")
         .expect("live refresh must reset the per-node justification cache");

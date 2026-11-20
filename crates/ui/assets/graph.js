@@ -8,6 +8,10 @@
 
     function switchTab(tab) {
       currentTab = tab;
+      // Live symbol/call graphs load on first open; re-render once they land.
+      if (!lazyGraphReady(tab)) {
+        ensureLazyGraph(tab).then(() => { if (currentTab === tab) switchTab(tab); });
+      }
       ['include', 'symbol', 'call', 'traversal'].forEach(t => {
         const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
         if (btn) {
