@@ -6,6 +6,7 @@
         PLANNING_EXTRACTIONS_PERCENT, ProgressFn, ProgressReport, REDUCTION_PHASE, STAGES_PER_RUN,
         SYMBOLS_ANALYZED_PERCENT, TU_INDEX_PHASE,
     };
+    use super::collateral_symbol_percent;
     use ariadne_pipeline::{LoadMilestone, ProgressEvent};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -150,6 +151,23 @@
         }
     }
 
+    /// The symbol pass fills the stage-5 floor up to "symbols analyzed"
+    /// and names its count, so the bar moves during it.
+    #[test]
+    fn test_symbol_pass_events_fill_the_stage_five_floor() {
+        assert_eq!(collateral_symbol_percent(0, 0), stage_start_percent(5));
+        assert_eq!(collateral_symbol_percent(9, 9), SYMBOLS_ANALYZED_PERCENT);
+        let collected: Arc<Mutex<Vec<ProgressReport>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let progress: ProgressFn = Arc::new(move |report| sink.lock().unwrap().push(report));
+        let mut event_cb = stage_progress_callback(progress);
+        event_cb(&ProgressEvent::CollateralSymbol { done: 2, total: 3 });
+        let reports = collected.lock().unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].percent, collateral_symbol_percent(2, 3));
+        assert!(reports[0].message.contains("Analyzing symbols 2/3"), "{:?}", reports[0].message);
+    }
+
     /// A4: replay the exact stage-5 emission order of `run_pipeline_stages`
     /// and `stage_progress_callback` and `build_ui_payload` (static
     /// milestones through the same `stage_report` helper, pipeline events
@@ -167,6 +185,9 @@
         let mut event_cb = stage_progress_callback(progress.clone());
 
         progress(stage_report(5, stage_start_percent(5), COLLATERAL_PHASE, "Load analysis"));
+        for done in 1..=3 {
+            event_cb(&ProgressEvent::CollateralSymbol { done, total: 3 });
+        }
         event_cb(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
             symbols: 21,
         }));
@@ -214,6 +235,9 @@
             sequence,
             vec![
                 (80, "Load analysis"),
+                (81, "Analyzing symbols 1/3"),
+                (82, "Analyzing symbols 2/3"),
+                (83, "Analyzing symbols 3/3"),
                 (83, "21 symbols analyzed"),
                 (83, "0/4 files"),
                 (85, "1/4 files"),

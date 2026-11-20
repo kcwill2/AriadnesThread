@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // name production code here still calls (child modules see parent-private
 // `use` bindings, so the frozen import lines stay UNEDITED).
 use stage_spans::{
-    collateral_file_percent, discovery_hashed_percent, include_scan_percent, stage_end_percent,
+    collateral_file_percent, collateral_symbol_percent, discovery_hashed_percent, include_scan_percent, stage_end_percent,
     stage_start_percent, step_percent, tu_index_percent, ARTIFACTS_PHASE, ARTIFACTS_SAVED_PERCENT,
     CALL_GRAPH_PHASE, COLLATERAL_PHASE, JUSTIFICATION_COMPLETE_PERCENT, JUSTIFYING_SYMBOLS_PERCENT,
     MODEL_REDUCED_PERCENT, PAYLOAD_ASSEMBLED_PERCENT, PLANNING_EXTRACTIONS_PERCENT, REDUCTION_PHASE, RUN_PHASES,
@@ -167,6 +167,12 @@ fn stage_progress_callback(cb_progress: ProgressFn) -> impl FnMut(&ProgressEvent
             tu_index_percent(*done, *total),
             TU_INDEX_PHASE,
             &format!("{done}/{total} TUs"),
+        )),
+        ProgressEvent::CollateralSymbol { done, total } => (cb_progress)(stage_report(
+            5,
+            collateral_symbol_percent(*done, *total),
+            COLLATERAL_PHASE,
+            &format!("Analyzing symbols {done}/{total}"),
         )),
         ProgressEvent::CollateralFile { done, total } => (cb_progress)(stage_report(
             5,

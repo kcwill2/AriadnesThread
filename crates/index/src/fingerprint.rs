@@ -101,7 +101,8 @@ pub const LOAD_STAGE_LABEL: &str = "load/attribution-2";
 /// Stage label of the reduced-model fingerprint, revised the same way (the
 /// revision rebuilds reduce and everything downstream, never the parse).
 /// Revision 2: call sites become semantic edges (`graph::call_usage`).
-pub const REDUCED_STAGE_LABEL: &str = "reduced/call-usage-2";
+/// Revision 3: a call matching too many visible symbols stays unresolved.
+pub const REDUCED_STAGE_LABEL: &str = "reduced/call-usage-3";
 
 /// The fingerprint chain shared by all pipeline stages. Each downstream stage
 /// is keyed by the fingerprints of its inputs, so a mismatch invalidates the

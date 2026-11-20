@@ -131,6 +131,9 @@ impl RunStats {
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
     TuIndex { done: usize, total: usize },
+    /// Stage 5 symbol pass: symbols analyzed so far, reported as each
+    /// defining-file group completes (before `SymbolsAnalyzed`).
+    CollateralSymbol { done: usize, total: usize },
     CollateralFile { done: usize, total: usize },
     /// A4: named checkpoints inside the load stage that no per-item event
     /// covers — the symbol pass boundary and the artifact-save completion.
