@@ -325,7 +325,7 @@ pub fn build_file_justification(
     String,
     std::collections::HashMap<String, JustificationEntry>,
 > {
-    build_file_justification_with_memo(file_metrics, include_graph, model, path_to_id, None)
+    build_file_justification_with_memo(file_metrics, include_graph, model, path_to_id, None, &|_, _| {})
 }
 
 /// C1 memo-seeding twin: `Some(memo)` builds the analyzer over an ALREADY
@@ -345,12 +345,14 @@ pub fn build_file_justification(
 /// maps + Mutex guards held only for get/insert, never across derived work);
 /// no inner loop here spawns nested rayon work. Locked byte-for-byte by the
 /// golden/determinism tests in `tests/ui_test/justification_golden.rs`.
+/// `on_root_done(done, total)` fires once per metric, from rayon workers.
 pub fn build_file_justification_with_memo(
     file_metrics: &[ariadne_graph::LoadMetric],
     include_graph: &ariadne_graph::IncludeGraph,
     model: &ariadne_graph::ReducedSemanticModel,
     path_to_id: &std::collections::HashMap<std::path::PathBuf, u64>,
     memo: Option<&std::sync::Arc<ariadne_graph::LoadMemo>>,
+    on_root_done: &(dyn Fn(usize, usize) + Sync),
 ) -> std::collections::HashMap<
     String,
     std::collections::HashMap<String, JustificationEntry>,
@@ -363,10 +365,16 @@ pub fn build_file_justification_with_memo(
         ),
         None => ariadne_graph::LoadAnalyzer::new(include_graph, model),
     };
+    let finished = std::sync::atomic::AtomicUsize::new(0);
     let roots: Vec<(String, std::collections::HashMap<String, JustificationEntry>)> =
         file_metrics
             .par_iter()
-            .filter_map(|metric| justification_root(metric, &analyzer, model, path_to_id))
+            .filter_map(|metric| {
+                let root = justification_root(metric, &analyzer, model, path_to_id);
+                let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                on_root_done(done, file_metrics.len());
+                root
+            })
             .collect();
     roots.into_iter().collect()
 }
