@@ -105,6 +105,10 @@ pub struct UiState {
     /// the payload write documents above.
     extraction_applier:
         std::sync::RwLock<Option<Arc<dyn ExtractionPlanApplier>>>,
+    /// The generation's compact collateral counts behind the on-demand
+    /// `/api/collateral/*` routes. `None` until the cli installs it; the
+    /// routes then answer from the payload's own `file_collateral` map.
+    collateral_index: std::sync::RwLock<Option<Arc<crate::collateral_index::CollateralIndex>>>,
 }
 
 impl UiState {
@@ -128,6 +132,7 @@ impl UiState {
             export_serialize_count: AtomicU64::new(0),
             extraction_reader: std::sync::RwLock::new(None),
             extraction_applier: std::sync::RwLock::new(None),
+            collateral_index: std::sync::RwLock::new(None),
         }
     }
 
@@ -157,6 +162,7 @@ impl UiState {
             export_serialize_count: AtomicU64::new(0),
             extraction_reader: std::sync::RwLock::new(None),
             extraction_applier: std::sync::RwLock::new(None),
+            collateral_index: std::sync::RwLock::new(None),
         };
         // Cold memo; the live server path installs a closure-seeded memo via
         // `install_analysis` instead (cli boot seeds `LoadMemo::with_closures`
@@ -192,6 +198,16 @@ impl UiState {
     /// a rebuild swaps in a newer generation mid-flight.
     pub fn analysis(&self) -> Option<Arc<AnalysisGeneration>> {
         read_state(&self.analysis).clone()
+    }
+
+    /// Install the generation's collateral counts (cli `swap_into_state`,
+    /// alongside `install_analysis`).
+    pub fn install_collateral_index(&self, index: Arc<crate::collateral_index::CollateralIndex>) {
+        *write_state(&self.collateral_index) = Some(index);
+    }
+
+    pub fn collateral_index(&self) -> Option<Arc<crate::collateral_index::CollateralIndex>> {
+        read_state(&self.collateral_index).clone()
     }
 
     /// Install the read-only extraction provider (shape C2). The host (cli)

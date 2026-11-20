@@ -11,6 +11,11 @@
     // re-parsing an unchanged payload (server answers 304 on match).
     let lastSeenRefresh = 0;
     let exportEtag = null;
+    // Live collateral loads on demand: graphData.file_collateral caches whole
+    // rows (root -> {header: count}) as they arrive, and this caches columns
+    // (header -> {root: count}) for the payer-side heat view. A row lands in
+    // the cache only complete, so every existing lookup stays exact.
+    let collateralColumnCache = {};
 
     // Synthetic boot snapshot for the standalone export path: same wire shape
     // as /api/status progress, three steps at the historical 25/65/100
@@ -95,6 +100,7 @@
                   graphData.file_justification = exportPayload.file_justification || {};
                   graphData.extraction_proposals = exportPayload.extraction_proposals || [];
                 }
+                await resetLiveCollateral();
 
                 updateProgress(100, 'Rendering visualization... 100%');
                 applyLoadedData();
@@ -160,6 +166,7 @@
               }
               // Payload swap: drop per-node /api/justification detail cached against the previous build.
               justificationCache = {};
+              await resetLiveCollateral();
               applyLoadedData();
             }
           }
@@ -190,12 +197,54 @@
         });
     }
 
+    // null on failure, so a transient error is retried, never cached.
+    function fetchCollateralJson(path) {
+      return fetch(path)
+        .then(res => (res && res.ok) ? res.json() : null)
+        .catch(() => null);
+    }
+
+    // New generation: drop cached rows and columns, reload the per-header
+    // burden totals, and refetch what the current selection reads.
+    async function resetLiveCollateral() {
+      if (isStandaloneReport()) return;
+      graphData.file_collateral = {};
+      collateralColumnCache = {};
+      graphData.collateral_burden = (await fetchCollateralJson('/api/collateral/burden')) || {};
+      if (selectedNodeId) await ensureCollateralFor(selectedNodeId, hotspotHeatLens === 'in');
+    }
+
+    function collateralReadyFor(id, needsColumn) {
+      if (isStandaloneReport()) return true;
+      const rowReady = Boolean((graphData.file_collateral || {})[id]);
+      return rowReady && (!needsColumn || Boolean(collateralColumnCache[id]));
+    }
+
+    // Fetch the row (and, for the payer view, the column) of `id` if missing.
+    function ensureCollateralFor(id, needsColumn) {
+      if (collateralReadyFor(id, needsColumn)) return Promise.resolve();
+      const fileParam = encodeURIComponent(id);
+      const rowLoad = (graphData.file_collateral || {})[id]
+        ? null
+        : fetchCollateralJson('/api/collateral/row?file=' + fileParam).then(row => {
+            if (!row) return;
+            if (!graphData.file_collateral) graphData.file_collateral = {};
+            graphData.file_collateral[id] = row;
+          });
+      const columnLoad = (!needsColumn || collateralColumnCache[id])
+        ? null
+        : fetchCollateralJson('/api/collateral/column?file=' + fileParam).then(column => {
+            if (column) collateralColumnCache[id] = column;
+          });
+      return Promise.all([rowLoad, columnLoad]);
+    }
+
     function justificationCombined(row) {
       return (row.entry.justified_count || 0) + (row.entry.collateral_count || 0);
     }
 
     function justificationBasename(id) {
-      const node = tabAllNodes.find(n => n.id === id);
+      const node = tabNodeById(id);
       const path = String(node ? (node.path || node.label) : id).replace(/\\/g, '/');
       return path.substring(path.lastIndexOf('/') + 1) || id;
     }

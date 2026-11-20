@@ -56,6 +56,10 @@ pub struct UiBuildResult {
     /// (boot installs epoch 1, the watcher counts up). The export path
     /// never swaps and leaves it at 0.
     pub install_epoch: u64,
+    /// Per-file collateral counts behind the live on-demand routes. The
+    /// payload's `file_collateral` stays empty (it made `/api/export` grow
+    /// with files x closure size); `--export` fills it from this index.
+    pub collateral_index: Arc<ariadne_ui::CollateralIndex>,
 }
 
 /// Poison recovery: the holder already panicked elsewhere; the data stays
@@ -273,7 +277,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         "Justifying symbols...",
     );
     let path_to_id = node_maps::build_path_to_id(&include_graph);
-    let file_collateral = build_file_collateral(&path_to_id, &load_report.file_metrics);
+    let collateral_index = ariadne_ui::CollateralIndex::from_metrics(&path_to_id, &load_report.file_metrics);
+    let collateral_index = Arc::new(collateral_index);
     let file_justification = ariadne_ui::build_file_justification_with_memo(
         &load_report.file_metrics,
         &include_graph,
@@ -299,7 +304,7 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
             total_calls: call_graph.edges.len(),
             cycle_count: report.cycle_count,
         },
-        file_collateral,
+        file_collateral: HashMap::new(),
         file_justification,
         extraction_proposals,
     };
@@ -315,31 +320,8 @@ fn build_ui_payload(repo_path: &PathBuf, progress: ProgressFn) -> Result<UiBuild
         fps: pipeline.fps.clone(),
         extraction_plans,
         install_epoch: 0,
+        collateral_index,
     })
-}
-
-/// Map each target file (by numeric FileId) to the symbol counts contributed
-/// by its collateral sources, keeping only files with non-zero contributors.
-fn build_file_collateral(
-    path_to_id: &HashMap<PathBuf, u64>,
-    file_metrics: &[ariadne_graph::LoadMetric],
-) -> HashMap<String, HashMap<String, usize>> {
-    let mut file_collateral: HashMap<String, HashMap<String, usize>> = HashMap::new();
-    for metric in file_metrics {
-        let Some(path) = metric.target_file.as_ref().and_then(|p| path_to_id.get(p)) else {
-            continue;
-        };
-        let mut collat = HashMap::new();
-        for src in &metric.collateral_sources {
-            if src.symbol_count > 0 {
-                collat.insert(src.file_id.0.to_string(), src.symbol_count);
-            }
-        }
-        if !collat.is_empty() {
-            file_collateral.insert(path.to_string(), collat);
-        }
-    }
-    file_collateral
 }
 
 fn translation_unit_file_ids(
@@ -581,6 +563,7 @@ fn swap_into_state(state: &UiState, out: UiBuildResult) -> StageFingerprints {
     let reader_plans = out.extraction_plans;
     let applier_plans = reader_plans.clone();
     state.install_analysis(out.include_graph, out.reduced_model, out.load_memo);
+    state.install_collateral_index(out.collateral_index);
     // W-2a (shape C2): the reader belongs to THIS generation - installed in
     // the same sequence right after `install_analysis`, from the plans this
     // payload was rendered from and the generation Arc `install_analysis`
@@ -743,7 +726,10 @@ pub async fn run_ui(
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        ariadne_ui::export_standalone_html(&out.payload, "", &path)?;
+        let mut payload = out.payload;
+        // Offline pages have no server to ask, so they embed the full map.
+        payload.file_collateral = out.collateral_index.to_nested_map();
+        ariadne_ui::export_standalone_html(&payload, "", &path)?;
         println!("Report exported successfully to {}", path.display());
     } else {
         let state = Arc::new(UiState::new_loading(repo_path.clone()));

@@ -196,9 +196,28 @@
     }
 
     // === HOTSPOTS PANEL (Include tab) ===
-    // Aggregate collateral burden over the full file_collateral map (rootFileId -> {depId: symbols}).
-    // Cached by object identity; a payload reload swaps graphData.file_collateral and invalidates it.
+    // Live servers send per-header totals (graphData.collateral_burden); offline
+    // exports aggregate the embedded full file_collateral map (rootFileId -> {depId: symbols}).
+    // Cached by object identity; a payload reload swaps either source and invalidates it.
+    function hasCollateralBurden() {
+      return Object.keys(graphData.collateral_burden || {}).length > 0;
+    }
+
     function getBurdenMaps() {
+      if (hasCollateralBurden()) {
+        const totals = graphData.collateral_burden;
+        if (hotspotBurdenSource !== totals) {
+          const burden = {};
+          const affected = {};
+          Object.keys(totals).forEach(dep => {
+            burden[dep] = totals[dep].burden;
+            affected[dep] = totals[dep].affected;
+          });
+          hotspotBurdenCache = { burden, affected };
+          hotspotBurdenSource = totals;
+        }
+        return hotspotBurdenCache;
+      }
       const collateral = graphData.file_collateral || {};
       if (hotspotBurdenSource !== collateral) {
         const burden = {};
@@ -266,7 +285,7 @@
 
       let metric = document.getElementById('hotspotMetric').value;
       const hint = document.getElementById('hotspotHint');
-      if (metric === 'burden' && Object.keys(graphData.file_collateral || {}).length === 0) {
+      if (metric === 'burden' && !hasCollateralBurden() && Object.keys(graphData.file_collateral || {}).length === 0) {
         metric = 'fanin';
         document.getElementById('hotspotMetric').value = 'fanin';
         hint.textContent = 'No collateral data in this payload — showing Fan-in instead.';
@@ -335,18 +354,7 @@
     // consumer of nodeId, mirroring the forward heat BFS with the direction
     // flipped. Same full-dataset scan semantics, not the degree-limited canvas.
     function computeFullConsumers(nodeId) {
-      const payers = new Set();
-      const queue = [nodeId];
-      while (queue.length > 0) {
-        const curr = queue.shift();
-        tabAllEdges.forEach(e => {
-          if (e.target === curr && !payers.has(e.source)) {
-            payers.add(e.source);
-            queue.push(e.source);
-          }
-        });
-      }
-      return payers;
+      return reachableOver(tabIndex().incoming, nodeId);
     }
 
     // Inbound heat view: the payer-side mirror of the include-graph heat pass,
@@ -357,15 +365,19 @@
     // no spine, no tip; a true-zero payer shows '+0 col' (outbound parity).
     function renderInboundHeatView(nodesLayer, edgesLayer) {
       const payers = computeFullConsumers(selectedNodeId);
-      const paid = nid => ((graphData.file_collateral || {})[nid] || {})[selectedNodeId] || 0;
+      // Live: the header's fetched column; offline: the embedded rows.
+      const column = collateralColumnCache[selectedNodeId];
+      const paid = nid => column
+        ? (column[nid] || 0)
+        : (((graphData.file_collateral || {})[nid] || {})[selectedNodeId] || 0);
       const just = nid => ((graphData.file_justification || {})[nid] || {})[selectedNodeId];
       const payerIds = [...payers];
       const paidValues = payerIds.map(paid);
       const maxCollateral = paidValues.length > 0 ? Math.max(...paidValues) : 0;
       const total = paidValues.reduce((sum, value) => sum + value, 0);
-      const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+      const rootNode = tabNodeById(selectedNodeId);
       const rootLabel = rootNode ? rootNode.label : selectedNodeId;
-      const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
+      const nodeLabel = id => (tabNodeById(id) || { label: id }).label;
       const hops = computeHopDistances(selectedNodeId);
 
       nodesLayer.querySelectorAll('.node-group').forEach(el => {

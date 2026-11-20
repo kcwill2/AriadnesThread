@@ -159,7 +159,7 @@ function populateTraversalRootSelect() {
       // Get direct dependencies of this root - filter to headers only
       const deps = tabAllEdges
         .filter(e => e.source === rootId && !e.is_cycle)
-        .map(e => tabAllNodes.find(n => n.id === e.target))
+        .map(e => tabNodeById(e.target))
         .filter(Boolean)
         .filter(isHeaderFile);
       
@@ -239,6 +239,8 @@ function populateTraversalRootSelect() {
         const response = await fetch(`/api/graph/traversal?${params.toString()}`);
         if (!response.ok) throw new Error('Failed to load traversal data');
         traversalData = await response.json();
+        // The extraction filter reads the root's collateral row (on demand live).
+        await ensureCollateralFor(String(traversalData.root_file_id), false);
         renderTraversalView();
       } catch (err) {
         console.error('Traversal load error:', err);

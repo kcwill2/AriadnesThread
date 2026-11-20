@@ -75,7 +75,7 @@
           else if (still.has(nid)) cls = 'preview-still-reachable';
           else if (kept.has(nid)) cls = 'preview-kept';
         } else {
-          const node = tabAllNodes.find(n => n.id === nid);
+          const node = tabNodeById(nid);
           // Honest ambiguity: the capped sample exposes basenames only, so every
           // node with a matching basename is marked — same-named headers all light.
           if (node && (samples.has(node.label) || samples.has(previewBasename(node.path || node.label)))) {
@@ -125,7 +125,7 @@
         const collateralMap = (graphData.file_collateral || {})[selectedNodeId] || {};
         const justificationMap = (graphData.file_justification || {})[selectedNodeId] || {};
         const total = [...deps].reduce((s, id) => s + (collateralMap[id] || 0), 0);
-        const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+        const rootNode = tabNodeById(selectedNodeId);
         updateHeatLegend(rootNode ? rootNode.label : selectedNodeId, deps.size, total, justificationMap);
       } else {
         restoreStandardLegend();
