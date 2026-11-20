@@ -91,12 +91,18 @@ fn test_stage_five_event_stream_matches_recorded_literal() {
     // the byte-equality lock runs on the frames' Debug rendering: identical
     // kinds + order + payloads render byte-identically, anything else does
     // not. The literal below was captured from the pre-M28-T2 tree (T2
-    // journal, R1 capture run).
+    // journal, R1 capture run), plus the per-group `CollateralSymbol`
+    // frames the symbol pass now reports ahead of its milestone.
     let recorded_frames: Vec<String> = recorded
         .iter()
         .map(|event| format!("{event:?}"))
         .collect();
     let expected: Vec<&str> = vec![
+        "CollateralSymbol { done: 1, total: 5 }",
+        "CollateralSymbol { done: 2, total: 5 }",
+        "CollateralSymbol { done: 3, total: 5 }",
+        "CollateralSymbol { done: 4, total: 5 }",
+        "CollateralSymbol { done: 5, total: 5 }",
         "LoadMilestone(SymbolsAnalyzed { symbols: 5 })",
         "CollateralFile { done: 0, total: 5 }",
         "CollateralFile { done: 1, total: 5 }",

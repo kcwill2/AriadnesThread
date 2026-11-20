@@ -429,6 +429,39 @@ fn test_load_milestone_event_order() {
     );
 }
 
+/// The symbol pass reports per-group progress (it ran silent at 0% for
+/// minutes on large repos): `CollateralSymbol` events arrive before
+/// `SymbolsAnalyzed`, never move backwards, and end at `done == total`.
+#[test]
+fn test_symbol_pass_reports_progress_before_symbols_analyzed() {
+    let dir = setup_repo();
+    let events: Arc<Mutex<Vec<ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = events.clone();
+    let mut pipeline = Pipeline::new(dir.path(), None)
+        .unwrap()
+        .with_progress(move |event| recorder.lock().unwrap().push(event.clone()));
+    pipeline.ensure_load().unwrap();
+
+    let recorded = events.lock().unwrap();
+    let symbol_events: Vec<(usize, usize, usize)> = recorded
+        .iter()
+        .enumerate()
+        .filter_map(|(at, event)| match event {
+            ProgressEvent::CollateralSymbol { done, total } => Some((at, *done, *total)),
+            _ => None,
+        })
+        .collect();
+    let symbols_at = recorded
+        .iter()
+        .position(|event| matches!(event, ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed { .. })))
+        .expect("cold rebuild must emit SymbolsAnalyzed");
+    let &(last_at, last_done, total) = symbol_events.last().expect("symbol pass must report progress");
+    assert!(total > 0 && last_done == total, "last event must be done == total, got {last_done}/{total}");
+    assert!(last_at < symbols_at, "symbol progress must precede SymbolsAnalyzed");
+    let dones: Vec<usize> = symbol_events.iter().map(|&(_, done, _)| done).collect();
+    assert!(dones.windows(2).all(|pair| pair[0] < pair[1]), "done must strictly increase: {dones:?}");
+}
+
 /// Load-stage progress events: `LoadMilestone` + `CollateralFile`.
 fn load_progress_event_count(events: &[ProgressEvent]) -> usize {
     events

@@ -396,7 +396,7 @@ struct Spare { int unused; };",
 
         let memo_off = LoadMemo::with_closures_and_capacity(closures.clone(), 0, 0);
         let analyzer = LoadAnalyzer::with_memo(&graph, &reduced, Arc::new(memo_off));
-        let grouped = collect_symbol_metrics(&analyzer);
+        let grouped = collect_symbol_metrics(&analyzer, &std::sync::Mutex::new(None));
 
         let reference_analyzer = LoadAnalyzer::with_closures(&graph, &reduced, closures);
         let reference: Vec<LoadMetric> = reduced

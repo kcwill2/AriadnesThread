@@ -39,6 +39,7 @@ fn index_progress_inputs(event: &ProgressEvent) -> Option<(usize, usize)> {
         ProgressEvent::TuIndex { done, total }
         | ProgressEvent::TuStarted { done, total, .. } => Some((*done, *total)),
         ProgressEvent::CollateralFile { .. }
+        | ProgressEvent::CollateralSymbol { .. }
         | ProgressEvent::LoadMilestone(_)
         | ProgressEvent::BootMilestone(_)
         | ProgressEvent::ModelReduced => None,

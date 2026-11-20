@@ -105,17 +105,17 @@ impl Pipeline {
         // parallel output against an in-test sequential reference.
         //
         // A4 milestone bracketing: the two passes stay separate pool
-        // sections so the symbol-pass boundary can notify through
-        // `self.notify` before the file pass takes the callback into a
-        // Mutex for the rayon workers (mirroring
-        // `rebuild_index_single_threaded`). The old `LoadReport` field
+        // sections; both share the callback through one Mutex so the
+        // rayon workers of either pass can report (the symbol pass ran
+        // silent for minutes on large repos). The old `LoadReport` field
         // order already guaranteed symbols-before-files.
-        let symbol_metrics = self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer))?;
-        self.notify(&ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
+        let progress = Mutex::new(self.progress.take());
+        let symbol_metrics =
+            self.run_on_configured_pool(|| collect_symbol_metrics(&analyzer, &progress))?;
+        notify_locked(&progress, &ProgressEvent::LoadMilestone(LoadMilestone::SymbolsAnalyzed {
             symbols: symbol_metrics.len(),
         }));
 
-        let progress = Mutex::new(self.progress.take());
         let completed_files = AtomicUsize::new(0);
         let file_metrics = self.run_on_configured_pool(|| {
             collect_file_metrics(
@@ -358,7 +358,10 @@ fn symbol_query_resolution(model: &ReducedSemanticModel) -> HashMap<&str, &Symbo
 /// Both the walk and the resolution read `analyzer.model` - the same map the
 /// by-id entry resolves against - so the pass cannot index one model while
 /// resolving against another.
-pub(crate) fn collect_symbol_metrics(analyzer: &LoadAnalyzer<'_>) -> Vec<LoadMetric> {
+pub(crate) fn collect_symbol_metrics(
+    analyzer: &LoadAnalyzer<'_>,
+    progress: &Mutex<Option<ProgressCb>>,
+) -> Vec<LoadMetric> {
     let symbols_by_query = symbol_query_resolution(analyzer.model);
     // Every record name is a key of the table, so the lookup cannot miss;
     // `filter_map` keeps the drop-on-miss shape in case the table and the
@@ -370,15 +373,44 @@ pub(crate) fn collect_symbol_metrics(analyzer: &LoadAnalyzer<'_>) -> Vec<LoadMet
         .filter_map(|record| symbols_by_query.get(record.name.as_str()).copied())
         .collect();
     let groups = group_walk_by_def_file(analyzer, &walk);
+    let total: usize = groups.iter().map(|(_, positions)| positions.len()).sum();
+    let done = AtomicUsize::new(0);
     let analyzed: Vec<Vec<(usize, LoadMetric)>> = groups
         .par_iter()
-        .map(|(def_file, positions)| analyze_def_file_group(analyzer, *def_file, &walk, positions))
+        .map(|(def_file, positions)| {
+            let metrics = analyze_def_file_group(analyzer, *def_file, &walk, positions);
+            report_symbol_group(progress, &done, positions.len(), total);
+            metrics
+        })
         .collect();
     let mut slots: Vec<Option<LoadMetric>> = (0..walk.len()).map(|_| None).collect();
     for (position, metric) in analyzed.into_iter().flatten() {
         slots[position] = Some(metric);
     }
     slots.into_iter().flatten().collect()
+}
+
+/// Hand `event` to the shared callback, if any.
+fn notify_locked(progress: &Mutex<Option<ProgressCb>>, event: &ProgressEvent) {
+    if let Some(cb) = progress.lock().unwrap_or_else(|err| err.into_inner()).as_mut() {
+        cb(event);
+    }
+}
+
+/// Count one finished defining-file group and report the running total.
+/// The count moves while the callback lock is held, so `done` reaches the
+/// consumer strictly increasing however the workers interleave.
+fn report_symbol_group(
+    progress: &Mutex<Option<ProgressCb>>,
+    done: &AtomicUsize,
+    group_size: usize,
+    total: usize,
+) {
+    let mut guard = progress.lock().unwrap_or_else(|err| err.into_inner());
+    let done = done.fetch_add(group_size, Ordering::SeqCst) + group_size;
+    if let Some(cb) = guard.as_mut() {
+        cb(&ProgressEvent::CollateralSymbol { done, total });
+    }
 }
 
 /// Walk positions grouped by the symbol's defining file (BTreeMap keeps the

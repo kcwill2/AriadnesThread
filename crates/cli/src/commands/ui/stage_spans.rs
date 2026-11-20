@@ -104,6 +104,11 @@ pub fn tu_index_percent(done: usize, total: usize) -> usize {
     mapped_span_percent(stage_start_percent(2), stage_end_percent(2), done, total)
 }
 
+/// Symbol pass: per defining-file group over [stage start(5), 83].
+pub fn collateral_symbol_percent(done: usize, total: usize) -> usize {
+    mapped_span_percent(stage_start_percent(5), SYMBOLS_ANALYZED_PERCENT, done, total)
+}
+
 pub fn collateral_file_percent(done: usize, total: usize) -> usize {
     mapped_span_percent(
         SYMBOLS_ANALYZED_PERCENT,

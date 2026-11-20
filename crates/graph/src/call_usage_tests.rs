@@ -119,3 +119,31 @@ fn a_call_from_an_unknown_caller_adds_nothing() {
     let model = ReducedSemanticModel::reduce(&index);
     assert!(model.edges.is_empty(), "edges: {:?}", model.edges);
 }
+
+/// `count` same-named `Type<i>::get` methods visible to user0.cpp, which
+/// calls `get` once.
+fn index_with_visible_getters(count: usize) -> IndexResult {
+    let user = FileId::from_relative_path("user0.cpp");
+    let types = FileId::from_relative_path("types.h");
+    let mut symbols = vec![function("user0", "user0", user)];
+    symbols.extend((0..count).map(|i| function(&format!("Type{i}::get"), &format!("Type{i}::get"), types)));
+    IndexResult::new(
+        PathBuf::from("/test"),
+        vec![unit(user, symbols, vec![call("user0", "get", user)])],
+    )
+}
+
+#[test]
+fn a_call_matching_a_few_visible_symbols_uses_each_of_them() {
+    let model = ReducedSemanticModel::reduce(&index_with_visible_getters(super::MAX_VISIBLE_CALL_TARGETS));
+    assert_eq!(callees_of(&model, "user0").len(), super::MAX_VISIBLE_CALL_TARGETS);
+}
+
+#[test]
+fn a_call_matching_too_many_visible_symbols_is_left_unresolved() {
+    // A common member name (`get`, `size`) seen through many classes would
+    // otherwise fan one call out to every one of them: on a generated
+    // 1500-unit repo that made the symbol graph 3.2 GB.
+    let model = ReducedSemanticModel::reduce(&index_with_visible_getters(super::MAX_VISIBLE_CALL_TARGETS + 1));
+    assert!(callees_of(&model, "user0").is_empty(), "edges: {:?}", model.edges);
+}

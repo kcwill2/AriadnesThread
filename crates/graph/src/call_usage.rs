@@ -18,6 +18,15 @@ use rayon::prelude::*;
 
 use crate::reduced::ReducedSymbolRecord;
 
+/// The most same-named visible symbols one call may resolve to. A bare
+/// name cannot say which class a member call targets, so a call matching
+/// more (a common member name such as `get` or `size` seen through many
+/// classes) stays unresolved, as every call was before calls counted:
+/// fanning it out to all of them inflated each closure, the stage-5 passes
+/// and the symbol graph (3.2 GB on a generated 1500-unit repo). Free
+/// functions and one class's overloads share one id, so this rarely bites.
+pub(crate) const MAX_VISIBLE_CALL_TARGETS: usize = 4;
+
 /// A same-named candidate with its using units resolved up front, so each
 /// visibility test is an integer set probe, not a string-keyed map lookup.
 type Candidate<'m> = (&'m SymbolId, &'m BTreeSet<FileId>);
@@ -60,13 +69,31 @@ fn unit_call_edges<'m>(
         let Some((caller, _)) = symbols.get_key_value(&site.caller_symbol) else {
             continue;
         };
-        for &(callee, units) in by_name.get(name).map(Vec::as_slice).unwrap_or_default() {
-            if callee != caller && units.contains(&tu.tu_file_id) {
-                found.push((caller, callee));
-            }
+        let candidates = by_name.get(name).map(Vec::as_slice).unwrap_or_default();
+        if let Some(targets) = visible_targets(candidates, caller, tu.tu_file_id) {
+            found.extend(targets.into_iter().map(|callee| (caller, callee)));
         }
     }
     found
+}
+
+/// The candidates `unit` can see, self excluded; None once more than
+/// `MAX_VISIBLE_CALL_TARGETS` match (the name is too ambiguous to resolve).
+fn visible_targets<'m>(
+    candidates: &[Candidate<'m>],
+    caller: &SymbolId,
+    unit: FileId,
+) -> Option<Vec<&'m SymbolId>> {
+    let mut targets = Vec::new();
+    for &(callee, units) in candidates {
+        if callee != caller && units.contains(&unit) {
+            if targets.len() == MAX_VISIBLE_CALL_TARGETS {
+                return None;
+            }
+            targets.push(callee);
+        }
+    }
+    Some(targets)
 }
 
 /// The distinct pairs in id order: an address dedupe first (cheap, and
