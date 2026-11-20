@@ -12,6 +12,9 @@ pub use crate::routes::api_payloads::StatusResponse;
 pub use crate::routes::api_source::RepoInfoResponse;
 pub use crate::state::{AnalysisGeneration, UiState};
 
+use crate::routes::api_collateral::{
+    api_collateral_burden, api_collateral_column, api_collateral_row,
+};
 use crate::routes::api_extraction::{api_extraction_dry_run, api_extraction_manifest};
 use crate::routes::api_extraction_apply::api_extraction_apply;
 use crate::routes::api_graph::{
@@ -76,6 +79,9 @@ pub fn build_router(state: Arc<UiState>) -> axum::Router {
         .route("/api/graph/collateral", get(api_graph_collateral))
         .route("/api/graph/traversal", get(api_graph_traversal))
         .route("/api/justification", get(api_justification))
+        .route("/api/collateral/row", get(api_collateral_row))
+        .route("/api/collateral/column", get(api_collateral_column))
+        .route("/api/collateral/burden", get(api_collateral_burden))
         .route("/api/source", get(api_source))
         .route("/api/export", get(api_export))
         .route("/api/extraction/:plan_id/manifest", get(api_extraction_manifest))

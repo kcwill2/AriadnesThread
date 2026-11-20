@@ -122,9 +122,23 @@ fn test_monotone_ramp_tables() {
 fn test_distance_independence() {
     let body = function_body(GRAPH_JS, "computeHopDistances");
     assert!(
-        body.contains("tabAllEdges"),
-        "I3: hop distance must come from the full tabAllEdges dataset"
+        body.contains("tabIndex()"),
+        "I3: hop distance must walk the full-dataset adjacency index"
     );
+    // The index itself is built from the full tab dataset only.
+    let index = function_body(MAIN_JS, "tabIndex");
+    assert!(
+        index.contains("tabAllEdges") && index.contains("tabAllNodes"),
+        "I3: the adjacency index must come from the full tabAllEdges dataset"
+    );
+    for source in [&body, &index] {
+        for foreign_input in ["activeNodes", "activeEdges", "nodeCap", "currentDegree", "seeds"] {
+            assert!(
+                !source.contains(foreign_input),
+                "I3: the hop walk and its index must never read {foreign_input}"
+            );
+        }
+    }
     for foreign_input in [
         "activeNodes",
         "activeEdges",

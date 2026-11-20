@@ -96,8 +96,20 @@ fn test_select_node_consumes_pending_lens() {
         .collect();
     assert_eq!(
         first_statements,
-        vec!["hotspotHeatLens = pendingHeatLens;", "pendingHeatLens = null;"],
+        vec!["const lens = pendingHeatLens;", "pendingHeatLens = null;"],
         "I3: selectNode must consume the pending lens as its first two statements"
+    );
+    // The selection body applies exactly the consumed lens (selectNode may
+    // first await an on-demand collateral fetch; the lens travels with it).
+    let now_body = function_body(GRAPH_JS, "selectNodeNow");
+    let first_now = now_body
+        .lines()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty() && !line.starts_with("//"));
+    assert_eq!(
+        first_now,
+        Some("hotspotHeatLens = lens;"),
+        "I3: selectNodeNow must apply the consumed lens first"
     );
 }
 

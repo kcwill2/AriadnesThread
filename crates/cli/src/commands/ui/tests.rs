@@ -44,7 +44,8 @@ fn test_resolve_bind_addr_honors_expose_override() {
     assert_eq!(super::resolve_bind_addr(Some(" 10.0.0.5 ")), "10.0.0.5");
 }
 
-// UTA-T7b row 1: build_file_collateral behavior pins (LoadMetric fixture).
+// UTA-T7b row 1: file_collateral behavior pins (LoadMetric fixture), now
+// built by `CollateralIndex::from_metrics` (live rows + offline export map).
 
 fn collateral_source(rel: &str, symbol_count: usize) -> ariadne_graph::ContributingSource {
     ariadne_graph::ContributingSource {
@@ -109,7 +110,8 @@ fn pin_build_file_collateral_drops_zeroes_skips_unmapped_and_keys_by_id_string()
         ),
     ];
 
-    let file_collateral = super::build_file_collateral(&path_to_id, &metrics);
+    let file_collateral =
+        ariadne_ui::CollateralIndex::from_metrics(&path_to_id, &metrics).to_nested_map();
 
     assert_eq!(
         file_collateral.keys().cloned().collect::<Vec<_>>(),

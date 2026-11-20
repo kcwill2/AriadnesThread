@@ -9,6 +9,7 @@
         call_graph: [],
         stats: { total_files: 0, total_symbols: 0, total_calls: 0, cycle_count: 0 },
         file_collateral: {},
+        collateral_burden: {},
         file_justification: {},
         extraction_proposals: []
       };
@@ -16,6 +17,50 @@
     let activeEdges = [];
     let tabAllNodes = [];
     let tabAllEdges = [];
+
+    // Adjacency and node lookup over the FULL tab dataset, built once per
+    // dataset (parseAndRenderElements replaces both arrays, so identity plus
+    // length keys it). The closure walks used to rescan every edge for each
+    // visited node - O(visited x edges), seconds per click on large graphs.
+    let tabIndexCache = null;
+    function tabIndex() {
+      const cached = tabIndexCache;
+      if (cached && cached.nodes === tabAllNodes && cached.edges === tabAllEdges &&
+          cached.nodeCount === tabAllNodes.length && cached.edgeCount === tabAllEdges.length) {
+        return cached;
+      }
+      const byId = new Map();
+      const outgoing = new Map();
+      const incoming = new Map();
+      tabAllNodes.forEach(n => { byId.set(n.id, n); outgoing.set(n.id, []); incoming.set(n.id, []); });
+      tabAllEdges.forEach(e => {
+        if (outgoing.has(e.source)) outgoing.get(e.source).push(e.target);
+        if (incoming.has(e.target)) incoming.get(e.target).push(e.source);
+      });
+      tabIndexCache = {
+        nodes: tabAllNodes, edges: tabAllEdges,
+        nodeCount: tabAllNodes.length, edgeCount: tabAllEdges.length,
+        byId, outgoing, incoming,
+      };
+      return tabIndexCache;
+    }
+
+    function tabNodeById(id) {
+      return tabIndex().byId.get(id);
+    }
+
+    // Everything reachable from startId along `adjacency` (startId itself
+    // only through a cycle). Index-pointer queue: shift() is linear.
+    function reachableOver(adjacency, startId) {
+      const reached = new Set();
+      const queue = [startId];
+      for (let head = 0; head < queue.length; head++) {
+        (adjacency.get(queue[head]) || []).forEach(next => {
+          if (!reached.has(next)) { reached.add(next); queue.push(next); }
+        });
+      }
+      return reached;
+    }
     let nodeCap = 50;
     let currentDegree = 1;
     let isAllCapped = true;

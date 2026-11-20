@@ -380,9 +380,9 @@
         const depCollaterals = [...reachableDependencies].map(id => collateralMap[id] || 0);
         const maxCollateral = depCollaterals.length > 0 ? Math.max(...depCollaterals) : 0;
         let totalCollateral = depCollaterals.reduce((s, c) => s + c, 0);
-        const rootNode = tabAllNodes.find(n => n.id === selectedNodeId);
+        const rootNode = tabNodeById(selectedNodeId);
         const rootLabel = rootNode ? rootNode.label : selectedNodeId;
-        const nodeLabel = id => (tabAllNodes.find(n => n.id === id) || { label: id }).label;
+        const nodeLabel = id => (tabNodeById(id) || { label: id }).label;
         const hops = computeHopDistances(selectedNodeId);
 
         nodesLayer.querySelectorAll('.node-group').forEach(el => {
@@ -449,18 +449,7 @@
     // BFS over the full (unfiltered) edge dataset to find all outgoing include deps.
     // Temperature/heat must use this set, not the degree-limited activeEdges.
     function computeFullDependencies(nodeId) {
-      const reachableDependencies = new Set();
-      const queue = [nodeId];
-      while (queue.length > 0) {
-        const curr = queue.shift();
-        tabAllEdges.forEach(e => {
-          if (e.source === curr && !reachableDependencies.has(e.target)) {
-            reachableDependencies.add(e.target);
-            queue.push(e.target);
-          }
-        });
-      }
-      return reachableDependencies;
+      return reachableOver(tabIndex().outgoing, nodeId);
     }
 
     // Hop-distance heat ramp (track ui-degree-opacity-ramp T1): per-element
@@ -476,23 +465,17 @@
     // pattern); visited-set makes it cycle-safe. Returns Map<nodeId, hop>=1>;
     // the root is absent (it is never faded).
     function computeHopDistances(rootId) {
-      const adjOut = {};
-      const adjIn = {};
-      tabAllNodes.forEach(n => { adjOut[n.id] = []; adjIn[n.id] = []; });
-      tabAllEdges.forEach(e => {
-        if(adjOut[e.source]) adjOut[e.source].push(e.target);
-        if(adjIn[e.target]) adjIn[e.target].push(e.source);
-      });
+      const { outgoing, incoming } = tabIndex();
       const dist = new Map();
       const visited = new Set([rootId]);
       const queue = [{ id: rootId, dist: 0 }];
-      while (queue.length > 0) {
-        const cur = queue.shift();
+      for (let head = 0; head < queue.length; head++) {
+        const cur = queue[head];
         const next = cur.dist + 1;
-        (adjOut[cur.id] || []).forEach(id => {
+        (outgoing.get(cur.id) || []).forEach(id => {
           if (!visited.has(id)) { visited.add(id); dist.set(id, next); queue.push({ id, dist: next }); }
         });
-        (adjIn[cur.id] || []).forEach(id => {
+        (incoming.get(cur.id) || []).forEach(id => {
           if (!visited.has(id)) { visited.add(id); dist.set(id, next); queue.push({ id, dist: next }); }
         });
       }
@@ -511,12 +494,29 @@
       return String(table[Math.floor(hop) - 1]);
     }
 
+    // Live collateral loads on demand: fetch what this selection reads (the
+    // file's row; the header's column for the inbound lens), then select.
+    // The pending lens is consumed here, first, so no other selection can
+    // inherit it while a fetch is in flight; the newest selection wins.
+    let selectionTicket = 0;
     function selectNode(id, skipFilter = false, skipCrumb = false) {
-      // Consume the pending inbound lens FIRST: manual selections inherit nothing.
-      hotspotHeatLens = pendingHeatLens;
+      const lens = pendingHeatLens;
       pendingHeatLens = null;
+      const ticket = ++selectionTicket;
+      if (collateralReadyFor(id, lens === 'in')) {
+        selectNodeNow(id, lens, skipFilter, skipCrumb);
+        return;
+      }
+      ensureCollateralFor(id, lens === 'in').then(() => {
+        if (ticket === selectionTicket) selectNodeNow(id, lens, skipFilter, skipCrumb);
+      });
+    }
+
+    function selectNodeNow(id, lens, skipFilter, skipCrumb) {
+      // The lens selectNode consumed: manual selections carry null.
+      hotspotHeatLens = lens;
       selectedNodeId = id;
-      const node = activeNodes.find(n => n.id === id) || tabAllNodes.find(n => n.id === id);
+      const node = activeNodes.find(n => n.id === id) || tabNodeById(id);
       if (!node) { renderThreadBar(); return; }
       if (!skipCrumb) recordCrumb(id, node.label);
 
@@ -527,7 +527,7 @@
       } else if (currentTab === 'traversal') {
         // Ensure selected node is in active set for rendering
         if (!activeNodes.some(n => n.id === id) && tabAllNodes.some(n => n.id === id)) {
-          activeNodes = [...activeNodes, tabAllNodes.find(n => n.id === id)];
+          activeNodes = [...activeNodes, tabNodeById(id)];
         }
       }
 
@@ -589,7 +589,7 @@
       document.getElementById('inspUpstreamCount').textContent = String(upstream.length);
       const upList = document.getElementById('inspUpstreamList');
       upList.innerHTML = upstream.map(e => {
-        const srcNode = tabAllNodes.find(n => n.id === e.source);
+        const srcNode = tabNodeById(e.source);
         const name = srcNode ? srcNode.label : e.source;
         return `
           <div class="link-item" data-select-id="${escapeAttribute(e.source)}">
@@ -603,7 +603,7 @@
       document.getElementById('inspDownstreamCount').textContent = String(downstream.length);
       const downList = document.getElementById('inspDownstreamList');
       downList.innerHTML = downstream.map(e => {
-        const dstNode = tabAllNodes.find(n => n.id === e.target);
+        const dstNode = tabNodeById(e.target);
         const name = dstNode ? dstNode.label : e.target;
         return `
           <div class="link-item" data-select-id="${escapeAttribute(e.target)}">
@@ -620,7 +620,7 @@
         const reachableDeps = computeFullDependencies(id);
         const collateralMap = (graphData.file_collateral || {})[id] || {};
         const entries = [...reachableDeps].map(depId => {
-          const depNode = tabAllNodes.find(n => n.id === depId);
+          const depNode = tabNodeById(depId);
           const col = collateralMap[depId] || 0;
           return { id: depId, label: depNode ? depNode.label : depId, col };
         }).sort((a, b) => b.col - a.col);
@@ -678,6 +678,7 @@
     }
 
     function clearSelection() {
+      selectionTicket++;
       if (!selectedNodeId) return;
       selectedNodeId = null;
       clearInspector();
@@ -818,7 +819,7 @@
       }
       
       if (selectedNodeId) {
-        const n = tabAllNodes.find(n => n.id === selectedNodeId);
+        const n = tabNodeById(selectedNodeId);
         if (n) seeds = [n];
       } else if (q) {
         seeds = tabAllNodes.filter(n => matchesFilter(n, matcher));
