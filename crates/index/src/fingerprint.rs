@@ -91,6 +91,13 @@ impl Fingerprint {
     }
 }
 
+/// Stage label of the load fingerprint, revised when load metrics change
+/// meaning without a format change: the revision rebuilds only stage 5,
+/// where an analysis-version bump would re-parse every TU. Revision 2:
+/// collateral of .cpp-defined, header-declared symbols is credited to the
+/// declaring header (`LoadAnalyzer::attribution_file`).
+pub const LOAD_STAGE_LABEL: &str = "load/attribution-2";
+
 /// The fingerprint chain shared by all pipeline stages. Each downstream stage
 /// is keyed by the fingerprints of its inputs, so a mismatch invalidates the
 /// stage wholesale while TU-level content hashes still allow parse reuse.
@@ -113,7 +120,7 @@ impl StageFingerprints {
         let index = Fingerprint::chain("index", &[repository.clone(), contexts.clone()]);
         let reduced = Fingerprint::chain("reduced", std::slice::from_ref(&index));
         let callgraph = Fingerprint::chain("callgraph", &[index.clone(), reduced.clone()]);
-        let load = Fingerprint::chain("load", &[include_graph.clone(), reduced.clone()]);
+        let load = Fingerprint::chain(LOAD_STAGE_LABEL, &[include_graph.clone(), reduced.clone()]);
         let plan = Fingerprint::chain("plan", &[include_graph.clone(), reduced.clone()]);
         Self {
             repository,
@@ -169,6 +176,14 @@ mod tests {
         let changed = (FileId::from_relative_path("a.h"), "h2".to_string());
         let after = Fingerprint::inputs(&root, &[changed]);
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn load_fingerprint_carries_its_stage_revision() {
+        let fps = StageFingerprints::compute("repo".to_string(), "ctx".to_string());
+        let unrevised = Fingerprint::chain("load", &[fps.include_graph.clone(), fps.reduced.clone()]);
+        assert_ne!(fps.load, unrevised, "pre-revision load artifacts must read as stale");
+        assert_eq!(fps.index, Fingerprint::chain("index", &["repo".to_string(), "ctx".to_string()]));
     }
 
     #[test]

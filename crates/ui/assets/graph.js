@@ -507,13 +507,15 @@
       const lens = pendingHeatLens;
       pendingHeatLens = null;
       const ticket = ++selectionTicket;
-      if (collateralReadyFor(id, lens === 'in')) {
-        selectNodeNow(id, lens, skipFilter, skipCrumb);
-        return;
-      }
-      ensureCollateralFor(id, lens === 'in').then(() => {
-        if (ticket === selectionTicket) selectNodeNow(id, lens, skipFilter, skipCrumb);
-      });
+      const run = () => {
+        if (ticket !== selectionTicket) return;
+        try { selectNodeNow(id, lens, skipFilter, skipCrumb); } finally { setSelectionBusy(false); }
+      };
+      if (skipFilter && collateralReadyFor(id, lens === 'in')) { run(); return; }
+      // A rebuild (or fetch) follows: show the badge, and yield one tick
+      // so it paints before the synchronous layout runs.
+      setSelectionBusy(true);
+      ensureCollateralFor(id, lens === 'in').then(() => setTimeout(run, 0));
     }
 
     function selectNodeNow(id, lens, skipFilter, skipCrumb) {
@@ -542,8 +544,8 @@
 
       // Calculate connections from activeEdges (or tabAllEdges if you prefer, but UI usually shows visible)
       // Actually let's show true global connections in inspector
-      const upstream = tabAllEdges.filter(e => e.target === id);
-      const downstream = tabAllEdges.filter(e => e.source === id);
+      const upstream = tabIndex().inEdges.get(id) || [];
+      const downstream = tabIndex().outEdges.get(id) || [];
 
       document.getElementById('inspClosure').textContent = node.closure ? `${node.closure} files` : `${downstream.length}`;
       document.getElementById('inspClosureSub').textContent = node.closure ? 'Transitive include closure' : 'Outgoing dependencies';
@@ -814,6 +816,8 @@
       const q = document.getElementById('searchInput').value.trim();
       const matcher = compileMatcher(q);
       const dir = document.getElementById('dirSelect').value;
+      // The cached tab index replaces a per-click rebuild over every edge.
+      const index = tabIndex();
       
       let seeds = [];
       let matchCount = 0;
@@ -830,18 +834,13 @@
       } else if (dirScope) {
         seeds = tabAllNodes.filter(n => (n.path || '').startsWith(dirScope));
       } else {
-        const inDeg = {};
-        const outDeg = {};
-        tabAllNodes.forEach(n => { inDeg[n.id] = 0; outDeg[n.id] = 0; });
-        tabAllEdges.forEach(e => { 
-          if (inDeg[e.target] !== undefined) inDeg[e.target]++; 
-          if (outDeg[e.source] !== undefined) outDeg[e.source]++; 
-        });
+        const inDeg = id => index.incoming.get(id).length;
+        const outDeg = id => index.outgoing.get(id).length;
         let sorted = tabAllNodes.slice().sort((a,b) => {
-          const aHasOut = outDeg[a.id] > 0 ? 0 : 1;
-          const bHasOut = outDeg[b.id] > 0 ? 0 : 1;
+          const aHasOut = outDeg(a.id) > 0 ? 0 : 1;
+          const bHasOut = outDeg(b.id) > 0 ? 0 : 1;
           if (aHasOut !== bHasOut) return aHasOut - bHasOut;
-          return inDeg[a.id] - inDeg[b.id];
+          return inDeg(a.id) - inDeg(b.id);
         });
         seeds = sorted.slice(0, Math.min(sorted.length, nodeCap));
       }
@@ -857,14 +856,6 @@
         document.getElementById('searchClearBtn').style.display = 'none';
         document.getElementById('btnShowAllMatches').style.display = 'none';
       }
-
-      const adjOut = {};
-      const adjIn = {};
-      tabAllNodes.forEach(n => { adjOut[n.id] = []; adjIn[n.id] = []; });
-      tabAllEdges.forEach(e => {
-        if(adjOut[e.source]) adjOut[e.source].push(e.target);
-        if(adjIn[e.target]) adjIn[e.target].push(e.source);
-      });
 
       let includedNodes = new Set();
       let queue = [];
@@ -887,17 +878,17 @@
         isCapped = true;
       }
 
-      while (queue.length > 0 && !capReached()) {
-        const { id, dist, branchDir } = queue.shift();
+      for (let head = 0; head < queue.length && !capReached(); head++) {
+        const { id, dist, branchDir } = queue[head];
         
         if (!isAllCapped && dist >= currentDegree) continue;
 
         let neighbors = [];
         if (branchDir === 'both' || branchDir === 'out') {
-          (adjOut[id] || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'out' }));
+          (index.outgoing.get(id) || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'out' }));
         }
         if (branchDir === 'both' || branchDir === 'in') {
-          (adjIn[id] || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'in' }));
+          (index.incoming.get(id) || []).forEach(nxt => neighbors.push({ nxt, nextDir: 'in' }));
         }
 
         for (const { nxt, nextDir } of neighbors) {
@@ -913,12 +904,12 @@
       }
 
       // Ensure selected node is always in the active set, even if filtered by degree
-      if (selectedNodeId && tabAllNodes.some(n => n.id === selectedNodeId)) {
+      if (selectedNodeId && index.byId.has(selectedNodeId)) {
         includedNodes.add(selectedNodeId);
       }
 
       activeNodes = tabAllNodes.filter(n => includedNodes.has(n.id));
-      activeEdges = tabAllEdges.filter(e => includedNodes.has(e.source) && includedNodes.has(e.target));
+      activeEdges = activeNodes.flatMap(n => index.outEdges.get(n.id).filter(e => includedNodes.has(e.target)));
 
       document.getElementById('badgeNodes').textContent = `${activeNodes.length} / ${tabAllNodes.length} Nodes`;
       document.getElementById('badgeEdges').textContent = `${activeEdges.length} Edges`;
@@ -926,7 +917,8 @@
 
       applyLayout();
 
-      if (selectedNodeId && activeNodes.find(n => n.id === selectedNodeId)) {
+      if (selectedNodeId && includedNodes.has(selectedNodeId)) {
+        centerOnNode(selectedNodeId);
       } else if (activeNodes.length > 0) {
         selectNode(activeNodes[0].id, true, true);
       } else {

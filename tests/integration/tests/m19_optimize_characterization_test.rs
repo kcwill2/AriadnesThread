@@ -65,9 +65,11 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
                 header_name: "heavy.h".to_string(),
                 collateral_symbols: 9,
             },
+            // 1 own + 6 thing.cpp-defined members it declares (load stage
+            // revision 2 credits those to the declaring header).
             ariadne_cli::CollateralOpportunity {
                 header_name: "thing.h".to_string(),
-                collateral_symbols: 1,
+                collateral_symbols: 7,
             },
             ariadne_cli::CollateralOpportunity {
                 header_name: "thing_types.h".to_string(),
@@ -82,7 +84,7 @@ fn optimize_on_basic_fixture_locks_report_counts() -> Result<()> {
     assert_eq!(report.validation_passed_tus, 2);
     assert!(report.build_passed);
     assert_eq!(report.committed_transformations, 1);
-    assert_eq!(report.residual_collateral_load, 9);
+    assert_eq!(report.residual_collateral_load, 15); // 9 + 6 now credited to thing.h
     Ok(())
 }
 
@@ -244,6 +246,7 @@ fn handle_optimize_matches_direct_optimize_and_locks_output_header() -> Result<(
     assert!(rendered.contains("Validation:\n    2 / 2 affected TUs passed"));
     assert!(rendered.contains("Build:\n    PASS"));
     assert!(rendered.contains("Committed:\n    1 transformations"));
-    assert!(rendered.contains("Residual collateral load:\n    9 symbols"));
+    // 9 + the 6 thing.cpp-defined symbols now credited to thing.h.
+    assert!(rendered.contains("Residual collateral load:\n    15 symbols"));
     Ok(())
 }

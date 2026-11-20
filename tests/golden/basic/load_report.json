@@ -80,15 +80,6 @@
       "semantic_load": 4,
       "semantic_sources": [
         {
-          "file_id": 12388715314208539073,
-          "path": "src/thing.cpp",
-          "symbol_count": 2,
-          "symbols": [
-            "Thing::Thing",
-            "Thing::get_id"
-          ]
-        },
-        {
           "file_id": 12813084605127730049,
           "path": "include/thing_types.h",
           "symbol_count": 1,
@@ -99,9 +90,11 @@
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 1,
+          "symbol_count": 3,
           "symbols": [
-            "Thing"
+            "Thing",
+            "Thing::Thing",
+            "Thing::get_id"
           ]
         }
       ],
@@ -145,15 +138,6 @@
       "semantic_load": 4,
       "semantic_sources": [
         {
-          "file_id": 12388715314208539073,
-          "path": "src/thing.cpp",
-          "symbol_count": 2,
-          "symbols": [
-            "Thing::Thing",
-            "Thing::get_id"
-          ]
-        },
-        {
           "file_id": 12813084605127730049,
           "path": "include/thing_types.h",
           "symbol_count": 1,
@@ -164,9 +148,11 @@
         {
           "file_id": 5780424644969596122,
           "path": "include/thing.h",
-          "symbol_count": 1,
+          "symbol_count": 3,
           "symbols": [
-            "Thing"
+            "Thing",
+            "Thing::Thing",
+            "Thing::get_id"
           ]
         }
       ],
@@ -184,21 +170,21 @@
       "collateral_load": 4,
       "collateral_sources": [
         {
-          "file_id": 12388715314208539073,
-          "path": "src/thing.cpp",
-          "symbol_count": 2,
-          "symbols": [
-            "Thing::Thing",
-            "Thing::get_id"
-          ]
-        },
-        {
           "file_id": 2171065965022647111,
           "path": "include/heavy.h",
           "symbol_count": 2,
           "symbols": [
             "HeavyData",
             "heavy_computation"
+          ]
+        },
+        {
+          "file_id": 5780424644969596122,
+          "path": "include/thing.h",
+          "symbol_count": 2,
+          "symbols": [
+            "Thing::Thing",
+            "Thing::get_id"
           ]
         }
       ],

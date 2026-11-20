@@ -32,17 +32,45 @@
       const byId = new Map();
       const outgoing = new Map();
       const incoming = new Map();
-      tabAllNodes.forEach(n => { byId.set(n.id, n); outgoing.set(n.id, []); incoming.set(n.id, []); });
+      // Edge objects per endpoint, so a selection never rescans every edge.
+      const outEdges = new Map();
+      const inEdges = new Map();
+      tabAllNodes.forEach(n => {
+        byId.set(n.id, n);
+        outgoing.set(n.id, []); incoming.set(n.id, []); outEdges.set(n.id, []); inEdges.set(n.id, []);
+      });
       tabAllEdges.forEach(e => {
-        if (outgoing.has(e.source)) outgoing.get(e.source).push(e.target);
-        if (incoming.has(e.target)) incoming.get(e.target).push(e.source);
+        if (outgoing.has(e.source)) { outgoing.get(e.source).push(e.target); outEdges.get(e.source).push(e); }
+        if (incoming.has(e.target)) { incoming.get(e.target).push(e.source); inEdges.get(e.target).push(e); }
       });
       tabIndexCache = {
         nodes: tabAllNodes, edges: tabAllEdges,
         nodeCount: tabAllNodes.length, edgeCount: tabAllEdges.length,
-        byId, outgoing, incoming,
+        byId, outgoing, incoming, outEdges, inEdges,
       };
       return tabIndexCache;
+    }
+
+    // Pan so the selected node sits mid-canvas at the current zoom. Layouts
+    // grow rightward from a fixed origin (an inbound root lands past all its
+    // consumers), so without this the selection was often off-screen.
+    const NODE_HALF_WIDTH = 85;
+    const NODE_HALF_HEIGHT = 21;
+    function centerOnNode(id) {
+      const node = tabNodeById(id);
+      const container = document.getElementById('canvasContainer');
+      if (!node || !container || !container.clientWidth || typeof node.x !== 'number') return;
+      panX = container.clientWidth / 2 - (node.x + NODE_HALF_WIDTH) * zoomScale;
+      panY = container.clientHeight / 2 - (node.y + NODE_HALF_HEIGHT) * zoomScale;
+      document.getElementById('viewportGroup').setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomScale})`);
+    }
+
+    // "Building graph..." while a selection fetches and lays out its subgraph.
+    function setSelectionBusy(busy) {
+      const badge = document.getElementById('selectionBusyBadge');
+      if (badge) badge.style.display = busy ? 'inline-block' : 'none';
+      const container = document.getElementById('canvasContainer');
+      if (container) container.classList.toggle('selection-busy', busy);
     }
 
     function tabNodeById(id) {
